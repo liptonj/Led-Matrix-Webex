@@ -150,9 +150,43 @@ Connect the HUB75 matrix to the ESP32-S3 as follows:
 | LAT | GPIO47 | Latch |
 | OE | GPIO14 | Output enable |
 
-## Quick Start
+## Installation
 
-### 1. Flash the Firmware
+### Option A: Install from Pre-built Release (Recommended)
+
+Download the latest release from [GitHub Releases](https://github.com/liptonj/Led-Matrix-Webex/releases).
+
+**Required files:**
+- `bootstrap.bin` - Initial firmware for WiFi setup
+- `firmware.bin` - Main application firmware  
+- `littlefs.bin` - Web UI filesystem
+
+**Flash using esptool.py:**
+
+```bash
+# Install esptool if needed
+pip install esptool
+
+# Flash the bootstrap firmware (first time setup)
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash 0x0 bootstrap.bin
+
+# Or flash the full firmware with filesystem
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash 0x0 firmware.bin 0x310000 littlefs.bin
+```
+
+**Flash using PlatformIO (if installed):**
+
+```bash
+# Download and extract the release
+unzip firmware-v1.0.0.zip -d firmware-release
+
+# Flash firmware
+esptool.py --chip esp32s3 write_flash 0x0 firmware-release/firmware.bin
+```
+
+### Option B: Build from Source
 
 ```bash
 cd firmware
@@ -160,7 +194,9 @@ pio run -t upload         # Upload firmware
 pio run -t uploadfs       # Upload web UI files
 ```
 
-### 2. Configure via Web UI
+## Quick Start
+
+### 1. Configure via Web UI
 
 1. On first boot, the device creates a WiFi access point: `Webex-Display-Setup`
 2. Connect to this network with your phone or computer
@@ -169,7 +205,7 @@ pio run -t uploadfs       # Upload web UI files
 5. Configure Webex OAuth settings (see below)
 6. (Optional) Configure MQTT for Meraki sensor integration
 
-### 3. Webex Integration Setup
+### 2. Webex Integration Setup
 
 1. Go to [Webex Developer Portal](https://developer.webex.com)
 2. Create a new Integration
@@ -177,17 +213,28 @@ pio run -t uploadfs       # Upload web UI files
 4. Request scopes: `spark:people_read`, `spark:xapi_statuses`
 5. Copy your Client ID and Client Secret to the device configuration
 
-### 4. (Optional) Bridge Server
+### 3. (Optional) Bridge Server
 
-For real-time presence updates without a RoomOS device, run the Node.js bridge:
+For real-time presence updates without a Cisco RoomOS device (desk phone, room kit, etc.), you need to run the Node.js bridge server.
+
+**What is the bridge?**
+- A standalone Node.js application (NOT a Webex plugin)
+- Runs on an always-on device: Raspberry Pi, home server, NAS, Docker container, etc.
+- Connects to Webex cloud using OAuth to monitor your presence in real-time
+- Pushes status updates to the ESP32 over your local network via WebSocket
+- Auto-discovered by ESP32 using mDNS (`webex-bridge.local`)
+
+**Quick start:**
 
 ```bash
 cd bridge
 npm install
-cp .env.example .env
-# Edit .env with your Webex credentials
+cp env.example .env
+# Edit .env with your Webex OAuth credentials
 npm start
 ```
+
+**For production deployment** (Raspberry Pi, server, Docker), see the detailed guide: [Bridge Deployment Guide](docs/bridge_deployment.md)
 
 The bridge uses the Webex JavaScript SDK to receive real-time presence updates via Mercury WebSocket and pushes them to the ESP32.
 
