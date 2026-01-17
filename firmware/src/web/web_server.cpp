@@ -124,7 +124,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["temperature"] = app_state->temperature;
     doc["humidity"] = app_state->humidity;
     doc["door_status"] = app_state->door_status;
-    doc["air_quality"] = app_state->air_quality;
+    doc["air_quality"] = app_state->air_quality_index;
 
     // System info
     doc["ip_address"] = WiFi.localIP().toString();
