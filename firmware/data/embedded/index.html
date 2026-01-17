@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Matrix Status - Webex Embedded App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <h1>LED Matrix Display</h1>
+            </div>
+            <div class="status-indicator" id="connection-status">
+                <span class="dot"></span>
+                <span class="text">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Tab Navigation -->
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="status">Status</button>
+            <button class="tab-btn" data-tab="display">Display</button>
+            <button class="tab-btn" data-tab="modules">Modules</button>
+            <button class="tab-btn" data-tab="webex">Webex</button>
+            <button class="tab-btn" data-tab="sensors">Sensors</button>
+            <button class="tab-btn" data-tab="system">System</button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- ==================== STATUS TAB ==================== -->
+            <section id="status" class="tab-content active">
+                <!-- User Info Section -->
+                <div class="card user-info">
+                    <h2>Your Webex Status</h2>
+                    <div class="presence-display" id="presence-container">
+                        <div class="presence-avatar" id="presence-avatar">
+                            <span class="initial" id="user-initial">?</span>
+                        </div>
+                        <div class="presence-details">
+                            <span class="name" id="user-name">Loading...</span>
+                            <span class="status" id="user-status">--</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Meeting Detection Status -->
+                    <div class="meeting-status" id="meeting-status" style="display: none;">
+                        <span class="icon">📞</span>
+                        <span class="text">In a meeting - auto-detected</span>
+                    </div>
+                    
+                    <!-- Manual Status Selection -->
+                    <div class="status-selector">
+                        <h3>Set Your Status</h3>
+                        <div class="status-buttons" id="status-buttons">
+                            <button class="status-btn available" data-status="active" title="Available">
+                                <span class="dot"></span>
+                                <span>Available</span>
+                            </button>
+                            <button class="status-btn away" data-status="away" title="Away">
+                                <span class="dot"></span>
+                                <span>Away</span>
+                            </button>
+                            <button class="status-btn busy" data-status="meeting" title="In a Call">
+                                <span class="dot"></span>
+                                <span>In a Call</span>
+                            </button>
+                            <button class="status-btn dnd" data-status="dnd" title="Do Not Disturb">
+                                <span class="dot"></span>
+                                <span>DND</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="sync-status" id="sync-status">
+                        <span class="icon">⏳</span>
+                        <span class="text">Waiting to sync...</span>
+                    </div>
+                </div>
+
+                <!-- Current Display Status -->
+                <div class="card">
+                    <h2>Display Status</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">Current Status:</span>
+                            <span id="display-status" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Camera:</span>
+                            <span id="camera-status" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Microphone:</span>
+                            <span id="mic-status" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">In Call:</span>
+                            <span id="call-status" class="value">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sensor Data -->
+                <div class="card">
+                    <h2>Sensor Data</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">Temperature:</span>
+                            <span id="temperature" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Humidity:</span>
+                            <span id="humidity" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Air Quality:</span>
+                            <span id="air-quality" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Door:</span>
+                            <span id="door-status" class="value">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Additional Displays -->
+                <div class="card displays-section">
+                    <div class="card-header">
+                        <h2>Additional Displays</h2>
+                        <button class="btn-icon" id="add-display" title="Add display">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <p class="help-text">Sync your status to multiple displays on your network.</p>
+                    <div class="displays-list" id="displays-list">
+                        <div class="empty-state" id="no-displays">
+                            <p>No additional displays configured.</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Add Display Form -->
+                    <div class="add-display-form" id="add-display-form" style="display: none;">
+                        <div class="form-group">
+                            <label for="new-display-host">Display Address:</label>
+                            <input type="text" id="new-display-host" placeholder="e.g., webex-display-2.local or 192.168.1.100">
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn btn-primary" id="save-display">Add</button>
+                            <button class="btn" id="cancel-add-display">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="card activity-section">
+                    <h2>Activity Log</h2>
+                    <div class="activity-log" id="activity-log">
+                        <div class="log-entry">
+                            <span class="time">--:--:--</span>
+                            <span class="message">Initializing...</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== DISPLAY TAB ==================== -->
+            <section id="display" class="tab-content">
+                <div class="card">
+                    <h2>Display Settings</h2>
+                    <form id="display-form">
+                        <div class="form-group">
+                            <label for="device-name">Device Name:</label>
+                            <input type="text" id="device-name" placeholder="webex-display">
+                            <p class="help-text">Used for mDNS hostname (e.g., webex-display.local)</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="display-name">Your Name:</label>
+                            <input type="text" id="display-name" placeholder="John Doe">
+                            <p class="help-text">Displayed on the LED matrix</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="brightness">Brightness: <span id="brightness-value">128</span></label>
+                            <input type="range" id="brightness" min="10" max="255" value="128">
+                        </div>
+                        <div class="form-group">
+                            <label for="poll-interval">Status Poll Interval (seconds):</label>
+                            <input type="number" id="poll-interval" min="20" max="300" value="30">
+                            <p class="help-text">How often to check Webex status (min 20s)</p>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Display Settings</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Connection Info</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">This Display:</span>
+                            <span id="display-host" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">IP Address:</span>
+                            <span id="ip-address" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">MAC Address:</span>
+                            <span id="mac-address" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Last Synced:</span>
+                            <span id="last-sync-time" class="value">Never</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Connections</h2>
+                    <div class="connection-grid">
+                        <div class="connection-item" id="conn-wifi">
+                            <span class="icon">📶</span>
+                            <span class="name">WiFi</span>
+                        </div>
+                        <div class="connection-item" id="conn-webex">
+                            <span class="icon">🔗</span>
+                            <span class="name">Webex</span>
+                        </div>
+                        <div class="connection-item" id="conn-bridge">
+                            <span class="icon">🌉</span>
+                            <span class="name">Bridge</span>
+                        </div>
+                        <div class="connection-item" id="conn-mqtt">
+                            <span class="icon">📡</span>
+                            <span class="name">MQTT</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== MODULES TAB ==================== -->
+            <section id="modules" class="tab-content">
+                <div class="card">
+                    <h2>Installed Modules</h2>
+                    <p class="help-text">Current firmware variant: <strong id="current-variant">--</strong></p>
+                    <div class="modules-list" id="modules-list">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Available Firmware Variants</h2>
+                    <p class="help-text">Install a different variant to add or remove features.</p>
+                    <div class="update-info" id="update-info">
+                        <div class="info-row">
+                            <span class="label">Update Method:</span>
+                            <span class="value" id="update-method">Full firmware</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Est. Download:</span>
+                            <span class="value" id="estimated-download">--</span>
+                        </div>
+                    </div>
+                    <div class="variants-list" id="variants-list">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Custom Installation</h2>
+                    <p class="help-text">Select the modules you need, then install the recommended variant.</p>
+                    <div class="module-selector" id="module-selector">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                    <div class="recommended-variant" id="recommended-variant" style="display: none;">
+                        <p>Recommended: <strong id="recommended-name">--</strong></p>
+                        <button id="install-recommended" class="btn btn-primary">Install Recommended</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== WEBEX TAB ==================== -->
+            <section id="webex" class="tab-content">
+                <div class="card">
+                    <h2>Webex OAuth Configuration</h2>
+                    <p class="help-text">Configure OAuth credentials from <a href="https://developer.webex.com/my-apps" target="_blank">developer.webex.com</a></p>
+                    <form id="webex-form">
+                        <div class="form-group">
+                            <label for="webex-client-id">Client ID:</label>
+                            <input type="text" id="webex-client-id" placeholder="Your Webex Integration Client ID">
+                        </div>
+                        <div class="form-group">
+                            <label for="webex-client-secret">Client Secret:</label>
+                            <input type="password" id="webex-client-secret" placeholder="Your Webex Integration Client Secret">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Credentials</button>
+                    </form>
+                    <hr>
+                    <div class="auth-section">
+                        <h3>Authorization Status</h3>
+                        <p>Status: <span id="webex-auth-status" class="value">Not connected</span></p>
+                        <button id="webex-auth-btn" class="btn">Connect to Webex</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>RoomOS Device (Optional)</h2>
+                    <p class="help-text">For real-time camera/mic status from Webex Room devices</p>
+                    <form id="xapi-form">
+                        <div class="form-group">
+                            <label for="xapi-device-id">xAPI Device ID:</label>
+                            <input type="text" id="xapi-device-id" placeholder="Leave empty to auto-discover">
+                        </div>
+                        <div class="form-group">
+                            <label for="xapi-poll-interval">xAPI Poll Interval (seconds):</label>
+                            <input type="number" id="xapi-poll-interval" min="5" max="60" value="10">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save xAPI Config</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Embedded App Settings</h2>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="auto-sync" checked>
+                            <span>Auto-sync status changes to display</span>
+                        </label>
+                    </div>
+                    <p class="help-text">When enabled, status changes are immediately pushed to the display.</p>
+                </div>
+            </section>
+
+            <!-- ==================== SENSORS TAB ==================== -->
+            <section id="sensors" class="tab-content">
+                <div class="card">
+                    <h2>Meraki MT Sensors (MQTT)</h2>
+                    <p class="help-text">Connect to Meraki MT sensors for temperature, humidity, and air quality data.</p>
+                    <form id="mqtt-form">
+                        <div class="form-group">
+                            <label for="mqtt-broker">MQTT Broker Address:</label>
+                            <input type="text" id="mqtt-broker" placeholder="mqtt.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt-port">Port:</label>
+                            <input type="number" id="mqtt-port" value="1883" min="1" max="65535">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt-username">Username (optional):</label>
+                            <input type="text" id="mqtt-username" placeholder="MQTT username">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt-password">Password (optional):</label>
+                            <input type="password" id="mqtt-password" placeholder="MQTT password">
+                        </div>
+                        <div class="form-group">
+                            <label for="mqtt-topic">Topic:</label>
+                            <input type="text" id="mqtt-topic" value="meraki/v1/mt/#">
+                        </div>
+                        <div class="form-group">
+                            <label for="sensor-serial">Sensor Serial Number:</label>
+                            <input type="text" id="sensor-serial" placeholder="XXXX-XXXX-XXXX">
+                            <p class="help-text">Enter the Meraki MT sensor serial to subscribe to</p>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save MQTT Config</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Current Sensor Readings</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">Temperature:</span>
+                            <span id="sensor-temp" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Humidity:</span>
+                            <span id="sensor-humidity" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Air Quality Index:</span>
+                            <span id="sensor-aq" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Door Status:</span>
+                            <span id="sensor-door" class="value">--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== SYSTEM TAB ==================== -->
+            <section id="system" class="tab-content">
+                <div class="card">
+                    <h2>System Information</h2>
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <span class="label">Firmware Version:</span>
+                            <span id="firmware-version" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Free Memory:</span>
+                            <span id="free-heap" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Uptime:</span>
+                            <span id="uptime" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">WiFi Signal:</span>
+                            <span id="wifi-signal" class="value">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>WiFi Configuration</h2>
+                    <button id="scan-wifi" class="btn">Scan Networks</button>
+                    <div id="wifi-networks" class="network-list"></div>
+                    <form id="wifi-form">
+                        <div class="form-group">
+                            <label for="wifi-ssid">SSID:</label>
+                            <input type="text" id="wifi-ssid" placeholder="WiFi network name">
+                        </div>
+                        <div class="form-group">
+                            <label for="wifi-password">Password:</label>
+                            <input type="password" id="wifi-password" placeholder="WiFi password">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save & Connect</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Firmware Update</h2>
+                    <div class="status-grid" style="margin-bottom: 15px;">
+                        <div class="status-item">
+                            <span class="label">Current:</span>
+                            <span id="current-version" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Latest:</span>
+                            <span id="latest-version" class="value">--</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="ota-url">Update URL:</label>
+                        <input type="text" id="ota-url" placeholder="GitHub Releases URL">
+                    </div>
+                    <div class="form-group checkbox-group">
+                        <label>
+                            <input type="checkbox" id="auto-update">
+                            <span>Enable automatic updates</span>
+                        </label>
+                    </div>
+                    <button id="check-update" class="btn">Check for Updates</button>
+                    <button id="perform-update" class="btn btn-warning" disabled>Install Update</button>
+                </div>
+
+                <div class="card danger-zone">
+                    <h2>Danger Zone</h2>
+                    <p class="help-text">These actions cannot be undone.</p>
+                    <button id="reboot-btn" class="btn btn-warning">Reboot Device</button>
+                    <button id="factory-reset-btn" class="btn btn-danger">Factory Reset</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span>LED Matrix Webex Display</span>
+            <span class="version" id="app-version">v1.0.0</span>
+        </footer>
+    </div>
+
+    <!-- Webex Embedded Apps SDK -->
+    <script src="https://binaries.webex.com/static-content-pipeline/webex-embedded-app/v1/webex-embedded-app-sdk.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

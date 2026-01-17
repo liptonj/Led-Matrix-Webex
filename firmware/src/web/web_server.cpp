@@ -11,7 +11,7 @@
 extern class OTAManager ota_manager;
 
 WebServerManager::WebServerManager()
-    : server(nullptr), config_manager(nullptr), app_state(nullptr), running(false) {
+    : server(nullptr), config_manager(nullptr), app_state(nullptr), module_manager(nullptr), running(false) {
 }
 
 WebServerManager::~WebServerManager() {
@@ -20,9 +20,10 @@ WebServerManager::~WebServerManager() {
     }
 }
 
-void WebServerManager::begin(ConfigManager* config, AppState* state) {
+void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules) {
     config_manager = config;
     app_state = state;
+    module_manager = modules;
 
     // Initialize LittleFS for static files
     if (!LittleFS.begin(true)) {
@@ -102,6 +103,47 @@ void WebServerManager::setupRoutes() {
     server->on("/api/factory-reset", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleFactoryReset(request);
     });
+
+    // Embedded App API endpoints
+    server->on("/api/embedded/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleEmbeddedStatusGet(request);
+    });
+
+    server->on("/api/embedded/status", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleEmbeddedStatus(request, data, len);
+        }
+    );
+
+    // Serve embedded app static files
+    server->serveStatic("/embedded/", LittleFS, "/embedded/").setDefaultFile("index.html");
+
+    // Module management API endpoints
+    server->on("/api/modules", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetModules(request);
+    });
+
+    server->on("/api/modules/variants", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetVariants(request);
+    });
+
+    server->on("/api/modules/enable", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleSetModuleEnabled(request, data, len);
+        }
+    );
+
+    server->on("/api/modules/install", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleInstallVariant(request, data, len);
+        }
+    );
 
     // 404 handler
     server->onNotFound([](AsyncWebServerRequest* request) {
@@ -349,6 +391,267 @@ void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
     request->send(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete. Rebooting...\"}");
     delay(1000);
     ESP.restart();
+}
+
+void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
+    // Return current status for embedded app to read
+    JsonDocument doc;
+    
+    doc["status"] = app_state->webex_status;
+    doc["camera_on"] = app_state->camera_on;
+    doc["mic_muted"] = app_state->mic_muted;
+    doc["in_call"] = app_state->in_call;
+    doc["display_name"] = config_manager->getDisplayName();
+    doc["hostname"] = config_manager->getDeviceName() + ".local";
+    doc["embedded_app_enabled"] = true;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    // Receive status update from Webex Embedded App
+    String body = String((char*)data).substring(0, len);
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    
+    // Update app state from embedded app
+    if (doc["status"].is<const char*>()) {
+        String newStatus = doc["status"].as<String>();
+        
+        // Map embedded app status to internal status
+        if (newStatus == "active" || newStatus == "available") {
+            app_state->webex_status = "active";
+        } else if (newStatus == "away" || newStatus == "inactive") {
+            app_state->webex_status = "away";
+        } else if (newStatus == "dnd" || newStatus == "donotdisturb") {
+            app_state->webex_status = "dnd";
+        } else if (newStatus == "meeting" || newStatus == "call" || newStatus == "busy") {
+            app_state->webex_status = "meeting";
+            app_state->in_call = true;
+        } else if (newStatus == "ooo" || newStatus == "outofoffice") {
+            app_state->webex_status = "ooo";
+        } else if (newStatus == "offline") {
+            app_state->webex_status = "offline";
+        } else {
+            app_state->webex_status = newStatus;
+        }
+        
+        Serial.printf("[WEB] Embedded app status update: %s\n", app_state->webex_status.c_str());
+    }
+    
+    // Handle call state
+    if (doc["in_call"].is<bool>()) {
+        app_state->in_call = doc["in_call"].as<bool>();
+    }
+    
+    // Handle camera state
+    if (doc["camera_on"].is<bool>()) {
+        app_state->camera_on = doc["camera_on"].as<bool>();
+    }
+    
+    // Handle mic state
+    if (doc["mic_muted"].is<bool>()) {
+        app_state->mic_muted = doc["mic_muted"].as<bool>();
+    }
+    
+    // Handle display name update
+    if (doc["displayName"].is<const char*>()) {
+        config_manager->setDisplayName(doc["displayName"].as<const char*>());
+    }
+    
+    // Mark as connected via embedded app
+    app_state->bridge_connected = true;  // Reusing this flag for embedded app connection
+    
+    JsonDocument response;
+    response["success"] = true;
+    response["status"] = app_state->webex_status;
+    response["message"] = "Status updated from embedded app";
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    request->send(200, "application/json", responseStr);
+}
+
+void WebServerManager::handleGetModules(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    
+    // Current firmware info
+    doc["current_variant"] = module_manager ? module_manager->getCurrentVariant() : "unknown";
+    doc["installed_modules"] = module_manager ? module_manager->getInstalledModules() : INSTALLED_MODULES;
+    doc["enabled_modules"] = module_manager ? module_manager->getEnabledModules() : INSTALLED_MODULES;
+    
+    // List all available modules
+    JsonArray modules = doc["modules"].to<JsonArray>();
+    
+    if (module_manager) {
+        auto allModules = module_manager->getAllModules();
+        for (const auto* mod : allModules) {
+            JsonObject m = modules.add<JsonObject>();
+            m["id"] = mod->id;
+            m["name"] = mod->name;
+            m["description"] = mod->description;
+            m["version"] = mod->version;
+            m["size_kb"] = mod->size_kb;
+            m["installed"] = module_manager->isInstalled(mod->id);
+            m["enabled"] = module_manager->isEnabled(mod->id);
+            m["ota_filename"] = mod->ota_filename;
+        }
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+void WebServerManager::handleGetVariants(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    
+    doc["current_variant"] = module_manager ? module_manager->getCurrentVariant() : "unknown";
+    
+    // Recommended variant based on enabled modules
+    if (module_manager) {
+        const FirmwareVariant* recommended = module_manager->getRecommendedVariant();
+        if (recommended) {
+            doc["recommended"] = recommended->name;
+        }
+    }
+    
+    // List all firmware variants
+    JsonArray variants = doc["variants"].to<JsonArray>();
+    
+    if (module_manager) {
+        auto allVariants = module_manager->getAllVariants();
+        for (const auto* var : allVariants) {
+            JsonObject v = variants.add<JsonObject>();
+            v["name"] = var->name;
+            v["description"] = var->description;
+            v["modules"] = var->modules;
+            v["filename"] = var->filename;
+            v["size_kb"] = var->size_kb;
+            v["is_current"] = (var->modules == module_manager->getInstalledModules());
+        }
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+void WebServerManager::handleSetModuleEnabled(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    if (!module_manager) {
+        request->send(503, "application/json", "{\"error\":\"Module manager not available\"}");
+        return;
+    }
+    
+    String body = String((char*)data).substring(0, len);
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    
+    if (!doc["module_id"].is<int>() || !doc["enabled"].is<bool>()) {
+        request->send(400, "application/json", "{\"error\":\"module_id and enabled required\"}");
+        return;
+    }
+    
+    uint8_t moduleId = doc["module_id"].as<uint8_t>();
+    bool enabled = doc["enabled"].as<bool>();
+    
+    // Check if module is installed
+    if (!module_manager->isInstalled(moduleId)) {
+        request->send(400, "application/json", "{\"error\":\"Module not installed\"}");
+        return;
+    }
+    
+    module_manager->setEnabled(moduleId, enabled);
+    
+    JsonDocument response;
+    response["success"] = true;
+    response["module_id"] = moduleId;
+    response["enabled"] = module_manager->isEnabled(moduleId);
+    response["message"] = enabled ? "Module enabled" : "Module disabled";
+    
+    // Check if firmware variant change is recommended
+    const FirmwareVariant* recommended = module_manager->getRecommendedVariant();
+    if (recommended && recommended->modules != module_manager->getInstalledModules()) {
+        response["recommended_variant"] = recommended->name;
+        response["variant_change_suggested"] = true;
+    }
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    request->send(200, "application/json", responseStr);
+}
+
+void WebServerManager::handleInstallVariant(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    if (!module_manager) {
+        request->send(503, "application/json", "{\"error\":\"Module manager not available\"}");
+        return;
+    }
+    
+    String body = String((char*)data).substring(0, len);
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    
+    if (!doc["variant"].is<const char*>()) {
+        request->send(400, "application/json", "{\"error\":\"variant name required\"}");
+        return;
+    }
+    
+    const char* variantName = doc["variant"].as<const char*>();
+    const FirmwareVariant* variant = module_manager->getVariant(variantName);
+    
+    if (!variant) {
+        request->send(404, "application/json", "{\"error\":\"Variant not found\"}");
+        return;
+    }
+    
+    // Build the OTA URL for this variant
+    String otaBaseUrl = config_manager->getOTAUrl();
+    if (otaBaseUrl.isEmpty()) {
+        otaBaseUrl = "https://github.com/liptonj/Led-Matrix-Webex/releases/latest/download";
+    }
+    
+    String firmwareUrl = otaBaseUrl + "/" + String(variant->filename);
+    
+    JsonDocument response;
+    response["success"] = true;
+    response["variant"] = variantName;
+    response["filename"] = variant->filename;
+    response["url"] = firmwareUrl;
+    response["size_kb"] = variant->size_kb;
+    response["modules"] = variant->modules;
+    response["message"] = "Starting OTA update...";
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    request->send(200, "application/json", responseStr);
+    
+    // Trigger OTA update (handled by OTA manager)
+    // The OTA manager will be called after this response
+    Serial.printf("[WEB] Installing variant: %s from %s\n", variantName, firmwareUrl.c_str());
+    
+    // Store the URL for OTA manager to pick up
+    config_manager->setOTAUrl(firmwareUrl);
+    
+    // Note: Actual OTA installation would be triggered here
+    // This would call ota_manager.installFromUrl(firmwareUrl)
 }
 
 String WebServerManager::getContentType(const String& filename) {

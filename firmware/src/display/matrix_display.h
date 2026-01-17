@@ -112,6 +112,18 @@ public:
     void showUpdating(const String& version);
 
     /**
+     * @brief Show setup screen with hostname for embedded app access
+     * @param hostname Device hostname (e.g., "webex-display.local")
+     */
+    void showSetupHostname(const String& hostname);
+
+    /**
+     * @brief Show waiting for Webex connection screen
+     * @param hostname Device hostname for embedded app
+     */
+    void showWaitingForWebex(const String& hostname);
+
+    /**
      * @brief Clear the display
      */
     void clear();

@@ -203,6 +203,59 @@ void MatrixDisplay::showUpdating(const String& version) {
     drawSmallText(2, 24, version, COLOR_CYAN);
 }
 
+void MatrixDisplay::showSetupHostname(const String& hostname) {
+    if (!initialized) return;
+
+    dma_display->clearScreen();
+    
+    // Title
+    drawCenteredText(0, "SETUP", COLOR_CYAN);
+    
+    // Separator
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+    
+    // Instructions
+    drawCenteredText(10, "Open in Webex:", COLOR_WHITE);
+    
+    // Hostname - may need to scroll if too long
+    String displayHost = hostname;
+    if (displayHost.length() > 10) {
+        // Truncate with ".local" visible
+        displayHost = hostname.substring(0, 7) + "...";
+    }
+    drawCenteredText(18, displayHost, COLOR_GREEN);
+    
+    // Separator
+    dma_display->drawFastHLine(0, 25, MATRIX_WIDTH, COLOR_GRAY);
+    
+    // Embedded app path hint
+    drawCenteredText(27, "/embedded", COLOR_YELLOW);
+}
+
+void MatrixDisplay::showWaitingForWebex(const String& hostname) {
+    if (!initialized) return;
+
+    dma_display->clearScreen();
+    
+    // Status indicator - pulsing effect would be nice but static for now
+    drawStatusIcon(MATRIX_WIDTH / 2 - 4, 0, "pending");
+    
+    // Message
+    drawCenteredText(10, "WAITING", COLOR_YELLOW);
+    
+    // Separator
+    dma_display->drawFastHLine(0, 17, MATRIX_WIDTH, COLOR_GRAY);
+    
+    // Hostname info
+    drawCenteredText(19, "Connect via:", COLOR_WHITE);
+    
+    String displayHost = hostname;
+    if (displayHost.length() > 10) {
+        displayHost = hostname.substring(0, 10);
+    }
+    drawCenteredText(26, displayHost, COLOR_CYAN);
+}
+
 void MatrixDisplay::clear() {
     if (!initialized) return;
     dma_display->clearScreen();
