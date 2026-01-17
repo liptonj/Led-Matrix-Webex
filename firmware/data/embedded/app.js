@@ -758,6 +758,10 @@ function renderVariantsList(recommended) {
         return;
     }
     
+    // Find current variant for download size estimation
+    const currentVariant = state.variants.find(v => v.is_current);
+    const currentModules = currentVariant ? currentVariant.modules : 0x01;
+    
     listEl.innerHTML = state.variants.map(v => {
         const isCurrent = v.is_current;
         const isRecommended = v.name === recommended;
@@ -765,15 +769,22 @@ function renderVariantsList(recommended) {
         if (isCurrent) badges += '<span class="badge badge-current">Current</span> ';
         if (isRecommended && !isCurrent) badges += '<span class="badge badge-recommended">Recommended</span>';
         
+        // Estimate download size
+        const downloadInfo = estimateDownloadSize(currentModules, v.modules, v.size_kb);
+        const sizeClass = downloadInfo.size < 50 ? 'small' : downloadInfo.size < 150 ? 'medium' : 'large';
+        
         return `
             <div class="variant-item ${isCurrent ? 'current' : ''} ${isRecommended ? 'recommended' : ''}" data-variant="${v.name}">
                 <div class="variant-info">
                     <div class="variant-name">${v.name} ${badges}</div>
                     <div class="variant-desc">${v.description}</div>
-                    <div class="variant-size">${v.size_kb} KB</div>
+                    <div class="variant-size">
+                        ${v.size_kb} KB total
+                        ${!isCurrent ? `<span class="download-size ${sizeClass}">↓ ~${downloadInfo.size} KB ${downloadInfo.method}</span>` : ''}
+                    </div>
                 </div>
                 <div class="variant-actions">
-                    ${!isCurrent ? `<button class="btn btn-primary install-variant" data-variant="${v.name}">Install</button>` : ''}
+                    ${!isCurrent ? `<button class="btn btn-primary install-variant" data-variant="${v.name}" data-size="${downloadInfo.size}">Install</button>` : ''}
                 </div>
             </div>
         `;
@@ -905,6 +916,54 @@ async function installVariant(variantName) {
         }
     } catch (error) {
         logActivity('error', `Install failed: ${error.message}`);
+    }
+}
+
+/**
+ * Estimate download size based on module changes
+ * Returns estimated KB and update method
+ */
+function estimateDownloadSize(fromModules, toModules, fullSizeKb) {
+    // Module sizes in KB (approximate)
+    const MODULE_SIZES = {
+        0x01: 180,  // Core
+        0x02: 35,   // Webex Polling
+        0x04: 25,   // MQTT Sensors
+        0x08: 20,   // Bridge Client
+        0x10: 30,   // xAPI Client
+        0x20: 45    // Embedded App
+    };
+    
+    const addedModules = toModules & ~fromModules;
+    const removedModules = fromModules & ~toModules;
+    
+    // If delta OTA is available, estimate patch size
+    // For now, we use compressed full image estimation
+    
+    if (addedModules === 0 && removedModules === 0) {
+        // Same modules, version update only
+        return { size: Math.round(fullSizeKb * 0.1), method: '(patch)' };
+    }
+    
+    // Calculate delta size
+    let deltaSize = 10;  // Base overhead
+    
+    for (let bit = 0x01; bit <= 0x20; bit <<= 1) {
+        if (addedModules & bit) {
+            deltaSize += Math.round((MODULE_SIZES[bit] || 20) * 0.8);
+        }
+        if (removedModules & bit) {
+            deltaSize += Math.round((MODULE_SIZES[bit] || 20) * 0.1);
+        }
+    }
+    
+    // Compare with compressed full image (~60% of full)
+    const compressedSize = Math.round(fullSizeKb * 0.6);
+    
+    if (deltaSize < compressedSize) {
+        return { size: deltaSize, method: '(delta)' };
+    } else {
+        return { size: compressedSize, method: '(compressed)' };
     }
 }
 

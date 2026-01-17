@@ -260,7 +260,17 @@
 
                 <div class="card">
                     <h2>Available Firmware Variants</h2>
-                    <p class="help-text">Install a different variant to add or remove features. This will perform an OTA update.</p>
+                    <p class="help-text">Install a different variant to add or remove features.</p>
+                    <div class="update-info" id="update-info">
+                        <div class="info-row">
+                            <span class="label">Update Method:</span>
+                            <span class="value" id="update-method">Full firmware</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="label">Est. Download:</span>
+                            <span class="value" id="estimated-download">--</span>
+                        </div>
+                    </div>
                     <div class="variants-list" id="variants-list">
                         <!-- Populated by JavaScript -->
                     </div>
