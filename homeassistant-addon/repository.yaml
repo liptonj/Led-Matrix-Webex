@@ -1,0 +1,7 @@
+# Home Assistant Add-on Repository Configuration
+# Add this repository URL to Home Assistant:
+# https://github.com/liptonj/Led-Matrix-Webex
+
+name: "Webex LED Matrix Display"
+url: "https://github.com/liptonj/Led-Matrix-Webex"
+maintainer: "liptonj"

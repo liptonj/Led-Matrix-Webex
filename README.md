@@ -234,7 +234,10 @@ cp env.example .env
 npm start
 ```
 
-**For production deployment** (Raspberry Pi, server, Docker), see the detailed guide: [Bridge Deployment Guide](docs/bridge_deployment.md)
+**Deployment options:**
+- **Home Assistant Add-on**: [One-click install](homeassistant-addon/README.md) - easiest if you already run HA
+- **Raspberry Pi / Server**: [Bridge Deployment Guide](docs/bridge_deployment.md)
+- **Docker**: See deployment guide for Docker instructions
 
 The bridge uses the Webex JavaScript SDK to receive real-time presence updates via Mercury WebSocket and pushes them to the ESP32.
 
