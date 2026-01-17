@@ -1,6 +1,6 @@
 /**
  * mDNS Service
- * 
+ *
  * Advertises the bridge server via mDNS for automatic discovery.
  */
 

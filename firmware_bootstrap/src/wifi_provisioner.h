@@ -1,7 +1,7 @@
 /**
  * @file wifi_provisioner.h
  * @brief WiFi Provisioner with AP Mode and SmartConfig
- * 
+ *
  * Handles WiFi provisioning using two methods simultaneously:
  * - AP Mode: Creates a hotspot for web-based configuration
  * - SmartConfig: Listens for credentials from ESP Touch app
@@ -16,8 +16,7 @@
 
 // AP Mode Configuration
 #define AP_SSID "Webex-Display-Setup"
-#define AP_PASSWORD "webexdisplay"
-#define AP_CHANNEL 1
+#define AP_CHANNEL 6  // Channel 6 for better compatibility
 #define AP_MAX_CONNECTIONS 4
 
 // Connection timeouts
@@ -26,7 +25,7 @@
 
 /**
  * @brief WiFi Provisioner Class
- * 
+ *
  * Manages WiFi connection and provisioning for the bootstrap firmware.
  */
 class WiFiProvisioner {
@@ -57,7 +56,7 @@ public:
 
     /**
      * @brief Start AP mode with SmartConfig listener
-     * 
+     *
      * Creates a WiFi hotspot for web configuration while also
      * listening for SmartConfig provisioning from mobile app.
      */
@@ -70,7 +69,7 @@ public:
 
     /**
      * @brief Process provisioning events (call in loop)
-     * 
+     *
      * Checks for SmartConfig completion and handles events.
      */
     void loop();

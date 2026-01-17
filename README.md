@@ -124,12 +124,19 @@ Led-Matrix-Webex/
 
 | Component | Specification |
 |-----------|---------------|
-| Microcontroller | ESP32-S3-DevKitC-1-N8R2 |
+| Microcontroller | ESP32-S3-DevKitC-1-N8R2 (recommended) or ESP32-DevKitC |
 | Display | 64x32 RGB LED Matrix Panel (2048 LEDs, 3mm pitch, HUB75 interface) |
 | Display Dimensions | 192mm x 96mm |
 | Power Supply | 5V 2.5A minimum (matrix consumes up to 12W) |
 
-### Hardware Wiring
+### Supported Boards
+
+| Board | Flash | Build Command |
+|-------|-------|---------------|
+| ESP32-S3-DevKitC-1 | 8MB | `pio run -e esp32s3` |
+| ESP32-DevKitC (standard) | 4MB | `pio run -e esp32` |
+
+### Hardware Wiring (ESP32-S3)
 
 Connect the HUB75 matrix to the ESP32-S3 as follows:
 
@@ -150,62 +157,168 @@ Connect the HUB75 matrix to the ESP32-S3 as follows:
 | LAT | GPIO47 | Latch |
 | OE | GPIO14 | Output enable |
 
+### Hardware Wiring (ESP32 Standard)
+
+Connect the HUB75 matrix to a standard ESP32 as follows:
+
+| Matrix Pin | ESP32 GPIO | Function |
+|------------|------------|----------|
+| R1 | GPIO25 | Red data (upper) |
+| G1 | GPIO26 | Green data (upper) |
+| B1 | GPIO27 | Blue data (upper) |
+| R2 | GPIO14 | Red data (lower) |
+| G2 | GPIO12 | Green data (lower) |
+| B2 | GPIO13 | Blue data (lower) |
+| A | GPIO23 | Row address bit 0 |
+| B | GPIO19 | Row address bit 1 |
+| C | GPIO5 | Row address bit 2 |
+| D | GPIO17 | Row address bit 3 |
+| E | GPIO32 | Row address bit 4 |
+| CLK | GPIO16 | Clock |
+| LAT | GPIO4 | Latch |
+| OE | GPIO15 | Output enable |
+
 ## Installation
 
 ### Option A: Install from Pre-built Release (Recommended)
 
 Download the latest release from [GitHub Releases](https://github.com/liptonj/Led-Matrix-Webex/releases).
 
-**Required files:**
-- `bootstrap.bin` - Initial firmware for WiFi setup
-- `firmware.bin` - Main application firmware  
+**Release files:**
+- `bootloader.bin` - ESP32 bootloader
+- `partitions.bin` - Partition table
+- `firmware.bin` - Main application firmware
 - `littlefs.bin` - Web UI filesystem
+- `bootstrap.bin` - Alternative minimal firmware for WiFi provisioning + OTA
 
-**Flash using esptool.py:**
+**Flash addresses by board:**
+
+| File | ESP32-S3 (8MB) | ESP32 (4MB) | Description |
+|------|----------------|-------------|-------------|
+| bootloader.bin | 0x1000 | 0x1000 | Second-stage bootloader |
+| partitions.bin | 0x8000 | 0x8000 | Partition table |
+| firmware.bin | 0x10000 | 0x10000 | Main application |
+| littlefs.bin | 0x670000 | 0x290000 | Web UI filesystem |
+
+**Flash using esptool.py (ESP32-S3):**
 
 ```bash
 # Install esptool if needed
 pip install esptool
 
-# Flash the bootstrap firmware (first time setup)
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-    write_flash 0x0 bootstrap.bin
+# Erase flash first (recommended for clean install)
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
 
-# Or flash the full firmware with filesystem
+# Flash all components
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-    write_flash 0x0 firmware.bin 0x310000 littlefs.bin
+    write_flash \
+    0x1000 bootloader.bin \
+    0x8000 partitions.bin \
+    0x10000 firmware.bin \
+    0x670000 littlefs.bin
 ```
 
-**Flash using PlatformIO (if installed):**
+**Flash using esptool.py (ESP32 standard):**
 
 ```bash
-# Download and extract the release
-unzip firmware-v1.0.0.zip -d firmware-release
+# Erase flash first (recommended for clean install)
+esptool.py --chip esp32 --port /dev/ttyUSB0 erase_flash
 
-# Flash firmware
-esptool.py --chip esp32s3 write_flash 0x0 firmware-release/firmware.bin
+# Flash all components
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash \
+    0x1000 bootloader.bin \
+    0x8000 partitions.bin \
+    0x10000 firmware.bin \
+    0x290000 littlefs.bin
 ```
+
+**Alternative: Bootstrap firmware (for OTA setup):**
+
+If you prefer to use WiFi provisioning and download the main firmware over-the-air:
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash \
+    0x1000 bootloader.bin \
+    0x8000 partitions.bin \
+    0x10000 bootstrap.bin
+```
+
+The bootstrap firmware creates a WiFi access point for initial configuration and downloads the main firmware from GitHub Releases.
+
+**Note:** On macOS, the port is typically `/dev/cu.usbmodem*`. On Windows, use `COM3` or similar.
 
 ### Option B: Build from Source
 
+**First-time setup (install bootloader once):**
+
+The ESP32-S3 bootloader only needs to be installed once. PlatformIO includes it automatically on the first upload:
+
 ```bash
 cd firmware
-pio run -t upload         # Upload firmware
-pio run -t uploadfs       # Upload web UI files
+pio run -t upload         # First upload includes bootloader + partitions + firmware
+pio run -t uploadfs       # Upload web UI filesystem (LittleFS)
+```
+
+**Subsequent firmware updates:**
+
+After the bootloader is installed, you only need to update the application firmware:
+
+```bash
+cd firmware
+pio run -t upload         # Updates firmware only
+```
+
+**Bootstrap firmware (alternative):**
+
+```bash
+cd firmware_bootstrap
+pio run -t upload         # Upload bootstrap firmware
+pio run -t uploadfs       # Upload bootstrap web UI
 ```
 
 ## Quick Start
 
-### 1. Configure via Web UI
+### 1. Configure WiFi via SmartConfig
 
-1. On first boot, the device creates a WiFi access point: `Webex-Display-Setup`
-2. Connect to this network with your phone or computer
-3. Open `http://192.168.4.1` in your browser
-4. Enter your WiFi credentials
-5. Configure Webex OAuth settings (see below)
-6. (Optional) Configure MQTT for Meraki sensor integration
+The easiest way to configure WiFi is using the ESP Touch app:
 
-### 2. Webex Integration Setup
+1. **Download the ESP Touch app:**
+   - [iOS App Store](https://apps.apple.com/app/espressif-esptouch/id1071176700)
+   - [Android Play Store](https://play.google.com/store/apps/details?id=com.espressif.esptouch)
+
+2. **Connect your phone to your home WiFi** (the one you want the display to use)
+
+3. **Open the ESP Touch app** and enter your WiFi password
+
+4. **Power on the ESP32** with the bootstrap firmware installed
+
+5. **Tap "Confirm"** in the app - it will broadcast your credentials to the device
+
+6. **Watch the serial monitor** - the device will show its IP address when connected:
+   ```
+   [WIFI] SmartConfig connected! IP: 192.168.1.xxx
+   ```
+
+### 2. Install Main Firmware via Web UI
+
+1. Open a browser and go to the IP address shown in the serial monitor (e.g., `http://192.168.1.xxx`)
+
+2. The bootstrap web interface will open automatically
+
+3. Click **"Install Firmware"** - the device will download the main firmware from GitHub Releases
+
+4. The device will reboot into the full application
+
+**Alternative: Direct AP Connection**
+
+If SmartConfig doesn't work, you can also connect directly:
+1. Look for WiFi network: `Webex-Display-Setup` (open network, no password)
+2. Connect and open `http://192.168.4.1`
+3. Enter your WiFi credentials and install firmware
+
+### 3. Webex Integration Setup
 
 1. Go to [Webex Developer Portal](https://developer.webex.com)
 2. Create a new Integration

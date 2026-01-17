@@ -9,17 +9,22 @@
 
 WebSetup::WebSetup()
     : server(nullptr)
+    , dns_server(nullptr)
     , config_store(nullptr)
     , wifi_provisioner(nullptr)
     , ota_downloader(nullptr)
     , ota_pending(false)
     , wifi_pending(false)
-    , running(false) {
+    , running(false)
+    , captive_portal_active(false) {
 }
 
 WebSetup::~WebSetup() {
     if (server) {
         delete server;
+    }
+    if (dns_server) {
+        delete dns_server;
     }
 }
 
@@ -27,27 +32,48 @@ void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* 
     config_store = config;
     wifi_provisioner = wifi;
     ota_downloader = ota;
-    
+
     // Initialize LittleFS for static files
     if (!LittleFS.begin(true)) {
         Serial.println("[WEB] Failed to mount LittleFS, using embedded HTML");
     }
-    
+
     // Create server on port 80
     server = new AsyncWebServer(80);
-    
+
     // Setup routes
     setupRoutes();
-    
+
+    // Setup captive portal if AP is active
+    setupCaptivePortal();
+
     // Start server
     server->begin();
     running = true;
-    
+
     Serial.println("[WEB] Bootstrap web server started on port 80");
 }
 
 void WebSetup::loop() {
-    // AsyncWebServer handles requests automatically
+    // Process DNS requests for captive portal
+    if (dns_server && captive_portal_active) {
+        dns_server->processNextRequest();
+    }
+}
+
+void WebSetup::setupCaptivePortal() {
+    // Start DNS server for captive portal (redirect all DNS to our IP)
+    dns_server = new DNSServer();
+
+    // Start DNS server - redirect all domains to the AP IP
+    if (dns_server->start(DNS_PORT, "*", WiFi.softAPIP())) {
+        captive_portal_active = true;
+        Serial.println("[WEB] Captive portal DNS started");
+        Serial.printf("[WEB] All DNS queries will redirect to %s\n",
+                      WiFi.softAPIP().toString().c_str());
+    } else {
+        Serial.println("[WEB] Failed to start captive portal DNS");
+    }
 }
 
 void WebSetup::setupRoutes() {
@@ -60,20 +86,20 @@ void WebSetup::setupRoutes() {
             handleRoot(request);
         });
     }
-    
+
     // API endpoints
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
     });
-    
+
     server->on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleConfig(request);
     });
-    
+
     server->on("/api/scan", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleScan(request);
     });
-    
+
     server->on("/api/wifi", HTTP_POST,
         [](AsyncWebServerRequest* request) {},
         nullptr,
@@ -81,7 +107,7 @@ void WebSetup::setupRoutes() {
             handleWifiSave(request, data, len);
         }
     );
-    
+
     server->on("/api/ota-url", HTTP_POST,
         [](AsyncWebServerRequest* request) {},
         nullptr,
@@ -89,18 +115,54 @@ void WebSetup::setupRoutes() {
             handleOTAUrl(request, data, len);
         }
     );
-    
+
     server->on("/api/start-ota", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleStartOTA(request);
     });
-    
+
     server->on("/api/ota-progress", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleOTAProgress(request);
     });
-    
-    // 404 handler
-    server->onNotFound([](AsyncWebServerRequest* request) {
-        request->send(404, "application/json", "{\"error\":\"Not found\"}");
+
+    // Captive portal detection endpoints - redirect to setup page
+    // Apple
+    server->on("/hotspot-detect.html", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+    server->on("/library/test/success.html", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+
+    // Android
+    server->on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+    server->on("/gen_204", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+
+    // Windows
+    server->on("/connecttest.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+    server->on("/ncsi.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+
+    // Firefox
+    server->on("/success.txt", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/");
+    });
+
+    // Fallback - redirect any unknown request to setup page (captive portal behavior)
+    server->onNotFound([this](AsyncWebServerRequest* request) {
+        // If it's an API request, return 404
+        if (request->url().startsWith("/api/")) {
+            request->send(404, "application/json", "{\"error\":\"Not found\"}");
+            return;
+        }
+        // Otherwise redirect to captive portal
+        request->redirect("http://192.168.4.1/");
     });
 }
 
@@ -142,7 +204,7 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
 <body>
     <div class="container">
         <h1>Webex Display Setup</h1>
-        
+
         <div class="card">
             <h2>WiFi Configuration</h2>
             <button class="btn btn-secondary" onclick="scanNetworks()">Scan Networks</button>
@@ -159,7 +221,7 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 <button type="submit" class="btn btn-primary">Connect</button>
             </form>
         </div>
-        
+
         <div class="card">
             <h2>Firmware Update</h2>
             <div id="ota-status" class="status">Ready to install firmware</div>
@@ -174,7 +236,7 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 <button class="btn btn-secondary" onclick="saveOTAUrl()">Save URL</button>
             </div>
         </div>
-        
+
         <div class="card">
             <h2>Status</h2>
             <div id="device-status" class="status">Loading...</div>
@@ -244,28 +306,28 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
 </body>
 </html>
 )rawliteral";
-    
+
     request->send(200, "text/html", html);
 }
 
 void WebSetup::handleStatus(AsyncWebServerRequest* request) {
     JsonDocument doc;
-    
+
     doc["wifi_connected"] = wifi_provisioner->isConnected();
     doc["ap_active"] = wifi_provisioner->isAPActive();
     doc["smartconfig_active"] = wifi_provisioner->isSmartConfigActive();
     doc["ip_address"] = wifi_provisioner->getIPAddress().toString();
     doc["ap_ip"] = wifi_provisioner->getAPIPAddress().toString();
-    
+
     #ifdef BOOTSTRAP_VERSION
     doc["version"] = BOOTSTRAP_VERSION;
     #else
-    doc["version"] = "1.0.0";
+    doc["version"] = "1.0.1";
     #endif
-    
+
     doc["free_heap"] = ESP.getFreeHeap();
     doc["ota_url"] = config_store->getOTAUrl();
-    
+
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
@@ -273,12 +335,12 @@ void WebSetup::handleStatus(AsyncWebServerRequest* request) {
 
 void WebSetup::handleConfig(AsyncWebServerRequest* request) {
     JsonDocument doc;
-    
+
     doc["has_wifi"] = config_store->hasWiFi();
     doc["wifi_ssid"] = config_store->getWiFiSSID();
     doc["ota_url"] = config_store->getOTAUrl();
     doc["has_custom_ota_url"] = config_store->hasCustomOTAUrl();
-    
+
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
@@ -286,17 +348,17 @@ void WebSetup::handleConfig(AsyncWebServerRequest* request) {
 
 void WebSetup::handleScan(AsyncWebServerRequest* request) {
     int count = wifi_provisioner->scanNetworks();
-    
+
     JsonDocument doc;
     JsonArray networks = doc["networks"].to<JsonArray>();
-    
+
     for (int i = 0; i < count; i++) {
         JsonObject network = networks.add<JsonObject>();
         network["ssid"] = wifi_provisioner->getScannedSSID(i);
         network["rssi"] = wifi_provisioner->getScannedRSSI(i);
         network["encrypted"] = wifi_provisioner->isScannedNetworkEncrypted(i);
     }
-    
+
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);
@@ -304,67 +366,67 @@ void WebSetup::handleScan(AsyncWebServerRequest* request) {
 
 void WebSetup::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     String body = String((char*)data).substring(0, len);
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
-    
+
     if (error) {
         request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
         return;
     }
-    
+
     String ssid = doc["ssid"].as<String>();
     String password = doc["password"].as<String>();
-    
+
     if (ssid.isEmpty()) {
         request->send(400, "application/json", "{\"error\":\"SSID required\"}");
         return;
     }
-    
+
     // Save credentials
     config_store->setWiFiCredentials(ssid, password);
     wifi_pending = true;
-    
-    request->send(200, "application/json", 
+
+    request->send(200, "application/json",
                   "{\"success\":true,\"message\":\"WiFi saved. Will connect shortly...\"}");
 }
 
 void WebSetup::handleOTAUrl(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     String body = String((char*)data).substring(0, len);
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
-    
+
     if (error) {
         request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
         return;
     }
-    
+
     String url = doc["url"].as<String>();
     config_store->setOTAUrl(url);
-    
-    request->send(200, "application/json", 
+
+    request->send(200, "application/json",
                   "{\"success\":true,\"message\":\"OTA URL saved\"}");
 }
 
 void WebSetup::handleStartOTA(AsyncWebServerRequest* request) {
     if (!wifi_provisioner->isConnected()) {
-        request->send(400, "application/json", 
+        request->send(400, "application/json",
                       "{\"error\":\"WiFi not connected\"}");
         return;
     }
-    
+
     ota_pending = true;
-    request->send(200, "application/json", 
+    request->send(200, "application/json",
                   "{\"success\":true,\"message\":\"OTA update starting...\"}");
 }
 
 void WebSetup::handleOTAProgress(AsyncWebServerRequest* request) {
     JsonDocument doc;
-    
+
     doc["progress"] = ota_downloader->getProgress();
     doc["message"] = ota_downloader->getStatusMessage();
-    
+
     OTAStatus status = ota_downloader->getStatus();
     if (status == OTAStatus::SUCCESS) {
         doc["status"] = "success";
@@ -373,7 +435,7 @@ void WebSetup::handleOTAProgress(AsyncWebServerRequest* request) {
     } else {
         doc["status"] = "in_progress";
     }
-    
+
     String response;
     serializeJson(doc, response);
     request->send(200, "application/json", response);

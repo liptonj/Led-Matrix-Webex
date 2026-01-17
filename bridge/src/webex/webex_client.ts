@@ -1,6 +1,6 @@
 /**
  * Webex Client
- * 
+ *
  * Wrapper around the Webex JS SDK for authentication and API access.
  */
 
@@ -95,7 +95,7 @@ export class WebexClient {
         // Ensure token is valid
         if (Date.now() > this.tokenExpiry - 300000) { // 5 min buffer
             await this.refreshAccessToken();
-            
+
             // Reinitialize SDK with new token
             this.webex = Webex.init({
                 credentials: {

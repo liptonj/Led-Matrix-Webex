@@ -32,21 +32,21 @@ bool WiFiProvisioner::connectWithStoredCredentials() {
 
     String ssid = config_store->getWiFiSSID();
     String password = config_store->getWiFiPassword();
-    
+
     return connect(ssid, password, false);
 }
 
 bool WiFiProvisioner::connect(const String& ssid, const String& password, bool save_credentials) {
     Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
-    
+
     // Disconnect from any current network
     WiFi.disconnect(true);
     delay(100);
-    
+
     // Set station mode
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
-    
+
     // Wait for connection with timeout
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED) {
@@ -57,42 +57,64 @@ bool WiFiProvisioner::connect(const String& ssid, const String& password, bool s
         delay(500);
         Serial.print(".");
     }
-    
+
     Serial.println();
     Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    
+
     // Save credentials on successful connection
     if (save_credentials && config_store) {
         config_store->setWiFiCredentials(ssid, password);
     }
-    
+
     // Notify callback
     if (connection_callback) {
         connection_callback(true);
     }
-    
+
     return true;
 }
 
 void WiFiProvisioner::startAPWithSmartConfig() {
-    Serial.println("[WIFI] Starting AP mode with SmartConfig...");
-    
-    // Configure AP + STA mode (needed for SmartConfig while hosting AP)
+    Serial.println("[WIFI] Starting AP mode...");
+
+    // Use AP-only mode first for better compatibility
+    WiFi.mode(WIFI_AP);
+    delay(100);
+
+    // Configure AP settings before starting
+    WiFi.softAPConfig(
+        IPAddress(192, 168, 4, 1),    // AP IP
+        IPAddress(192, 168, 4, 1),    // Gateway
+        IPAddress(255, 255, 255, 0)   // Subnet
+    );
+
+    // Start Access Point (open network - no password for easy setup)
+    bool ap_result = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, 0, AP_MAX_CONNECTIONS);
+
+    if (ap_result) {
+        ap_active = true;
+        Serial.printf("[WIFI] AP started successfully!\n");
+        Serial.printf("[WIFI] SSID: '%s' (open network)\n", AP_SSID);
+        Serial.printf("[WIFI] IP: %s\n", WiFi.softAPIP().toString().c_str());
+        Serial.printf("[WIFI] Channel: %d\n", AP_CHANNEL);
+        Serial.printf("[WIFI] MAC: %s\n", WiFi.softAPmacAddress().c_str());
+    } else {
+        Serial.println("[WIFI] ERROR: Failed to start AP!");
+        ap_active = false;
+        return;
+    }
+
+    // Now switch to AP+STA for SmartConfig
+    delay(500);
     WiFi.mode(WIFI_AP_STA);
-    
-    // Start Access Point
-    WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONNECTIONS);
-    ap_active = true;
-    
-    Serial.printf("[WIFI] AP started: SSID='%s', IP=%s\n", 
-                  AP_SSID, WiFi.softAPIP().toString().c_str());
-    
+    delay(100);
+
     // Start SmartConfig
     WiFi.beginSmartConfig();
     smartconfig_active = true;
     smartconfig_done = false;
     smartconfig_start_time = millis();
-    
+
     Serial.println("[WIFI] SmartConfig listening... Use ESP Touch app to configure");
 }
 
@@ -102,7 +124,7 @@ void WiFiProvisioner::stopProvisioning() {
         smartconfig_active = false;
         Serial.println("[WIFI] SmartConfig stopped");
     }
-    
+
     if (ap_active) {
         WiFi.softAPdisconnect(true);
         ap_active = false;
@@ -127,7 +149,7 @@ void WiFiProvisioner::loop() {
 
 void WiFiProvisioner::handleSmartConfigResult() {
     Serial.println("[WIFI] SmartConfig received credentials!");
-    
+
     // Wait for connection
     unsigned long start_time = millis();
     while (WiFi.status() != WL_CONNECTED) {
@@ -138,21 +160,21 @@ void WiFiProvisioner::handleSmartConfigResult() {
         delay(500);
         Serial.print(".");
     }
-    
+
     Serial.println();
     Serial.printf("[WIFI] SmartConfig connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    
+
     // Save credentials
     if (config_store) {
         config_store->setWiFiCredentials(WiFi.SSID(), WiFi.psk());
     }
-    
+
     // Stop provisioning mode
     stopProvisioning();
-    
+
     // Switch to station-only mode
     WiFi.mode(WIFI_STA);
-    
+
     // Notify callback
     if (connection_callback) {
         connection_callback(true);

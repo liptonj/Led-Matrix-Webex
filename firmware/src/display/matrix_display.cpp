@@ -17,7 +17,9 @@ MatrixDisplay::~MatrixDisplay() {
 }
 
 bool MatrixDisplay::begin() {
-    // Configure HUB75 pins for ESP32-S3
+    // Configure HUB75 pins based on board type
+#if defined(ESP32_S3_BOARD)
+    // ESP32-S3 pin configuration
     HUB75_I2S_CFG::i2s_pins _pins = {
         42, // R1
         41, // G1
@@ -34,6 +36,25 @@ bool MatrixDisplay::begin() {
         47, // LAT
         14  // OE
     };
+#else
+    // ESP32 (standard) pin configuration
+    HUB75_I2S_CFG::i2s_pins _pins = {
+        25, // R1
+        26, // G1
+        27, // B1
+        14, // R2
+        12, // G2
+        13, // B2
+        23, // A
+        19, // B
+        5,  // C
+        17, // D
+        32, // E (active for 1/32 scan, directly active for 1/16 scan panels)
+        16, // CLK
+        4,  // LAT
+        15  // OE
+    };
+#endif
 
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(

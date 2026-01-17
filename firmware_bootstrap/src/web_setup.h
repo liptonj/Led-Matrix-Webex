@@ -1,8 +1,9 @@
 /**
  * @file web_setup.h
  * @brief Minimal Web Server for Bootstrap Configuration
- * 
+ *
  * Provides a simple web interface for WiFi configuration and OTA updates.
+ * Includes captive portal support for automatic redirect on connection.
  */
 
 #ifndef WEB_SETUP_H
@@ -10,14 +11,18 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
+#include <DNSServer.h>
 #include <LittleFS.h>
 #include "config_store.h"
 #include "wifi_provisioner.h"
 #include "ota_downloader.h"
 
+// DNS port for captive portal
+#define DNS_PORT 53
+
 /**
  * @brief Web Setup Server Class
- * 
+ *
  * Hosts a minimal web interface for bootstrap configuration.
  */
 class WebSetup {
@@ -62,15 +67,18 @@ public:
 
 private:
     AsyncWebServer* server;
+    DNSServer* dns_server;
     ConfigStore* config_store;
     WiFiProvisioner* wifi_provisioner;
     OTADownloader* ota_downloader;
     bool ota_pending;
     bool wifi_pending;
     bool running;
+    bool captive_portal_active;
 
     void setupRoutes();
-    
+    void setupCaptivePortal();
+
     // Request handlers
     void handleRoot(AsyncWebServerRequest* request);
     void handleStatus(AsyncWebServerRequest* request);
