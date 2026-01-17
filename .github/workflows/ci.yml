@@ -1,0 +1,189 @@
+# GitHub Actions CI/CD Workflow
+# Runs unit tests and builds release artifacts for the LED Matrix Webex project
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+
+env:
+  PLATFORMIO_CORE_DIR: ~/.platformio
+
+jobs:
+  # ============================================================================
+  # Bridge (Node.js/TypeScript) Tests and Build
+  # ============================================================================
+  bridge-test:
+    name: Bridge Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: bridge/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --passWithNoTests
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Upload bridge build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bridge-dist
+          path: bridge/dist/
+          retention-days: 7
+
+  # ============================================================================
+  # Firmware (PlatformIO) Build and Test
+  # ============================================================================
+  firmware-build:
+    name: Firmware Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Create secrets.h for build
+        run: |
+          cat > include/secrets.h << 'EOF'
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          // Placeholder secrets for CI build
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #endif
+          EOF
+
+      - name: Build firmware (ESP32-S3)
+        run: pio run -e esp32s3
+
+      - name: Build native simulation
+        run: pio run -e native
+
+      - name: Run native tests
+        run: |
+          if [ -f ".pio/build/native/program" ]; then
+            .pio/build/native/program
+          else
+            echo "Native simulation binary not found, skipping"
+          fi
+
+      - name: Build filesystem image
+        run: pio run -t buildfs -e esp32s3
+
+      - name: Rename firmware artifacts
+        run: |
+          mkdir -p artifacts
+          cp .pio/build/esp32s3/firmware.bin artifacts/firmware.bin
+          cp .pio/build/esp32s3/bootloader.bin artifacts/bootloader.bin 2>/dev/null || true
+          cp .pio/build/esp32s3/partitions.bin artifacts/partitions.bin 2>/dev/null || true
+          cp .pio/build/esp32s3/littlefs.bin artifacts/littlefs.bin 2>/dev/null || true
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # Create Release (only on version tags)
+  # ============================================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [bridge-test, firmware-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: release/firmware/
+
+      - name: Download bridge artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-dist
+          path: release/bridge/
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archives
+        run: |
+          cd release
+          # Create firmware release zip
+          cd firmware && zip -r ../firmware-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+          # Create bridge release zip
+          cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          generate_release_notes: true
+          files: |
+            release/firmware-${{ steps.version.outputs.VERSION }}.zip
+            release/bridge-${{ steps.version.outputs.VERSION }}.zip
+            release/firmware/firmware.bin

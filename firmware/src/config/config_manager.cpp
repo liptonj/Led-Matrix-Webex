@@ -270,7 +270,13 @@ bool ConfigManager::hasMQTTConfig() const {
 // OTA Configuration
 
 String ConfigManager::getOTAUrl() const {
-    return loadString("ota_url", "");
+    String url = loadString("ota_url", "");
+    if (url.isEmpty()) {
+        #ifdef DEFAULT_OTA_URL
+        return DEFAULT_OTA_URL;
+        #endif
+    }
+    return url;
 }
 
 void ConfigManager::setOTAUrl(const String& url) {
