@@ -7,10 +7,10 @@
       .gray { fill: #606060; }
     </style>
   </defs>
-  
+
   <!-- Black background (LED matrix panel) -->
   <rect width="640" height="320" fill="#0a0a0a"/>
-  
+
   <!-- Grid pattern showing LED structure -->
   <g opacity="0.08">
     <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
@@ -18,7 +18,7 @@
     </pattern>
     <rect width="640" height="320" fill="url(#grid)"/>
   </g>
-  
+
   <!-- "WEBEX" text centered - Cyan -->
   <!-- W -->
   <rect x="190" y="40" width="8" height="8" class="led cyan"/>
@@ -34,7 +34,7 @@
   <rect x="230" y="70" width="8" height="8" class="led cyan"/>
   <rect x="200" y="80" width="8" height="8" class="led cyan"/>
   <rect x="220" y="80" width="8" height="8" class="led cyan"/>
-  
+
   <!-- E -->
   <rect x="250" y="40" width="8" height="8" class="led cyan"/>
   <rect x="260" y="40" width="8" height="8" class="led cyan"/>
@@ -49,7 +49,7 @@
   <rect x="260" y="80" width="8" height="8" class="led cyan"/>
   <rect x="270" y="80" width="8" height="8" class="led cyan"/>
   <rect x="280" y="80" width="8" height="8" class="led cyan"/>
-  
+
   <!-- B -->
   <rect x="300" y="40" width="8" height="8" class="led cyan"/>
   <rect x="310" y="40" width="8" height="8" class="led cyan"/>
@@ -64,7 +64,7 @@
   <rect x="300" y="80" width="8" height="8" class="led cyan"/>
   <rect x="310" y="80" width="8" height="8" class="led cyan"/>
   <rect x="320" y="80" width="8" height="8" class="led cyan"/>
-  
+
   <!-- E -->
   <rect x="350" y="40" width="8" height="8" class="led cyan"/>
   <rect x="360" y="40" width="8" height="8" class="led cyan"/>
@@ -79,7 +79,7 @@
   <rect x="360" y="80" width="8" height="8" class="led cyan"/>
   <rect x="370" y="80" width="8" height="8" class="led cyan"/>
   <rect x="380" y="80" width="8" height="8" class="led cyan"/>
-  
+
   <!-- X -->
   <rect x="400" y="40" width="8" height="8" class="led cyan"/>
   <rect x="440" y="40" width="8" height="8" class="led cyan"/>
@@ -90,7 +90,7 @@
   <rect x="430" y="70" width="8" height="8" class="led cyan"/>
   <rect x="400" y="80" width="8" height="8" class="led cyan"/>
   <rect x="440" y="80" width="8" height="8" class="led cyan"/>
-  
+
   <!-- "DISPLAY" text centered - White -->
   <!-- D -->
   <rect x="140" y="110" width="8" height="8" class="led white"/>
@@ -105,7 +105,7 @@
   <rect x="140" y="150" width="8" height="8" class="led white"/>
   <rect x="150" y="150" width="8" height="8" class="led white"/>
   <rect x="160" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- I -->
   <rect x="190" y="110" width="8" height="8" class="led white"/>
   <rect x="200" y="110" width="8" height="8" class="led white"/>
@@ -116,7 +116,7 @@
   <rect x="190" y="150" width="8" height="8" class="led white"/>
   <rect x="200" y="150" width="8" height="8" class="led white"/>
   <rect x="210" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- S -->
   <rect x="240" y="110" width="8" height="8" class="led white"/>
   <rect x="250" y="110" width="8" height="8" class="led white"/>
@@ -129,7 +129,7 @@
   <rect x="240" y="150" width="8" height="8" class="led white"/>
   <rect x="250" y="150" width="8" height="8" class="led white"/>
   <rect x="260" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- P -->
   <rect x="290" y="110" width="8" height="8" class="led white"/>
   <rect x="300" y="110" width="8" height="8" class="led white"/>
@@ -141,7 +141,7 @@
   <rect x="310" y="130" width="8" height="8" class="led white"/>
   <rect x="290" y="140" width="8" height="8" class="led white"/>
   <rect x="290" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- L -->
   <rect x="340" y="110" width="8" height="8" class="led white"/>
   <rect x="340" y="120" width="8" height="8" class="led white"/>
@@ -151,7 +151,7 @@
   <rect x="350" y="150" width="8" height="8" class="led white"/>
   <rect x="360" y="150" width="8" height="8" class="led white"/>
   <rect x="370" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- A -->
   <rect x="400" y="110" width="8" height="8" class="led white"/>
   <rect x="410" y="110" width="8" height="8" class="led white"/>
@@ -167,7 +167,7 @@
   <rect x="430" y="140" width="8" height="8" class="led white"/>
   <rect x="390" y="150" width="8" height="8" class="led white"/>
   <rect x="430" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- Y -->
   <rect x="450" y="110" width="8" height="8" class="led white"/>
   <rect x="490" y="110" width="8" height="8" class="led white"/>
@@ -176,10 +176,10 @@
   <rect x="470" y="130" width="8" height="8" class="led white"/>
   <rect x="470" y="140" width="8" height="8" class="led white"/>
   <rect x="470" y="150" width="8" height="8" class="led white"/>
-  
+
   <!-- Separator line -->
   <rect x="0" y="170" width="640" height="2" fill="#404040"/>
-  
+
   <!-- "v1.0.0" version centered - Gray -->
   <!-- v -->
   <rect x="250" y="200" width="8" height="8" class="led gray"/>
@@ -187,15 +187,15 @@
   <rect x="255" y="210" width="8" height="8" class="led gray"/>
   <rect x="275" y="210" width="8" height="8" class="led gray"/>
   <rect x="265" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- 1 -->
   <rect x="300" y="200" width="8" height="8" class="led gray"/>
   <rect x="300" y="210" width="8" height="8" class="led gray"/>
   <rect x="300" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- . -->
   <rect x="320" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- 0 -->
   <rect x="340" y="200" width="8" height="8" class="led gray"/>
   <rect x="350" y="200" width="8" height="8" class="led gray"/>
@@ -203,10 +203,10 @@
   <rect x="355" y="210" width="8" height="8" class="led gray"/>
   <rect x="340" y="220" width="8" height="8" class="led gray"/>
   <rect x="350" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- . -->
   <rect x="375" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- 0 -->
   <rect x="395" y="200" width="8" height="8" class="led gray"/>
   <rect x="405" y="200" width="8" height="8" class="led gray"/>
@@ -214,7 +214,7 @@
   <rect x="410" y="210" width="8" height="8" class="led gray"/>
   <rect x="395" y="220" width="8" height="8" class="led gray"/>
   <rect x="405" y="220" width="8" height="8" class="led gray"/>
-  
+
   <!-- Panel frame -->
   <rect x="0" y="0" width="640" height="320" fill="none" stroke="#333" stroke-width="4"/>
 </svg>

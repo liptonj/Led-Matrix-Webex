@@ -1,10 +1,15 @@
-# ESP32 Firmware Build
-firmware/.pio/
+# PlatformIO Build Artifacts (all firmware projects)
+**/.pio/
+**/.pioenvs/
+**/.piolibdeps/
+
+# ESP32 Firmware specific
 firmware/.vscode/
 firmware/lib/
 firmware/test/
-firmware/.pioenvs/
-firmware/.piolibdeps/
+firmware_bootstrap/.vscode/
+firmware_bootstrap/lib/
+firmware_bootstrap/test/
 
 # Node.js Bridge
 bridge/node_modules/

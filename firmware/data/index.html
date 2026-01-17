@@ -179,6 +179,11 @@
                         <label for="mqtt-topic">Topic:</label>
                         <input type="text" id="mqtt-topic" name="topic" value="meraki/v1/mt/#">
                     </div>
+                    <div class="form-group">
+                        <label for="sensor-serial">Sensor Serial Number:</label>
+                        <input type="text" id="sensor-serial" name="sensor_serial" placeholder="XXXX-XXXX-XXXX">
+                        <p class="help-text">Enter the Meraki MT sensor serial number to filter data</p>
+                    </div>
                     <button type="submit" class="btn btn-primary">Save MQTT Config</button>
                 </form>
             </div>

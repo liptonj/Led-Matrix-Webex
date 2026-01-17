@@ -27,7 +27,7 @@ When the device powers on, it shows the startup screen with version information:
 
 ### Status: Available
 
-Green circle indicates you're available and ready to communicate:
+Green circle indicates you're available and ready to communicate. The date and time are displayed in the status color, with temperature, humidity, and air quality index at the bottom:
 
 ![Available Status](docs/images/display-active.svg)
 
@@ -43,17 +43,16 @@ Red circle signals you should not be interrupted. Full text "DO NOT DISTURB" is 
 
 ![DND Status](docs/images/display-dnd.svg)
 
-### Status: In Meeting
+### Status: In A Call
 
-During calls, the display shows the meeting status along with camera and microphone icons. Green camera with "ON" means video is active; red mic with "MUTED" indicates audio is muted:
+During calls, the display shows "IN A CALL" along with camera and microphone icons. Green camera with "ON" means video is active; red mic with slash and "OFF" indicates audio is muted:
 
 ![In Meeting](docs/images/display-meeting.svg)
 
-### Sensor Display
-
-Environmental data from Meraki MT sensors is shown on all status screens. Temperature is displayed in Fahrenheit, humidity as a percentage, and air quality as Good/Moderate/Poor:
-
-![Sensor Display](docs/images/display-sensors.svg)
+All status screens display environmental data from Meraki MT sensors at the bottom:
+- **Temperature**: Displayed in Fahrenheit (e.g., 72°F)
+- **Humidity**: Displayed as percentage (e.g., 45%)
+- **Air Quality**: Displayed as AQ index number (e.g., AQ 87) - higher is better, 0-50 poor, 51-100 moderate, 100+ good
 
 ## How It Works
 
@@ -206,9 +205,9 @@ The web UI allows configuring:
 To display environmental data from Cisco Meraki MT sensors:
 
 1. Configure an MQTT broker (e.g., Mosquitto)
-2. Set up Meraki Dashboard to publish sensor data via webhooks
-3. Create a webhook receiver that publishes to MQTT
-4. Configure the ESP32 with MQTT broker details
+2. Set up Meraki Dashboard to publish sensor data via MQTT
+3. Configure the ESP32 with MQTT broker details in the web interface
+4. Enter the sensor serial number in the device settings to subscribe to that specific sensor's data
 
 Supported sensor data:
 - **Temperature**: Displays in Fahrenheit

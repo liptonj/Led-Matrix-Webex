@@ -1,7 +1,7 @@
 /**
  * @file icons.h
  * @brief Icon bitmaps for the LED matrix display
- * 
+ *
  * Icons are stored as 1-bit bitmaps where 1 = pixel on, 0 = pixel off.
  */
 
@@ -10,7 +10,7 @@
 
 #include <Arduino.h>
 
-// Status circle icon (8x8)
+// Status circle icon (8x8) - small version
 // Filled circle representing presence status
 const uint8_t STATUS_ICON[] PROGMEM = {
     0, 0, 1, 1, 1, 1, 0, 0,
@@ -21,6 +21,22 @@ const uint8_t STATUS_ICON[] PROGMEM = {
     1, 1, 1, 1, 1, 1, 1, 1,
     0, 1, 1, 1, 1, 1, 1, 0,
     0, 0, 1, 1, 1, 1, 0, 0,
+};
+
+// Large status circle icon (12x12) - for centered display
+const uint8_t STATUS_ICON_LARGE[] PROGMEM = {
+    0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0,
+    0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+    0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0,
 };
 
 // Camera icon (8x5)

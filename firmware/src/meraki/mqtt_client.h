@@ -15,13 +15,13 @@
  * @brief Meraki Sensor Data structure
  */
 struct MerakiSensorData {
-    float temperature;      // Celsius
-    float humidity;         // Percentage
-    String door_status;     // "open" or "closed"
-    String water_status;    // "wet" or "dry"
-    float tvoc;             // TVOC in ppb
-    int iaq;                // Indoor Air Quality index
-    String air_quality;     // "good", "moderate", "poor"
+    float temperature;       // Celsius
+    float humidity;          // Percentage
+    String door_status;      // "open" or "closed"
+    String water_status;     // "wet" or "dry"
+    float tvoc;              // TVOC in ppb
+    int iaq;                 // Indoor Air Quality index (legacy)
+    int air_quality_index;   // Air quality as numeric index (0-500)
     unsigned long timestamp;
     bool valid;
 };
@@ -33,41 +33,41 @@ class MerakiMQTTClient {
 public:
     MerakiMQTTClient();
     ~MerakiMQTTClient();
-    
+
     /**
      * @brief Initialize the MQTT client
      * @param config Pointer to configuration manager
      */
     void begin(ConfigManager* config);
-    
+
     /**
      * @brief Process MQTT events
      */
     void loop();
-    
+
     /**
      * @brief Check if connected to broker
      * @return true if connected
      */
     bool isConnected();
-    
+
     /**
      * @brief Check if there's a pending update
      * @return true if update available
      */
     bool hasUpdate() const { return update_pending; }
-    
+
     /**
      * @brief Get the latest sensor data
      * @return MerakiSensorData structure
      */
     MerakiSensorData getLatestData();
-    
+
     /**
      * @brief Reconnect to broker
      */
     void reconnect();
-    
+
     /**
      * @brief Disconnect from broker
      */
@@ -80,11 +80,10 @@ private:
     MerakiSensorData sensor_data;
     bool update_pending;
     unsigned long last_reconnect;
-    
+
     void onMessage(char* topic, byte* payload, unsigned int length);
     void parseMessage(const String& topic, const String& payload);
     static void messageCallback(char* topic, byte* payload, unsigned int length);
-    String calculateAirQuality(int iaq);
 };
 
 // Global instance for callback

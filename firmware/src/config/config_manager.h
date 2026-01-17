@@ -21,26 +21,26 @@
 
 /**
  * @brief Configuration Manager Class
- * 
+ *
  * Handles persistent storage of configuration in ESP32 NVS.
  */
 class ConfigManager {
 public:
     ConfigManager();
     ~ConfigManager();
-    
+
     /**
      * @brief Initialize the configuration manager
      * @return true on success
      */
     bool begin();
-    
+
     // WiFi Configuration
     String getWiFiSSID() const;
     String getWiFiPassword() const;
     void setWiFiCredentials(const String& ssid, const String& password);
     bool hasWiFiCredentials() const;
-    
+
     // Device Configuration
     String getDeviceName() const;
     void setDeviceName(const String& name);
@@ -48,50 +48,52 @@ public:
     void setDisplayName(const String& name);
     uint8_t getBrightness() const;
     void setBrightness(uint8_t brightness);
-    
+
     // Webex Configuration
     String getWebexClientId() const;
     String getWebexClientSecret() const;
     void setWebexCredentials(const String& client_id, const String& client_secret);
     bool hasWebexCredentials() const;
-    
+
     String getWebexAccessToken() const;
     String getWebexRefreshToken() const;
     unsigned long getWebexTokenExpiry() const;
     void setWebexTokens(const String& access_token, const String& refresh_token, unsigned long expiry);
     bool hasWebexTokens() const;
     void clearWebexTokens();
-    
+
     uint16_t getWebexPollInterval() const;
     void setWebexPollInterval(uint16_t seconds);
-    
+
     // xAPI Configuration
     String getXAPIDeviceId() const;
     void setXAPIDeviceId(const String& device_id);
     bool hasXAPIDevice() const;
     uint16_t getXAPIPollInterval() const;
     void setXAPIPollInterval(uint16_t seconds);
-    
+
     // MQTT Configuration
     String getMQTTBroker() const;
     uint16_t getMQTTPort() const;
     String getMQTTUsername() const;
     String getMQTTPassword() const;
     String getMQTTTopic() const;
-    void setMQTTConfig(const String& broker, uint16_t port, 
+    String getSensorSerial() const;
+    void setMQTTConfig(const String& broker, uint16_t port,
                        const String& username, const String& password,
                        const String& topic);
+    void setSensorSerial(const String& serial);
     bool hasMQTTConfig() const;
-    
+
     // OTA Configuration
     String getOTAUrl() const;
     void setOTAUrl(const String& url);
     bool getAutoUpdate() const;
     void setAutoUpdate(bool enabled);
-    
+
     // Factory reset
     void factoryReset();
-    
+
     // Export/Import configuration as JSON
     String exportConfig() const;
     bool importConfig(const String& json);
@@ -99,7 +101,7 @@ public:
 private:
     mutable Preferences preferences;  // mutable to allow const getter methods
     bool initialized;
-    
+
     // Cached values for faster access
     mutable String cached_ssid;
     mutable String cached_password;
@@ -113,7 +115,7 @@ private:
     mutable uint16_t cached_poll_interval;
     mutable uint8_t cached_brightness;
     mutable bool cache_loaded;
-    
+
     void loadCache();
     void saveString(const char* key, const String& value);
     String loadString(const char* key, const String& default_value = "") const;

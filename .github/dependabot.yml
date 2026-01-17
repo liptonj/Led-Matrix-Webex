@@ -1,0 +1,30 @@
+# Dependabot configuration for automatic dependency updates
+version: 2
+
+updates:
+  # Node.js dependencies for the bridge
+  - package-ecosystem: "npm"
+    directory: "/bridge"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      development-dependencies:
+        dependency-type: "development"
+        patterns:
+          - "@types/*"
+          - "eslint*"
+          - "jest*"
+          - "ts-*"
+          - "typescript"
+      production-dependencies:
+        dependency-type: "production"
+
+  # GitHub Actions updates
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3

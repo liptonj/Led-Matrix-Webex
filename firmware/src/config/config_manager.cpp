@@ -6,7 +6,7 @@
 #include "config_manager.h"
 #include <ArduinoJson.h>
 
-ConfigManager::ConfigManager() 
+ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
       cached_brightness(DEFAULT_BRIGHTNESS), cache_loaded(false) {
 }
@@ -22,10 +22,10 @@ bool ConfigManager::begin() {
         Serial.println("[CONFIG] Failed to initialize NVS!");
         return false;
     }
-    
+
     initialized = true;
     loadCache();
-    
+
     Serial.println("[CONFIG] Configuration loaded successfully");
     return true;
 }
@@ -200,7 +200,7 @@ void ConfigManager::setWebexPollInterval(uint16_t seconds) {
     if (seconds > MAX_POLL_INTERVAL) {
         seconds = MAX_POLL_INTERVAL;
     }
-    
+
     saveUInt("poll_interval", seconds);
     cached_poll_interval = seconds;
     Serial.printf("[CONFIG] Poll interval set to %d seconds\n", seconds);
@@ -267,6 +267,15 @@ bool ConfigManager::hasMQTTConfig() const {
     return !getMQTTBroker().isEmpty();
 }
 
+String ConfigManager::getSensorSerial() const {
+    return loadString("sensor_serial");
+}
+
+void ConfigManager::setSensorSerial(const String& serial) {
+    saveString("sensor_serial", serial);
+    Serial.printf("[CONFIG] Sensor serial saved: %s\n", serial.c_str());
+}
+
 // OTA Configuration
 
 String ConfigManager::getOTAUrl() const {
@@ -305,7 +314,7 @@ void ConfigManager::factoryReset() {
 
 String ConfigManager::exportConfig() const {
     JsonDocument doc;
-    
+
     doc["device_name"] = getDeviceName();
     doc["display_name"] = getDisplayName();
     doc["brightness"] = getBrightness();
@@ -314,9 +323,10 @@ String ConfigManager::exportConfig() const {
     doc["mqtt_broker"] = getMQTTBroker();
     doc["mqtt_port"] = getMQTTPort();
     doc["mqtt_topic"] = getMQTTTopic();
+    doc["sensor_serial"] = getSensorSerial();
     doc["ota_url"] = getOTAUrl();
     doc["auto_update"] = getAutoUpdate();
-    
+
     String output;
     serializeJson(doc, output);
     return output;
@@ -325,12 +335,12 @@ String ConfigManager::exportConfig() const {
 bool ConfigManager::importConfig(const String& json) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json.c_str());
-    
+
     if (error) {
         Serial.printf("[CONFIG] Failed to parse config JSON: %s\n", error.c_str());
         return false;
     }
-    
+
     if (doc["device_name"].is<const char*>()) {
         setDeviceName(doc["device_name"].as<const char*>());
     }
@@ -346,7 +356,7 @@ bool ConfigManager::importConfig(const String& json) {
     if (doc["xapi_poll"].is<int>()) {
         setXAPIPollInterval(doc["xapi_poll"].as<uint16_t>());
     }
-    
+
     Serial.println("[CONFIG] Configuration imported successfully");
     return true;
 }

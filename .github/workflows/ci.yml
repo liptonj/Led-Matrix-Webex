@@ -7,7 +7,7 @@ on:
   push:
     branches: [main, master]
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches: [main, master]
 
@@ -32,8 +32,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: bridge/package-lock.json
 
       - name: Install dependencies
@@ -61,10 +61,10 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Firmware (PlatformIO) Build and Test
+  # Main Firmware (PlatformIO) Build and Test
   # ============================================================================
   firmware-build:
-    name: Firmware Build
+    name: Main Firmware Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -77,7 +77,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -122,13 +122,36 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32s3
 
-      - name: Rename firmware artifacts
+      - name: Collect firmware artifacts
         run: |
           mkdir -p artifacts
-          cp .pio/build/esp32s3/firmware.bin artifacts/firmware.bin
-          cp .pio/build/esp32s3/bootloader.bin artifacts/bootloader.bin 2>/dev/null || true
-          cp .pio/build/esp32s3/partitions.bin artifacts/partitions.bin 2>/dev/null || true
-          cp .pio/build/esp32s3/littlefs.bin artifacts/littlefs.bin 2>/dev/null || true
+          BUILD_DIR=".pio/build/esp32s3"
+
+          # Main firmware (required)
+          cp "$BUILD_DIR/firmware.bin" artifacts/firmware.bin
+
+          # Bootloader - check multiple possible locations
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader.bin
+          elif [ -f "$BUILD_DIR/bootloader/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader/bootloader.bin" artifacts/bootloader.bin
+          fi
+
+          # Partition table
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions.bin
+          fi
+
+          # Filesystem image
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs.bin
+          elif [ -f "$BUILD_DIR/spiffs.bin" ]; then
+            cp "$BUILD_DIR/spiffs.bin" artifacts/filesystem.bin
+          fi
+
+          # List collected artifacts
+          echo "Collected artifacts:"
+          ls -la artifacts/
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -138,12 +161,78 @@ jobs:
           retention-days: 7
 
   # ============================================================================
+  # Bootstrap Firmware (WiFi Provisioning + OTA)
+  # ============================================================================
+  firmware-bootstrap-build:
+    name: Bootstrap Firmware Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware_bootstrap
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-bootstrap-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-bootstrap-
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Build bootstrap firmware (ESP32-S3)
+        run: pio run -e esp32s3
+
+      - name: Collect bootstrap artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/esp32s3"
+
+          # Bootstrap firmware
+          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap.bin
+
+          # Bootloader
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader.bin
+          fi
+
+          # Partition table
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions.bin
+          fi
+
+          echo "Collected bootstrap artifacts:"
+          ls -la artifacts/
+
+      - name: Upload bootstrap artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-bootstrap
+          path: firmware_bootstrap/artifacts/
+          retention-days: 7
+
+  # ============================================================================
   # Create Release (only on version tags)
   # ============================================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [bridge-test, firmware-build]
+    needs: [bridge-test, firmware-build, firmware-bootstrap-build]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -158,6 +247,12 @@ jobs:
           name: firmware-esp32s3
           path: release/firmware/
 
+      - name: Download bootstrap artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-bootstrap
+          path: release/bootstrap/
+
       - name: Download bridge artifacts
         uses: actions/download-artifact@v4
         with:
@@ -171,8 +266,10 @@ jobs:
       - name: Create release archives
         run: |
           cd release
-          # Create firmware release zip
+          # Create firmware release zip (includes main firmware + filesystem)
           cd firmware && zip -r ../firmware-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+          # Create bootstrap release zip
+          cd bootstrap && zip -r ../bootstrap-${{ steps.version.outputs.VERSION }}.zip . && cd ..
           # Create bridge release zip
           cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
 
@@ -185,5 +282,8 @@ jobs:
           generate_release_notes: true
           files: |
             release/firmware-${{ steps.version.outputs.VERSION }}.zip
+            release/bootstrap-${{ steps.version.outputs.VERSION }}.zip
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
             release/firmware/firmware.bin
+            release/firmware/littlefs.bin
+            release/bootstrap/bootstrap.bin

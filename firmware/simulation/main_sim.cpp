@@ -50,26 +50,33 @@ ConfigManager config_manager;
 MatrixDisplay matrix_display;
 
 // Use shared AppState definition
-#include "../src/app_state.h"
+#include "app_state.h"
 
-// Initialize app_state with simulation defaults
-AppState app_state = {
-    .wifi_connected = true,  // Simulate connected
-    .webex_authenticated = false,
-    .bridge_connected = false,
-    .xapi_connected = false,
-    .mqtt_connected = false,
-    .webex_status = "active",  // Simulate active status
-    .camera_on = false,
-    .mic_muted = false,
-    .in_call = false,
-    .temperature = 22.5f,
-    .humidity = 45.0f,
-    .door_status = "closed",
-    .air_quality = "good",
-    .last_poll_time = 0,
-    .last_ota_check = 0
-};
+// Application state instance
+AppState app_state;
+
+// Additional simulation-only state for display
+String sim_air_quality_text = "good";
+
+// Initialize simulation state
+void init_simulation_state() {
+    app_state.wifi_connected = true;  // Simulate connected by default
+    app_state.webex_authenticated = false;
+    app_state.bridge_connected = false;
+    app_state.xapi_connected = false;
+    app_state.mqtt_connected = false;
+    app_state.webex_status = "active";
+    app_state.camera_on = false;
+    app_state.mic_muted = false;
+    app_state.in_call = false;
+    app_state.temperature = 22.5f;
+    app_state.humidity = 45.0f;
+    app_state.door_status = "closed";
+    app_state.air_quality_index = 50;  // Good air quality
+    app_state.last_poll_time = 0;
+    app_state.last_ota_check = 0;
+    app_state.time_synced = true;
+}
 
 // ============================================================================
 // Simulation Commands
@@ -251,7 +258,7 @@ void process_command(const char* cmd) {
         printf("  Temperature: %.1f C\n", app_state.temperature);
         printf("  Humidity: %.1f%%\n", app_state.humidity);
         printf("  Door: %s\n", app_state.door_status.c_str());
-        printf("  Air Quality: %s\n", app_state.air_quality.c_str());
+        printf("  Air Quality Index: %d (%s)\n", app_state.air_quality_index, sim_air_quality_text.c_str());
         printf("==============================\n\n");
         return;
     }
@@ -289,7 +296,7 @@ void update_display() {
     data.temperature = app_state.temperature;
     data.humidity = app_state.humidity;
     data.door_status = app_state.door_status;
-    data.air_quality = app_state.air_quality;
+    data.air_quality_index = app_state.air_quality_index;
     data.show_sensors = app_state.mqtt_connected;
     data.wifi_connected = app_state.wifi_connected;
     data.bridge_connected = app_state.bridge_connected;
@@ -316,6 +323,9 @@ int main(int argc, char* argv[]) {
     // ========================================================================
     // Setup Phase (mirrors real setup())
     // ========================================================================
+    
+    // Initialize simulation state
+    init_simulation_state();
     
     Serial.begin(115200);
     delay(100);

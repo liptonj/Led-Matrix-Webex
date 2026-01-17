@@ -1,7 +1,7 @@
 /**
  * @file app_state.h
  * @brief Shared application state structure
- * 
+ *
  * Defines the AppState struct used across the application.
  */
 
@@ -12,7 +12,7 @@
 
 /**
  * @brief Application state structure
- * 
+ *
  * Holds the current state of all monitored systems.
  */
 struct AppState {
@@ -28,9 +28,11 @@ struct AppState {
     float temperature = 0.0f;
     float humidity = 0.0f;
     String door_status = "";
-    String air_quality = "";
+    int air_quality_index = 0;      // Air quality as numeric index (0-500)
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
+    // Time tracking
+    bool time_synced = false;
 };
 
 #endif // APP_STATE_H

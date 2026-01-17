@@ -49,10 +49,16 @@ struct DisplayData {
     float temperature = 0.0f;
     float humidity = 0.0f;
     String door_status = "";
-    String air_quality = "";
+    int air_quality_index = 0;      // Air quality as numeric value (0-500)
     bool show_sensors = false;
     bool wifi_connected = false;
     bool bridge_connected = false;
+    // Time and date
+    int hour = 0;                   // 0-23
+    int minute = 0;                 // 0-59
+    int day = 0;                    // 1-31
+    int month = 0;                  // 1-12
+    bool time_valid = false;        // True if time has been synced
 };
 
 /**
@@ -62,54 +68,54 @@ class MatrixDisplay {
 public:
     MatrixDisplay();
     ~MatrixDisplay();
-    
+
     /**
      * @brief Initialize the display
      * @return true on success
      */
     bool begin();
-    
+
     /**
      * @brief Update display with current data
      * @param data Display data structure
      */
     void update(const DisplayData& data);
-    
+
     /**
      * @brief Show startup screen
      * @param version Firmware version string
      */
     void showStartupScreen(const char* version);
-    
+
     /**
      * @brief Show AP mode screen
      * @param ip_address AP IP address
      */
     void showAPMode(const String& ip_address);
-    
+
     /**
      * @brief Show connecting screen
      * @param ssid WiFi SSID
      */
     void showConnecting(const String& ssid);
-    
+
     /**
      * @brief Show connected screen
      * @param ip_address Device IP address
      */
     void showConnected(const String& ip_address);
-    
+
     /**
      * @brief Show updating screen
      * @param version New version being installed
      */
     void showUpdating(const String& version);
-    
+
     /**
      * @brief Clear the display
      */
     void clear();
-    
+
     /**
      * @brief Set display brightness
      * @param brightness Brightness level (0-255)
@@ -120,8 +126,9 @@ private:
     MatrixPanel_I2S_DMA* dma_display;
     bool initialized;
     uint8_t brightness;
-    
+
     // Drawing helpers
+    void drawLargeStatusCircle(int center_x, int center_y, uint16_t color);
     void drawStatusIcon(int x, int y, const String& status);
     void drawCameraIcon(int x, int y, bool on);
     void drawMicIcon(int x, int y, bool muted);
@@ -129,12 +136,17 @@ private:
     void drawWifiIcon(int x, int y, bool connected);
     void drawText(int x, int y, const String& text, uint16_t color);
     void drawSmallText(int x, int y, const String& text, uint16_t color);
+    void drawCenteredText(int y, const String& text, uint16_t color);
+    void drawSensorBar(const DisplayData& data, int y);
     void drawRect(int x, int y, int w, int h, uint16_t color);
     void fillRect(int x, int y, int w, int h, uint16_t color);
     void drawPixel(int x, int y, uint16_t color);
-    
+
     uint16_t getStatusColor(const String& status);
     String getStatusText(const String& status);
+    String formatTime(int hour, int minute);
+    String formatDate(int month, int day);
+    String getMonthAbbrev(int month);
 };
 
 #endif // MATRIX_DISPLAY_H

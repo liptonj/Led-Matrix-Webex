@@ -12,9 +12,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdarg>
 #include <cstring>
 #include <string>
-#include <string_view>
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -324,9 +324,12 @@ public:
     }
     
     // Printf-style output
-    template<typename... Args>
-    size_t printf(const char* format, Args... args) {
-        return ::printf(format, args...);
+    size_t printf(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        int result = vprintf(format, args);
+        va_end(args);
+        return result > 0 ? result : 0;
     }
     
     operator bool() { return true; }
