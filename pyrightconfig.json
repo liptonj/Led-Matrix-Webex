@@ -1,0 +1,16 @@
+{
+    "pythonVersion": "3.10",
+    "venvPath": ".",
+    "venv": ".venv",
+    "reportUndefinedVariable": "none",
+    "reportUnboundVariable": "none",
+    "include": [
+        "firmware/scripts",
+        "firmware/simulation"
+    ],
+    "exclude": [
+        ".venv",
+        "**/__pycache__",
+        "firmware/.pio"
+    ]
+}

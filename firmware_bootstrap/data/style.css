@@ -1,0 +1,280 @@
+/* Bootstrap Firmware - Setup Page Styles */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #eaeaea;
+    min-height: 100vh;
+    padding: 20px;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+header h1 {
+    color: #00bceb;
+    font-size: 1.8em;
+    margin-bottom: 4px;
+}
+
+.subtitle {
+    color: #888;
+    font-size: 0.9em;
+}
+
+.card {
+    background: rgba(22, 33, 62, 0.9);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.card-info {
+    background: rgba(0, 188, 235, 0.1);
+    border-color: rgba(0, 188, 235, 0.3);
+}
+
+.card h2 {
+    color: #00bceb;
+    font-size: 1.1em;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+input[type="text"],
+input[type="password"] {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: #0f0f23;
+    color: #fff;
+    font-size: 1em;
+    transition: border-color 0.2s;
+}
+
+input:focus {
+    outline: none;
+    border-color: #00bceb;
+}
+
+input::placeholder {
+    color: #555;
+}
+
+.btn {
+    display: block;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 1em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+}
+
+.btn-primary {
+    background: #00bceb;
+    color: #000;
+}
+
+.btn-primary:hover {
+    background: #00a4d1;
+}
+
+.btn-primary:disabled {
+    background: #333;
+    color: #666;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: #333;
+    color: #fff;
+}
+
+.btn-secondary:hover {
+    background: #444;
+}
+
+.btn-large {
+    padding: 16px;
+    font-size: 1.1em;
+}
+
+.network-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 12px 0;
+    border-radius: 6px;
+}
+
+.network {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #0f0f23;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.network:hover {
+    background: #1a1a3e;
+}
+
+.network-ssid {
+    font-weight: 500;
+}
+
+.network-info {
+    font-size: 0.85em;
+    color: #888;
+}
+
+.status-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    background: #0f0f23;
+    border-radius: 6px;
+    margin-bottom: 12px;
+}
+
+.status-icon {
+    font-size: 1.2em;
+}
+
+.status-icon.ready { color: #888; }
+.status-icon.progress { color: #f39c12; }
+.status-icon.success { color: #27ae60; }
+.status-icon.error { color: #e74c3c; }
+
+.progress-container {
+    position: relative;
+    height: 24px;
+    background: #0f0f23;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 16px;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #00bceb, #00a4d1);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.status-item {
+    background: #0f0f23;
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.status-item .label {
+    display: block;
+    font-size: 0.8em;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.status-item .value {
+    font-weight: 500;
+    color: #fff;
+}
+
+.advanced {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.advanced summary {
+    cursor: pointer;
+    color: #00bceb;
+    font-size: 0.9em;
+    margin-bottom: 12px;
+}
+
+.help-text {
+    font-size: 0.85em;
+    color: #666;
+    margin-top: 6px;
+}
+
+ol {
+    padding-left: 20px;
+    margin-top: 12px;
+}
+
+ol li {
+    margin-bottom: 8px;
+    color: #aaa;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0f0f23;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #444;
+}

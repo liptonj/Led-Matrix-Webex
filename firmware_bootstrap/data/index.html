@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webex Display Setup</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Webex Display Setup</h1>
+            <p class="subtitle">Bootstrap Firmware</p>
+        </header>
+
+        <!-- WiFi Configuration -->
+        <div class="card">
+            <h2>WiFi Configuration</h2>
+            <button id="scan-btn" class="btn btn-secondary">Scan Networks</button>
+            <div id="networks" class="network-list"></div>
+            <form id="wifi-form">
+                <div class="form-group">
+                    <label for="ssid">Network Name (SSID)</label>
+                    <input type="text" id="ssid" name="ssid" required placeholder="Enter SSID">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" placeholder="Enter password">
+                </div>
+                <button type="submit" class="btn btn-primary">Connect to WiFi</button>
+            </form>
+        </div>
+
+        <!-- Firmware Update -->
+        <div class="card">
+            <h2>Install Firmware</h2>
+            <p class="help-text">Connect to WiFi first, then install the full firmware.</p>
+            
+            <div class="status-box" id="ota-status">
+                <span class="status-icon" id="status-icon">&#9679;</span>
+                <span id="status-text">Ready</span>
+            </div>
+            
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+                <span class="progress-text" id="progress-text">0%</span>
+            </div>
+            
+            <button id="install-btn" class="btn btn-primary btn-large">Install Firmware</button>
+            
+            <details class="advanced">
+                <summary>Advanced Options</summary>
+                <div class="form-group">
+                    <label for="ota-url">Custom Firmware URL</label>
+                    <input type="text" id="ota-url" placeholder="Leave empty for default GitHub releases">
+                    <p class="help-text">GitHub releases API URL or direct .bin file URL</p>
+                </div>
+                <button id="save-url-btn" class="btn btn-secondary">Save URL</button>
+            </details>
+        </div>
+
+        <!-- Device Status -->
+        <div class="card">
+            <h2>Device Status</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="label">WiFi</span>
+                    <span class="value" id="wifi-status">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">IP Address</span>
+                    <span class="value" id="ip-address">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">SmartConfig</span>
+                    <span class="value" id="smartconfig-status">--</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Version</span>
+                    <span class="value" id="version">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SmartConfig Info -->
+        <div class="card card-info">
+            <h2>ESP Touch / SmartConfig</h2>
+            <p>You can also configure WiFi using the <strong>ESP Touch</strong> app:</p>
+            <ol>
+                <li>Download ESP Touch app (iOS/Android)</li>
+                <li>Connect your phone to the target WiFi network</li>
+                <li>Open the app and enter your WiFi password</li>
+                <li>The device will automatically connect</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

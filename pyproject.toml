@@ -1,0 +1,59 @@
+[project]
+name = "led-matrix-webex"
+version = "1.0.0"
+description = "LED Matrix Webex Status Display - Build tools and scripts"
+requires-python = ">=3.10"
+dependencies = [
+    "platformio>=6.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pylint>=3.3.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",  # Line too long - handled by formatter
+]
+
+# PlatformIO scripts use SCons globals that are injected at runtime
+per-file-ignores = { "firmware/scripts/*.py" = ["F821"], "firmware/simulation/*.py" = ["F821"] }
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "firmware.scripts.*"
+disable_error_code = ["name-defined"]
+
+[[tool.mypy.overrides]]
+module = "firmware.simulation.*"
+disable_error_code = ["name-defined"]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0103",  # invalid-name - PlatformIO scripts use lowercase module vars
+    "W0621",  # redefined-outer-name - common in build scripts
+    "W0718",  # broad-exception-caught - acceptable for build scripts
+    "E0601",  # used-before-assignment - PlatformIO SCons globals
+    "E0602",  # undefined-variable - PlatformIO SCons globals
+]
+
+[tool.pylint.basic]
+# Allow lowercase module-level variables in scripts
+const-rgx = "[a-zA-Z_][a-zA-Z0-9_]*$"
+
+[tool.basedpyright]
+pythonVersion = "3.10"
+reportUndefinedVariable = "none"
