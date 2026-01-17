@@ -11,6 +11,7 @@
 #include <LittleFS.h>
 #include "../config/config_manager.h"
 #include "../app_state.h"
+#include "../modules/module_manager.h"
 
 /**
  * @brief Web Server Manager Class
@@ -24,8 +25,9 @@ public:
      * @brief Initialize and start the web server
      * @param config Pointer to configuration manager
      * @param state Pointer to application state
+     * @param modules Pointer to module manager (optional)
      */
-    void begin(ConfigManager* config, AppState* state);
+    void begin(ConfigManager* config, AppState* state, ModuleManager* modules = nullptr);
     
     /**
      * @brief Process web server events (called in loop)
@@ -42,6 +44,7 @@ private:
     AsyncWebServer* server;
     ConfigManager* config_manager;
     AppState* app_state;
+    ModuleManager* module_manager;
     bool running;
     
     // Route handlers
@@ -62,6 +65,12 @@ private:
     // Embedded app API handlers
     void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleEmbeddedStatusGet(AsyncWebServerRequest* request);
+    
+    // Module management API handlers
+    void handleGetModules(AsyncWebServerRequest* request);
+    void handleGetVariants(AsyncWebServerRequest* request);
+    void handleSetModuleEnabled(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleInstallVariant(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     
     // Utility
     String getContentType(const String& filename);

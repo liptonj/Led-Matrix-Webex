@@ -19,6 +19,10 @@ const CONFIG = {
     localStatusEndpoint: '/api/embedded/status',
     statusEndpoint: '/api/status',
     configEndpoint: '/api/config',
+    modulesEndpoint: '/api/modules',
+    variantsEndpoint: '/api/modules/variants',
+    moduleEnableEndpoint: '/api/modules/enable',
+    moduleInstallEndpoint: '/api/modules/install',
     wifiScanEndpoint: '/api/wifi/scan',
     wifiSaveEndpoint: '/api/wifi/save',
     webexAuthEndpoint: '/api/webex/auth',
@@ -50,7 +54,10 @@ const state = {
     localHost: window.location.host,
     meetingCheckTimer: null,
     statusPollTimer: null,
-    displayConfig: {}
+    displayConfig: {},
+    modules: [],
+    variants: [],
+    selectedModules: 0
 };
 
 // ============================================================
@@ -68,6 +75,7 @@ async function initializeApp() {
     // Start polling display status
     await loadDisplayStatus();
     await loadDisplayConfig();
+    await loadModules();
     state.statusPollTimer = setInterval(loadDisplayStatus, CONFIG.statusPollInterval);
     
     try {
@@ -669,6 +677,234 @@ async function factoryReset() {
         logActivity('info', 'Factory reset...');
     } catch (error) {
         logActivity('error', 'Reset failed');
+    }
+}
+
+// ============================================================
+// Module Management
+// ============================================================
+async function loadModules() {
+    try {
+        // Load modules info
+        const modulesRes = await fetch(CONFIG.modulesEndpoint);
+        const modulesData = await modulesRes.json();
+        state.modules = modulesData.modules || [];
+        state.selectedModules = modulesData.enabled_modules || 0;
+        
+        document.getElementById('current-variant').textContent = modulesData.current_variant || 'unknown';
+        
+        // Load variants info
+        const variantsRes = await fetch(CONFIG.variantsEndpoint);
+        const variantsData = await variantsRes.json();
+        state.variants = variantsData.variants || [];
+        
+        renderModulesList();
+        renderVariantsList(variantsData.recommended);
+        renderModuleSelector();
+        
+    } catch (error) {
+        console.error('Failed to load modules:', error);
+        logActivity('error', 'Failed to load modules');
+    }
+}
+
+function renderModulesList() {
+    const listEl = document.getElementById('modules-list');
+    
+    if (!state.modules.length) {
+        listEl.innerHTML = '<p class="help-text">No module information available</p>';
+        return;
+    }
+    
+    listEl.innerHTML = state.modules.map(mod => {
+        const installedClass = mod.installed ? 'installed' : 'not-installed';
+        const badge = mod.installed 
+            ? '<span class="badge badge-installed">Installed</span>'
+            : '<span class="badge badge-not-installed">Not Installed</span>';
+        
+        return `
+            <div class="module-item ${installedClass}" data-module-id="${mod.id}">
+                <div class="module-info">
+                    <div class="module-name">${mod.name} ${badge}</div>
+                    <div class="module-desc">${mod.description}</div>
+                    <div class="module-size">v${mod.version} • ${mod.size_kb} KB</div>
+                </div>
+                ${mod.installed && mod.id !== 1 ? `
+                    <div class="module-actions">
+                        <div class="module-toggle ${mod.enabled ? 'enabled' : ''}" 
+                             data-module-id="${mod.id}" 
+                             title="${mod.enabled ? 'Disable' : 'Enable'}"></div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    // Add toggle listeners
+    listEl.querySelectorAll('.module-toggle').forEach(toggle => {
+        toggle.addEventListener('click', async () => {
+            const moduleId = parseInt(toggle.dataset.moduleId);
+            const isEnabled = toggle.classList.contains('enabled');
+            await setModuleEnabled(moduleId, !isEnabled);
+        });
+    });
+}
+
+function renderVariantsList(recommended) {
+    const listEl = document.getElementById('variants-list');
+    
+    if (!state.variants.length) {
+        listEl.innerHTML = '<p class="help-text">No variants available</p>';
+        return;
+    }
+    
+    listEl.innerHTML = state.variants.map(v => {
+        const isCurrent = v.is_current;
+        const isRecommended = v.name === recommended;
+        let badges = '';
+        if (isCurrent) badges += '<span class="badge badge-current">Current</span> ';
+        if (isRecommended && !isCurrent) badges += '<span class="badge badge-recommended">Recommended</span>';
+        
+        return `
+            <div class="variant-item ${isCurrent ? 'current' : ''} ${isRecommended ? 'recommended' : ''}" data-variant="${v.name}">
+                <div class="variant-info">
+                    <div class="variant-name">${v.name} ${badges}</div>
+                    <div class="variant-desc">${v.description}</div>
+                    <div class="variant-size">${v.size_kb} KB</div>
+                </div>
+                <div class="variant-actions">
+                    ${!isCurrent ? `<button class="btn btn-primary install-variant" data-variant="${v.name}">Install</button>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Add install listeners
+    listEl.querySelectorAll('.install-variant').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const variant = btn.dataset.variant;
+            if (confirm(`Install "${variant}" firmware? This will reboot the device.`)) {
+                await installVariant(variant);
+            }
+        });
+    });
+}
+
+function renderModuleSelector() {
+    const selectorEl = document.getElementById('module-selector');
+    
+    // Only show non-core modules
+    const selectableModules = state.modules.filter(m => m.id !== 1);
+    
+    selectorEl.innerHTML = selectableModules.map(mod => {
+        const isSelected = (state.selectedModules & mod.id) !== 0;
+        return `
+            <label class="module-checkbox">
+                <input type="checkbox" data-module-id="${mod.id}" ${isSelected ? 'checked' : ''}>
+                <span class="label">${mod.name}</span>
+                <span class="size">${mod.size_kb} KB</span>
+            </label>
+        `;
+    }).join('');
+    
+    // Add change listeners
+    selectorEl.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            updateSelectedModules();
+        });
+    });
+    
+    updateRecommendedVariant();
+}
+
+function updateSelectedModules() {
+    const selectorEl = document.getElementById('module-selector');
+    let selected = 1; // Core is always selected
+    
+    selectorEl.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        selected |= parseInt(cb.dataset.moduleId);
+    });
+    
+    state.selectedModules = selected;
+    updateRecommendedVariant();
+}
+
+function updateRecommendedVariant() {
+    const recommendedEl = document.getElementById('recommended-variant');
+    const nameEl = document.getElementById('recommended-name');
+    
+    // Find best matching variant
+    let bestVariant = null;
+    let bestSize = Infinity;
+    
+    for (const v of state.variants) {
+        if ((v.modules & state.selectedModules) === state.selectedModules) {
+            if (v.size_kb < bestSize) {
+                bestVariant = v;
+                bestSize = v.size_kb;
+            }
+        }
+    }
+    
+    if (bestVariant && !bestVariant.is_current) {
+        nameEl.textContent = `${bestVariant.name} (${bestVariant.size_kb} KB)`;
+        recommendedEl.style.display = 'block';
+        
+        document.getElementById('install-recommended').onclick = async () => {
+            if (confirm(`Install "${bestVariant.name}" firmware?`)) {
+                await installVariant(bestVariant.name);
+            }
+        };
+    } else {
+        recommendedEl.style.display = 'none';
+    }
+}
+
+async function setModuleEnabled(moduleId, enabled) {
+    try {
+        const response = await fetch(CONFIG.moduleEnableEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ module_id: moduleId, enabled: enabled })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            logActivity('success', `Module ${enabled ? 'enabled' : 'disabled'}`);
+            await loadModules(); // Refresh
+            
+            if (data.variant_change_suggested) {
+                logActivity('info', `Consider installing "${data.recommended_variant}" variant`);
+            }
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        logActivity('error', `Failed to update module: ${error.message}`);
+    }
+}
+
+async function installVariant(variantName) {
+    try {
+        logActivity('info', `Installing ${variantName}...`);
+        
+        const response = await fetch(CONFIG.moduleInstallEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ variant: variantName })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            logActivity('success', `OTA update started: ${data.filename}`);
+            logActivity('info', 'Device will reboot when complete...');
+        } else {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        logActivity('error', `Install failed: ${error.message}`);
     }
 }
 

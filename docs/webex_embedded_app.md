@@ -2,6 +2,38 @@
 
 This document describes how to use the Webex Embedded App to control your LED Matrix Display directly from within Webex.
 
+## Modular Firmware Architecture
+
+The LED Matrix Display uses a modular firmware architecture. You can install only the features you need:
+
+| Variant | Modules Included | Size | Use Case |
+|---------|-----------------|------|----------|
+| `minimal` | Core only | ~180 KB | Bootstrap, minimal footprint |
+| `embedded` | Core + Embedded App | ~225 KB | Webex control only, no polling |
+| `standard` | Core + Embedded App + Webex Polling | ~260 KB | Direct Webex integration |
+| `sensors` | Core + Embedded App + MQTT | ~250 KB | Meraki sensor display |
+| `bridge` | Core + Embedded App + Bridge Client | ~245 KB | Node.js bridge integration |
+| `full` | All modules | ~350 KB | Complete functionality |
+
+### Installing a Different Firmware Variant
+
+1. Open the embedded app in Webex
+2. Go to the **Modules** tab
+3. View currently installed modules and available variants
+4. Click **Install** on your desired variant
+5. The device will download and install the new firmware via OTA
+
+### Available Modules
+
+| Module | Description |
+|--------|-------------|
+| `core` | WiFi, Display, Web Server, OTA (always installed) |
+| `embedded_app` | Webex Embedded App with configuration UI |
+| `webex_polling` | Direct Webex API polling for presence status |
+| `mqtt_sensors` | MQTT client for Meraki MT sensor data |
+| `bridge_client` | WebSocket client for Node.js bridge server |
+| `xapi_client` | RoomOS xAPI WebSocket for device control |
+
 ## Overview
 
 The LED Matrix Display includes a built-in Webex Embedded App that allows you to:
