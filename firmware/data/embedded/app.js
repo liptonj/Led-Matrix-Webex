@@ -1,39 +1,42 @@
 /**
  * LED Matrix Display - Webex Embedded App
  * 
- * This embedded app integrates with Webex to detect meeting state
- * and allows manual status selection to push to LED matrix displays.
+ * Full-featured embedded app with:
+ * - Webex SDK integration for meeting detection
+ * - Manual status selection
+ * - Multi-display sync support
+ * - Complete display configuration
  * 
- * The app is hosted directly on the ESP32 display.
- * 
- * Webex Embedded Apps SDK Capabilities:
- * - context.getUser() - Get user info (name, email)
- * - context.getMeeting() - Detect if user is in a meeting
- * - Event listeners for meeting state changes
- * 
- * Note: Full presence status (available/away/DND) is NOT available
- * in the Embedded Apps SDK. Users can manually select their status
- * or rely on the ESP32's direct OAuth integration for auto-polling.
+ * Hosted directly on the ESP32 display.
  */
 
 /* global Webex */
 
+// ============================================================
 // Configuration
+// ============================================================
 const CONFIG = {
-    // Local display API endpoint (same origin)
     localStatusEndpoint: '/api/embedded/status',
-    // Storage key for additional displays
+    statusEndpoint: '/api/status',
+    configEndpoint: '/api/config',
+    wifiScanEndpoint: '/api/wifi/scan',
+    wifiSaveEndpoint: '/api/wifi/save',
+    webexAuthEndpoint: '/api/webex/auth',
+    otaCheckEndpoint: '/api/ota/check',
+    otaUpdateEndpoint: '/api/ota/update',
+    rebootEndpoint: '/api/reboot',
+    factoryResetEndpoint: '/api/factory-reset',
     displaysStorageKey: 'webex_displays',
-    // Max log entries to keep
     maxLogEntries: 30,
-    // Retry settings
     maxRetries: 3,
     retryDelayMs: 2000,
-    // Meeting check interval (for detecting when meeting ends)
-    meetingCheckInterval: 10000
+    meetingCheckInterval: 10000,
+    statusPollInterval: 5000
 };
 
+// ============================================================
 // Application State
+// ============================================================
 const state = {
     webexApp: null,
     user: null,
@@ -45,131 +48,133 @@ const state = {
     isInitialized: false,
     lastSyncTime: null,
     localHost: window.location.host,
-    meetingCheckTimer: null
+    meetingCheckTimer: null,
+    statusPollTimer: null,
+    displayConfig: {}
 };
 
-/**
- * Initialize the Webex Embedded App
- */
+// ============================================================
+// Initialization
+// ============================================================
 async function initializeApp() {
     logActivity('info', 'Initializing Webex Embedded App...');
-    updateDisplayHost();
+    
+    // Initialize tabs
+    initTabs();
+    
+    // Load stored displays
     loadAdditionalDisplays();
+    
+    // Start polling display status
+    await loadDisplayStatus();
+    await loadDisplayConfig();
+    state.statusPollTimer = setInterval(loadDisplayStatus, CONFIG.statusPollInterval);
     
     try {
         // Check if Webex SDK is available
         if (typeof Webex === 'undefined' || !Webex.Application) {
-            throw new Error('Webex SDK not loaded. Make sure you are running inside Webex.');
+            throw new Error('Webex SDK not loaded');
         }
         
-        // Initialize Webex Embedded App SDK
         state.webexApp = new Webex.Application();
         
-        logActivity('info', 'Waiting for Webex app to be ready...');
+        logActivity('info', 'Waiting for Webex connection...');
         await state.webexApp.onReady();
         logActivity('success', 'Connected to Webex');
         
-        // Get user context
         await getUserContext();
-        
-        // Start listening for presence changes
         await startPresenceMonitoring();
         
-        // Setup event listeners
-        setupEventListeners();
-        
-        // Update connection status
         updateConnectionStatus('connected');
         state.isInitialized = true;
         
-        logActivity('success', 'App initialization complete');
+        logActivity('success', 'App ready');
         
     } catch (error) {
-        console.error('Failed to initialize app:', error);
-        logActivity('error', `Initialization failed: ${error.message}`);
+        console.error('Webex SDK init failed:', error);
+        logActivity('error', `Webex: ${error.message}`);
         updateConnectionStatus('error');
         
-        // Show helpful message for non-Webex environments
-        if (error.message.includes('Webex SDK not loaded')) {
-            document.getElementById('user-name').textContent = 'Not in Webex';
-            document.getElementById('user-status').textContent = 'Open this app inside Webex';
-        }
+        // App still works for configuration even without Webex
+        document.getElementById('user-name').textContent = 'Not in Webex';
+        document.getElementById('user-status').textContent = 'Configuration mode';
     }
+    
+    // Setup all event listeners
+    setupEventListeners();
 }
 
-/**
- * Get user context from Webex
- */
+// ============================================================
+// Tab Navigation
+// ============================================================
+function initTabs() {
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabId = tab.dataset.tab;
+            
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+}
+
+// ============================================================
+// Webex SDK Integration
+// ============================================================
 async function getUserContext() {
     try {
         const context = await state.webexApp.context.getUser();
-        
         state.user = {
             id: context.id,
             email: context.email,
             displayName: context.displayName || context.email.split('@')[0],
             orgId: context.orgId
         };
-        
-        // Update UI
         updateUserDisplay();
-        logActivity('info', `Signed in as ${state.user.displayName}`);
-        
+        logActivity('info', `Signed in: ${state.user.displayName}`);
     } catch (error) {
         console.error('Failed to get user context:', error);
-        logActivity('error', 'Could not get user information');
+        logActivity('error', 'Could not get user info');
         throw error;
     }
 }
 
-/**
- * Start monitoring meeting state
- * Note: The Embedded Apps SDK can detect meetings but NOT general presence status
- */
 async function startPresenceMonitoring() {
     logActivity('info', 'Starting meeting detection...');
     
     try {
-        // Check initial meeting state
         await checkMeetingState();
         
-        // Listen for meeting state changes via SDK events
         if (state.webexApp.context.on) {
-            state.webexApp.context.on('meeting', (meeting) => {
-                handleMeetingChange(meeting);
-            });
+            state.webexApp.context.on('meeting', handleMeetingChange);
         }
         
-        // Periodic meeting check (backup for when events don't fire)
         state.meetingCheckTimer = setInterval(checkMeetingState, CONFIG.meetingCheckInterval);
-        
         logActivity('success', 'Meeting detection active');
-        logActivity('info', 'Select your status manually or use auto-detection in meetings');
         
     } catch (error) {
-        console.error('Failed to start meeting monitoring:', error);
+        console.error('Meeting monitoring failed:', error);
         logActivity('error', 'Meeting detection unavailable');
     }
     
-    // Setup manual status button listeners
     setupStatusButtons();
 }
 
-/**
- * Check current meeting state
- */
 async function checkMeetingState() {
     try {
-        const meetingContext = await state.webexApp.context.getMeeting().catch(() => null);
-        handleMeetingChange(meetingContext);
+        const meeting = await state.webexApp.context.getMeeting().catch(() => null);
+        handleMeetingChange(meeting);
     } catch (error) {
-        console.error('Meeting check failed:', error);
+        // Silently handle - meeting detection not critical
     }
 }
 
-/**
- * Handle meeting state changes
- */
 function handleMeetingChange(meeting) {
     const wasInMeeting = state.isInMeeting;
     state.isInMeeting = meeting && (meeting.state === 'active' || meeting.id);
@@ -178,42 +183,30 @@ function handleMeetingChange(meeting) {
     
     if (state.isInMeeting) {
         meetingStatusEl.style.display = 'flex';
-        
         if (!wasInMeeting) {
-            logActivity('info', 'Meeting detected - auto-setting status to "In a Call"');
+            logActivity('info', 'Meeting detected');
             setStatus('meeting', true);
         }
     } else {
         meetingStatusEl.style.display = 'none';
-        
         if (wasInMeeting) {
             logActivity('info', 'Meeting ended');
-            // Optionally revert to previous status or stay as is
         }
     }
 }
 
-/**
- * Setup manual status button click handlers
- */
 function setupStatusButtons() {
     const buttons = document.querySelectorAll('.status-btn');
-    
     buttons.forEach(btn => {
         btn.addEventListener('click', () => {
             const status = btn.dataset.status;
             setStatus(status, false);
-            
-            // Update UI to show selected button
             buttons.forEach(b => b.classList.remove('selected'));
             btn.classList.add('selected');
         });
     });
 }
 
-/**
- * Set status (manual or auto from meeting detection)
- */
 function setStatus(status, autoDetected = false) {
     updatePresence({
         status: status,
@@ -222,124 +215,67 @@ function setStatus(status, autoDetected = false) {
     });
 }
 
-/**
- * Update presence status
- */
 function updatePresence(presence) {
     state.previousStatus = state.currentStatus;
     state.currentStatus = presence.status?.toLowerCase() || 'unknown';
     
-    // Update UI
     const statusEl = document.getElementById('user-status');
     const avatarEl = document.getElementById('presence-avatar');
     
     statusEl.textContent = formatStatus(state.currentStatus);
-    
-    // Update avatar status class
     avatarEl.className = 'presence-avatar ' + state.currentStatus;
     
-    // Log status change
     if (state.previousStatus !== state.currentStatus) {
         logActivity('info', `Status: ${formatStatus(state.currentStatus)}`);
-        
-        // Auto-sync if enabled
         if (state.autoSync && state.isInitialized) {
             syncStatusToAllDisplays();
         }
     }
 }
 
-/**
- * Format status for display
- */
 function formatStatus(status) {
-    const statusMap = {
-        'active': 'Available',
-        'available': 'Available',
-        'away': 'Away',
-        'inactive': 'Away',
-        'busy': 'In a Call',
-        'call': 'In a Call',
-        'dnd': 'Do Not Disturb',
-        'donotdisturb': 'Do Not Disturb',
-        'meeting': 'In a Meeting',
-        'oncall': 'In a Call',
-        'outofoffice': 'Out of Office',
-        'ooo': 'Out of Office',
-        'offline': 'Offline',
-        'pending': 'Pending',
-        'unknown': 'Unknown'
+    const map = {
+        'active': 'Available', 'available': 'Available',
+        'away': 'Away', 'inactive': 'Away',
+        'busy': 'In a Call', 'call': 'In a Call', 'meeting': 'In a Call',
+        'dnd': 'Do Not Disturb', 'donotdisturb': 'Do Not Disturb',
+        'ooo': 'Out of Office', 'outofoffice': 'Out of Office',
+        'offline': 'Offline', 'unknown': 'Unknown'
     };
-    
-    return statusMap[status?.toLowerCase()] || status || 'Unknown';
+    return map[status?.toLowerCase()] || status || 'Unknown';
 }
 
-/**
- * Map internal status to display status
- */
 function mapToDisplayStatus(status) {
-    const displayMap = {
-        'active': 'active',
-        'available': 'active',
-        'away': 'away',
-        'inactive': 'away',
-        'busy': 'meeting',
-        'call': 'meeting',
-        'dnd': 'dnd',
-        'donotdisturb': 'dnd',
-        'meeting': 'meeting',
-        'oncall': 'meeting',
-        'outofoffice': 'ooo',
-        'ooo': 'ooo',
+    const map = {
+        'active': 'active', 'available': 'active',
+        'away': 'away', 'inactive': 'away',
+        'busy': 'meeting', 'call': 'meeting', 'meeting': 'meeting',
+        'dnd': 'dnd', 'donotdisturb': 'dnd',
+        'ooo': 'ooo', 'outofoffice': 'ooo',
         'offline': 'offline'
     };
-    
-    return displayMap[status?.toLowerCase()] || 'unknown';
+    return map[status?.toLowerCase()] || 'unknown';
 }
 
-/**
- * Update user display in UI
- */
 function updateUserDisplay() {
     if (!state.user) return;
-    
-    const nameEl = document.getElementById('user-name');
-    const initialEl = document.getElementById('user-initial');
-    
-    nameEl.textContent = state.user.displayName;
-    initialEl.textContent = state.user.displayName.charAt(0).toUpperCase();
+    document.getElementById('user-name').textContent = state.user.displayName;
+    document.getElementById('user-initial').textContent = state.user.displayName.charAt(0).toUpperCase();
 }
 
-/**
- * Update display host info
- */
-function updateDisplayHost() {
-    const hostEl = document.getElementById('display-host');
-    hostEl.textContent = state.localHost;
-}
-
-/**
- * Sync status to all configured displays
- */
+// ============================================================
+// Status Sync
+// ============================================================
 async function syncStatusToAllDisplays() {
-    if (!state.currentStatus) {
-        logActivity('error', 'No status to sync');
-        return;
-    }
+    if (!state.currentStatus) return;
     
     const displayStatus = mapToDisplayStatus(state.currentStatus);
-    
-    // Sync to local display (this device)
     const localResult = await syncStatusToDisplay(null, displayStatus);
     
-    // Sync to additional displays
     const additionalResults = await Promise.allSettled(
-        state.additionalDisplays.map(display => 
-            syncStatusToDisplay(display.host, displayStatus)
-        )
+        state.additionalDisplays.map(d => syncStatusToDisplay(d.host, displayStatus))
     );
     
-    // Update sync status UI
     const allSuccessful = localResult && 
         additionalResults.every(r => r.status === 'fulfilled' && r.value);
     
@@ -347,30 +283,22 @@ async function syncStatusToAllDisplays() {
     
     if (allSuccessful) {
         state.lastSyncTime = new Date();
-        updateLastSyncTime();
+        document.getElementById('last-sync-time').textContent = state.lastSyncTime.toLocaleTimeString();
     }
 }
 
-/**
- * Sync status to a specific display
- * @param {string|null} host - Display host (null for local)
- * @param {string} status - Status to send
- * @returns {Promise<boolean>} Success status
- */
 async function syncStatusToDisplay(host, status) {
     const isLocal = host === null;
-    const displayName = isLocal ? 'local display' : host;
+    const displayName = isLocal ? 'local' : host;
     
     try {
         const url = isLocal 
             ? CONFIG.localStatusEndpoint 
             : `http://${host}/api/embedded/status`;
         
-        const response = await fetchWithRetry(url, {
+        const response = await fetchWithTimeout(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 status: status,
                 displayName: state.user?.displayName || 'Unknown',
@@ -380,101 +308,373 @@ async function syncStatusToDisplay(host, status) {
         });
         
         if (response.ok) {
-            logActivity('success', `Synced to ${displayName}`);
-            
-            // Update display item status if not local
-            if (!isLocal) {
-                updateDisplayItemStatus(host, 'synced');
-            }
-            
+            logActivity('success', `Synced: ${displayName}`);
+            if (!isLocal) updateDisplayItemStatus(host, 'synced');
             return true;
-        } else {
-            throw new Error(`HTTP ${response.status}`);
         }
-        
+        throw new Error(`HTTP ${response.status}`);
     } catch (error) {
-        logActivity('error', `Failed to sync to ${displayName}: ${error.message}`);
-        
-        if (!isLocal) {
-            updateDisplayItemStatus(host, 'error');
-        }
-        
+        logActivity('error', `Sync failed: ${displayName}`);
+        if (!isLocal) updateDisplayItemStatus(host, 'error');
         return false;
     }
 }
 
-/**
- * Fetch with retry logic
- */
-async function fetchWithRetry(url, options, retries = CONFIG.maxRetries) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-            
-            const response = await fetch(url, {
-                ...options,
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeout);
-            return response;
-            
-        } catch (error) {
-            if (i === retries - 1) throw error;
-            await new Promise(r => setTimeout(r, CONFIG.retryDelayMs * (i + 1)));
-        }
-    }
-}
-
-/**
- * Update sync status display
- */
 function updateSyncStatus(success) {
-    const syncStatusEl = document.getElementById('sync-status');
-    
+    const el = document.getElementById('sync-status');
     if (success) {
-        syncStatusEl.className = 'sync-status success';
-        syncStatusEl.innerHTML = '<span class="icon">✓</span><span class="text">Status synced to display(s)</span>';
+        el.className = 'sync-status success';
+        el.innerHTML = '<span class="icon">✓</span><span class="text">Status synced</span>';
     } else {
-        syncStatusEl.className = 'sync-status error';
-        syncStatusEl.innerHTML = '<span class="icon">✗</span><span class="text">Some displays failed to sync</span>';
+        el.className = 'sync-status error';
+        el.innerHTML = '<span class="icon">✗</span><span class="text">Sync failed</span>';
     }
 }
 
-/**
- * Update last sync time display
- */
-function updateLastSyncTime() {
-    const timeEl = document.getElementById('last-sync-time');
-    if (state.lastSyncTime) {
-        timeEl.textContent = state.lastSyncTime.toLocaleTimeString();
+// ============================================================
+// Display Status & Config Loading
+// ============================================================
+async function loadDisplayStatus() {
+    try {
+        const response = await fetch(CONFIG.statusEndpoint);
+        const data = await response.json();
+        
+        // Update status tab
+        document.getElementById('display-status').textContent = data.webex_status || '--';
+        document.getElementById('camera-status').textContent = data.camera_on ? 'On' : 'Off';
+        document.getElementById('mic-status').textContent = data.mic_muted ? 'Muted' : 'On';
+        document.getElementById('call-status').textContent = data.in_call ? 'Yes' : 'No';
+        
+        // Sensor data
+        if (data.temperature) {
+            const tempF = (data.temperature * 9/5) + 32;
+            document.getElementById('temperature').textContent = tempF.toFixed(1) + '°F';
+            document.getElementById('sensor-temp').textContent = tempF.toFixed(1) + '°F';
+        }
+        if (data.humidity) {
+            document.getElementById('humidity').textContent = data.humidity.toFixed(1) + '%';
+            document.getElementById('sensor-humidity').textContent = data.humidity.toFixed(1) + '%';
+        }
+        document.getElementById('air-quality').textContent = data.air_quality || '--';
+        document.getElementById('sensor-aq').textContent = data.air_quality || '--';
+        document.getElementById('door-status').textContent = data.door_status || '--';
+        document.getElementById('sensor-door').textContent = data.door_status || '--';
+        
+        // System info
+        document.getElementById('firmware-version').textContent = data.firmware_version || '--';
+        document.getElementById('current-version').textContent = data.firmware_version || '--';
+        document.getElementById('app-version').textContent = 'v' + (data.firmware_version || '1.0.0');
+        document.getElementById('ip-address').textContent = data.ip_address || '--';
+        document.getElementById('mac-address').textContent = data.mac_address || '--';
+        document.getElementById('display-host').textContent = data.ip_address || state.localHost;
+        document.getElementById('free-heap').textContent = formatBytes(data.free_heap);
+        document.getElementById('uptime').textContent = formatUptime(data.uptime);
+        
+        // Connection status
+        updateConnectionItem('conn-wifi', data.wifi_connected);
+        updateConnectionItem('conn-webex', data.webex_authenticated);
+        updateConnectionItem('conn-bridge', data.bridge_connected);
+        updateConnectionItem('conn-mqtt', data.mqtt_connected);
+        
+    } catch (error) {
+        console.error('Failed to load status:', error);
     }
 }
 
-/**
- * Update connection status indicator
- */
-function updateConnectionStatus(status) {
-    const indicator = document.getElementById('connection-status');
-    const text = indicator.querySelector('.text');
-    
-    indicator.className = 'status-indicator ' + status;
-    
-    const statusText = {
-        'connected': 'Connected',
-        'error': 'Not Connected',
-        'disconnected': 'Disconnected'
-    };
-    
-    text.textContent = statusText[status] || 'Unknown';
+async function loadDisplayConfig() {
+    try {
+        const response = await fetch(CONFIG.configEndpoint);
+        state.displayConfig = await response.json();
+        
+        // Populate form fields
+        document.getElementById('device-name').value = state.displayConfig.device_name || '';
+        document.getElementById('display-name').value = state.displayConfig.display_name || '';
+        document.getElementById('brightness').value = state.displayConfig.brightness || 128;
+        document.getElementById('brightness-value').textContent = state.displayConfig.brightness || 128;
+        document.getElementById('poll-interval').value = state.displayConfig.poll_interval || 30;
+        document.getElementById('xapi-device-id').value = state.displayConfig.xapi_device_id || '';
+        document.getElementById('xapi-poll-interval').value = state.displayConfig.xapi_poll_interval || 10;
+        document.getElementById('mqtt-broker').value = state.displayConfig.mqtt_broker || '';
+        document.getElementById('mqtt-port').value = state.displayConfig.mqtt_port || 1883;
+        document.getElementById('mqtt-topic').value = state.displayConfig.mqtt_topic || 'meraki/v1/mt/#';
+        document.getElementById('sensor-serial').value = state.displayConfig.sensor_serial || '';
+        document.getElementById('ota-url').value = state.displayConfig.ota_url || '';
+        document.getElementById('auto-update').checked = state.displayConfig.auto_update || false;
+        
+        // Auth status
+        const authStatus = document.getElementById('webex-auth-status');
+        if (state.displayConfig.has_webex_tokens) {
+            authStatus.textContent = 'Connected';
+            authStatus.style.color = '#6cc04a';
+        } else if (state.displayConfig.has_webex_credentials) {
+            authStatus.textContent = 'Not authorized';
+            authStatus.style.color = '#ffcc00';
+        } else {
+            authStatus.textContent = 'Not configured';
+            authStatus.style.color = '#ff5c5c';
+        }
+        
+    } catch (error) {
+        console.error('Failed to load config:', error);
+    }
 }
 
-// ============ Additional Displays Management ============
+function updateConnectionItem(id, connected) {
+    const el = document.getElementById(id);
+    if (connected) {
+        el.classList.add('connected');
+    } else {
+        el.classList.remove('connected');
+    }
+}
 
-/**
- * Load additional displays from storage
- */
+// ============================================================
+// Configuration Forms
+// ============================================================
+function setupEventListeners() {
+    // Brightness slider
+    document.getElementById('brightness').addEventListener('input', (e) => {
+        document.getElementById('brightness-value').textContent = e.target.value;
+    });
+    
+    // Display settings form
+    document.getElementById('display-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveConfig({
+            device_name: document.getElementById('device-name').value,
+            display_name: document.getElementById('display-name').value,
+            brightness: parseInt(document.getElementById('brightness').value),
+            poll_interval: parseInt(document.getElementById('poll-interval').value)
+        });
+    });
+    
+    // Webex credentials form
+    document.getElementById('webex-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveConfig({
+            webex_client_id: document.getElementById('webex-client-id').value,
+            webex_client_secret: document.getElementById('webex-client-secret').value
+        });
+    });
+    
+    // Webex auth button
+    document.getElementById('webex-auth-btn').addEventListener('click', startWebexAuth);
+    
+    // xAPI form
+    document.getElementById('xapi-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveConfig({
+            xapi_device_id: document.getElementById('xapi-device-id').value,
+            xapi_poll_interval: parseInt(document.getElementById('xapi-poll-interval').value)
+        });
+    });
+    
+    // MQTT form
+    document.getElementById('mqtt-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveConfig({
+            mqtt_broker: document.getElementById('mqtt-broker').value,
+            mqtt_port: parseInt(document.getElementById('mqtt-port').value),
+            mqtt_username: document.getElementById('mqtt-username').value,
+            mqtt_password: document.getElementById('mqtt-password').value,
+            mqtt_topic: document.getElementById('mqtt-topic').value,
+            sensor_serial: document.getElementById('sensor-serial').value
+        });
+    });
+    
+    // WiFi scan
+    document.getElementById('scan-wifi').addEventListener('click', scanWifi);
+    
+    // WiFi form
+    document.getElementById('wifi-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await saveWifi();
+    });
+    
+    // OTA buttons
+    document.getElementById('check-update').addEventListener('click', checkForUpdate);
+    document.getElementById('perform-update').addEventListener('click', performUpdate);
+    
+    // System buttons
+    document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
+    document.getElementById('factory-reset-btn').addEventListener('click', factoryReset);
+    
+    // Auto-sync toggle
+    document.getElementById('auto-sync').addEventListener('change', (e) => {
+        state.autoSync = e.target.checked;
+        logActivity('info', state.autoSync ? 'Auto-sync enabled' : 'Auto-sync disabled');
+    });
+    
+    // Additional displays
+    document.getElementById('add-display').addEventListener('click', () => {
+        document.getElementById('add-display-form').style.display = 'block';
+        document.getElementById('new-display-host').focus();
+    });
+    
+    document.getElementById('cancel-add-display').addEventListener('click', () => {
+        document.getElementById('add-display-form').style.display = 'none';
+        document.getElementById('new-display-host').value = '';
+    });
+    
+    document.getElementById('save-display').addEventListener('click', () => {
+        const host = document.getElementById('new-display-host').value;
+        if (addDisplay(host)) {
+            document.getElementById('add-display-form').style.display = 'none';
+            document.getElementById('new-display-host').value = '';
+        }
+    });
+    
+    document.getElementById('new-display-host').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('save-display').click();
+        }
+    });
+}
+
+async function saveConfig(data) {
+    try {
+        const response = await fetch(CONFIG.configEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (response.ok) {
+            logActivity('success', 'Configuration saved');
+            await loadDisplayConfig();
+        } else {
+            throw new Error('Save failed');
+        }
+    } catch (error) {
+        logActivity('error', 'Failed to save config');
+    }
+}
+
+async function startWebexAuth() {
+    try {
+        const response = await fetch(CONFIG.webexAuthEndpoint);
+        const data = await response.json();
+        if (data.auth_url) {
+            window.open(data.auth_url, '_blank');
+            logActivity('info', 'Opened Webex authorization');
+        }
+    } catch (error) {
+        logActivity('error', 'Failed to start auth');
+    }
+}
+
+async function scanWifi() {
+    const btn = document.getElementById('scan-wifi');
+    const listEl = document.getElementById('wifi-networks');
+    
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    listEl.innerHTML = '<div class="network-item">Scanning...</div>';
+    
+    try {
+        const response = await fetch(CONFIG.wifiScanEndpoint);
+        const data = await response.json();
+        
+        listEl.innerHTML = data.networks.map(n => `
+            <div class="network-item" data-ssid="${n.ssid}">
+                <span class="ssid">${n.ssid}</span>
+                <span class="signal">${n.rssi} dBm ${n.encrypted ? '🔒' : ''}</span>
+            </div>
+        `).join('');
+        
+        listEl.querySelectorAll('.network-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.getElementById('wifi-ssid').value = item.dataset.ssid;
+            });
+        });
+        
+    } catch (error) {
+        listEl.innerHTML = '<div class="network-item">Scan failed</div>';
+    }
+    
+    btn.disabled = false;
+    btn.textContent = 'Scan Networks';
+}
+
+async function saveWifi() {
+    const ssid = document.getElementById('wifi-ssid').value;
+    const password = document.getElementById('wifi-password').value;
+    
+    if (!ssid) {
+        logActivity('error', 'SSID required');
+        return;
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('ssid', ssid);
+        formData.append('password', password);
+        
+        await fetch(CONFIG.wifiSaveEndpoint, { method: 'POST', body: formData });
+        logActivity('success', 'WiFi saved - rebooting...');
+    } catch (error) {
+        logActivity('error', 'Failed to save WiFi');
+    }
+}
+
+async function checkForUpdate() {
+    const btn = document.getElementById('check-update');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+    
+    try {
+        const response = await fetch(CONFIG.otaCheckEndpoint);
+        const data = await response.json();
+        document.getElementById('latest-version').textContent = data.latest_version || 'Unknown';
+        if (data.update_available) {
+            document.getElementById('perform-update').disabled = false;
+            logActivity('info', 'Update available!');
+        }
+    } catch (error) {
+        logActivity('error', 'Update check failed');
+    }
+    
+    btn.disabled = false;
+    btn.textContent = 'Check for Updates';
+}
+
+async function performUpdate() {
+    if (!confirm('Install update? Device will restart.')) return;
+    
+    try {
+        await fetch(CONFIG.otaUpdateEndpoint, { method: 'POST' });
+        logActivity('info', 'Update started...');
+    } catch (error) {
+        logActivity('error', 'Update failed');
+    }
+}
+
+async function rebootDevice() {
+    if (!confirm('Reboot the display?')) return;
+    
+    try {
+        await fetch(CONFIG.rebootEndpoint, { method: 'POST' });
+        logActivity('info', 'Rebooting...');
+    } catch (error) {
+        logActivity('error', 'Reboot failed');
+    }
+}
+
+async function factoryReset() {
+    if (!confirm('Factory reset? All settings will be erased!')) return;
+    if (!confirm('This cannot be undone. Continue?')) return;
+    
+    try {
+        await fetch(CONFIG.factoryResetEndpoint, { method: 'POST' });
+        logActivity('info', 'Factory reset...');
+    } catch (error) {
+        logActivity('error', 'Reset failed');
+    }
+}
+
+// ============================================================
+// Additional Displays
+// ============================================================
 function loadAdditionalDisplays() {
     try {
         const stored = localStorage.getItem(CONFIG.displaysStorageKey);
@@ -483,65 +683,43 @@ function loadAdditionalDisplays() {
             renderDisplaysList();
         }
     } catch (error) {
-        console.error('Failed to load displays from storage:', error);
         state.additionalDisplays = [];
     }
 }
 
-/**
- * Save additional displays to storage
- */
 function saveAdditionalDisplays() {
     try {
         localStorage.setItem(CONFIG.displaysStorageKey, JSON.stringify(state.additionalDisplays));
     } catch (error) {
-        console.error('Failed to save displays to storage:', error);
+        // Storage unavailable
     }
 }
 
-/**
- * Add a new display
- */
 function addDisplay(host) {
-    // Validate host
     host = host.trim();
     if (!host) {
-        logActivity('error', 'Display address is required');
+        logActivity('error', 'Address required');
         return false;
     }
-    
-    // Check for duplicates
     if (state.additionalDisplays.some(d => d.host === host)) {
-        logActivity('error', 'Display already added');
+        logActivity('error', 'Already added');
         return false;
     }
     
-    state.additionalDisplays.push({
-        host: host,
-        addedAt: new Date().toISOString(),
-        lastStatus: 'pending'
-    });
-    
+    state.additionalDisplays.push({ host, lastStatus: 'pending' });
     saveAdditionalDisplays();
     renderDisplaysList();
-    logActivity('success', `Added display: ${host}`);
-    
+    logActivity('success', `Added: ${host}`);
     return true;
 }
 
-/**
- * Remove a display
- */
 function removeDisplay(host) {
     state.additionalDisplays = state.additionalDisplays.filter(d => d.host !== host);
     saveAdditionalDisplays();
     renderDisplaysList();
-    logActivity('info', `Removed display: ${host}`);
+    logActivity('info', `Removed: ${host}`);
 }
 
-/**
- * Render the displays list
- */
 function renderDisplaysList() {
     const listEl = document.getElementById('displays-list');
     const emptyEl = document.getElementById('no-displays');
@@ -554,18 +732,16 @@ function renderDisplaysList() {
     }
     
     emptyEl.style.display = 'none';
-    
-    listEl.innerHTML = state.additionalDisplays.map(display => `
-        <div class="display-item" data-host="${display.host}">
+    listEl.innerHTML = state.additionalDisplays.map(d => `
+        <div class="display-item" data-host="${d.host}">
             <div class="display-item-info">
-                <span class="display-item-host">${display.host}</span>
-                <span class="display-item-status" id="display-status-${encodeId(display.host)}">
-                    ${display.lastStatus === 'synced' ? '✓ Synced' : 
-                      display.lastStatus === 'error' ? '✗ Error' : '⏳ Pending'}
+                <span class="display-item-host">${d.host}</span>
+                <span class="display-item-status ${d.lastStatus}" id="display-status-${encodeId(d.host)}">
+                    ${d.lastStatus === 'synced' ? '✓ Synced' : d.lastStatus === 'error' ? '✗ Error' : '⏳ Pending'}
                 </span>
             </div>
             <div class="display-item-actions">
-                <button class="btn-icon btn-danger remove-display" data-host="${display.host}" title="Remove">
+                <button class="btn-icon btn-danger remove-display" data-host="${d.host}" title="Remove">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
                         <line x1="6" y1="6" x2="18" y2="18"/>
@@ -575,117 +751,95 @@ function renderDisplaysList() {
         </div>
     `).join('');
     
-    // Add remove button listeners
     listEl.querySelectorAll('.remove-display').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const host = e.currentTarget.dataset.host;
-            if (confirm(`Remove display ${host}?`)) {
-                removeDisplay(host);
+        btn.addEventListener('click', () => {
+            if (confirm(`Remove ${btn.dataset.host}?`)) {
+                removeDisplay(btn.dataset.host);
             }
         });
     });
 }
 
-/**
- * Update display item status
- */
 function updateDisplayItemStatus(host, status) {
     const display = state.additionalDisplays.find(d => d.host === host);
-    if (display) {
-        display.lastStatus = status;
-    }
+    if (display) display.lastStatus = status;
     
-    const statusEl = document.getElementById(`display-status-${encodeId(host)}`);
-    if (statusEl) {
-        statusEl.className = `display-item-status ${status}`;
-        statusEl.textContent = status === 'synced' ? '✓ Synced' : 
-                               status === 'error' ? '✗ Error' : '⏳ Pending';
+    const el = document.getElementById(`display-status-${encodeId(host)}`);
+    if (el) {
+        el.className = `display-item-status ${status}`;
+        el.textContent = status === 'synced' ? '✓ Synced' : status === 'error' ? '✗ Error' : '⏳ Pending';
     }
 }
 
-/**
- * Encode host for use as element ID
- */
 function encodeId(host) {
     return host.replace(/[^a-zA-Z0-9]/g, '_');
 }
 
-// ============ Event Listeners ============
-
-/**
- * Setup event listeners
- */
-function setupEventListeners() {
-    // Add display button
-    document.getElementById('add-display').addEventListener('click', () => {
-        document.getElementById('add-display-form').style.display = 'block';
-        document.getElementById('new-display-host').focus();
-    });
-    
-    // Cancel add display
-    document.getElementById('cancel-add-display').addEventListener('click', () => {
-        document.getElementById('add-display-form').style.display = 'none';
-        document.getElementById('new-display-host').value = '';
-    });
-    
-    // Save new display
-    document.getElementById('save-display').addEventListener('click', () => {
-        const host = document.getElementById('new-display-host').value;
-        if (addDisplay(host)) {
-            document.getElementById('add-display-form').style.display = 'none';
-            document.getElementById('new-display-host').value = '';
-        }
-    });
-    
-    // Enter key in host input
-    document.getElementById('new-display-host').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            document.getElementById('save-display').click();
-        }
-    });
-    
-    // Auto-sync toggle
-    document.getElementById('auto-sync').addEventListener('change', (e) => {
-        state.autoSync = e.target.checked;
-        logActivity('info', state.autoSync ? 'Auto-sync enabled' : 'Auto-sync disabled');
-    });
+// ============================================================
+// Utilities
+// ============================================================
+function updateConnectionStatus(status) {
+    const indicator = document.getElementById('connection-status');
+    const text = indicator.querySelector('.text');
+    indicator.className = 'status-indicator ' + status;
+    text.textContent = status === 'connected' ? 'Connected' : status === 'error' ? 'Offline Mode' : 'Disconnected';
 }
 
-// ============ Activity Log ============
+async function fetchWithTimeout(url, options, timeout = 5000) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+    } catch (error) {
+        clearTimeout(id);
+        throw error;
+    }
+}
 
-/**
- * Add entry to activity log
- */
+function formatBytes(bytes) {
+    if (!bytes) return '--';
+    return (bytes / 1024).toFixed(1) + ' KB';
+}
+
+function formatUptime(seconds) {
+    if (!seconds) return '--';
+    const d = Math.floor(seconds / 86400);
+    const h = Math.floor((seconds % 86400) / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (d > 0) return `${d}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+}
+
 function logActivity(type, message) {
     const logEl = document.getElementById('activity-log');
-    const now = new Date();
-    const time = now.toLocaleTimeString('en-US', { hour12: false });
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     
     const entry = document.createElement('div');
     entry.className = `log-entry ${type}`;
-    entry.innerHTML = `
-        <span class="time">${time}</span>
-        <span class="message">${message}</span>
-    `;
+    entry.innerHTML = `<span class="time">${time}</span><span class="message">${message}</span>`;
     
-    // Insert at top
     if (logEl.firstChild) {
         logEl.insertBefore(entry, logEl.firstChild);
     } else {
         logEl.appendChild(entry);
     }
     
-    // Limit entries
     while (logEl.children.length > CONFIG.maxLogEntries) {
         logEl.removeChild(logEl.lastChild);
     }
     
-    // Also log to console
     console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
-// ============ Initialization ============
-
-// Initialize when DOM is ready
+// ============================================================
+// Initialize
+// ============================================================
 document.addEventListener('DOMContentLoaded', initializeApp);
+
+window.addEventListener('beforeunload', () => {
+    if (state.meetingCheckTimer) clearInterval(state.meetingCheckTimer);
+    if (state.statusPollTimer) clearInterval(state.statusPollTimer);
+});
