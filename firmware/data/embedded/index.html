@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Matrix Status - Webex Embedded App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                <h1>LED Matrix Display</h1>
+            </div>
+            <div class="status-indicator" id="connection-status">
+                <span class="dot"></span>
+                <span class="text">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- User Info Section -->
+            <section class="card user-info">
+                <h2>Your Webex Status</h2>
+                <div class="presence-display" id="presence-container">
+                    <div class="presence-avatar" id="presence-avatar">
+                        <span class="initial" id="user-initial">?</span>
+                    </div>
+                    <div class="presence-details">
+                        <span class="name" id="user-name">Loading...</span>
+                        <span class="status" id="user-status">--</span>
+                    </div>
+                </div>
+                
+                <!-- Meeting Detection Status -->
+                <div class="meeting-status" id="meeting-status" style="display: none;">
+                    <span class="icon">📞</span>
+                    <span class="text">In a meeting - auto-detected</span>
+                </div>
+                
+                <!-- Manual Status Selection -->
+                <div class="status-selector">
+                    <h3>Set Your Status</h3>
+                    <div class="status-buttons" id="status-buttons">
+                        <button class="status-btn available" data-status="active" title="Available">
+                            <span class="dot"></span>
+                            <span>Available</span>
+                        </button>
+                        <button class="status-btn away" data-status="away" title="Away">
+                            <span class="dot"></span>
+                            <span>Away</span>
+                        </button>
+                        <button class="status-btn busy" data-status="meeting" title="In a Call">
+                            <span class="dot"></span>
+                            <span>In a Call</span>
+                        </button>
+                        <button class="status-btn dnd" data-status="dnd" title="Do Not Disturb">
+                            <span class="dot"></span>
+                            <span>DND</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="sync-status" id="sync-status">
+                    <span class="icon">⏳</span>
+                    <span class="text">Waiting to sync...</span>
+                </div>
+            </section>
+
+            <!-- Display Configuration -->
+            <section class="card config-section">
+                <h2>Display Connection</h2>
+                <div class="display-info">
+                    <div class="info-row">
+                        <span class="label">This Display:</span>
+                        <span class="value" id="display-host">--</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Last Synced:</span>
+                        <span class="value" id="last-sync-time">Never</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Additional Displays -->
+            <section class="card displays-section">
+                <div class="card-header">
+                    <h2>Additional Displays</h2>
+                    <button class="btn-icon" id="add-display" title="Add display">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                    </button>
+                </div>
+                <p class="help-text">Sync your status to multiple displays on your network.</p>
+                <div class="displays-list" id="displays-list">
+                    <div class="empty-state" id="no-displays">
+                        <p>No additional displays configured.</p>
+                    </div>
+                </div>
+                
+                <!-- Add Display Form (hidden by default) -->
+                <div class="add-display-form" id="add-display-form" style="display: none;">
+                    <div class="form-group">
+                        <label for="new-display-host">Display Address:</label>
+                        <input type="text" id="new-display-host" placeholder="e.g., webex-display-2.local or 192.168.1.100">
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn btn-primary" id="save-display">Add</button>
+                        <button class="btn" id="cancel-add-display">Cancel</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings -->
+            <section class="card settings-section">
+                <h2>Settings</h2>
+                <div class="settings-form">
+                    <div class="form-group checkbox-group">
+                        <label for="auto-sync">
+                            <input type="checkbox" id="auto-sync" checked>
+                            <span>Auto-sync status changes</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Activity Log -->
+            <section class="card activity-section">
+                <h2>Activity Log</h2>
+                <div class="activity-log" id="activity-log">
+                    <div class="log-entry">
+                        <span class="time">--:--:--</span>
+                        <span class="message">Initializing...</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <span>LED Matrix Webex Display</span>
+            <span class="version">v1.0.0</span>
+        </footer>
+    </div>
+
+    <!-- Webex Embedded Apps SDK -->
+    <script src="https://binaries.webex.com/static-content-pipeline/webex-embedded-app/v1/webex-embedded-app-sdk.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

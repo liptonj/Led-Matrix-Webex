@@ -59,6 +59,10 @@ private:
     void handleReboot(AsyncWebServerRequest* request);
     void handleFactoryReset(AsyncWebServerRequest* request);
     
+    // Embedded app API handlers
+    void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleEmbeddedStatusGet(AsyncWebServerRequest* request);
+    
     // Utility
     String getContentType(const String& filename);
 };
