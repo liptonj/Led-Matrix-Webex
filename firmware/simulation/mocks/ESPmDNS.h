@@ -6,6 +6,7 @@
 #ifndef ESP_MDNS_H
 #define ESP_MDNS_H
 
+#include <vector>
 #include "Arduino.h"
 
 class MDNSResponder {

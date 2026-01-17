@@ -4,7 +4,8 @@
  * Wrapper around the Webex JS SDK for authentication and API access.
  */
 
-import Webex from 'webex';
+// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+const Webex = require('webex').default;
 import { Logger } from 'winston';
 import { ConfigManager } from '../config/config_manager';
 
@@ -74,7 +75,11 @@ export class WebexClient {
             throw new Error(`Token refresh failed: ${error}`);
         }
 
-        const data = await response.json();
+        const data = await response.json() as {
+            access_token: string;
+            expires_in: number;
+            refresh_token?: string;
+        };
         this.accessToken = data.access_token;
         this.tokenExpiry = Date.now() + (data.expires_in * 1000);
 

@@ -46,7 +46,7 @@ export class MDNSService {
     }
 
     stop(): void {
-        if (this.service) {
+        if (this.service && typeof this.service.stop === 'function') {
             this.service.stop();
             this.service = null;
         }
