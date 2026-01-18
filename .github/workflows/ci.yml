@@ -55,10 +55,10 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Main Firmware (PlatformIO) Build and Test
+  # Main Firmware - ESP32-S3 Build
   # ============================================================================
-  firmware-build:
-    name: Main Firmware Build
+  firmware-build-esp32s3:
+    name: Main Firmware (ESP32-S3)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -79,8 +79,9 @@ jobs:
           path: |
             ~/.platformio
             ~/.cache/pip
-          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/platformio.ini') }}
+          key: ${{ runner.os }}-pio-esp32s3-${{ hashFiles('firmware/platformio.ini') }}
           restore-keys: |
+            ${{ runner.os }}-pio-esp32s3-
             ${{ runner.os }}-pio-
 
       - name: Install PlatformIO
@@ -102,62 +103,32 @@ jobs:
       - name: Build firmware (ESP32-S3)
         run: pio run -e esp32s3
 
-      - name: Build firmware (ESP32)
-        run: pio run -e esp32
-
-      - name: Build native simulation
-        run: pio run -e native
-
-      - name: Run native simulation (smoke test)
-        run: |
-          if [ -f ".pio/build/native/program" ]; then
-            # Run simulation briefly and exit - it's interactive so we pipe "quit"
-            echo "quit" | timeout 10 .pio/build/native/program || true
-            echo "Native simulation smoke test passed"
-          else
-            echo "Native simulation binary not found, skipping"
-          fi
-
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32s3
 
-      - name: Collect firmware artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
-
-          # ESP32-S3 artifacts
           BUILD_DIR=".pio/build/esp32s3"
+          
           cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
-
+          
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
-
+          
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
           fi
-
+          
           if [ -f "$BUILD_DIR/littlefs.bin" ]; then
             cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs.bin
           fi
-
-          # ESP32 artifacts
-          BUILD_DIR=".pio/build/esp32"
-          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
-
-          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
-          fi
-
-          if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
-          fi
-
-          # List collected artifacts
-          echo "Collected artifacts:"
+          
+          echo "ESP32-S3 artifacts:"
           ls -la artifacts/
 
-      - name: Upload firmware artifacts
+      - name: Upload ESP32-S3 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: firmware-esp32s3
@@ -165,10 +136,131 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Bootstrap Firmware (WiFi Provisioning + OTA)
+  # Main Firmware - ESP32 Build
   # ============================================================================
-  firmware-bootstrap-build:
-    name: Bootstrap Firmware Build
+  firmware-build-esp32:
+    name: Main Firmware (ESP32)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-esp32-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-esp32-
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Create secrets.h for build
+        run: |
+          cat > include/secrets.h << 'EOF'
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          // Placeholder secrets for CI build
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #endif
+          EOF
+
+      - name: Build firmware (ESP32)
+        run: pio run -e esp32
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/esp32"
+          
+          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
+          
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
+          fi
+          
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
+          fi
+          
+          echo "ESP32 artifacts:"
+          ls -la artifacts/
+
+      - name: Upload ESP32 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # Native Simulation Build and Test
+  # ============================================================================
+  firmware-native-test:
+    name: Native Simulation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-native-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-native-
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Build native simulation
+        run: pio run -e native
+
+      - name: Run native simulation (smoke test)
+        run: |
+          if [ -f ".pio/build/native/program" ]; then
+            echo "quit" | timeout 10 .pio/build/native/program || true
+            echo "Native simulation smoke test passed"
+          else
+            echo "Native simulation binary not found, skipping"
+          fi
+
+  # ============================================================================
+  # Bootstrap Firmware - ESP32-S3 Build
+  # ============================================================================
+  bootstrap-build-esp32s3:
+    name: Bootstrap Firmware (ESP32-S3)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -189,9 +281,9 @@ jobs:
           path: |
             ~/.platformio
             ~/.cache/pip
-          key: ${{ runner.os }}-pio-bootstrap-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
+          key: ${{ runner.os }}-pio-bootstrap-esp32s3-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
           restore-keys: |
-            ${{ runner.os }}-pio-bootstrap-
+            ${{ runner.os }}-pio-bootstrap-esp32s3-
             ${{ runner.os }}-pio-
 
       - name: Install PlatformIO
@@ -202,44 +294,91 @@ jobs:
       - name: Build bootstrap firmware (ESP32-S3)
         run: pio run -e esp32s3
 
-      - name: Build bootstrap firmware (ESP32)
-        run: pio run -e esp32
-
-      - name: Collect bootstrap artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
-
-          # ESP32-S3 bootstrap
           BUILD_DIR=".pio/build/esp32s3"
+          
           cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32s3.bin
-
+          
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
-
+          
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
           fi
+          
+          echo "Bootstrap ESP32-S3 artifacts:"
+          ls -la artifacts/
 
-          # ESP32 bootstrap
+      - name: Upload ESP32-S3 bootstrap artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-esp32s3
+          path: firmware_bootstrap/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # Bootstrap Firmware - ESP32 Build
+  # ============================================================================
+  bootstrap-build-esp32:
+    name: Bootstrap Firmware (ESP32)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firmware_bootstrap
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: ${{ runner.os }}-pio-bootstrap-esp32-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-bootstrap-esp32-
+            ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Build bootstrap firmware (ESP32)
+        run: pio run -e esp32
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
+          
           cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32.bin
-
+          
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
           fi
-
+          
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
           fi
-
-          echo "Collected bootstrap artifacts:"
+          
+          echo "Bootstrap ESP32 artifacts:"
           ls -la artifacts/
 
-      - name: Upload bootstrap artifacts
+      - name: Upload ESP32 bootstrap artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-bootstrap
+          name: bootstrap-esp32
           path: firmware_bootstrap/artifacts/
           retention-days: 7
 
@@ -249,7 +388,7 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [bridge-test, firmware-build, firmware-bootstrap-build]
+    needs: [bridge-test, firmware-build-esp32s3, firmware-build-esp32, firmware-native-test, bootstrap-build-esp32s3, bootstrap-build-esp32]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -258,16 +397,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download firmware artifacts
+      - name: Download ESP32-S3 firmware artifacts
         uses: actions/download-artifact@v4
         with:
           name: firmware-esp32s3
           path: release/firmware/
 
-      - name: Download bootstrap artifacts
+      - name: Download ESP32 firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: firmware-bootstrap
+          name: firmware-esp32
+          path: release/firmware/
+
+      - name: Download ESP32-S3 bootstrap artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bootstrap-esp32s3
+          path: release/bootstrap/
+
+      - name: Download ESP32 bootstrap artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bootstrap-esp32
           path: release/bootstrap/
 
       - name: Download bridge artifacts
@@ -279,6 +430,28 @@ jobs:
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Validate version matches platformio.ini
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          # Strip 'v' prefix if present
+          TAG_VERSION="${TAG_VERSION#v}"
+          
+          # Check firmware version
+          FIRMWARE_VERSION=$(grep "firmware_version" firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
+          if [ "$TAG_VERSION" != "$FIRMWARE_VERSION" ]; then
+            echo "::warning::Tag version ($TAG_VERSION) does not match firmware version ($FIRMWARE_VERSION)"
+          else
+            echo "✓ Firmware version matches: $FIRMWARE_VERSION"
+          fi
+          
+          # Check bootstrap version
+          BOOTSTRAP_VERSION=$(grep "bootstrap_version" firmware_bootstrap/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
+          if [ "$TAG_VERSION" != "$BOOTSTRAP_VERSION" ]; then
+            echo "::warning::Tag version ($TAG_VERSION) does not match bootstrap version ($BOOTSTRAP_VERSION)"
+          else
+            echo "✓ Bootstrap version matches: $BOOTSTRAP_VERSION"
+          fi
 
       - name: Create release archives
         run: |

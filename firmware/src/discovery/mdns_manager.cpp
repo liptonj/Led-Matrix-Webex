@@ -22,6 +22,7 @@ bool MDNSManager::begin(const String& hostname) {
     }
     
     initialized = true;
+    current_hostname = hostname;
     Serial.printf("[MDNS] Started with hostname: %s.local\n", hostname.c_str());
     return true;
 }

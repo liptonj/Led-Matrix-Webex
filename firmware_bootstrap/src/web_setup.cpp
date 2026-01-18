@@ -16,7 +16,8 @@ WebSetup::WebSetup()
     , ota_pending(false)
     , wifi_pending(false)
     , running(false)
-    , captive_portal_active(false) {
+    , captive_portal_active(false)
+    , selected_release_index(-1) {
 }
 
 WebSetup::~WebSetup() {
@@ -157,6 +158,20 @@ void WebSetup::setupRoutes() {
     server->on("/api/ota-progress", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleOTAProgress(request);
     });
+    
+    // Fetch available releases (including beta)
+    server->on("/api/releases", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetReleases(request);
+    });
+    
+    // Install specific release by index
+    server->on("/api/install-release", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleInstallRelease(request, data, len);
+        }
+    );
 
     // Captive portal detection endpoints - redirect to setup page
     // Apple
@@ -258,9 +273,16 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
 
         <div class="card">
             <h2>Firmware Update</h2>
+            <button class="btn btn-secondary" onclick="loadReleases()">Check for Updates</button>
+            <div class="form-group" style="margin-top:10px">
+                <label>Select Version</label>
+                <select id="release-select" style="width:100%;padding:10px;background:#0f0f23;color:#fff;border:1px solid #333;border-radius:4px">
+                    <option value="-1">Latest Stable (Auto)</option>
+                </select>
+            </div>
             <div id="ota-status" class="status">Ready to install firmware</div>
             <div class="progress"><div id="progress-bar" class="progress-bar" style="width:0%"></div></div>
-            <button class="btn btn-primary" onclick="startOTA()">Install Firmware</button>
+            <button class="btn btn-primary" onclick="installSelected()">Install Selected</button>
             <p class="toggle" onclick="toggleAdvanced()">Advanced Options</p>
             <div id="advanced" class="collapse">
                 <div class="form-group">
@@ -302,12 +324,40 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 alert(d.message||'WiFi saved! Connecting...');
             }).catch(()=>alert('Failed to save WiFi'));
         }
-        function startOTA(){
+        function loadReleases(){
+            document.getElementById('ota-status').textContent='Loading versions...';
+            fetch('/api/releases').then(r=>r.json()).then(d=>{
+                const select=document.getElementById('release-select');
+                select.innerHTML='<option value="-1">Latest Stable (Auto)</option>';
+                d.releases.forEach(r=>{
+                    const beta=r.is_beta?' [BETA]':'';
+                    const opt=document.createElement('option');
+                    opt.value=r.index;
+                    opt.textContent=r.version+beta;
+                    if(r.is_beta)opt.style.color='#ffcc00';
+                    select.appendChild(opt);
+                });
+                document.getElementById('ota-status').textContent='Found '+d.count+' versions';
+            }).catch(()=>document.getElementById('ota-status').textContent='Failed to load versions');
+        }
+        function installSelected(){
+            const idx=parseInt(document.getElementById('release-select').value);
             document.getElementById('ota-status').textContent='Starting update...';
-            fetch('/api/start-ota',{method:'POST'}).then(r=>r.json()).then(d=>{
-                if(d.success)pollProgress();
-                else document.getElementById('ota-status').textContent=d.error||'Failed';
-            });
+            if(idx>=0){
+                fetch('/api/install-release',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({index:idx})
+                }).then(r=>r.json()).then(d=>{
+                    if(d.success)pollProgress();
+                    else document.getElementById('ota-status').textContent=d.error||'Failed';
+                });
+            }else{
+                fetch('/api/start-ota',{method:'POST'}).then(r=>r.json()).then(d=>{
+                    if(d.success)pollProgress();
+                    else document.getElementById('ota-status').textContent=d.error||'Failed';
+                });
+            }
         }
         function pollProgress(){
             fetch('/api/ota-progress').then(r=>r.json()).then(d=>{
@@ -356,7 +406,7 @@ void WebSetup::handleStatus(AsyncWebServerRequest* request) {
     #ifdef BOOTSTRAP_VERSION
     doc["version"] = BOOTSTRAP_VERSION;
     #else
-    doc["version"] = "1.0.1";
+    doc["version"] = "0.0.0-dev";
     #endif
 
     doc["free_heap"] = ESP.getFreeHeap();
@@ -489,4 +539,67 @@ bool WebSetup::isWiFiPending() const {
 
 void WebSetup::clearWiFiPending() {
     wifi_pending = false;
+}
+
+void WebSetup::handleGetReleases(AsyncWebServerRequest* request) {
+    Serial.println("[WEB] Fetching available releases...");
+    
+    // Fetch all releases including prereleases
+    int count = ota_downloader->fetchAvailableReleases(true);  // true = include betas
+    
+    JsonDocument doc;
+    JsonArray releases = doc["releases"].to<JsonArray>();
+    
+    for (int i = 0; i < count; i++) {
+        ReleaseInfo release = ota_downloader->getRelease(i);
+        if (release.valid) {
+            JsonObject rel = releases.add<JsonObject>();
+            rel["index"] = i;
+            rel["version"] = release.version;
+            rel["is_beta"] = release.is_prerelease;
+            rel["published"] = release.published_at;
+        }
+    }
+    
+    doc["count"] = count;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+}
+
+void WebSetup::handleInstallRelease(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    String body = String((char*)data).substring(0, len);
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+    
+    int index = doc["index"].as<int>();
+    
+    ReleaseInfo release = ota_downloader->getRelease(index);
+    if (!release.valid) {
+        request->send(400, "application/json", "{\"error\":\"Invalid release index\"}");
+        return;
+    }
+    
+    Serial.printf("[WEB] Installing release %d: %s\n", index, release.version.c_str());
+    
+    // Store the index for installation
+    selected_release_index = index;
+    ota_pending = true;
+    
+    JsonDocument response;
+    response["success"] = true;
+    response["message"] = "Installing " + release.version;
+    response["version"] = release.version;
+    response["is_beta"] = release.is_prerelease;
+    
+    String responseStr;
+    serializeJson(response, responseStr);
+    request->send(200, "application/json", responseStr);
 }

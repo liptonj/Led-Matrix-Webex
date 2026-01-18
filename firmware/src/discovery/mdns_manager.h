@@ -67,6 +67,12 @@ public:
      * @brief Refresh bridge discovery
      */
     void refreshBridgeDiscovery();
+    
+    /**
+     * @brief Get the mDNS hostname
+     * @return Hostname (without .local)
+     */
+    String getHostname() const { return current_hostname; }
 
 private:
     bool initialized;
@@ -74,6 +80,7 @@ private:
     String bridge_host;
     uint16_t bridge_port;
     unsigned long last_discovery;
+    String current_hostname;
 };
 
 #endif // MDNS_MANAGER_H

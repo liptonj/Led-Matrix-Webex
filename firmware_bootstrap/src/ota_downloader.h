@@ -14,6 +14,7 @@
 // OTA Configuration
 #define OTA_DOWNLOAD_TIMEOUT_MS 300000UL  // 5 minutes (unsigned long)
 #define OTA_BUFFER_SIZE 1024  // Reduced from 4096 to prevent stack overflow
+#define MAX_RELEASES 10  // Maximum number of releases to track
 
 /**
  * @brief OTA Download Status
@@ -31,6 +32,17 @@ enum class OTAStatus {
     ERROR_DOWNLOAD,
     ERROR_FLASH,
     ERROR_VERIFY
+};
+
+/**
+ * @brief Release info structure
+ */
+struct ReleaseInfo {
+    String version;
+    String firmware_url;
+    bool is_prerelease;
+    String published_at;
+    bool valid;
 };
 
 /**
@@ -99,6 +111,40 @@ public:
      * @return true if successful
      */
     bool downloadAndInstall(const String& firmware_url);
+    
+    /**
+     * @brief Fetch available releases from GitHub
+     * @param include_prereleases Include beta/prerelease versions
+     * @return Number of releases found
+     */
+    int fetchAvailableReleases(bool include_prereleases = true);
+    
+    /**
+     * @brief Get number of available releases
+     * @return Count of releases
+     */
+    int getReleaseCount() const { return release_count; }
+    
+    /**
+     * @brief Get release info by index
+     * @param index Release index (0 = newest)
+     * @return ReleaseInfo structure
+     */
+    ReleaseInfo getRelease(int index) const;
+    
+    /**
+     * @brief Install a specific release by index
+     * @param index Release index
+     * @return true if install started
+     */
+    bool installRelease(int index);
+    
+    /**
+     * @brief Check if a version is a beta/prerelease
+     * @param version Version string
+     * @return true if beta/prerelease
+     */
+    static bool isBetaVersion(const String& version);
 
 private:
     ConfigStore* config_store;
@@ -106,6 +152,10 @@ private:
     int progress;
     String status_message;
     OTAProgressCallback progress_callback;
+    
+    // Available releases
+    ReleaseInfo releases[MAX_RELEASES];
+    int release_count;
 
     /**
      * @brief Fetch and parse GitHub releases JSON

@@ -22,6 +22,15 @@ WiFiProvisioner::~WiFiProvisioner() {
 void WiFiProvisioner::begin(ConfigStore* config) {
     config_store = config;
     Serial.println("[WIFI] Provisioner initialized");
+    
+    // Do an initial network scan so results are ready for AP interface
+    Serial.println("[WIFI] Performing initial network scan...");
+    WiFi.mode(WIFI_STA);
+    delay(100);
+    scanNetworks();
+    
+    // Sort results by signal strength (strongest first) - WiFi.scanNetworks does this by default
+    Serial.printf("[WIFI] Found %d networks in initial scan\n", scanned_network_count);
 }
 
 bool WiFiProvisioner::connectWithStoredCredentials() {
@@ -76,6 +85,15 @@ bool WiFiProvisioner::connect(const String& ssid, const String& password, bool s
 
 void WiFiProvisioner::startAPWithSmartConfig() {
     Serial.println("[WIFI] Starting AP mode...");
+
+    // If we don't have scan results yet, do a quick scan first
+    // This ensures the web interface has networks to show
+    if (scanned_network_count <= 0) {
+        Serial.println("[WIFI] No cached scan results, scanning now...");
+        WiFi.mode(WIFI_STA);
+        delay(100);
+        scanNetworks();
+    }
 
     // Fully reset WiFi
     WiFi.disconnect(true);
@@ -237,6 +255,18 @@ bool WiFiProvisioner::isScannedNetworkEncrypted(int index) const {
 
 int WiFiProvisioner::getScannedNetworkCount() const {
     return scanned_network_count;
+}
+
+bool WiFiProvisioner::isNetworkInScanResults(const String& ssid) const {
+    for (int i = 0; i < scanned_network_count; i++) {
+        if (WiFi.SSID(i) == ssid) {
+            Serial.printf("[WIFI] Network '%s' found in scan (signal: %d dBm)\n", 
+                          ssid.c_str(), WiFi.RSSI(i));
+            return true;
+        }
+    }
+    Serial.printf("[WIFI] Network '%s' NOT found in scan results\n", ssid.c_str());
+    return false;
 }
 
 void WiFiProvisioner::setConnectionCallback(ConnectionCallback callback) {

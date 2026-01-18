@@ -136,6 +136,19 @@ public:
      * @return Network count
      */
     int getScannedNetworkCount() const;
+    
+    /**
+     * @brief Check if a specific SSID was found in the last scan
+     * @param ssid SSID to search for
+     * @return true if network was found
+     */
+    bool isNetworkInScanResults(const String& ssid) const;
+    
+    /**
+     * @brief Check if scan results are available
+     * @return true if networks have been scanned
+     */
+    bool hasScanResults() const { return scanned_network_count > 0; }
 
     /**
      * @brief Callback type for connection events

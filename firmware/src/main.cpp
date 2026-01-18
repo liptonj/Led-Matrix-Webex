@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <time.h>
 
+#include "boot_validator.h"
 #include "config/config_manager.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
@@ -20,9 +21,9 @@
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
 
-// Firmware version
+// Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "1.0.2"
+#define FIRMWARE_VERSION "0.0.0-dev"
 #endif
 
 // Global instances
@@ -61,20 +62,30 @@ void setup() {
     Serial.println("===========================================");
     Serial.println();
 
+    // Boot validation - check if we should rollback to bootstrap
+    // This must be called early before other initialization
+    if (!boot_validator.begin()) {
+        // This won't return if rollback is triggered
+        Serial.println("[ERROR] Boot validation failed!");
+    }
+
     // Initialize configuration
     Serial.println("[INIT] Loading configuration...");
     if (!config_manager.begin()) {
         Serial.println("[ERROR] Failed to initialize configuration!");
+        boot_validator.onCriticalFailure("Config", "Failed to load configuration");
+        // Won't return - device reboots to bootloader
     }
 
     // Initialize display
     Serial.println("[INIT] Initializing LED matrix...");
     if (!matrix_display.begin()) {
         Serial.println("[ERROR] Failed to initialize display!");
+        // Display failure is not critical - continue without display
     }
     matrix_display.showStartupScreen(FIRMWARE_VERSION);
 
-    // Setup WiFi
+    // Setup WiFi (includes AP mode fallback if connection fails)
     Serial.println("[INIT] Setting up WiFi...");
     setup_wifi();
 
@@ -133,6 +144,19 @@ void setup() {
 
     Serial.println("[INIT] Setup complete!");
     Serial.println();
+
+    // Mark boot as successful - this cancels OTA rollback
+    // Only do this after all critical initialization succeeded
+    boot_validator.markBootSuccessful();
+
+    // Show connection info briefly on display
+    if (app_state.wifi_connected) {
+        String hostname = mdns_manager.getHostname();
+        matrix_display.showConnected(WiFi.localIP().toString());
+        delay(3000);  // Show for 3 seconds
+        Serial.printf("[INIT] Device ready at http://%s or http://%s.local\n",
+                      WiFi.localIP().toString().c_str(), hostname.c_str());
+    }
 }
 
 /**
@@ -211,6 +235,24 @@ void loop() {
         check_for_updates();
     }
 
+    // Print connection info every 15 seconds (visible on serial connect)
+    static unsigned long last_connection_print = 0;
+    if (current_time - last_connection_print >= 15000) {
+        last_connection_print = current_time;
+        if (app_state.wifi_connected) {
+            Serial.println();
+            Serial.println("=== WEBEX STATUS DISPLAY ===");
+            Serial.printf("IP: %s | mDNS: %s.local\n", 
+                          WiFi.localIP().toString().c_str(),
+                          mdns_manager.getHostname().c_str());
+            Serial.printf("Status: %s | Bridge: %s | MQTT: %s\n",
+                          app_state.webex_status.c_str(),
+                          app_state.bridge_connected ? "Yes" : "No",
+                          app_state.mqtt_connected ? "Yes" : "No");
+            Serial.println("============================");
+        }
+    }
+
     // Update display
     update_display();
 
@@ -225,6 +267,18 @@ void setup_wifi() {
     String ssid = config_manager.getWiFiSSID();
     String password = config_manager.getWiFiPassword();
 
+    // Always scan for networks first so they're available in the web interface
+    Serial.println("[WIFI] Scanning for networks...");
+    WiFi.mode(WIFI_STA);
+    delay(100);
+    int network_count = WiFi.scanNetworks();
+    Serial.printf("[WIFI] Found %d networks\n", network_count);
+    
+    // List networks found
+    for (int i = 0; i < min(network_count, 10); i++) {
+        Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+    }
+
     if (ssid.isEmpty()) {
         // Start AP mode for configuration
         Serial.println("[WIFI] No WiFi configured, starting AP mode...");
@@ -232,6 +286,26 @@ void setup_wifi() {
         WiFi.softAP("Webex-Display-Setup", "webexdisplay");
         Serial.printf("[WIFI] AP started: SSID='Webex-Display-Setup', IP=%s\n",
                       WiFi.softAPIP().toString().c_str());
+        matrix_display.showAPMode(WiFi.softAPIP().toString());
+        return;
+    }
+
+    // Check if configured network was found in scan
+    bool network_found = false;
+    for (int i = 0; i < network_count; i++) {
+        if (WiFi.SSID(i) == ssid) {
+            network_found = true;
+            Serial.printf("[WIFI] Configured network '%s' found (signal: %d dBm)\n", 
+                          ssid.c_str(), WiFi.RSSI(i));
+            break;
+        }
+    }
+    
+    if (!network_found) {
+        Serial.printf("[WIFI] Configured network '%s' NOT found! Starting AP mode...\n", ssid.c_str());
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.softAP("Webex-Display-Setup", "webexdisplay");
+        Serial.printf("[WIFI] AP started for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
         matrix_display.showAPMode(WiFi.softAPIP().toString());
         return;
     }
@@ -256,9 +330,10 @@ void setup_wifi() {
         Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
         matrix_display.showConnected(WiFi.localIP().toString());
     } else {
-        Serial.println("[WIFI] Connection failed, starting AP mode...");
+        Serial.println("[WIFI] Connection failed, starting AP mode for reconfiguration...");
         WiFi.mode(WIFI_AP_STA);
         WiFi.softAP("Webex-Display-Setup", "webexdisplay");
+        Serial.printf("[WIFI] AP started: IP=%s\n", WiFi.softAPIP().toString().c_str());
         matrix_display.showAPMode(WiFi.softAPIP().toString());
     }
 }

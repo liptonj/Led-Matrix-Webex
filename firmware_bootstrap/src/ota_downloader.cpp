@@ -13,7 +13,12 @@ OTADownloader::OTADownloader()
     : config_store(nullptr)
     , status(OTAStatus::IDLE)
     , progress(0)
-    , progress_callback(nullptr) {
+    , progress_callback(nullptr)
+    , release_count(0) {
+    // Initialize releases array
+    for (int i = 0; i < MAX_RELEASES; i++) {
+        releases[i].valid = false;
+    }
 }
 
 OTADownloader::~OTADownloader() {
@@ -56,23 +61,29 @@ bool OTADownloader::checkAndInstall() {
     updateStatus(OTAStatus::CHECKING, "Checking for firmware...");
     updateProgress(5, "Fetching release info...");
 
-    // Determine if this is a GitHub releases URL or direct firmware URL
-    String firmware_url;
+    // Check if direct .bin URL
+    if (ota_url.endsWith(".bin")) {
+        // Direct firmware URL - install it
+        return downloadAndInstall(ota_url);
+    }
     
+    // GitHub releases URL - fetch all releases
     if (ota_url.indexOf("api.github.com") >= 0 || ota_url.indexOf("/releases") >= 0) {
-        // GitHub releases URL - need to parse JSON
-        if (!fetchFirmwareUrl(ota_url, firmware_url)) {
+        // Fetch releases (excluding prereleases for auto-install)
+        int count = fetchAvailableReleases(false);  // false = skip prereleases
+        
+        if (count == 0) {
+            updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "No stable releases found");
             return false;
         }
-    } else if (ota_url.endsWith(".bin")) {
-        // Direct firmware URL
-        firmware_url = ota_url;
-    } else {
-        updateStatus(OTAStatus::ERROR_PARSE, "Invalid OTA URL format");
-        return false;
+        
+        // Install the first (newest) stable release
+        Serial.printf("[OTA] Auto-installing latest stable: %s\n", releases[0].version.c_str());
+        return installRelease(0);
     }
-
-    return downloadAndInstall(firmware_url);
+    
+    updateStatus(OTAStatus::ERROR_PARSE, "Invalid OTA URL format");
+    return false;
 }
 
 bool OTADownloader::fetchFirmwareUrl(const String& releases_url, String& firmware_url) {
@@ -310,4 +321,173 @@ int OTADownloader::getProgress() const {
 
 void OTADownloader::setProgressCallback(OTAProgressCallback callback) {
     progress_callback = callback;
+}
+
+bool OTADownloader::isBetaVersion(const String& version) {
+    String lower = version;
+    lower.toLowerCase();
+    return lower.indexOf("beta") >= 0 || 
+           lower.indexOf("alpha") >= 0 || 
+           lower.indexOf("rc") >= 0 ||
+           lower.indexOf("dev") >= 0 ||
+           lower.indexOf("pre") >= 0;
+}
+
+int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
+    if (!config_store) {
+        return 0;
+    }
+    
+    // Reset releases array
+    release_count = 0;
+    for (int i = 0; i < MAX_RELEASES; i++) {
+        releases[i].valid = false;
+    }
+    
+    // Build releases list URL (not just /latest)
+    String ota_url = config_store->getOTAUrl();
+    String releases_url = ota_url;
+    
+    // Convert /latest to full releases list
+    if (releases_url.endsWith("/latest")) {
+        releases_url = releases_url.substring(0, releases_url.length() - 7);
+    }
+    
+    Serial.printf("[OTA] Fetching releases from: %s\n", releases_url.c_str());
+    
+    WiFiClientSecure client;
+    client.setInsecure();
+    
+    HTTPClient http;
+    http.begin(client, releases_url);
+    http.addHeader("User-Agent", "ESP32-Bootstrap");
+    http.addHeader("Accept", "application/vnd.github.v3+json");
+    http.setTimeout(30000);
+    
+    int http_code = http.GET();
+    
+    if (http_code != HTTP_CODE_OK) {
+        Serial.printf("[OTA] HTTP error: %d\n", http_code);
+        http.end();
+        return 0;
+    }
+    
+    String payload = http.getString();
+    http.end();
+    
+    // Parse JSON array of releases
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (error) {
+        Serial.printf("[OTA] JSON parse error: %s\n", error.c_str());
+        return 0;
+    }
+    
+    // Handle both array (all releases) and object (single release)
+    JsonArray releasesArray;
+    if (doc.is<JsonArray>()) {
+        releasesArray = doc.as<JsonArray>();
+    } else {
+        // Single release object - not an array
+        Serial.println("[OTA] Single release found");
+        // We'll handle this case specially
+    }
+    
+    Serial.printf("[OTA] Found %d releases\n", releasesArray.size());
+    
+    for (JsonObject release : releasesArray) {
+        if (release_count >= MAX_RELEASES) break;
+        
+        bool is_prerelease = release["prerelease"].as<bool>();
+        String tag = release["tag_name"].as<String>();
+        
+        // Skip prereleases if not requested
+        if (is_prerelease && !include_prereleases) {
+            Serial.printf("[OTA] Skipping prerelease: %s\n", tag.c_str());
+            continue;
+        }
+        
+        // Also check version string for beta indicators
+        if (!include_prereleases && isBetaVersion(tag)) {
+            Serial.printf("[OTA] Skipping beta version: %s\n", tag.c_str());
+            continue;
+        }
+        
+        // Find firmware asset for this chip
+        JsonArray assets = release["assets"].as<JsonArray>();
+        String firmware_url = "";
+        
+        for (JsonObject asset : assets) {
+            String name = asset["name"].as<String>();
+            String name_lower = name;
+            name_lower.toLowerCase();
+            
+            // Skip non-bin and bootstrap files
+            if (!name_lower.endsWith(".bin") || name_lower.indexOf("bootstrap") >= 0) {
+                continue;
+            }
+            
+            // Prioritize chip-specific firmware
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                firmware_url = asset["browser_download_url"].as<String>();
+                break;
+            }
+            #else
+            if ((name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                firmware_url = asset["browser_download_url"].as<String>();
+                break;
+            }
+            #endif
+            
+            // Fallback to generic firmware.bin
+            if (name_lower == "firmware.bin" && firmware_url.isEmpty()) {
+                firmware_url = asset["browser_download_url"].as<String>();
+            }
+        }
+        
+        if (!firmware_url.isEmpty()) {
+            releases[release_count].version = tag;
+            releases[release_count].firmware_url = firmware_url;
+            releases[release_count].is_prerelease = is_prerelease || isBetaVersion(tag);
+            releases[release_count].published_at = release["published_at"].as<String>();
+            releases[release_count].valid = true;
+            
+            Serial.printf("[OTA] Release %d: %s %s\n", 
+                          release_count, 
+                          tag.c_str(), 
+                          releases[release_count].is_prerelease ? "(beta)" : "(stable)");
+            
+            release_count++;
+        }
+    }
+    
+    Serial.printf("[OTA] Total valid releases: %d\n", release_count);
+    return release_count;
+}
+
+ReleaseInfo OTADownloader::getRelease(int index) const {
+    if (index >= 0 && index < release_count && releases[index].valid) {
+        return releases[index];
+    }
+    
+    ReleaseInfo empty;
+    empty.valid = false;
+    return empty;
+}
+
+bool OTADownloader::installRelease(int index) {
+    if (index < 0 || index >= release_count || !releases[index].valid) {
+        updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "Invalid release index");
+        return false;
+    }
+    
+    ReleaseInfo& release = releases[index];
+    Serial.printf("[OTA] Installing release: %s\n", release.version.c_str());
+    updateProgress(10, "Installing " + release.version);
+    
+    return downloadAndInstall(release.firmware_url);
 }

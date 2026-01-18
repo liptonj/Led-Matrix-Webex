@@ -75,6 +75,12 @@ public:
      * @brief Clear WiFi pending flag
      */
     void clearWiFiPending();
+    
+    /**
+     * @brief Get selected release index for OTA
+     * @return Release index, or -1 for auto (latest stable)
+     */
+    int getSelectedReleaseIndex() const { return selected_release_index; }
 
 private:
     AsyncWebServer* server;
@@ -99,6 +105,11 @@ private:
     void handleOTAUrl(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleStartOTA(AsyncWebServerRequest* request);
     void handleOTAProgress(AsyncWebServerRequest* request);
+    void handleGetReleases(AsyncWebServerRequest* request);
+    void handleInstallRelease(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    
+    // State for selected release
+    int selected_release_index;
 };
 
 #endif // WEB_SETUP_H

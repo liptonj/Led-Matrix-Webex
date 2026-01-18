@@ -1,6 +1,8 @@
 # LED Matrix Webex Status Display
 
-An ESP32-S3 powered 64x32 RGB LED matrix display that shows your Webex presence status at a glance. Perfect for home offices, meeting rooms, or anywhere you want colleagues and family to know your availability without interrupting you.
+An ESP32/ESP32-S3 powered 64x32 RGB LED matrix display that shows your Webex presence status at a glance. Perfect for home offices, meeting rooms, or anywhere you want colleagues and family to know your availability without interrupting you.
+
+**Current Version: 1.0.3**
 
 ## Overview
 
@@ -12,12 +14,21 @@ This project creates a physical "busy light" that automatically syncs with your 
 - **Visual at a Glance**: Color-coded status visible from across the room
 - **Call Awareness**: Shows when your camera is on or microphone is muted
 - **Environmental Monitoring**: Optional integration with Meraki MT sensors for temperature, humidity, door status, and air quality
-- **Zero Touch Updates**: OTA firmware updates from GitHub Releases
-- **Easy Setup**: Web-based configuration portal
+- **Zero Touch Updates**: OTA firmware updates from GitHub Releases with version selection
+- **Easy Setup**: Web-based configuration portal with captive portal support
+- **Automatic Recovery**: Factory rollback if firmware fails to boot properly
+- **Multi-Board Support**: Works on both ESP32 and ESP32-S3 DevKits
 
 ## Display States
 
 The 64x32 pixel LED matrix (192mm x 96mm, 3mm pitch, 2048 individual RGB LEDs) displays different screens based on the current state. Each status screen shows the current time, temperature, and air quality.
+
+### Bootstrap/Setup Screen
+
+When the device powers on with bootstrap firmware or enters setup mode, it displays:
+- The device IP address
+- The mDNS hostname (e.g., `webex-display.local`)
+- WiFi connection status
 
 ### Startup Screen
 
@@ -62,24 +73,24 @@ All status screens display environmental data from Meraki MT sensors at the bott
 └─────────────────────────────────────────────────────────────────────────────┘
 
   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-  │ Webex Cloud  │         │ Node.js      │         │ ESP32-S3     │
+  │ Webex Cloud  │         │ Node.js      │         │ ESP32/S3     │
   │              │  WS/API │ Bridge       │  HTTP   │ Firmware     │
   │ - People API ├────────►│              ├────────►│              │
   │ - xAPI       │         │ - Webex SDK  │         │ - Display    │
   │ - Mercury    │         │ - WebSocket  │         │ - Web Server │
   └──────────────┘         └──────────────┘         └──────┬───────┘
-                                                           │
-  ┌──────────────┐                                         │
-  │ Meraki Cloud │         ┌──────────────┐                │
-  │              │  MQTT   │ MQTT Broker  │    MQTT        │
-  │ - MT Sensors ├────────►│              ├────────────────┤
-  │ - Webhooks   │         │              │                │
-  └──────────────┘         └──────────────┘                ▼
-                                                   ┌──────────────┐
-                                                   │ 64x32 RGB    │
-                                                   │ LED Matrix   │
-                                                   │ HUB75        │
-                                                   └──────────────┘
+                                                          │
+  ┌──────────────┐                                        │
+  │ Meraki Cloud │         ┌──────────────┐               │
+  │              │  MQTT   │ MQTT Broker  │    MQTT       │
+  │ - MT Sensors ├────────►│              ├───────────────┤
+  │ - Webhooks   │         │              │               │
+  └──────────────┘         └──────────────┘               ▼
+                                                  ┌──────────────┐
+                                                  │ 64x32 RGB    │
+                                                  │ LED Matrix   │
+                                                  │ HUB75        │
+                                                  └──────────────┘
 ```
 
 ### Data Sources
@@ -107,15 +118,18 @@ The display can receive status updates from multiple sources:
 
 ```
 Led-Matrix-Webex/
-├── firmware/               # ESP32-S3 PlatformIO project
+├── firmware/               # Main ESP32/S3 application firmware
 │   ├── src/
 │   │   ├── display/        # LED matrix driver and icons
 │   │   ├── network/        # WiFi, MQTT, HTTP clients
 │   │   ├── web/            # Embedded web server
 │   │   └── config/         # Configuration management
 │   └── data/               # Web UI files (LittleFS)
+├── firmware_bootstrap/     # Bootstrap firmware for initial setup + OTA
+│   └── src/                # Minimal WiFi provisioning + OTA downloader
 ├── bridge/                 # Node.js bridge server (optional)
 │   └── src/                # TypeScript source
+├── homeassistant-addon/    # Home Assistant add-on for bridge
 └── docs/                   # Documentation
     └── images/             # Display state visualizations
 ```
@@ -131,10 +145,12 @@ Led-Matrix-Webex/
 
 ### Supported Boards
 
-| Board | Flash | Build Command |
-|-------|-------|---------------|
-| ESP32-S3-DevKitC-1 | 8MB | `pio run -e esp32s3` |
-| ESP32-DevKitC (standard) | 4MB | `pio run -e esp32` |
+| Board | Flash | Firmware File | Build Command |
+|-------|-------|---------------|---------------|
+| ESP32-S3-DevKitC-1 | 8MB | `firmware-esp32s3.bin` | `pio run -e esp32s3` |
+| ESP32-DevKitC (standard) | 4MB | `firmware-esp32.bin` | `pio run -e esp32` |
+
+The OTA system automatically detects your board type and downloads the correct firmware.
 
 ### Hardware Wiring (ESP32-S3)
 
@@ -180,143 +196,128 @@ Connect the HUB75 matrix to a standard ESP32 as follows:
 
 ## Installation
 
-### Option A: Install from Pre-built Release (Recommended)
+### Option A: Bootstrap Firmware (Recommended)
 
-Download the latest release from [GitHub Releases](https://github.com/liptonj/Led-Matrix-Webex/releases).
+The easiest way to get started is with the bootstrap firmware. It handles WiFi provisioning and downloads the main firmware over-the-air.
 
-**Release files:**
-- `bootloader.bin` - ESP32 bootloader
-- `partitions.bin` - Partition table
-- `firmware.bin` - Main application firmware
-- `littlefs.bin` - Web UI filesystem
-- `bootstrap.bin` - Alternative minimal firmware for WiFi provisioning + OTA
+**Step 1: Flash Bootstrap**
 
-**Flash addresses by board:**
-
-| File | ESP32-S3 (8MB) | ESP32 (4MB) | Description |
-|------|----------------|-------------|-------------|
-| bootloader.bin | 0x1000 | 0x1000 | Second-stage bootloader |
-| partitions.bin | 0x8000 | 0x8000 | Partition table |
-| firmware.bin | 0x10000 | 0x10000 | Main application |
-| littlefs.bin | 0x670000 | 0x290000 | Web UI filesystem |
-
-**Flash using esptool.py (ESP32-S3):**
+Download `bootstrap-esp32.bin` or `bootstrap-esp32s3.bin` from [GitHub Releases](https://github.com/liptonj/Led-Matrix-Webex/releases).
 
 ```bash
 # Install esptool if needed
 pip install esptool
 
-# Erase flash first (recommended for clean install)
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
-
-# Flash all components
-esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-    write_flash \
-    0x1000 bootloader.bin \
-    0x8000 partitions.bin \
-    0x10000 firmware.bin \
-    0x670000 littlefs.bin
-```
-
-**Flash using esptool.py (ESP32 standard):**
-
-```bash
-# Erase flash first (recommended for clean install)
+# For ESP32:
 esptool.py --chip esp32 --port /dev/ttyUSB0 erase_flash
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 bootstrap-esp32.bin
 
-# Flash all components
-esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
-    write_flash \
-    0x1000 bootloader.bin \
-    0x8000 partitions.bin \
-    0x10000 firmware.bin \
-    0x290000 littlefs.bin
+# For ESP32-S3:
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash 0x0 bootstrap-esp32s3.bin
 ```
 
-**Alternative: Bootstrap firmware (for OTA setup):**
+**Step 2: Connect to WiFi**
 
-If you prefer to use WiFi provisioning and download the main firmware over-the-air:
+1. The LED matrix will display "AP MODE" with the IP address `192.168.4.1`
+2. Connect your phone/computer to WiFi network: `Webex-Display-Setup` (no password)
+3. Open `http://192.168.4.1` in your browser
+4. Enter your WiFi credentials and click "Connect"
+
+**Step 3: Install Main Firmware**
+
+1. After WiFi connects, the display shows your IP address and mDNS hostname
+2. The IP and hostname are also printed to the serial port every 15 seconds
+3. Open the web interface at the displayed IP or `http://webex-display.local`
+4. Select a firmware version from the dropdown (beta versions are marked)
+5. Click "Install" - the device downloads and installs the correct firmware for your board
+
+**Note:** Beta/prerelease versions are never auto-installed. You must manually select them if desired.
+
+### Option B: Install from Pre-built Release
+
+Download the latest release from [GitHub Releases](https://github.com/liptonj/Led-Matrix-Webex/releases).
+
+**Release files:**
+- `bootstrap-esp32.bin` - Bootstrap firmware for ESP32
+- `bootstrap-esp32s3.bin` - Bootstrap firmware for ESP32-S3
+- `firmware-esp32.bin` - Main application for ESP32
+- `firmware-esp32s3.bin` - Main application for ESP32-S3
+
+**Flash main firmware directly (ESP32-S3):**
 
 ```bash
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 erase_flash
 esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
-    write_flash \
-    0x1000 bootloader.bin \
-    0x8000 partitions.bin \
-    0x10000 bootstrap.bin
+    write_flash 0x0 firmware-esp32s3.bin
 ```
 
-The bootstrap firmware creates a WiFi access point for initial configuration and downloads the main firmware from GitHub Releases.
-
-**Note:** On macOS, the port is typically `/dev/cu.usbmodem*`. On Windows, use `COM3` or similar.
-
-### Option B: Build from Source
-
-**First-time setup (install bootloader once):**
-
-The ESP32-S3 bootloader only needs to be installed once. PlatformIO includes it automatically on the first upload:
+**Flash main firmware directly (ESP32):**
 
 ```bash
-cd firmware
-pio run -t upload         # First upload includes bootloader + partitions + firmware
-pio run -t uploadfs       # Upload web UI filesystem (LittleFS)
+esptool.py --chip esp32 --port /dev/ttyUSB0 erase_flash
+esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 \
+    write_flash 0x0 firmware-esp32.bin
 ```
 
-**Subsequent firmware updates:**
+**Note:** On macOS, the port is typically `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`. On Windows, use `COM3` or similar.
 
-After the bootloader is installed, you only need to update the application firmware:
-
-```bash
-cd firmware
-pio run -t upload         # Updates firmware only
-```
-
-**Bootstrap firmware (alternative):**
+### Option C: Build from Source
 
 ```bash
+# Clone the repository
+git clone https://github.com/liptonj/Led-Matrix-Webex.git
+cd Led-Matrix-Webex
+
+# Build and upload bootstrap firmware
 cd firmware_bootstrap
-pio run -t upload         # Upload bootstrap firmware
-pio run -t uploadfs       # Upload bootstrap web UI
+pio run -e esp32 -t upload       # For ESP32
+# OR
+pio run -e esp32s3 -t upload     # For ESP32-S3
+
+# Build and upload main firmware
+cd ../firmware
+pio run -e esp32 -t upload       # For ESP32
+# OR
+pio run -e esp32s3 -t upload     # For ESP32-S3
+pio run -t uploadfs              # Upload web UI filesystem
 ```
+
+## Firmware Recovery
+
+The firmware includes automatic recovery features:
+
+### WiFi Connection Failure
+If the configured WiFi network is not found or connection fails, the device automatically starts an Access Point (`Webex-Display-Setup`) for reconfiguration. This works in both the bootstrap and main firmware.
+
+### Boot Failure Recovery
+If the main firmware fails to boot properly (crashes repeatedly), it automatically rolls back to the bootstrap (factory) partition. You can then use the web interface to reinstall the firmware.
+
+### Manual Recovery
+If the device becomes unresponsive:
+1. Connect USB and open serial monitor
+2. Hold the BOOT button while pressing RESET
+3. Re-flash the bootstrap firmware using esptool
 
 ## Quick Start
 
-### 1. Configure WiFi via SmartConfig
+### 1. Configure WiFi
 
-The easiest way to configure WiFi is using the ESP Touch app:
+After flashing the bootstrap firmware:
 
-1. **Download the ESP Touch app:**
-   - [iOS App Store](https://apps.apple.com/app/espressif-esptouch/id1071176700)
-   - [Android Play Store](https://play.google.com/store/apps/details?id=com.espressif.esptouch)
+1. **Look at the LED matrix** - it shows "AP MODE" and the IP `192.168.4.1`
+2. **Check serial output** - the IP and mDNS name are printed every 15 seconds
+3. **Connect to `Webex-Display-Setup`** WiFi network (no password)
+4. **Open `http://192.168.4.1`** in your browser
+5. **Enter your WiFi credentials** and click Connect
+6. **Once connected**, the display shows your new IP address and hostname
 
-2. **Connect your phone to your home WiFi** (the one you want the display to use)
+### 2. Install Main Firmware
 
-3. **Open the ESP Touch app** and enter your WiFi password
-
-4. **Power on the ESP32** with the bootstrap firmware installed
-
-5. **Tap "Confirm"** in the app - it will broadcast your credentials to the device
-
-6. **Watch the serial monitor** - the device will show its IP address when connected:
-   ```
-   [WIFI] SmartConfig connected! IP: 192.168.1.xxx
-   ```
-
-### 2. Install Main Firmware via Web UI
-
-1. Open a browser and go to the IP address shown in the serial monitor (e.g., `http://192.168.1.xxx`)
-
-2. The bootstrap web interface will open automatically
-
-3. Click **"Install Firmware"** - the device will download the main firmware from GitHub Releases
-
-4. The device will reboot into the full application
-
-**Alternative: Direct AP Connection**
-
-If SmartConfig doesn't work, you can also connect directly:
-1. Look for WiFi network: `Webex-Display-Setup` (open network, no password)
-2. Connect and open `http://192.168.4.1`
-3. Enter your WiFi credentials and install firmware
+1. Open the web interface at the IP shown on the display (or `http://webex-display.local`)
+2. Select a firmware version from the dropdown
+3. Click **"Install"** - the device downloads the correct firmware for your board
+4. The device reboots into the full application
 
 ### 3. Webex Integration Setup
 
@@ -326,7 +327,7 @@ If SmartConfig doesn't work, you can also connect directly:
 4. Request scopes: `spark:people_read`, `spark:xapi_statuses`
 5. Copy your Client ID and Client Secret to the device configuration
 
-### 3. (Optional) Bridge Server
+### 4. (Optional) Bridge Server
 
 For real-time presence updates without a Cisco RoomOS device (desk phone, room kit, etc.), you need to run the Node.js bridge server.
 
@@ -377,6 +378,86 @@ Supported sensor data:
 - **Humidity**: Displays as percentage
 - **Door Status**: Open/Closed indicator
 - **Air Quality**: Good/Moderate/Poor
+
+## Development
+
+### Version Management
+
+Each firmware project has a single source of truth for its version number in `platformio.ini`:
+
+**Main Firmware** (`firmware/platformio.ini`):
+```ini
+[version]
+firmware_version = 1.0.3
+```
+
+**Bootstrap Firmware** (`firmware_bootstrap/platformio.ini`):
+```ini
+[version]
+bootstrap_version = 1.0.3
+```
+
+When releasing a new version:
+1. Update the version in the `[version]` section of each `platformio.ini`
+2. Update `README.md` with the new version and changelog
+3. Update `homeassistant-addon/config.yaml` version
+4. Update `bridge/package.json` version
+5. Update `pyproject.toml` version
+6. Create a git tag matching the version (e.g., `v1.0.3`)
+
+### Build Environments
+
+**Main Firmware** (`firmware/`):
+| Environment | Description |
+|-------------|-------------|
+| `esp32s3` | Full build for ESP32-S3 (all modules) |
+| `esp32` | Full build for standard ESP32 |
+| `minimal` | Core only (smallest size) |
+| `embedded` | Core + Embedded App |
+| `standard` | Core + Embedded App + Webex Polling |
+| `sensors` | Core + Embedded App + MQTT Sensors |
+| `bridge` | Core + Embedded App + Bridge Client |
+| `native` | Native simulation (for development) |
+| `native_test` | Native unit tests |
+
+**Bootstrap Firmware** (`firmware_bootstrap/`):
+| Environment | Description |
+|-------------|-------------|
+| `esp32s3` | Bootstrap for ESP32-S3 |
+| `esp32` | Bootstrap for standard ESP32 |
+
+## Changelog
+
+### v1.0.3
+**OTA Improvements:**
+- Version selection UI - choose which firmware version to install from a dropdown
+- Beta/prerelease versions are clearly marked and never auto-installed
+- Board-specific firmware binaries (ESP32 vs ESP32-S3) - OTA automatically selects correct one
+- Improved OTA reliability with proper chip detection and validation
+
+**Display & Discovery:**
+- LED matrix displays IP address and mDNS hostname during boot and setup mode
+- Serial output prints IP/hostname every 15 seconds for easy discovery
+- Bootstrap firmware now has full LED matrix support
+
+**Recovery & Reliability:**
+- Automatic factory rollback if main firmware fails to boot (repeated crashes)
+- WiFi fallback to AP mode if configured network not found (scans before connecting)
+- Factory partition support in partition tables for reliable rollback
+
+**Developer Experience:**
+- Single source of truth for version numbers in `platformio.ini` `[version]` section
+- Cleaner build configuration with shared common settings
+- Consistent environment naming across projects
+
+### v1.0.2
+- Initial public release
+- ESP32 and ESP32-S3 support
+- Webex presence integration via REST polling, xAPI WebSocket, or Bridge server
+- Meraki MT sensor support via MQTT
+- OTA updates from GitHub Releases
+- Web-based configuration portal
+- SmartConfig WiFi provisioning support
 
 ## License
 
