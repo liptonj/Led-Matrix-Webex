@@ -118,7 +118,7 @@ jobs:
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
             python -m esptool \
               --chip esp32s3 \
-              merge_bin \
+              merge-bin \
               -o "$BUILD_DIR/firmware-ota-esp32s3.bin" \
               --flash-mode dio \
               --flash-freq 80m \
@@ -229,7 +229,7 @@ jobs:
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
             python -m esptool \
               --chip esp32 \
-              merge_bin \
+              merge-bin \
               -o "$BUILD_DIR/firmware-ota-esp32.bin" \
               --flash-mode dio \
               --flash-freq 40m \
@@ -376,7 +376,7 @@ jobs:
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
             python -m esptool \
               --chip esp32s3 \
-              merge_bin \
+              merge-bin \
               -o "$BUILD_DIR/bootstrap-ota-esp32s3.bin" \
               --flash-mode dio \
               --flash-freq 80m \
@@ -476,7 +476,7 @@ jobs:
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
             python -m esptool \
               --chip esp32 \
-              merge_bin \
+              merge-bin \
               -o "$BUILD_DIR/bootstrap-ota-esp32.bin" \
               --flash-mode dio \
               --flash-freq 40m \
