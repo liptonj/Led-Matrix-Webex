@@ -116,11 +116,13 @@ jobs:
           # For OTA updates, we create a binary that includes both
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool merge_bin \
+            python -m esptool \
+              --chip esp32s3 \
+              merge_bin \
               -o "$BUILD_DIR/firmware-ota-esp32s3.bin" \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 8MB \
+              --flash-mode dio \
+              --flash-freq 80m \
+              --flash-size 8MB \
               0x0 "$BUILD_DIR/firmware.bin" \
               0x400000 "$BUILD_DIR/littlefs.bin"
             echo "✓ Created merged OTA binary for ESP32-S3"
@@ -225,11 +227,13 @@ jobs:
           # For OTA updates, we create a binary that includes both
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool merge_bin \
+            python -m esptool \
+              --chip esp32 \
+              merge_bin \
               -o "$BUILD_DIR/firmware-ota-esp32.bin" \
-              --flash_mode dio \
-              --flash_freq 40m \
-              --flash_size 4MB \
+              --flash-mode dio \
+              --flash-freq 40m \
+              --flash-size 4MB \
               0x0 "$BUILD_DIR/firmware.bin" \
               0x280000 "$BUILD_DIR/littlefs.bin"
             echo "✓ Created merged OTA binary for ESP32"
@@ -370,11 +374,13 @@ jobs:
           # For OTA updates, we create a binary that includes both
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool merge_bin \
+            python -m esptool \
+              --chip esp32s3 \
+              merge_bin \
               -o "$BUILD_DIR/bootstrap-ota-esp32s3.bin" \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 8MB \
+              --flash-mode dio \
+              --flash-freq 80m \
+              --flash-size 8MB \
               0x0 "$BUILD_DIR/firmware.bin" \
               0x400000 "$BUILD_DIR/littlefs.bin"
             echo "✓ Created merged OTA binary for Bootstrap ESP32-S3"
@@ -468,11 +474,13 @@ jobs:
           # For OTA updates, we create a binary that includes both
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool merge_bin \
+            python -m esptool \
+              --chip esp32 \
+              merge_bin \
               -o "$BUILD_DIR/bootstrap-ota-esp32.bin" \
-              --flash_mode dio \
-              --flash_freq 40m \
-              --flash_size 4MB \
+              --flash-mode dio \
+              --flash-freq 40m \
+              --flash-size 4MB \
               0x0 "$BUILD_DIR/firmware.bin" \
               0x280000 "$BUILD_DIR/littlefs.bin"
             echo "✓ Created merged OTA binary for Bootstrap ESP32"
