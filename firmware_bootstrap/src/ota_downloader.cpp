@@ -4,7 +4,9 @@
  */
 
 #include "ota_downloader.h"
+#include "debug.h"
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Update.h>
@@ -14,7 +16,10 @@ OTADownloader::OTADownloader()
     , status(OTAStatus::IDLE)
     , progress(0)
     , progress_callback(nullptr)
-    , release_count(0) {
+    , release_count(0)
+    , releases_cached(false)
+    , release_fetch_error("")
+    , last_release_fetch_ms(0) {
     // Initialize releases array
     for (int i = 0; i < MAX_RELEASES; i++) {
         releases[i].valid = false;
@@ -23,6 +28,27 @@ OTADownloader::OTADownloader()
 
 OTADownloader::~OTADownloader() {
 }
+
+namespace {
+void logConnectivityProbe(const char* host, uint16_t port) {
+    IPAddress resolved;
+    if (WiFi.hostByName(host, resolved)) {
+        Serial.printf("[OTA] DNS %s -> %s\n", host, resolved.toString().c_str());
+    } else {
+        Serial.printf("[OTA] DNS lookup failed for %s\n", host);
+        return;
+    }
+
+    WiFiClient tcp_client;
+    Serial.printf("[OTA] TCP probe %s:%u\n", host, port);
+    if (tcp_client.connect(resolved, port)) {
+        Serial.println("[OTA] TCP probe connected");
+        tcp_client.stop();
+    } else {
+        Serial.println("[OTA] TCP probe failed");
+    }
+}
+}  // namespace
 
 void OTADownloader::begin(ConfigStore* config) {
     config_store = config;
@@ -77,6 +103,9 @@ bool OTADownloader::checkAndInstall() {
             return false;
         }
         
+        // Update progress after successful fetch
+        updateProgress(10, "Found releases, downloading...");
+        
         // Install the first (newest) stable release
         Serial.printf("[OTA] Auto-installing latest stable: %s\n", releases[0].version.c_str());
         return installRelease(0);
@@ -120,9 +149,11 @@ bool OTADownloader::fetchFirmwareUrl(const String& releases_url, String& firmwar
     
     // Look for appropriate firmware in assets
     // Priority: 
-    //   1. firmware-esp32.bin (chip-specific for ESP32)
-    //   2. firmware.bin (generic main firmware)
-    //   3. Any .bin that's not bootstrap
+    //   1. firmware-ota-esp32s3.bin (merged: app + filesystem, chip-specific ESP32-S3)
+    //   2. firmware-ota-esp32.bin (merged: app + filesystem, chip-specific ESP32)
+    //   3. firmware-esp32.bin (chip-specific for ESP32)
+    //   4. firmware.bin (generic main firmware)
+    //   5. Any .bin that's not bootstrap
     JsonArray assets = doc["assets"].as<JsonArray>();
     
     String best_match_url;
@@ -147,17 +178,25 @@ bool OTADownloader::fetchFirmwareUrl(const String& releases_url, String& firmwar
         
         int priority = 0;
         
-        // Check for chip-specific firmware (highest priority)
+        // Check for chip-specific OTA firmware (HIGHEST PRIORITY - includes filesystem)
         #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 100;
+            if (name_lower.indexOf("ota") >= 0 && 
+                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
+                priority = 200;  // Highest: merged OTA binary for ESP32-S3
+            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 100;  // High: chip-specific firmware only
             }
         #else
             // Standard ESP32 - look for esp32 but NOT esp32s3
-            if ((name_lower.indexOf("esp32") >= 0) && 
+            if (name_lower.indexOf("ota") >= 0 &&
+                (name_lower.indexOf("esp32") >= 0) && 
                 (name_lower.indexOf("esp32s3") < 0) && 
                 (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 100;
+                priority = 200;  // Highest: merged OTA binary for ESP32
+            } else if ((name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                priority = 100;  // High: chip-specific firmware only
             }
         #endif
         
@@ -334,7 +373,19 @@ bool OTADownloader::isBetaVersion(const String& version) {
 }
 
 int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
+    LOG_FUNC_ENTRY(OTA_TAG);
+    
+    last_release_fetch_ms = millis();
+    release_fetch_error = "";
+    
+    Serial.println("[OTA] ==========================================");
+    Serial.printf("[OTA] Fetch releases request (include prereleases: %s)\n", 
+                  include_prereleases ? "yes" : "no");
+
     if (!config_store) {
+        LOG_ERROR(OTA_TAG, "Config store is null");
+        release_fetch_error = "Config store not initialized";
+        Serial.println("[OTA] ==========================================");
         return 0;
     }
     
@@ -348,32 +399,105 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
     String ota_url = config_store->getOTAUrl();
     String releases_url = ota_url;
     
+    LOG_DEBUG(OTA_TAG, "OTA URL from config: %s", ota_url.c_str());
+    
     // Convert /latest to full releases list
     if (releases_url.endsWith("/latest")) {
         releases_url = releases_url.substring(0, releases_url.length() - 7);
+        LOG_DEBUG(OTA_TAG, "Converted to releases list URL: %s", releases_url.c_str());
     }
     
-    Serial.printf("[OTA] Fetching releases from: %s\n", releases_url.c_str());
+    // Add pagination limit to reduce memory usage and speed up fetch
+    // Limit to 10 releases per page (only fetch first page)
+    if (releases_url.indexOf('?') >= 0) {
+        releases_url += "&per_page=10";
+    } else {
+        releases_url += "?per_page=10";
+    }
+    
+    LOG_INFO(OTA_TAG, "Fetching releases from: %s", releases_url.c_str());
+
+    logConnectivityProbe("api.github.com", 443);
     
     WiFiClientSecure client;
     client.setInsecure();
+    LOG_DEBUG(OTA_TAG, "Created WiFiClientSecure (insecure mode)");
     
     HTTPClient http;
     http.begin(client, releases_url);
     http.addHeader("User-Agent", "ESP32-Bootstrap");
     http.addHeader("Accept", "application/vnd.github.v3+json");
-    http.setTimeout(30000);
+    http.setTimeout(60000);  // 60 seconds - increased from 30s for slower networks
+    LOG_DEBUG(OTA_TAG, "HTTP client configured, timeout=60s");
     
-    int http_code = http.GET();
+    // Retry logic: attempt up to 2 times
+    int max_attempts = 2;
+    int http_code = -1;
+    String payload;
     
-    if (http_code != HTTP_CODE_OK) {
-        Serial.printf("[OTA] HTTP error: %d\n", http_code);
-        http.end();
-        return 0;
+    Serial.printf("[OTA] Will attempt up to %d times with 60s timeout per attempt\n", max_attempts);
+    
+    for (int attempt = 1; attempt <= max_attempts; attempt++) {
+        if (attempt > 1) {
+            LOG_INFO(OTA_TAG, "Retry attempt %d/%d...", attempt, max_attempts);
+            Serial.printf("[OTA] Retry attempt %d/%d after failure\n", attempt, max_attempts);
+            delay(2000);  // Wait 2 seconds before retry
+        }
+        
+        LOG_DEBUG(OTA_TAG, "Starting HTTP GET request (attempt %d)...", attempt);
+        Serial.printf("[OTA] → Sending HTTP GET (attempt %d/%d)...\n", attempt, max_attempts);
+        unsigned long req_start = millis();
+        
+        http_code = http.GET();
+        
+        unsigned long req_duration = millis() - req_start;
+        LOG_DEBUG(OTA_TAG, "HTTP response code: %d", http_code);
+        Serial.printf("[OTA] ← HTTP response: %d (took %lu ms)\n", http_code, req_duration);
+        
+        if (http_code == HTTP_CODE_OK) {
+            payload = http.getString();
+            LOG_DEBUG(OTA_TAG, "Received %d bytes from GitHub", payload.length());
+            Serial.printf("[OTA] ✓ Successfully received %d bytes\n", payload.length());
+            break;  // Success, exit retry loop
+        } else if (http_code > 0) {
+            // HTTP error (4xx, 5xx)
+            LOG_ERROR(OTA_TAG, "HTTP error: %d", http_code);
+            if (attempt == max_attempts) {
+                // Last attempt failed
+                if (http_code == 403) {
+                    release_fetch_error = "GitHub API rate limit exceeded";
+                } else if (http_code == 404) {
+                    release_fetch_error = "Repository or releases not found (404)";
+                } else if (http_code >= 500) {
+                    release_fetch_error = String("GitHub server error (") + String(http_code) + ")";
+                } else {
+                    release_fetch_error = String("HTTP error: ") + String(http_code);
+                }
+            }
+        } else {
+            // Connection error (timeout, DNS, etc.)
+            LOG_ERROR(OTA_TAG, "Connection error: %d", http_code);
+            if (attempt == max_attempts) {
+                if (http_code == HTTPC_ERROR_CONNECTION_REFUSED) {
+                    release_fetch_error = "Connection refused - check network";
+                } else if (http_code == HTTPC_ERROR_CONNECTION_LOST) {
+                    release_fetch_error = "Connection lost - check WiFi";
+                } else if (http_code == HTTPC_ERROR_READ_TIMEOUT) {
+                    release_fetch_error = "Request timeout - slow network";
+                } else {
+                    release_fetch_error = String("Connection error: ") + String(http_code);
+                }
+            }
+        }
     }
     
-    String payload = http.getString();
     http.end();
+    
+    // Check if all attempts failed
+    if (http_code != HTTP_CODE_OK) {
+        Serial.printf("[OTA] All %d attempts failed. Error: %s\n", max_attempts, release_fetch_error.c_str());
+        return 0;
+    }
     
     // Parse JSON array of releases
     JsonDocument doc;
@@ -381,6 +505,16 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
     
     if (error) {
         Serial.printf("[OTA] JSON parse error: %s\n", error.c_str());
+        // Provide more detailed error message
+        if (error == DeserializationError::NoMemory) {
+            release_fetch_error = "Out of memory parsing releases (too many releases)";
+        } else if (error == DeserializationError::InvalidInput) {
+            release_fetch_error = "Invalid JSON format from GitHub";
+        } else if (error == DeserializationError::IncompleteInput) {
+            release_fetch_error = "Incomplete JSON response from GitHub";
+        } else {
+            release_fetch_error = String("JSON parse error: ") + error.c_str();
+        }
         return 0;
     }
     
@@ -417,6 +551,7 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
         // Find firmware asset for this chip
         JsonArray assets = release["assets"].as<JsonArray>();
         String firmware_url = "";
+        int best_priority = 0;
         
         for (JsonObject asset : assets) {
             String name = asset["name"].as<String>();
@@ -428,23 +563,36 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
                 continue;
             }
             
-            // Prioritize chip-specific firmware
+            int priority = 0;
+            
+            // Prioritize merged OTA binaries (include filesystem)
             #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                firmware_url = asset["browser_download_url"].as<String>();
-                break;
+            if (name_lower.indexOf("ota") >= 0 && 
+                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
+                priority = 200;  // Highest: merged OTA binary
+            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 100;  // High: chip-specific firmware only
             }
             #else
-            if ((name_lower.indexOf("esp32") >= 0) && 
+            if (name_lower.indexOf("ota") >= 0 &&
+                (name_lower.indexOf("esp32") >= 0) && 
                 (name_lower.indexOf("esp32s3") < 0) && 
                 (name_lower.indexOf("esp32-s3") < 0)) {
-                firmware_url = asset["browser_download_url"].as<String>();
-                break;
+                priority = 200;  // Highest: merged OTA binary
+            } else if ((name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                priority = 100;  // High: chip-specific firmware only
             }
             #endif
             
             // Fallback to generic firmware.bin
-            if (name_lower == "firmware.bin" && firmware_url.isEmpty()) {
+            if (name_lower == "firmware.bin" && priority == 0) {
+                priority = 50;
+            }
+            
+            if (priority > best_priority) {
+                best_priority = priority;
                 firmware_url = asset["browser_download_url"].as<String>();
             }
         }
@@ -466,6 +614,22 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
     }
     
     Serial.printf("[OTA] Total valid releases: %d\n", release_count);
+    
+    // Provide helpful feedback if no releases found
+    if (release_count == 0) {
+        if (releasesArray.size() > 0) {
+            release_fetch_error = "No compatible firmware found in releases";
+            Serial.println("[OTA] No releases matched the filter criteria or had compatible firmware");
+        } else {
+            release_fetch_error = "No releases published in repository";
+            Serial.println("[OTA] Repository has no releases");
+        }
+    } else {
+        releases_cached = true;
+        release_fetch_error = "";
+    }
+    
+    Serial.println("[OTA] ==========================================");
     return release_count;
 }
 

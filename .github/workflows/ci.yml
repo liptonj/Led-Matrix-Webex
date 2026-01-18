@@ -106,6 +106,28 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32s3
 
+      - name: Create merged OTA binary (firmware + filesystem)
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          
+          # ESP32-S3 uses 8MB flash with partitions at:
+          # ota_0:    0x210000 (2MB app)
+          # spiffs:   0x610000 (filesystem)
+          # For OTA updates, we create a binary that includes both
+          
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            python -m esptool merge_bin \
+              -o "$BUILD_DIR/firmware-ota-esp32s3.bin" \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0 "$BUILD_DIR/firmware.bin" \
+              0x400000 "$BUILD_DIR/littlefs.bin"
+            echo "✓ Created merged OTA binary for ESP32-S3"
+          else
+            echo "⚠ Skipping merged binary - files not found"
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -123,6 +145,12 @@ jobs:
           
           if [ -f "$BUILD_DIR/littlefs.bin" ]; then
             cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs.bin
+          fi
+          
+          # Copy merged OTA binary (firmware + filesystem combined)
+          if [ -f "$BUILD_DIR/firmware-ota-esp32s3.bin" ]; then
+            cp "$BUILD_DIR/firmware-ota-esp32s3.bin" artifacts/firmware-ota-esp32s3.bin
+            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "ESP32-S3 artifacts:"
@@ -184,6 +212,31 @@ jobs:
       - name: Build firmware (ESP32)
         run: pio run -e esp32
 
+      - name: Build filesystem image
+        run: pio run -t buildfs -e esp32
+
+      - name: Create merged OTA binary (firmware + filesystem)
+        run: |
+          BUILD_DIR=".pio/build/esp32"
+          
+          # ESP32 uses 4MB flash with partitions at:
+          # ota_0:    0x150000 (1.25MB app)
+          # spiffs:   0x3D0000 (filesystem)
+          # For OTA updates, we create a binary that includes both
+          
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            python -m esptool merge_bin \
+              -o "$BUILD_DIR/firmware-ota-esp32.bin" \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              0x0 "$BUILD_DIR/firmware.bin" \
+              0x280000 "$BUILD_DIR/littlefs.bin"
+            echo "✓ Created merged OTA binary for ESP32"
+          else
+            echo "⚠ Skipping merged binary - files not found"
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -197,6 +250,16 @@ jobs:
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
+          fi
+          
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
+          fi
+          
+          # Copy merged OTA binary (firmware + filesystem combined)
+          if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
+            cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
+            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "ESP32 artifacts:"
@@ -294,6 +357,31 @@ jobs:
       - name: Build bootstrap firmware (ESP32-S3)
         run: pio run -e esp32s3
 
+      - name: Build filesystem image
+        run: pio run -t buildfs -e esp32s3
+
+      - name: Create merged OTA binary (firmware + filesystem)
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          
+          # ESP32-S3 uses 8MB flash with partitions at:
+          # ota_0:    0x210000 (2MB app)
+          # spiffs:   0x610000 (filesystem)
+          # For OTA updates, we create a binary that includes both
+          
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            python -m esptool merge_bin \
+              -o "$BUILD_DIR/bootstrap-ota-esp32s3.bin" \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0 "$BUILD_DIR/firmware.bin" \
+              0x400000 "$BUILD_DIR/littlefs.bin"
+            echo "✓ Created merged OTA binary for Bootstrap ESP32-S3"
+          else
+            echo "⚠ Skipping merged binary - files not found"
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -307,6 +395,16 @@ jobs:
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
+          fi
+          
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32s3.bin
+          fi
+          
+          # Copy merged OTA binary (firmware + filesystem combined)
+          if [ -f "$BUILD_DIR/bootstrap-ota-esp32s3.bin" ]; then
+            cp "$BUILD_DIR/bootstrap-ota-esp32s3.bin" artifacts/bootstrap-ota-esp32s3.bin
+            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "Bootstrap ESP32-S3 artifacts:"
@@ -357,6 +455,31 @@ jobs:
       - name: Build bootstrap firmware (ESP32)
         run: pio run -e esp32
 
+      - name: Build filesystem image
+        run: pio run -t buildfs -e esp32
+
+      - name: Create merged OTA binary (firmware + filesystem)
+        run: |
+          BUILD_DIR=".pio/build/esp32"
+          
+          # ESP32 uses 4MB flash with partitions at:
+          # ota_0:    0x150000 (1.25MB app)
+          # spiffs:   0x3D0000 (filesystem)
+          # For OTA updates, we create a binary that includes both
+          
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            python -m esptool merge_bin \
+              -o "$BUILD_DIR/bootstrap-ota-esp32.bin" \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              0x0 "$BUILD_DIR/firmware.bin" \
+              0x280000 "$BUILD_DIR/littlefs.bin"
+            echo "✓ Created merged OTA binary for Bootstrap ESP32"
+          else
+            echo "⚠ Skipping merged binary - files not found"
+          fi
+
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
@@ -370,6 +493,16 @@ jobs:
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
+          fi
+          
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
+          fi
+          
+          # Copy merged OTA binary (firmware + filesystem combined)
+          if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
+            cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
+            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "Bootstrap ESP32 artifacts:"
@@ -476,6 +609,13 @@ jobs:
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
             release/firmware/firmware-esp32s3.bin
             release/firmware/firmware-esp32.bin
+            release/firmware/firmware-ota-esp32s3.bin
+            release/firmware/firmware-ota-esp32.bin
             release/firmware/littlefs.bin
+            release/firmware/littlefs-esp32.bin
             release/bootstrap/bootstrap-esp32s3.bin
             release/bootstrap/bootstrap-esp32.bin
+            release/bootstrap/bootstrap-ota-esp32s3.bin
+            release/bootstrap/bootstrap-ota-esp32.bin
+            release/bootstrap/littlefs-esp32s3.bin
+            release/bootstrap/littlefs-esp32.bin

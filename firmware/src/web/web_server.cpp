@@ -48,9 +48,9 @@ void WebServerManager::loop() {
 }
 
 void WebServerManager::setupRoutes() {
-    // Serve static files from LittleFS
-    server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-
+    // IMPORTANT: Register API endpoints FIRST, before static file handlers
+    // This prevents VFS errors when checking for non-existent static files
+    
     // API endpoints
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
@@ -117,9 +117,6 @@ void WebServerManager::setupRoutes() {
         }
     );
 
-    // Serve embedded app static files
-    server->serveStatic("/embedded/", LittleFS, "/embedded/").setDefaultFile("index.html");
-
     // Module management API endpoints
     server->on("/api/modules", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleGetModules(request);
@@ -145,9 +142,24 @@ void WebServerManager::setupRoutes() {
         }
     );
 
-    // 404 handler
+    // STATIC FILE HANDLERS - Register AFTER all API endpoints
+    // This ensures API routes are checked first, preventing VFS errors
+    
+    // Serve embedded app static files
+    server->serveStatic("/embedded/", LittleFS, "/embedded/").setDefaultFile("index.html");
+    
+    // Serve main app static files (must be last)
+    server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+
+    // 404 handler for anything not matched
     server->onNotFound([](AsyncWebServerRequest* request) {
-        request->send(404, "application/json", "{\"error\":\"Not found\"}");
+        // Check if it's an API request that wasn't found
+        if (request->url().startsWith("/api/")) {
+            request->send(404, "application/json", "{\"error\":\"API endpoint not found\"}");
+        } else {
+            // For non-API requests, try serving index.html (SPA fallback)
+            request->send(LittleFS, "/index.html", "text/html");
+        }
     });
 }
 
@@ -363,10 +375,44 @@ void WebServerManager::handleOAuthCallback(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
-    // This will be filled in by OTA manager
     JsonDocument doc;
     doc["current_version"] = FIRMWARE_VERSION;
-    doc["checking"] = true;
+    
+    // Check for updates using OTA manager
+    Serial.println("[WEB] Checking for OTA updates...");
+    bool update_checked = ota_manager.checkForUpdate();
+    
+    if (update_checked) {
+        String latest = ota_manager.getLatestVersion();
+        bool available = ota_manager.isUpdateAvailable();
+        
+        // Ensure we have a valid version string
+        if (latest.isEmpty()) {
+            doc["latest_version"] = "Unknown";
+            doc["update_available"] = false;
+            doc["error"] = "No version information available";
+        } else {
+            doc["latest_version"] = latest;
+            doc["update_available"] = available;
+            
+            if (available) {
+                String download_url = ota_manager.getDownloadUrl();
+                if (!download_url.isEmpty()) {
+                    doc["download_url"] = download_url;
+                }
+                Serial.printf("[WEB] Update available: %s -> %s\n", 
+                             FIRMWARE_VERSION, latest.c_str());
+            } else {
+                Serial.println("[WEB] Already on latest version");
+            }
+        }
+    } else {
+        // Check failed
+        doc["latest_version"] = "Check failed";
+        doc["update_available"] = false;
+        doc["error"] = "Failed to check for updates. Check OTA URL configuration and network connection.";
+        Serial.println("[WEB] OTA check failed");
+    }
 
     String response;
     serializeJson(doc, response);
@@ -374,10 +420,25 @@ void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Update started...\"}");
-
-    // Trigger OTA update
-    // This would call ota_manager.performUpdate()
+    // Check if an update is available first
+    if (!ota_manager.isUpdateAvailable()) {
+        request->send(400, "application/json", 
+                     "{\"success\":false,\"message\":\"No update available. Check for updates first.\"}");
+        return;
+    }
+    
+    Serial.println("[WEB] Starting OTA update...");
+    request->send(200, "application/json", 
+                 "{\"success\":true,\"message\":\"Update started. Device will restart...\"}");
+    
+    // Give the response time to be sent
+    delay(100);
+    
+    // Trigger OTA update (this will reboot on success)
+    if (!ota_manager.performUpdate()) {
+        Serial.println("[WEB] OTA update failed");
+        // Note: If we get here, the update failed and didn't reboot
+    }
 }
 
 void WebServerManager::handleReboot(AsyncWebServerRequest* request) {

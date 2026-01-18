@@ -5,6 +5,8 @@
 
 #include "config_manager.h"
 #include <ArduinoJson.h>
+#include <esp_partition.h>
+#include <esp_ota_ops.h>
 
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
@@ -303,11 +305,88 @@ void ConfigManager::setAutoUpdate(bool enabled) {
 // Factory Reset
 
 void ConfigManager::factoryReset() {
-    Serial.println("[CONFIG] Performing factory reset...");
+    Serial.println("[CONFIG] =========================================");
+    Serial.println("[CONFIG] PERFORMING FULL FACTORY RESET");
+    Serial.println("[CONFIG] =========================================");
+    
+    // Step 1: Clear all NVS configuration
+    Serial.println("[CONFIG] Step 1: Clearing NVS configuration...");
     preferences.clear();
     cache_loaded = false;
     loadCache();
-    Serial.println("[CONFIG] Factory reset complete");
+    Serial.println("[CONFIG] ✓ NVS cleared");
+    
+    // Step 2: Erase OTA data partition (forces boot to factory partition)
+    Serial.println("[CONFIG] Step 2: Erasing OTA data partition...");
+    const esp_partition_t* otadata_partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_OTA,
+        NULL
+    );
+    
+    if (otadata_partition != NULL) {
+        esp_err_t err = esp_partition_erase_range(otadata_partition, 0, otadata_partition->size);
+        if (err == ESP_OK) {
+            Serial.println("[CONFIG] ✓ OTA data erased - will boot to factory partition");
+        } else {
+            Serial.printf("[CONFIG] ⚠ Failed to erase OTA data: %s\n", esp_err_to_name(err));
+        }
+    }
+    
+    // Step 3: Erase filesystem partition
+    Serial.println("[CONFIG] Step 3: Erasing filesystem partition...");
+    const esp_partition_t* spiffs_partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
+        NULL
+    );
+    
+    if (spiffs_partition != NULL) {
+        esp_err_t err = esp_partition_erase_range(spiffs_partition, 0, spiffs_partition->size);
+        if (err == ESP_OK) {
+            Serial.println("[CONFIG] ✓ Filesystem erased");
+        } else {
+            Serial.printf("[CONFIG] ⚠ Failed to erase filesystem: %s\n", esp_err_to_name(err));
+        }
+    }
+    
+    // Step 4: Optionally erase OTA partitions (free up space)
+    Serial.println("[CONFIG] Step 4: Erasing OTA partitions...");
+    
+    const esp_partition_t* ota_0 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP,
+        ESP_PARTITION_SUBTYPE_APP_OTA_0,
+        NULL
+    );
+    
+    if (ota_0 != NULL) {
+        esp_err_t err = esp_partition_erase_range(ota_0, 0, ota_0->size);
+        if (err == ESP_OK) {
+            Serial.println("[CONFIG] ✓ OTA_0 partition erased");
+        } else {
+            Serial.printf("[CONFIG] ⚠ Failed to erase OTA_0: %s\n", esp_err_to_name(err));
+        }
+    }
+    
+    const esp_partition_t* ota_1 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP,
+        ESP_PARTITION_SUBTYPE_APP_OTA_1,
+        NULL
+    );
+    
+    if (ota_1 != NULL) {
+        esp_err_t err = esp_partition_erase_range(ota_1, 0, ota_1->size);
+        if (err == ESP_OK) {
+            Serial.println("[CONFIG] ✓ OTA_1 partition erased");
+        } else {
+            Serial.printf("[CONFIG] ⚠ Failed to erase OTA_1: %s\n", esp_err_to_name(err));
+        }
+    }
+    
+    Serial.println("[CONFIG] =========================================");
+    Serial.println("[CONFIG] FACTORY RESET COMPLETE");
+    Serial.println("[CONFIG] Device will reboot to bootstrap firmware");
+    Serial.println("[CONFIG] =========================================");
 }
 
 // Export/Import Configuration

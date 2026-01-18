@@ -64,13 +64,65 @@ bool OTAManager::checkForUpdate() {
     latest_version = extractVersion(tag);
     
     // Find the firmware binary in assets
+    // Priority:
+    //   1. firmware-ota-esp32s3.bin or firmware-ota-esp32.bin (merged: app + filesystem)
+    //   2. firmware-esp32s3.bin or firmware-esp32.bin (chip-specific)
+    //   3. firmware.bin (generic)
     JsonArray assets = doc["assets"].as<JsonArray>();
+    int best_priority = 0;
+    
     for (JsonObject asset : assets) {
         String name = asset["name"].as<String>();
-        if (name.endsWith(".bin")) {
-            download_url = asset["browser_download_url"].as<String>();
-            break;
+        String name_lower = name;
+        name_lower.toLowerCase();
+        
+        if (!name_lower.endsWith(".bin")) {
+            continue;
         }
+        
+        // Skip bootstrap firmware
+        if (name_lower.indexOf("bootstrap") >= 0) {
+            continue;
+        }
+        
+        int priority = 0;
+        
+        // Check for merged OTA binary (highest priority)
+        #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("ota") >= 0 && 
+                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
+                priority = 200;
+            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 100;
+            }
+        #else
+            if (name_lower.indexOf("ota") >= 0 &&
+                (name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                priority = 200;
+            } else if ((name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                priority = 100;
+            }
+        #endif
+        
+        // Generic firmware.bin
+        if (name_lower == "firmware.bin") {
+            priority = max(priority, 50);
+        }
+        
+        if (priority > best_priority) {
+            best_priority = priority;
+            download_url = asset["browser_download_url"].as<String>();
+        }
+    }
+    
+    // Check if we found a suitable firmware
+    if (download_url.isEmpty()) {
+        Serial.println("[OTA] No suitable firmware found in release");
+        return false;
     }
     
     // Compare versions
@@ -83,7 +135,7 @@ bool OTAManager::checkForUpdate() {
         Serial.println("[OTA] Already on latest version");
     }
     
-    return update_available;
+    return true;  // Successfully checked (even if no update available)
 }
 
 bool OTAManager::performUpdate() {
