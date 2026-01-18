@@ -5,8 +5,12 @@
 
 #include "config_manager.h"
 #include <ArduinoJson.h>
+
+// ESP-specific headers only for actual ESP32 builds
+#ifndef NATIVE_BUILD
 #include <esp_partition.h>
 #include <esp_ota_ops.h>
+#endif
 
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
@@ -316,6 +320,9 @@ void ConfigManager::factoryReset() {
     loadCache();
     Serial.println("[CONFIG] ✓ NVS cleared");
     
+#ifndef NATIVE_BUILD
+    // ESP32-specific partition operations (not available in simulation)
+    
     // Step 2: Erase OTA data partition (forces boot to factory partition)
     Serial.println("[CONFIG] Step 2: Erasing OTA data partition...");
     const esp_partition_t* otadata_partition = esp_partition_find_first(
@@ -382,6 +389,9 @@ void ConfigManager::factoryReset() {
             Serial.printf("[CONFIG] ⚠ Failed to erase OTA_1: %s\n", esp_err_to_name(err));
         }
     }
+#else
+    Serial.println("[CONFIG] Note: Partition erase skipped in simulation build");
+#endif
     
     Serial.println("[CONFIG] =========================================");
     Serial.println("[CONFIG] FACTORY RESET COMPLETE");

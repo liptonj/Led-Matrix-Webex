@@ -4,11 +4,12 @@
  */
 
 #include "web_server.h"
+#include "../ota/ota_manager.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
 // External reference to OTA manager for update functionality
-extern class OTAManager ota_manager;
+extern OTAManager ota_manager;
 
 WebServerManager::WebServerManager()
     : server(nullptr), config_manager(nullptr), app_state(nullptr), module_manager(nullptr), running(false) {
