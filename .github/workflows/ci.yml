@@ -146,7 +146,7 @@ jobs:
           fi
           
           if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs.bin
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32s3.bin
           fi
           
           # Copy merged OTA binary (firmware + filesystem combined)
@@ -619,7 +619,7 @@ jobs:
             release/firmware/firmware-esp32.bin
             release/firmware/firmware-ota-esp32s3.bin
             release/firmware/firmware-ota-esp32.bin
-            release/firmware/littlefs.bin
+            release/firmware/littlefs-esp32s3.bin
             release/firmware/littlefs-esp32.bin
             release/bootstrap/bootstrap-esp32s3.bin
             release/bootstrap/bootstrap-esp32.bin
