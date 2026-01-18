@@ -12,7 +12,7 @@
 #include "config_store.h"
 
 // OTA Configuration
-#define OTA_DOWNLOAD_TIMEOUT_MS 300000UL  // 5 minutes (unsigned long)
+#define OTA_DOWNLOAD_TIMEOUT_MS 600000UL  // 10 minutes (increased from 5 min)
 #define OTA_BUFFER_SIZE 1024  // Reduced from 4096 to prevent stack overflow
 #define MAX_RELEASES 10  // Maximum number of releases to track
 
@@ -126,6 +126,24 @@ public:
     int getReleaseCount() const { return release_count; }
     
     /**
+     * @brief Check if releases have been cached
+     * @return true if releases are available
+     */
+    bool hasReleasesCached() const { return releases_cached; }
+
+    /**
+     * @brief Get last release fetch error (if any)
+     * @return Error message or empty string
+     */
+    String getReleaseFetchError() const { return release_fetch_error; }
+
+    /**
+     * @brief Get timestamp (ms) of last release fetch attempt
+     * @return millis() value of last attempt
+     */
+    unsigned long getLastReleaseFetchMs() const { return last_release_fetch_ms; }
+    
+    /**
      * @brief Get release info by index
      * @param index Release index (0 = newest)
      * @return ReleaseInfo structure
@@ -156,6 +174,9 @@ private:
     // Available releases
     ReleaseInfo releases[MAX_RELEASES];
     int release_count;
+    bool releases_cached;  // True if releases have been fetched
+    String release_fetch_error;
+    unsigned long last_release_fetch_ms;
 
     /**
      * @brief Fetch and parse GitHub releases JSON
