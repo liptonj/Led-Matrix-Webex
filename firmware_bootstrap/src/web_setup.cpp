@@ -20,15 +20,36 @@ WebSetup::WebSetup()
 }
 
 WebSetup::~WebSetup() {
+    stop();
+}
+
+void WebSetup::stop() {
     if (server) {
+        server->end();
         delete server;
+        server = nullptr;
     }
     if (dns_server) {
+        dns_server->stop();
         delete dns_server;
+        dns_server = nullptr;
     }
+    running = false;
+    captive_portal_active = false;
+    Serial.println("[WEB] Web server stopped");
+}
+
+bool WebSetup::isRunning() const {
+    return running;
 }
 
 void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* ota) {
+    // Prevent double initialization
+    if (running) {
+        Serial.println("[WEB] Web server already running, skipping initialization");
+        return;
+    }
+
     config_store = config;
     wifi_provisioner = wifi;
     ota_downloader = ota;
@@ -44,8 +65,12 @@ void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* 
     // Setup routes
     setupRoutes();
 
-    // Setup captive portal if AP is active
-    setupCaptivePortal();
+    // Setup captive portal only if AP is active
+    if (wifi_provisioner && wifi_provisioner->isAPActive()) {
+        setupCaptivePortal();
+    } else {
+        Serial.println("[WEB] Skipping captive portal (AP not active)");
+    }
 
     // Start server
     server->begin();
@@ -62,17 +87,26 @@ void WebSetup::loop() {
 }
 
 void WebSetup::setupCaptivePortal() {
+    // Verify AP IP is valid before starting DNS
+    IPAddress ap_ip = WiFi.softAPIP();
+    if (ap_ip == IPAddress(0, 0, 0, 0)) {
+        Serial.println("[WEB] Cannot start captive portal - AP IP is 0.0.0.0");
+        return;
+    }
+
     // Start DNS server for captive portal (redirect all DNS to our IP)
     dns_server = new DNSServer();
 
     // Start DNS server - redirect all domains to the AP IP
-    if (dns_server->start(DNS_PORT, "*", WiFi.softAPIP())) {
+    if (dns_server->start(DNS_PORT, "*", ap_ip)) {
         captive_portal_active = true;
         Serial.println("[WEB] Captive portal DNS started");
         Serial.printf("[WEB] All DNS queries will redirect to %s\n",
-                      WiFi.softAPIP().toString().c_str());
+                      ap_ip.toString().c_str());
     } else {
         Serial.println("[WEB] Failed to start captive portal DNS");
+        delete dns_server;
+        dns_server = nullptr;
     }
 }
 

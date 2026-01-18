@@ -102,6 +102,9 @@ jobs:
       - name: Build firmware (ESP32-S3)
         run: pio run -e esp32s3
 
+      - name: Build firmware (ESP32)
+        run: pio run -e esp32
+
       - name: Build native simulation
         run: pio run -e native
 
@@ -121,28 +124,33 @@ jobs:
       - name: Collect firmware artifacts
         run: |
           mkdir -p artifacts
+
+          # ESP32-S3 artifacts
           BUILD_DIR=".pio/build/esp32s3"
+          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
 
-          # Main firmware (required)
-          cp "$BUILD_DIR/firmware.bin" artifacts/firmware.bin
-
-          # Bootloader - check multiple possible locations
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader.bin
-          elif [ -f "$BUILD_DIR/bootloader/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader/bootloader.bin" artifacts/bootloader.bin
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
 
-          # Partition table
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions.bin
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
           fi
 
-          # Filesystem image
           if [ -f "$BUILD_DIR/littlefs.bin" ]; then
             cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs.bin
-          elif [ -f "$BUILD_DIR/spiffs.bin" ]; then
-            cp "$BUILD_DIR/spiffs.bin" artifacts/filesystem.bin
+          fi
+
+          # ESP32 artifacts
+          BUILD_DIR=".pio/build/esp32"
+          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
+
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
+          fi
+
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
           fi
 
           # List collected artifacts
@@ -194,22 +202,35 @@ jobs:
       - name: Build bootstrap firmware (ESP32-S3)
         run: pio run -e esp32s3
 
+      - name: Build bootstrap firmware (ESP32)
+        run: pio run -e esp32
+
       - name: Collect bootstrap artifacts
         run: |
           mkdir -p artifacts
+
+          # ESP32-S3 bootstrap
           BUILD_DIR=".pio/build/esp32s3"
+          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32s3.bin
 
-          # Bootstrap firmware
-          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap.bin
-
-          # Bootloader
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader.bin
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
 
-          # Partition table
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions.bin
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
+          fi
+
+          # ESP32 bootstrap
+          BUILD_DIR=".pio/build/esp32"
+          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32.bin
+
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
+          fi
+
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
           fi
 
           echo "Collected bootstrap artifacts:"
@@ -280,6 +301,8 @@ jobs:
             release/firmware-${{ steps.version.outputs.VERSION }}.zip
             release/bootstrap-${{ steps.version.outputs.VERSION }}.zip
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
-            release/firmware/firmware.bin
+            release/firmware/firmware-esp32s3.bin
+            release/firmware/firmware-esp32.bin
             release/firmware/littlefs.bin
-            release/bootstrap/bootstrap.bin
+            release/bootstrap/bootstrap-esp32s3.bin
+            release/bootstrap/bootstrap-esp32.bin

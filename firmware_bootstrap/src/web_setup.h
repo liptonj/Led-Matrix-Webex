@@ -44,6 +44,17 @@ public:
     void loop();
 
     /**
+     * @brief Stop the web server and cleanup resources
+     */
+    void stop();
+
+    /**
+     * @brief Check if web server is running
+     * @return true if server is running
+     */
+    bool isRunning() const;
+
+    /**
      * @brief Check if an OTA update was requested via web
      * @return true if OTA was triggered
      */

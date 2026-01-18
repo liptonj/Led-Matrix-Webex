@@ -13,7 +13,7 @@
 
 // OTA Configuration
 #define OTA_DOWNLOAD_TIMEOUT_MS 300000UL  // 5 minutes (unsigned long)
-#define OTA_BUFFER_SIZE 4096
+#define OTA_BUFFER_SIZE 1024  // Reduced from 4096 to prevent stack overflow
 
 /**
  * @brief OTA Download Status

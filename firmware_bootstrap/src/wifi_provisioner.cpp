@@ -77,9 +77,14 @@ bool WiFiProvisioner::connect(const String& ssid, const String& password, bool s
 void WiFiProvisioner::startAPWithSmartConfig() {
     Serial.println("[WIFI] Starting AP mode...");
 
-    // Use AP-only mode first for better compatibility
-    WiFi.mode(WIFI_AP);
+    // Fully reset WiFi
+    WiFi.disconnect(true);
+    WiFi.softAPdisconnect(true);
     delay(100);
+
+    // Use AP-only mode for maximum compatibility
+    WiFi.mode(WIFI_AP);
+    delay(500);
 
     // Configure AP settings before starting
     WiFi.softAPConfig(
@@ -87,12 +92,15 @@ void WiFiProvisioner::startAPWithSmartConfig() {
         IPAddress(192, 168, 4, 1),    // Gateway
         IPAddress(255, 255, 255, 0)   // Subnet
     );
+    delay(100);
 
     // Start Access Point (open network - no password for easy setup)
     bool ap_result = WiFi.softAP(AP_SSID, nullptr, AP_CHANNEL, 0, AP_MAX_CONNECTIONS);
 
     if (ap_result) {
         ap_active = true;
+        // Give AP time to fully initialize
+        delay(1000);
         Serial.printf("[WIFI] AP started successfully!\n");
         Serial.printf("[WIFI] SSID: '%s' (open network)\n", AP_SSID);
         Serial.printf("[WIFI] IP: %s\n", WiFi.softAPIP().toString().c_str());
@@ -104,18 +112,13 @@ void WiFiProvisioner::startAPWithSmartConfig() {
         return;
     }
 
-    // Now switch to AP+STA for SmartConfig
-    delay(500);
-    WiFi.mode(WIFI_AP_STA);
-    delay(100);
-
-    // Start SmartConfig
-    WiFi.beginSmartConfig();
-    smartconfig_active = true;
+    // Skip SmartConfig for now - AP-only mode is more reliable
+    // SmartConfig can be enabled later if needed
+    smartconfig_active = false;
     smartconfig_done = false;
-    smartconfig_start_time = millis();
+    smartconfig_start_time = 0;
 
-    Serial.println("[WIFI] SmartConfig listening... Use ESP Touch app to configure");
+    Serial.println("[WIFI] AP mode ready (SmartConfig disabled for reliability)");
 }
 
 void WiFiProvisioner::stopProvisioning() {

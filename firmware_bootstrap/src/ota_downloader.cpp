@@ -107,20 +107,76 @@ bool OTADownloader::fetchFirmwareUrl(const String& releases_url, String& firmwar
         return false;
     }
     
-    // Look for .bin file in assets
+    // Look for appropriate firmware in assets
+    // Priority: 
+    //   1. firmware-esp32.bin (chip-specific for ESP32)
+    //   2. firmware.bin (generic main firmware)
+    //   3. Any .bin that's not bootstrap
     JsonArray assets = doc["assets"].as<JsonArray>();
+    
+    String best_match_url;
+    String best_match_name;
+    int best_priority = 0;  // Higher is better
     
     for (JsonObject asset : assets) {
         String name = asset["name"].as<String>();
-        if (name.endsWith(".bin")) {
-            firmware_url = asset["browser_download_url"].as<String>();
-            Serial.printf("[OTA] Found firmware: %s\n", name.c_str());
-            updateProgress(10, "Found firmware: " + name);
-            return true;
+        String name_lower = name;
+        name_lower.toLowerCase();
+        
+        // Skip non-bin files
+        if (!name_lower.endsWith(".bin")) {
+            continue;
+        }
+        
+        // Skip bootstrap firmware - we want the main app
+        if (name_lower.indexOf("bootstrap") >= 0) {
+            Serial.printf("[OTA] Skipping bootstrap: %s\n", name.c_str());
+            continue;
+        }
+        
+        int priority = 0;
+        
+        // Check for chip-specific firmware (highest priority)
+        #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 100;
+            }
+        #else
+            // Standard ESP32 - look for esp32 but NOT esp32s3
+            if ((name_lower.indexOf("esp32") >= 0) && 
+                (name_lower.indexOf("esp32s3") < 0) && 
+                (name_lower.indexOf("esp32-s3") < 0)) {
+                priority = 100;
+            }
+        #endif
+        
+        // Generic "firmware.bin" is good (medium priority)
+        if (name_lower == "firmware.bin") {
+            priority = max(priority, 50);
+        }
+        
+        // Any other .bin file (low priority fallback)
+        if (priority == 0) {
+            priority = 10;
+        }
+        
+        Serial.printf("[OTA] Candidate: %s (priority %d)\n", name.c_str(), priority);
+        
+        if (priority > best_priority) {
+            best_priority = priority;
+            best_match_url = asset["browser_download_url"].as<String>();
+            best_match_name = name;
         }
     }
     
-    updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "No .bin file found in release");
+    if (best_priority > 0) {
+        firmware_url = best_match_url;
+        Serial.printf("[OTA] Selected firmware: %s\n", best_match_name.c_str());
+        updateProgress(10, "Found firmware: " + best_match_name);
+        return true;
+    }
+    
+    updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "No suitable firmware found in release");
     return false;
 }
 

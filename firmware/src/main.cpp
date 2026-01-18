@@ -22,7 +22,7 @@
 
 // Firmware version
 #ifndef FIRMWARE_VERSION
-#define FIRMWARE_VERSION "1.0.1"
+#define FIRMWARE_VERSION "1.0.2"
 #endif
 
 // Global instances

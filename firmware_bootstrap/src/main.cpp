@@ -21,7 +21,7 @@
 
 // Bootstrap version
 #ifndef BOOTSTRAP_VERSION
-#define BOOTSTRAP_VERSION "1.0.1"
+#define BOOTSTRAP_VERSION "1.0.2"
 #endif
 
 // Global instances
@@ -132,13 +132,13 @@ void attempt_stored_wifi_connection() {
         Serial.println("[BOOT] WiFi connected successfully!");
         Serial.printf("[BOOT] IP Address: %s\n", WiFi.localIP().toString().c_str());
 
-        // Start web server for status monitoring
-        web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
-
         // Check if we should auto-install firmware
         String ota_url = config_store.getOTAUrl();
         if (!ota_url.isEmpty()) {
             Serial.println("[BOOT] OTA URL configured, checking for firmware...");
+
+            // Start web server for status monitoring (STA mode, no captive portal)
+            web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
 
             // Short delay to allow web server to start
             delay(2000);
@@ -149,11 +149,15 @@ void attempt_stored_wifi_connection() {
                 // This won't return if successful (device reboots)
                 Serial.println("[BOOT] OTA started...");
             } else {
-                Serial.println("[BOOT] OTA check failed, starting provisioning mode");
+                Serial.println("[BOOT] OTA check failed, will use web interface");
                 ota_in_progress = false;
-                start_provisioning_mode();
+                // Don't restart provisioning - just stay in STA mode with web UI
+                Serial.printf("[BOOT] Web UI: http://%s\n", WiFi.localIP().toString().c_str());
+                Serial.println("[BOOT] Use web interface to retry OTA or reconfigure");
             }
         } else {
+            // Start web server for configuration
+            web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
             Serial.println("[BOOT] No OTA URL configured");
             Serial.println("[BOOT] Use web interface to configure and install firmware");
             Serial.printf("[BOOT] Web UI: http://%s\n", WiFi.localIP().toString().c_str());
