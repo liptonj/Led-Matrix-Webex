@@ -4,13 +4,11 @@
  */
 
 #include "wifi_provisioner.h"
+#include "debug.h"
 
 WiFiProvisioner::WiFiProvisioner()
     : config_store(nullptr)
     , ap_active(false)
-    , smartconfig_active(false)
-    , smartconfig_done(false)
-    , smartconfig_start_time(0)
     , scanned_network_count(0)
     , connection_callback(nullptr) {
 }
@@ -54,6 +52,10 @@ bool WiFiProvisioner::connect(const String& ssid, const String& password, bool s
 
     // Set station mode
     WiFi.mode(WIFI_STA);
+
+    // Ensure reliable DNS resolution when using DHCP
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE,
+                IPAddress(1, 1, 1, 1), IPAddress(8, 8, 8, 8));
     WiFi.begin(ssid.c_str(), password.c_str());
 
     // Wait for connection with timeout
@@ -130,22 +132,10 @@ void WiFiProvisioner::startAPWithSmartConfig() {
         return;
     }
 
-    // Skip SmartConfig for now - AP-only mode is more reliable
-    // SmartConfig can be enabled later if needed
-    smartconfig_active = false;
-    smartconfig_done = false;
-    smartconfig_start_time = 0;
-
-    Serial.println("[WIFI] AP mode ready (SmartConfig disabled for reliability)");
+    Serial.println("[WIFI] AP mode ready");
 }
 
 void WiFiProvisioner::stopProvisioning() {
-    if (smartconfig_active) {
-        WiFi.stopSmartConfig();
-        smartconfig_active = false;
-        Serial.println("[WIFI] SmartConfig stopped");
-    }
-
     if (ap_active) {
         WiFi.softAPdisconnect(true);
         ap_active = false;
@@ -154,52 +144,7 @@ void WiFiProvisioner::stopProvisioning() {
 }
 
 void WiFiProvisioner::loop() {
-    // Check SmartConfig status
-    if (smartconfig_active && !smartconfig_done) {
-        if (WiFi.smartConfigDone()) {
-            smartconfig_done = true;
-            handleSmartConfigResult();
-        } else if (millis() - smartconfig_start_time > SMARTCONFIG_TIMEOUT_MS) {
-            // SmartConfig timeout - just keep AP running
-            Serial.println("[WIFI] SmartConfig timeout, AP still active");
-            WiFi.stopSmartConfig();
-            smartconfig_active = false;
-        }
-    }
-}
-
-void WiFiProvisioner::handleSmartConfigResult() {
-    Serial.println("[WIFI] SmartConfig received credentials!");
-
-    // Wait for connection
-    unsigned long start_time = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start_time > WIFI_CONNECT_TIMEOUT_MS) {
-            Serial.println("[WIFI] SmartConfig: Connection failed");
-            return;
-        }
-        delay(500);
-        Serial.print(".");
-    }
-
-    Serial.println();
-    Serial.printf("[WIFI] SmartConfig connected! IP: %s\n", WiFi.localIP().toString().c_str());
-
-    // Save credentials
-    if (config_store) {
-        config_store->setWiFiCredentials(WiFi.SSID(), WiFi.psk());
-    }
-
-    // Stop provisioning mode
-    stopProvisioning();
-
-    // Switch to station-only mode
-    WiFi.mode(WIFI_STA);
-
-    // Notify callback
-    if (connection_callback) {
-        connection_callback(true);
-    }
+    // No-op for AP-only provisioning
 }
 
 bool WiFiProvisioner::isConnected() const {
@@ -208,10 +153,6 @@ bool WiFiProvisioner::isConnected() const {
 
 bool WiFiProvisioner::isAPActive() const {
     return ap_active;
-}
-
-bool WiFiProvisioner::isSmartConfigActive() const {
-    return smartconfig_active && !smartconfig_done;
 }
 
 IPAddress WiFiProvisioner::getIPAddress() const {
@@ -226,9 +167,36 @@ IPAddress WiFiProvisioner::getAPIPAddress() const {
 }
 
 int WiFiProvisioner::scanNetworks() {
-    Serial.println("[WIFI] Scanning networks...");
-    scanned_network_count = WiFi.scanNetworks();
-    Serial.printf("[WIFI] Found %d networks\n", scanned_network_count);
+    LOG_FUNC_ENTRY(WIFI_TAG);
+    LOG_INFO(WIFI_TAG, "Scanning networks...");
+    
+    // Delete any previous scan results
+    WiFi.scanDelete();
+    LOG_DEBUG(WIFI_TAG, "Previous scan results deleted");
+    
+    // Perform synchronous scan (blocking but reliable)
+    // Pass false for async, true for show_hidden
+    LOG_DEBUG(WIFI_TAG, "Starting synchronous scan (async=false, show_hidden=true)");
+    int result = WiFi.scanNetworks(false, true);
+    LOG_DEBUG(WIFI_TAG, "Scan returned: %d", result);
+    
+    if (result < 0) {
+        // Error codes: -1 = scan already in progress, -2 = scan failed
+        LOG_ERROR(WIFI_TAG, "Scan failed with error: %d", result);
+        scanned_network_count = 0;
+        return 0;
+    }
+    
+    scanned_network_count = result;
+    LOG_INFO(WIFI_TAG, "Found %d networks", scanned_network_count);
+    
+    // Log the networks found
+    for (int i = 0; i < min(scanned_network_count, 10); i++) {
+        LOG_DEBUG(WIFI_TAG, "  %d: %s (%d dBm, enc=%d)", 
+                  i, WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i));
+    }
+    
+    LOG_FUNC_EXIT(WIFI_TAG);
     return scanned_network_count;
 }
 

@@ -74,6 +74,12 @@ public:
      */
     String getHostname() const { return current_hostname; }
 
+    /**
+     * @brief Check if mDNS has been initialized
+     * @return true if MDNS.begin() succeeded
+     */
+    bool isInitialized() const { return initialized; }
+
 private:
     bool initialized;
     bool bridge_found;

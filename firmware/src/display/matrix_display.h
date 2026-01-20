@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
+#include "../config/config_manager.h"
 
 // Matrix configuration
 #define MATRIX_WIDTH 64
@@ -94,6 +95,17 @@ public:
     void showAPMode(const String& ip_address);
 
     /**
+     * @brief Show fallback screen when Webex is unavailable
+     * @param ip_address Device IP address
+     */
+    void showUnconfigured(const String& ip_address);
+
+    /**
+     * @brief Show WiFi disconnected screen
+     */
+    void showWifiDisconnected();
+
+    /**
      * @brief Show connecting screen
      * @param ssid WiFi SSID
      */
@@ -133,11 +145,13 @@ public:
      * @param brightness Brightness level (0-255)
      */
     void setBrightness(uint8_t brightness);
+    void setScrollSpeedMs(uint16_t speed_ms);
 
 private:
     MatrixPanel_I2S_DMA* dma_display;
     bool initialized;
     uint8_t brightness;
+    uint16_t scroll_speed_ms = DEFAULT_SCROLL_SPEED_MS;
 
     // Drawing helpers
     void drawLargeStatusCircle(int center_x, int center_y, uint16_t color);
@@ -149,6 +163,8 @@ private:
     void drawText(int x, int y, const String& text, uint16_t color);
     void drawSmallText(int x, int y, const String& text, uint16_t color);
     void drawCenteredText(int y, const String& text, uint16_t color);
+    void drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key);
+    String normalizeIpText(const String& input);
     void drawSensorBar(const DisplayData& data, int y);
     void drawRect(int x, int y, int w, int h, uint16_t color);
     void fillRect(int x, int y, int w, int h, uint16_t color);
@@ -159,6 +175,19 @@ private:
     String formatTime(int hour, int minute);
     String formatDate(int month, int day);
     String getMonthAbbrev(int month);
+
+    struct ScrollState {
+        String text;
+        int offset = 0;
+        unsigned long last_ms = 0;
+    };
+
+    ScrollState ap_scroll;
+    ScrollState unconfig_scroll;
+    ScrollState connecting_scroll;
+    ScrollState connected_scroll;
+    String last_static_key;
+    unsigned long last_static_ms = 0;
 };
 
 #endif // MATRIX_DISPLAY_H

@@ -10,6 +10,7 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <LittleFS.h>
 
 OTADownloader::OTADownloader()
     : config_store(nullptr)
@@ -89,8 +90,8 @@ bool OTADownloader::checkAndInstall() {
 
     // Check if direct .bin URL
     if (ota_url.endsWith(".bin")) {
-        // Direct firmware URL - install it
-        return downloadAndInstall(ota_url);
+        // Direct firmware URL - install it (filesystem unchanged)
+        return downloadAndInstall(ota_url, "");
     }
     
     // GitHub releases URL - fetch all releases
@@ -115,174 +116,177 @@ bool OTADownloader::checkAndInstall() {
     return false;
 }
 
-bool OTADownloader::fetchFirmwareUrl(const String& releases_url, String& firmware_url) {
-    WiFiClientSecure client;
-    client.setInsecure();  // Skip certificate validation for simplicity
-    
-    HTTPClient http;
-    http.begin(client, releases_url);
-    http.addHeader("User-Agent", "ESP32-Bootstrap");
-    http.addHeader("Accept", "application/vnd.github.v3+json");
-    http.setTimeout(30000);
-    
-    int http_code = http.GET();
-    
-    if (http_code != HTTP_CODE_OK) {
-        updateStatus(OTAStatus::ERROR_NETWORK, 
-                    String("HTTP error: ") + String(http_code));
-        http.end();
+bool OTADownloader::downloadAndInstall(const String& firmware_url, const String& littlefs_url) {
+    if (firmware_url.isEmpty()) {
+        updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "No firmware URL provided");
         return false;
     }
-    
-    String payload = http.getString();
-    http.end();
-    
-    // Parse JSON response
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    
-    if (error) {
-        updateStatus(OTAStatus::ERROR_PARSE, 
-                    String("JSON parse error: ") + error.c_str());
+
+    updateStatus(OTAStatus::DOWNLOADING, "Downloading firmware...");
+    updateProgress(15, "Starting firmware download...");
+
+    if (!downloadAndInstallBinary(firmware_url, U_FLASH, "Firmware", 15, 70)) {
         return false;
     }
-    
-    // Look for appropriate firmware in assets
-    // Priority: 
-    //   1. firmware-ota-esp32s3.bin (merged: app + filesystem, chip-specific ESP32-S3)
-    //   2. firmware-ota-esp32.bin (merged: app + filesystem, chip-specific ESP32)
-    //   3. firmware-esp32.bin (chip-specific for ESP32)
-    //   4. firmware.bin (generic main firmware)
-    //   5. Any .bin that's not bootstrap
-    JsonArray assets = doc["assets"].as<JsonArray>();
-    
-    String best_match_url;
-    String best_match_name;
-    int best_priority = 0;  // Higher is better
-    
+
+    if (littlefs_url.isEmpty()) {
+        updateStatus(OTAStatus::SUCCESS, "Firmware updated (filesystem unchanged)");
+        updateProgress(100, "Rebooting...");
+        Serial.println("[OTA] Firmware update complete (LittleFS unchanged), rebooting...");
+        delay(2000);
+        ESP.restart();
+        return true;
+    }
+
+    updateStatus(OTAStatus::DOWNLOADING, "Downloading LittleFS...");
+    updateProgress(75, "Starting LittleFS download...");
+
+    if (!downloadAndInstallBinary(littlefs_url, U_SPIFFS, "LittleFS", 75, 95)) {
+        return false;
+    }
+
+    updateStatus(OTAStatus::SUCCESS, "Firmware + LittleFS updated!");
+    updateProgress(100, "Rebooting...");
+
+    Serial.println("[OTA] Firmware and LittleFS update complete, rebooting in 2 seconds...");
+    delay(2000);
+    ESP.restart();
+    return true;
+}
+
+bool OTADownloader::selectReleaseAssets(const JsonArray& assets, String& firmware_url, String& littlefs_url) {
+    int firmware_priority = 0;
+    int littlefs_priority = 0;
+
     for (JsonObject asset : assets) {
         String name = asset["name"].as<String>();
         String name_lower = name;
         name_lower.toLowerCase();
-        
-        // Skip non-bin files
+
         if (!name_lower.endsWith(".bin")) {
             continue;
         }
-        
-        // Skip bootstrap firmware - we want the main app
+
         if (name_lower.indexOf("bootstrap") >= 0) {
-            Serial.printf("[OTA] Skipping bootstrap: %s\n", name.c_str());
             continue;
         }
-        
-        int priority = 0;
-        
-        // Check for chip-specific OTA firmware (HIGHEST PRIORITY - includes filesystem)
-        #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("ota") >= 0 && 
-                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
-                priority = 200;  // Highest: merged OTA binary for ESP32-S3
-            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 100;  // High: chip-specific firmware only
-            }
-        #else
-            // Standard ESP32 - look for esp32 but NOT esp32s3
-            if (name_lower.indexOf("ota") >= 0 &&
-                (name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 200;  // Highest: merged OTA binary for ESP32
-            } else if ((name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 100;  // High: chip-specific firmware only
-            }
-        #endif
-        
-        // Generic "firmware.bin" is good (medium priority)
-        if (name_lower == "firmware.bin") {
-            priority = max(priority, 50);
+
+        if (name_lower.indexOf("fullflash") >= 0) {
+            continue;
         }
-        
-        // Any other .bin file (low priority fallback)
-        if (priority == 0) {
-            priority = 10;
+
+        const String download = asset["browser_download_url"].as<String>();
+
+        if (name_lower.indexOf("littlefs") >= 0 || name_lower.indexOf("spiffs") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "littlefs.bin" || name_lower == "spiffs.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > littlefs_priority) {
+                littlefs_priority = priority;
+                littlefs_url = download;
+            }
+            continue;
         }
-        
-        Serial.printf("[OTA] Candidate: %s (priority %d)\n", name.c_str(), priority);
-        
-        if (priority > best_priority) {
-            best_priority = priority;
-            best_match_url = asset["browser_download_url"].as<String>();
-            best_match_name = name;
+
+        if (name_lower.indexOf("ota") >= 0) {
+            continue;  // Skip merged OTA binaries for streaming updates
+        }
+
+        if (name_lower.indexOf("firmware") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "firmware.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > firmware_priority) {
+                firmware_priority = priority;
+                firmware_url = download;
+            }
         }
     }
-    
-    if (best_priority > 0) {
-        firmware_url = best_match_url;
-        Serial.printf("[OTA] Selected firmware: %s\n", best_match_name.c_str());
-        updateProgress(10, "Found firmware: " + best_match_name);
-        return true;
-    }
-    
-    updateStatus(OTAStatus::ERROR_NO_FIRMWARE, "No suitable firmware found in release");
-    return false;
+
+    return firmware_priority > 0 && littlefs_priority > 0;
 }
 
-bool OTADownloader::downloadAndInstall(const String& firmware_url) {
-    updateStatus(OTAStatus::DOWNLOADING, "Downloading firmware...");
-    updateProgress(15, "Starting download...");
-    
+bool OTADownloader::downloadAndInstallBinary(const String& url,
+                                             int update_type,
+                                             const char* label,
+                                             int start_progress,
+                                             int end_progress) {
     WiFiClientSecure client;
     client.setInsecure();  // Skip certificate validation
-    
+
     HTTPClient http;
-    http.begin(client, firmware_url);
+    http.begin(client, url);
     http.addHeader("User-Agent", "ESP32-Bootstrap");
     http.setTimeout(static_cast<uint16_t>(OTA_DOWNLOAD_TIMEOUT_MS / 1000));  // Convert to seconds for HTTP timeout
-    
+
     // Follow redirects (GitHub uses redirects for downloads)
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    
+
     int http_code = http.GET();
-    
+
     if (http_code != HTTP_CODE_OK) {
         updateStatus(OTAStatus::ERROR_DOWNLOAD, 
                     String("Download failed: HTTP ") + String(http_code));
         http.end();
         return false;
     }
-    
+
     int content_length = http.getSize();
-    
+
     if (content_length <= 0) {
         updateStatus(OTAStatus::ERROR_DOWNLOAD, "Invalid content length");
         http.end();
         return false;
     }
-    
-    Serial.printf("[OTA] Firmware size: %d bytes\n", content_length);
-    updateProgress(20, String("Downloading ") + String(content_length / 1024) + "KB...");
-    
-    // Start OTA update
-    if (!Update.begin(content_length)) {
+
+    Serial.printf("[OTA] %s size: %d bytes\n", label, content_length);
+    updateProgress(start_progress, String("Downloading ") + String(content_length / 1024) + "KB...");
+
+    if (update_type == U_SPIFFS) {
+        LittleFS.end();
+    }
+
+    if (!Update.begin(content_length, update_type)) {
         updateStatus(OTAStatus::ERROR_FLASH, 
                     String("Not enough space: ") + Update.errorString());
         http.end();
         return false;
     }
-    
-    updateStatus(OTAStatus::FLASHING, "Flashing firmware...");
-    
+
+    updateStatus(OTAStatus::FLASHING, String("Flashing ") + label + "...");
+
     // Stream download to flash
     WiFiClient* stream = http.getStreamPtr();
     uint8_t buffer[OTA_BUFFER_SIZE];
     size_t written = 0;
-    
+
     unsigned long start_time = millis();
-    
-    while (written < content_length) {
+
+    while (written < static_cast<size_t>(content_length)) {
         // Check timeout
         if (millis() - start_time > OTA_DOWNLOAD_TIMEOUT_MS) {
             updateStatus(OTAStatus::ERROR_DOWNLOAD, "Download timeout");
@@ -290,22 +294,20 @@ bool OTADownloader::downloadAndInstall(const String& firmware_url) {
             http.end();
             return false;
         }
-        
-        // Read available data
+
         size_t available = stream->available();
         if (available == 0) {
             delay(10);
             continue;
         }
-        
+
         size_t to_read = min(available, sizeof(buffer));
         size_t bytes_read = stream->readBytes(buffer, to_read);
-        
+
         if (bytes_read == 0) {
             continue;
         }
-        
-        // Write to flash
+
         size_t bytes_written = Update.write(buffer, bytes_read);
         if (bytes_written != bytes_read) {
             updateStatus(OTAStatus::ERROR_FLASH, 
@@ -314,36 +316,27 @@ bool OTADownloader::downloadAndInstall(const String& firmware_url) {
             http.end();
             return false;
         }
-        
+
         written += bytes_written;
-        
-        // Update progress (20-90%)
-        int download_progress = 20 + (written * 70 / content_length);
-        updateProgress(download_progress, 
+
+        int progress = start_progress +
+            static_cast<int>((written * (end_progress - start_progress)) / content_length);
+        updateProgress(progress,
                       String("Flashing: ") + String(written / 1024) + "/" + 
                       String(content_length / 1024) + "KB");
     }
-    
+
     http.end();
-    
-    updateProgress(95, "Verifying...");
-    
-    // Finalize update
+    updateProgress(end_progress, "Verifying checksum...");
+
     if (!Update.end(true)) {
         updateStatus(OTAStatus::ERROR_VERIFY, 
                     String("Verification failed: ") + Update.errorString());
         return false;
     }
-    
-    updateStatus(OTAStatus::SUCCESS, "Update successful!");
-    updateProgress(100, "Rebooting...");
-    
-    Serial.println("[OTA] Firmware update complete, rebooting in 2 seconds...");
-    delay(2000);
-    
-    ESP.restart();
-    
-    return true;  // Won't reach here
+
+    Serial.printf("[OTA] %s update applied\n", label);
+    return true;
 }
 
 OTAStatus OTADownloader::getStatus() const {
@@ -548,69 +541,28 @@ int OTADownloader::fetchAvailableReleases(bool include_prereleases) {
             continue;
         }
         
-        // Find firmware asset for this chip
+        // Find firmware + LittleFS assets for this chip
         JsonArray assets = release["assets"].as<JsonArray>();
         String firmware_url = "";
-        int best_priority = 0;
-        
-        for (JsonObject asset : assets) {
-            String name = asset["name"].as<String>();
-            String name_lower = name;
-            name_lower.toLowerCase();
-            
-            // Skip non-bin and bootstrap files
-            if (!name_lower.endsWith(".bin") || name_lower.indexOf("bootstrap") >= 0) {
-                continue;
-            }
-            
-            int priority = 0;
-            
-            // Prioritize merged OTA binaries (include filesystem)
-            #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("ota") >= 0 && 
-                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
-                priority = 200;  // Highest: merged OTA binary
-            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 100;  // High: chip-specific firmware only
-            }
-            #else
-            if (name_lower.indexOf("ota") >= 0 &&
-                (name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 200;  // Highest: merged OTA binary
-            } else if ((name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 100;  // High: chip-specific firmware only
-            }
-            #endif
-            
-            // Fallback to generic firmware.bin
-            if (name_lower == "firmware.bin" && priority == 0) {
-                priority = 50;
-            }
-            
-            if (priority > best_priority) {
-                best_priority = priority;
-                firmware_url = asset["browser_download_url"].as<String>();
-            }
+        String littlefs_url = "";
+
+        if (!selectReleaseAssets(assets, firmware_url, littlefs_url)) {
+            continue;
         }
-        
-        if (!firmware_url.isEmpty()) {
-            releases[release_count].version = tag;
-            releases[release_count].firmware_url = firmware_url;
-            releases[release_count].is_prerelease = is_prerelease || isBetaVersion(tag);
-            releases[release_count].published_at = release["published_at"].as<String>();
-            releases[release_count].valid = true;
-            
-            Serial.printf("[OTA] Release %d: %s %s\n", 
-                          release_count, 
-                          tag.c_str(), 
-                          releases[release_count].is_prerelease ? "(beta)" : "(stable)");
-            
-            release_count++;
-        }
+
+        releases[release_count].version = tag;
+        releases[release_count].firmware_url = firmware_url;
+        releases[release_count].littlefs_url = littlefs_url;
+        releases[release_count].is_prerelease = is_prerelease || isBetaVersion(tag);
+        releases[release_count].published_at = release["published_at"].as<String>();
+        releases[release_count].valid = true;
+
+        Serial.printf("[OTA] Release %d: %s %s\n", 
+                      release_count, 
+                      tag.c_str(), 
+                      releases[release_count].is_prerelease ? "(beta)" : "(stable)");
+
+        release_count++;
     }
     
     Serial.printf("[OTA] Total valid releases: %d\n", release_count);
@@ -653,5 +605,5 @@ bool OTADownloader::installRelease(int index) {
     Serial.printf("[OTA] Installing release: %s\n", release.version.c_str());
     updateProgress(10, "Installing " + release.version);
     
-    return downloadAndInstall(release.firmware_url);
+    return downloadAndInstall(release.firmware_url, release.littlefs_url);
 }

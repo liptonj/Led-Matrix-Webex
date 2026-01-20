@@ -201,4 +201,5 @@
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/Udp.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/cbuf.h \
  src/config_store.h \
- /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
+ src/debug.h

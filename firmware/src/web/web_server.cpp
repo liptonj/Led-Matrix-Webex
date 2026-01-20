@@ -7,17 +7,27 @@
 #include "../ota/ota_manager.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <Update.h>
 
 // External reference to OTA manager for update functionality
 extern OTAManager ota_manager;
 
+// DNS port for captive portal
+#define DNS_PORT 53
+
 WebServerManager::WebServerManager()
-    : server(nullptr), config_manager(nullptr), app_state(nullptr), module_manager(nullptr), running(false) {
+    : server(nullptr), dns_server(nullptr), config_manager(nullptr), app_state(nullptr),
+      module_manager(nullptr), running(false), captive_portal_active(false),
+      ota_upload_in_progress(false), ota_upload_error(""), ota_upload_size(0) {
 }
 
 WebServerManager::~WebServerManager() {
     if (server) {
         delete server;
+    }
+    if (dns_server) {
+        dns_server->stop();
+        delete dns_server;
     }
 }
 
@@ -37,6 +47,9 @@ void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManag
     // Setup routes
     setupRoutes();
 
+    // Setup captive portal if AP is active
+    setupCaptivePortal();
+
     // Start server
     server->begin();
     running = true;
@@ -46,6 +59,37 @@ void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManag
 
 void WebServerManager::loop() {
     // AsyncWebServer handles requests automatically
+    if (dns_server && captive_portal_active) {
+        dns_server->processNextRequest();
+    }
+}
+
+void WebServerManager::setupCaptivePortal() {
+    IPAddress ap_ip = WiFi.softAPIP();
+    if (ap_ip == IPAddress(0, 0, 0, 0)) {
+        captive_portal_active = false;
+        return;
+    }
+
+    dns_server = new DNSServer();
+    if (dns_server->start(DNS_PORT, "*", ap_ip)) {
+        captive_portal_active = true;
+        Serial.println("[WEB] Captive portal DNS started");
+    } else {
+        Serial.println("[WEB] Failed to start captive portal DNS");
+        delete dns_server;
+        dns_server = nullptr;
+        captive_portal_active = false;
+    }
+}
+
+String WebServerManager::buildRedirectUri() const {
+    String device_name = config_manager ? config_manager->getDeviceName() : "";
+    String host = device_name.isEmpty() ? WiFi.localIP().toString() : (device_name + ".local");
+    if (host.isEmpty()) {
+        host = WiFi.localIP().toString();
+    }
+    return "http://" + host + "/oauth/callback";
 }
 
 void WebServerManager::setupRoutes() {
@@ -77,7 +121,7 @@ void WebServerManager::setupRoutes() {
         [](AsyncWebServerRequest* request) {},
         nullptr,
         [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-            handleWifiSave(request);
+            handleWifiSave(request, data, len);
         }
     );
 
@@ -96,6 +140,125 @@ void WebServerManager::setupRoutes() {
     server->on("/api/ota/update", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handlePerformUpdate(request);
     });
+
+    server->on("/api/ota/upload", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            bool success = ota_upload_error.isEmpty() && !Update.hasError();
+            JsonDocument doc;
+            doc["success"] = success;
+            doc["message"] = success
+                ? "Upload complete. Rebooting..."
+                : (ota_upload_error.isEmpty() ? "Upload failed" : ota_upload_error);
+
+            String response;
+            serializeJson(doc, response);
+
+            request->send(success ? 200 : 400, "application/json", response);
+
+            if (success) {
+                delay(1000);
+                ESP.restart();
+            }
+        },
+        [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+            if (index == 0) {
+                ota_upload_in_progress = true;
+                ota_upload_error = "";
+                ota_upload_size = request->contentLength();
+
+                Serial.printf("[WEB] OTA upload start: %s (%u bytes)\n",
+                              filename.c_str(), static_cast<unsigned>(ota_upload_size));
+
+                size_t total = ota_upload_size;
+                if (total == 0) {
+                    ota_upload_error = "Missing content length";
+                } else if (!Update.begin(total)) {
+                    ota_upload_error = Update.errorString();
+                }
+            }
+
+            if (ota_upload_error.isEmpty()) {
+                if (Update.write(data, len) != len) {
+                    ota_upload_error = Update.errorString();
+                }
+            }
+
+            if (final) {
+                if (ota_upload_error.isEmpty()) {
+                    if (!Update.end(true)) {
+                        ota_upload_error = Update.errorString();
+                    }
+                } else {
+                    Update.abort();
+                }
+                ota_upload_in_progress = false;
+                Serial.printf("[WEB] OTA upload %s (%u bytes)\n",
+                              ota_upload_error.isEmpty() ? "complete" : "failed",
+                              static_cast<unsigned>(ota_upload_size));
+            }
+        }
+    );
+
+    server->on("/api/ota/upload-fs", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            bool success = ota_upload_error.isEmpty() && !Update.hasError();
+            JsonDocument doc;
+            doc["success"] = success;
+            doc["message"] = success
+                ? "LittleFS upload complete. Rebooting..."
+                : (ota_upload_error.isEmpty() ? "LittleFS upload failed" : ota_upload_error);
+
+            String response;
+            serializeJson(doc, response);
+
+            request->send(success ? 200 : 400, "application/json", response);
+
+            if (success) {
+                delay(1000);
+                ESP.restart();
+            }
+        },
+        [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+            if (index == 0) {
+                ota_upload_in_progress = true;
+                ota_upload_error = "";
+                ota_upload_size = request->contentLength();
+
+                Serial.printf("[WEB] LittleFS upload start: %s (%u bytes)\n",
+                              filename.c_str(), static_cast<unsigned>(ota_upload_size));
+
+                size_t total = ota_upload_size;
+                if (total == 0) {
+                    ota_upload_error = "Missing content length";
+                } else {
+                    LittleFS.end();
+                    if (!Update.begin(total, U_SPIFFS)) {
+                        ota_upload_error = Update.errorString();
+                    }
+                }
+            }
+
+            if (ota_upload_error.isEmpty()) {
+                if (Update.write(data, len) != len) {
+                    ota_upload_error = Update.errorString();
+                }
+            }
+
+            if (final) {
+                if (ota_upload_error.isEmpty()) {
+                    if (!Update.end(true)) {
+                        ota_upload_error = Update.errorString();
+                    }
+                } else {
+                    Update.abort();
+                }
+                ota_upload_in_progress = false;
+                Serial.printf("[WEB] LittleFS upload %s (%u bytes)\n",
+                              ota_upload_error.isEmpty() ? "complete" : "failed",
+                              static_cast<unsigned>(ota_upload_size));
+            }
+        }
+    );
 
     server->on("/api/reboot", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleReboot(request);
@@ -143,6 +306,29 @@ void WebServerManager::setupRoutes() {
         }
     );
 
+    // Captive portal detection endpoints - redirect to AP IP
+    server->on("/hotspot-detect.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/library/test/success.html", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/generate_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/gen_204", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/connecttest.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/ncsi.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+    server->on("/success.txt", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->redirect("http://192.168.4.1/?portal=1");
+    });
+
     // STATIC FILE HANDLERS - Register AFTER all API endpoints
     // This ensures API routes are checked first, preventing VFS errors
     
@@ -153,11 +339,15 @@ void WebServerManager::setupRoutes() {
     server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
     // 404 handler for anything not matched
-    server->onNotFound([](AsyncWebServerRequest* request) {
+    server->onNotFound([this](AsyncWebServerRequest* request) {
         // Check if it's an API request that wasn't found
         if (request->url().startsWith("/api/")) {
             request->send(404, "application/json", "{\"error\":\"API endpoint not found\"}");
         } else {
+            if (captive_portal_active) {
+                request->redirect("http://192.168.4.1/?portal=1");
+                return;
+            }
             // For non-API requests, try serving index.html (SPA fallback)
             request->send(LittleFS, "/index.html", "text/html");
         }
@@ -170,6 +360,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["wifi_connected"] = app_state->wifi_connected;
     doc["webex_authenticated"] = app_state->webex_authenticated;
     doc["bridge_connected"] = app_state->bridge_connected;
+    doc["embedded_app_connected"] = app_state->embedded_app_connected;
     doc["xapi_connected"] = app_state->xapi_connected;
     doc["mqtt_connected"] = app_state->mqtt_connected;
     doc["webex_status"] = app_state->webex_status;
@@ -204,15 +395,49 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["device_name"] = config_manager->getDeviceName();
     doc["display_name"] = config_manager->getDisplayName();
     doc["brightness"] = config_manager->getBrightness();
+    doc["scroll_speed_ms"] = config_manager->getScrollSpeedMs();
     doc["poll_interval"] = config_manager->getWebexPollInterval();
     doc["xapi_poll_interval"] = config_manager->getXAPIPollInterval();
     doc["has_webex_credentials"] = config_manager->hasWebexCredentials();
     doc["has_webex_tokens"] = config_manager->hasWebexTokens();
     doc["has_xapi_device"] = config_manager->hasXAPIDevice();
     doc["xapi_device_id"] = config_manager->getXAPIDeviceId();
+    
+    // Webex credentials - show masked versions if present
+    String clientId = config_manager->getWebexClientId();
+    String clientSecret = config_manager->getWebexClientSecret();
+    if (!clientId.isEmpty()) {
+        // Show first 8 chars + masked rest
+        if (clientId.length() > 8) {
+            doc["webex_client_id_masked"] = clientId.substring(0, 8) + "..." + String(clientId.length() - 8) + " more";
+        } else {
+            doc["webex_client_id_masked"] = clientId;
+        }
+    } else {
+        doc["webex_client_id_masked"] = "";
+    }
+    if (!clientSecret.isEmpty()) {
+        doc["webex_client_secret_masked"] = "••••••••" + String(clientSecret.length()) + " characters";
+    } else {
+        doc["webex_client_secret_masked"] = "";
+    }
+    
+    // MQTT configuration
     doc["mqtt_broker"] = config_manager->getMQTTBroker();
     doc["mqtt_port"] = config_manager->getMQTTPort();
     doc["mqtt_topic"] = config_manager->getMQTTTopic();
+    doc["mqtt_username"] = config_manager->getMQTTUsername();
+    
+    // MQTT password - show indicator if present
+    String mqttPassword = config_manager->getMQTTPassword();
+    if (!mqttPassword.isEmpty()) {
+        doc["mqtt_password_masked"] = "••••••••" + String(mqttPassword.length()) + " characters";
+        doc["has_mqtt_password"] = true;
+    } else {
+        doc["mqtt_password_masked"] = "";
+        doc["has_mqtt_password"] = false;
+    }
+    
     doc["sensor_serial"] = config_manager->getSensorSerial();
     doc["ota_url"] = config_manager->getOTAUrl();
     doc["auto_update"] = config_manager->getAutoUpdate();
@@ -225,10 +450,14 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
 void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     String body = String((char*)data).substring(0, len);
 
+    Serial.printf("[WEB] Received config save request (length: %d bytes)\n", len);
+    Serial.printf("[WEB] Body: %s\n", body.c_str());
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
 
     if (error) {
+        Serial.printf("[WEB] Failed to parse JSON: %s\n", error.c_str());
         request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
         return;
     }
@@ -243,6 +472,9 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (doc["brightness"].is<int>()) {
         config_manager->setBrightness(doc["brightness"].as<uint8_t>());
     }
+    if (doc["scroll_speed_ms"].is<int>()) {
+        config_manager->setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
+    }
     if (doc["poll_interval"].is<int>()) {
         config_manager->setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
     }
@@ -252,23 +484,50 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (doc["xapi_device_id"].is<const char*>()) {
         config_manager->setXAPIDeviceId(doc["xapi_device_id"].as<const char*>());
     }
+    // Webex credentials - only save if both fields provided
     if (doc["webex_client_id"].is<const char*>() && doc["webex_client_secret"].is<const char*>()) {
-        config_manager->setWebexCredentials(
-            doc["webex_client_id"].as<const char*>(),
-            doc["webex_client_secret"].as<const char*>()
-        );
+        String client_id = doc["webex_client_id"].as<String>();
+        String client_secret = doc["webex_client_secret"].as<String>();
+        
+        if (!client_id.isEmpty() && !client_secret.isEmpty()) {
+            config_manager->setWebexCredentials(client_id, client_secret);
+            Serial.printf("[WEB] Webex credentials saved - Client ID: %s***\n", client_id.substring(0, 8).c_str());
+        } else if (client_id.isEmpty() && client_secret.isEmpty()) {
+            Serial.println("[WEB] Empty Webex credentials provided - skipping save");
+        } else {
+            Serial.println("[WEB] Warning: Only one Webex credential field provided");
+        }
     }
+    
+    // MQTT configuration
     if (doc["mqtt_broker"].is<const char*>()) {
-        config_manager->setMQTTConfig(
-            doc["mqtt_broker"].as<const char*>(),
-            doc["mqtt_port"] | 1883,
-            doc["mqtt_username"] | "",
-            doc["mqtt_password"] | "",
-            doc["mqtt_topic"] | "meraki/v1/mt/#"
-        );
+        String broker = doc["mqtt_broker"].as<String>();
+        uint16_t port = doc["mqtt_port"].is<int>() ? doc["mqtt_port"].as<uint16_t>() : 1883;
+        String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : "";
+        String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : "meraki/v1/mt/#";
+        
+        // Handle password - if not provided, keep existing
+        String password;
+        if (doc["mqtt_password"].is<const char*>()) {
+            password = doc["mqtt_password"].as<String>();
+        } else {
+            // Keep existing password
+            password = config_manager->getMQTTPassword();
+            Serial.println("[WEB] MQTT password not provided - keeping existing");
+        }
+        
+        config_manager->setMQTTConfig(broker, port, username, password, topic);
+        Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n", 
+                     broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
     }
+    
+    // Sensor serial number
     if (doc["sensor_serial"].is<const char*>()) {
-        config_manager->setSensorSerial(doc["sensor_serial"].as<const char*>());
+        String serial = doc["sensor_serial"].as<String>();
+        config_manager->setSensorSerial(serial);
+        if (!serial.isEmpty()) {
+            Serial.printf("[WEB] Sensor serial saved: %s\n", serial.c_str());
+        }
     }
     if (doc["ota_url"].is<const char*>()) {
         config_manager->setOTAUrl(doc["ota_url"].as<const char*>());
@@ -277,6 +536,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         config_manager->setAutoUpdate(doc["auto_update"].as<bool>());
     }
 
+    Serial.println("[WEB] Configuration save complete");
     request->send(200, "application/json", "{\"success\":true}");
 }
 
@@ -298,14 +558,72 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     request->send(200, "application/json", response);
 }
 
-void WebServerManager::handleWifiSave(AsyncWebServerRequest* request) {
-    if (!request->hasParam("ssid", true) || !request->hasParam("password", true)) {
-        request->send(400, "application/json", "{\"error\":\"Missing ssid or password\"}");
-        return;
+void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    String ssid;
+    String password;
+
+    // Helper to URL-decode form values
+    auto urlDecode = [](const String& input) -> String {
+        String out;
+        out.reserve(input.length());
+        for (size_t i = 0; i < input.length(); i++) {
+            char c = input[i];
+            if (c == '+') {
+                out += ' ';
+                continue;
+            }
+            if (c == '%' && i + 2 < input.length()) {
+                char hex[3] = { input[i + 1], input[i + 2], 0 };
+                out += static_cast<char>(strtol(hex, nullptr, 16));
+                i += 2;
+                continue;
+            }
+            out += c;
+        }
+        return out;
+    };
+
+    // Prefer JSON body if provided
+    if (len > 0) {
+        String body;
+        body.reserve(len);
+        for (size_t i = 0; i < len; i++) {
+            body += static_cast<char>(data[i]);
+        }
+
+        JsonDocument doc;
+        if (deserializeJson(doc, body) == DeserializationError::Ok) {
+            ssid = doc["ssid"] | "";
+            password = doc["password"] | "";
+        } else {
+            // Fallback for x-www-form-urlencoded / multipart body
+            int ssid_pos = body.indexOf("ssid=");
+            if (ssid_pos >= 0) {
+                int amp = body.indexOf('&', ssid_pos);
+                String raw = (amp >= 0) ? body.substring(ssid_pos + 5, amp) : body.substring(ssid_pos + 5);
+                ssid = urlDecode(raw);
+            }
+            int pass_pos = body.indexOf("password=");
+            if (pass_pos >= 0) {
+                int amp = body.indexOf('&', pass_pos);
+                String raw = (amp >= 0) ? body.substring(pass_pos + 9, amp) : body.substring(pass_pos + 9);
+                password = urlDecode(raw);
+            }
+        }
     }
 
-    String ssid = request->getParam("ssid", true)->value();
-    String password = request->getParam("password", true)->value();
+    // Fallback to form params (some clients send multipart params)
+    if (ssid.isEmpty() && request->hasParam("ssid", true)) {
+        ssid = request->getParam("ssid", true)->value();
+    }
+    if (password.isEmpty() && request->hasParam("password", true)) {
+        password = request->getParam("password", true)->value();
+    }
+
+    if (ssid.isEmpty()) {
+        request->send(400, "application/json", "{\"error\":\"Missing ssid\"}");
+        return;
+    }
 
     config_manager->setWiFiCredentials(ssid, password);
 
@@ -325,7 +643,7 @@ void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
     }
 
     // Build OAuth authorization URL
-    String redirect_uri = "http://" + WiFi.localIP().toString() + "/oauth/callback";
+    String redirect_uri = buildRedirectUri();
     String state = String(random(100000, 999999));
 
     String auth_url = "https://webexapis.com/v1/authorize";
@@ -336,11 +654,13 @@ void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
     auth_url += "&state=" + state;
 
     // Store state for verification
-    // In production, store this securely
+    last_oauth_state = state;
+    last_oauth_redirect_uri = redirect_uri;
 
     JsonDocument doc;
     doc["auth_url"] = auth_url;
     doc["state"] = state;
+    doc["redirect_uri"] = redirect_uri;
 
     String response;
     serializeJson(doc, response);
@@ -348,16 +668,23 @@ void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handleOAuthCallback(AsyncWebServerRequest* request) {
-    if (!request->hasParam("code")) {
-        request->send(400, "text/html", "<html><body><h1>Error</h1><p>Authorization code not received.</p></body></html>");
+    if (!request->hasParam("code") || !request->hasParam("state")) {
+        request->send(400, "text/html", "<html><body><h1>Error</h1><p>Missing authorization code or state.</p></body></html>");
         return;
     }
 
     String code = request->getParam("code")->value();
+    String state = request->getParam("state")->value();
 
-    // Store the auth code for the Webex client to exchange
-    // This will be handled by the main loop
-    // For now, we just acknowledge receipt
+    if (last_oauth_state.isEmpty() || state != last_oauth_state) {
+        request->send(400, "text/html", "<html><body><h1>Error</h1><p>Invalid OAuth state.</p></body></html>");
+        return;
+    }
+
+    pending_oauth_code = code;
+    pending_oauth_redirect_uri = last_oauth_redirect_uri.isEmpty()
+        ? buildRedirectUri()
+        : last_oauth_redirect_uri;
 
     String html = "<html><head>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
@@ -370,8 +697,6 @@ void WebServerManager::handleOAuthCallback(AsyncWebServerRequest* request) {
 
     request->send(200, "text/html", html);
 
-    // Trigger token exchange in main loop
-    // This would be handled by storing the code and processing it
     Serial.printf("[WEB] OAuth callback received, code: %s\n", code.substring(0, 10).c_str());
 }
 
@@ -530,7 +855,7 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     }
     
     // Mark as connected via embedded app
-    app_state->bridge_connected = true;  // Reusing this flag for embedded app connection
+    app_state->embedded_app_connected = true;
     
     JsonDocument response;
     response["success"] = true;

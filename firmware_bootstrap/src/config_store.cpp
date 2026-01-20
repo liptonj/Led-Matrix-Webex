@@ -106,17 +106,36 @@ bool ConfigStore::hasCustomOTAUrl() const {
     return !cached_ota_url.isEmpty();
 }
 
-void ConfigStore::clear() {
+void ConfigStore::ensureDefaults() {
     if (!initialized) {
+        Serial.println("[CONFIG] Error: Not initialized");
         return;
     }
 
-    preferences.clear();
-    
-    // Clear cache
-    cached_ssid = "";
-    cached_password = "";
-    cached_ota_url = "";
-    
-    Serial.println("[CONFIG] All configuration cleared");
+    loadCache();
+    bool updated = false;
+
+#ifdef DEFAULT_OTA_URL
+    if (cached_ota_url.isEmpty()) {
+        preferences.putString(KEY_OTA_URL, DEFAULT_OTA_URL);
+        cached_ota_url = DEFAULT_OTA_URL;
+        updated = true;
+        Serial.printf("[CONFIG] Default OTA URL applied: %s\n", cached_ota_url.c_str());
+    }
+#endif
+
+#if defined(DEFAULT_WIFI_SSID) && defined(DEFAULT_WIFI_PASSWORD)
+    if (cached_ssid.isEmpty() && String(DEFAULT_WIFI_SSID).length() > 0) {
+        preferences.putString(KEY_WIFI_SSID, DEFAULT_WIFI_SSID);
+        preferences.putString(KEY_WIFI_PASS, DEFAULT_WIFI_PASSWORD);
+        cached_ssid = DEFAULT_WIFI_SSID;
+        cached_password = DEFAULT_WIFI_PASSWORD;
+        updated = true;
+        Serial.printf("[CONFIG] Default WiFi SSID applied: %s\n", cached_ssid.c_str());
+    }
+#endif
+
+    if (updated) {
+        Serial.println("[CONFIG] Defaults stored in NVS");
+    }
 }

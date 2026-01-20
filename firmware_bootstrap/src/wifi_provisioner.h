@@ -1,10 +1,8 @@
 /**
  * @file wifi_provisioner.h
- * @brief WiFi Provisioner with AP Mode and SmartConfig
+ * @brief WiFi Provisioner with AP Mode
  *
- * Handles WiFi provisioning using two methods simultaneously:
- * - AP Mode: Creates a hotspot for web-based configuration
- * - SmartConfig: Listens for credentials from ESP Touch app
+ * Handles WiFi provisioning using AP mode for web-based configuration.
  */
 
 #ifndef WIFI_PROVISIONER_H
@@ -21,7 +19,6 @@
 
 // Connection timeouts
 #define WIFI_CONNECT_TIMEOUT_MS 15000
-#define SMARTCONFIG_TIMEOUT_MS 120000
 
 /**
  * @brief WiFi Provisioner Class
@@ -55,22 +52,19 @@ public:
     bool connect(const String& ssid, const String& password, bool save_credentials = true);
 
     /**
-     * @brief Start AP mode with SmartConfig listener
+     * @brief Start AP mode for provisioning
      *
-     * Creates a WiFi hotspot for web configuration while also
-     * listening for SmartConfig provisioning from mobile app.
+     * Creates a WiFi hotspot for web configuration.
      */
     void startAPWithSmartConfig();
 
     /**
-     * @brief Stop AP mode and SmartConfig
+     * @brief Stop AP mode
      */
     void stopProvisioning();
 
     /**
      * @brief Process provisioning events (call in loop)
-     *
-     * Checks for SmartConfig completion and handles events.
      */
     void loop();
 
@@ -85,12 +79,6 @@ public:
      * @return true if AP is running
      */
     bool isAPActive() const;
-
-    /**
-     * @brief Check if SmartConfig is running
-     * @return true if SmartConfig is active
-     */
-    bool isSmartConfigActive() const;
 
     /**
      * @brief Get local IP address
@@ -143,12 +131,6 @@ public:
      * @return true if network was found
      */
     bool isNetworkInScanResults(const String& ssid) const;
-    
-    /**
-     * @brief Check if scan results are available
-     * @return true if networks have been scanned
-     */
-    bool hasScanResults() const { return scanned_network_count > 0; }
 
     /**
      * @brief Callback type for connection events
@@ -164,13 +146,8 @@ public:
 private:
     ConfigStore* config_store;
     bool ap_active;
-    bool smartconfig_active;
-    bool smartconfig_done;
-    unsigned long smartconfig_start_time;
     int scanned_network_count;
     ConnectionCallback connection_callback;
-
-    void handleSmartConfigResult();
 };
 
 #endif // WIFI_PROVISIONER_H

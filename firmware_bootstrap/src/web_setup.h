@@ -49,12 +49,6 @@ public:
     void stop();
 
     /**
-     * @brief Check if web server is running
-     * @return true if server is running
-     */
-    bool isRunning() const;
-
-    /**
      * @brief Check if an OTA update was requested via web
      * @return true if OTA was triggered
      */
@@ -92,6 +86,19 @@ private:
     bool wifi_pending;
     bool running;
     bool captive_portal_active;
+    String ota_upload_error;
+    size_t ota_upload_size;
+    size_t ota_upload_written;
+    size_t ota_upload_next_log;
+    bool ota_bundle_mode;
+    bool ota_bundle_header_flushed;
+    size_t ota_bundle_header_filled;
+    size_t ota_bundle_app_size;
+    size_t ota_bundle_fs_size;
+    size_t ota_bundle_app_written;
+    size_t ota_bundle_fs_written;
+    bool ota_bundle_fs_started;
+    uint8_t ota_bundle_header[16];
 
     void setupRoutes();
     void setupCaptivePortal();

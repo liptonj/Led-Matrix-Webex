@@ -180,8 +180,12 @@
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_hw_support/include/soc/esp32/spiram.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.h \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.hpp \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson/Configuration.hpp \
  src/config_store.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
+ src/debug.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src/HTTPClient.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiClient.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/Client.h \
@@ -243,9 +247,8 @@
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/mbedtls/port/include/aes/esp_aes.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/aes_types.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/mbedtls/mbedtls/include/mbedtls/error.h \
- .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.h \
- .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.hpp \
- .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson/Configuration.hpp \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Update/src/Update.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/MD5Builder.h \
- /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_rom/include/esp_rom_md5.h
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_rom/include/esp_rom_md5.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/FS/src/FS.h

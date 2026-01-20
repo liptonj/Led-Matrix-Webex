@@ -8,9 +8,10 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include <Update.h>
+#include <LittleFS.h>
 
 OTAManager::OTAManager()
-    : update_available(false) {
+    : update_available(false), use_manifest_mode(false) {
 }
 
 OTAManager::~OTAManager() {
@@ -23,7 +24,100 @@ void OTAManager::begin(const String& url, const String& version) {
     Serial.printf("[OTA] Initialized with version %s\n", current_version.c_str());
 }
 
+void OTAManager::setManifestUrl(const String& url) {
+    manifest_url = url;
+    use_manifest_mode = true;
+    Serial.printf("[OTA] Manifest mode enabled: %s\n", manifest_url.c_str());
+}
+
 bool OTAManager::checkForUpdate() {
+    // Try manifest first if configured
+    if (use_manifest_mode && !manifest_url.isEmpty()) {
+        Serial.println("[OTA] Using manifest mode");
+        if (checkUpdateFromManifest()) {
+            return true;
+        }
+        // Fall through to GitHub API on failure
+        Serial.println("[OTA] Manifest mode failed, falling back to GitHub API");
+    }
+    
+    // Fallback to GitHub API
+    return checkUpdateFromGithubAPI();
+}
+
+bool OTAManager::checkUpdateFromManifest() {
+    if (manifest_url.isEmpty()) {
+        return false;
+    }
+    
+    Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
+    
+    WiFiClientSecure client;
+    client.setInsecure(); // TODO: Add proper certificate validation
+    
+    HTTPClient http;
+    http.begin(client, manifest_url);
+    http.addHeader("User-Agent", "ESP32-Webex-Display");
+    
+    int httpCode = http.GET();
+    
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[OTA] Manifest fetch failed: %d\n", httpCode);
+        http.end();
+        return false;
+    }
+    
+    String response = http.getString();
+    http.end();
+    
+    // Parse manifest JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
+    
+    if (error) {
+        Serial.printf("[OTA] Failed to parse manifest: %s\n", error.c_str());
+        return false;
+    }
+    
+    // Extract version
+    latest_version = doc["version"].as<String>();
+    
+    if (latest_version.isEmpty()) {
+        Serial.println("[OTA] No version in manifest");
+        return false;
+    }
+    
+    // Extract firmware and filesystem URLs for this board
+    #if defined(ESP32_S3_BOARD)
+    const char* board_type = "esp32s3";
+    #else
+    const char* board_type = "esp32";
+    #endif
+    
+    firmware_url = doc["firmware"][board_type]["url"].as<String>();
+    littlefs_url = doc["filesystem"][board_type]["url"].as<String>();
+    
+    if (firmware_url.isEmpty() || littlefs_url.isEmpty()) {
+        Serial.printf("[OTA] Missing %s assets in manifest\n", board_type);
+        return false;
+    }
+    
+    // Compare versions
+    update_available = compareVersions(latest_version, current_version);
+    
+    if (update_available) {
+        Serial.printf("[OTA] Update available: %s -> %s\n", 
+                      current_version.c_str(), latest_version.c_str());
+        Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
+        Serial.printf("[OTA] Filesystem: %s\n", littlefs_url.c_str());
+    } else {
+        Serial.println("[OTA] Already on latest version");
+    }
+    
+    return true;  // Successfully checked manifest
+}
+
+bool OTAManager::checkUpdateFromGithubAPI() {
     if (update_url.isEmpty()) {
         Serial.println("[OTA] No update URL configured");
         return false;
@@ -63,65 +157,13 @@ bool OTAManager::checkForUpdate() {
     String tag = doc["tag_name"].as<String>();
     latest_version = extractVersion(tag);
     
-    // Find the firmware binary in assets
-    // Priority:
-    //   1. firmware-ota-esp32s3.bin or firmware-ota-esp32.bin (merged: app + filesystem)
-    //   2. firmware-esp32s3.bin or firmware-esp32.bin (chip-specific)
-    //   3. firmware.bin (generic)
+    firmware_url = "";
+    littlefs_url = "";
+
+    // Find firmware + filesystem assets in release
     JsonArray assets = doc["assets"].as<JsonArray>();
-    int best_priority = 0;
-    
-    for (JsonObject asset : assets) {
-        String name = asset["name"].as<String>();
-        String name_lower = name;
-        name_lower.toLowerCase();
-        
-        if (!name_lower.endsWith(".bin")) {
-            continue;
-        }
-        
-        // Skip bootstrap firmware
-        if (name_lower.indexOf("bootstrap") >= 0) {
-            continue;
-        }
-        
-        int priority = 0;
-        
-        // Check for merged OTA binary (highest priority)
-        #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("ota") >= 0 && 
-                (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0)) {
-                priority = 200;
-            } else if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 100;
-            }
-        #else
-            if (name_lower.indexOf("ota") >= 0 &&
-                (name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 200;
-            } else if ((name_lower.indexOf("esp32") >= 0) && 
-                (name_lower.indexOf("esp32s3") < 0) && 
-                (name_lower.indexOf("esp32-s3") < 0)) {
-                priority = 100;
-            }
-        #endif
-        
-        // Generic firmware.bin
-        if (name_lower == "firmware.bin") {
-            priority = max(priority, 50);
-        }
-        
-        if (priority > best_priority) {
-            best_priority = priority;
-            download_url = asset["browser_download_url"].as<String>();
-        }
-    }
-    
-    // Check if we found a suitable firmware
-    if (download_url.isEmpty()) {
-        Serial.println("[OTA] No suitable firmware found in release");
+    if (!selectReleaseAssets(assets)) {
+        Serial.println("[OTA] Missing firmware or LittleFS asset in release");
         return false;
     }
     
@@ -139,65 +181,20 @@ bool OTAManager::checkForUpdate() {
 }
 
 bool OTAManager::performUpdate() {
-    if (!update_available || download_url.isEmpty()) {
-        Serial.println("[OTA] No update available or no download URL");
+    if (!update_available || firmware_url.isEmpty() || littlefs_url.isEmpty()) {
+        Serial.println("[OTA] No update available or missing asset URLs");
         return false;
     }
     
-    Serial.printf("[OTA] Downloading firmware from %s\n", download_url.c_str());
-    
-    WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
-    
-    HTTPClient http;
-    http.begin(client, download_url);
-    http.addHeader("User-Agent", "ESP32-Webex-Display");
-    
-    int httpCode = http.GET();
-    
-    if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OTA] Download failed: %d\n", httpCode);
-        http.end();
+    if (!downloadAndInstallBinary(firmware_url, U_FLASH, "firmware")) {
         return false;
     }
-    
-    int contentLength = http.getSize();
-    Serial.printf("[OTA] Firmware size: %d bytes\n", contentLength);
-    
-    if (contentLength <= 0) {
-        Serial.println("[OTA] Invalid content length");
-        http.end();
+
+    if (!downloadAndInstallBinary(littlefs_url, U_SPIFFS, "LittleFS")) {
         return false;
     }
-    
-    // Start update
-    if (!Update.begin(contentLength)) {
-        Serial.printf("[OTA] Not enough space: %s\n", Update.errorString());
-        http.end();
-        return false;
-    }
-    
-    Serial.println("[OTA] Starting update...");
-    
-    WiFiClient* stream = http.getStreamPtr();
-    size_t written = Update.writeStream(*stream);
-    
-    if (written != contentLength) {
-        Serial.printf("[OTA] Written only %d of %d bytes\n", written, contentLength);
-        Update.abort();
-        http.end();
-        return false;
-    }
-    
-    if (!Update.end()) {
-        Serial.printf("[OTA] Update failed: %s\n", Update.errorString());
-        http.end();
-        return false;
-    }
-    
-    http.end();
-    
-    Serial.println("[OTA] Update successful!");
+
+    Serial.println("[OTA] Firmware + LittleFS update successful!");
     Serial.println("[OTA] Rebooting...");
     
     delay(1000);
@@ -231,4 +228,136 @@ String OTAManager::extractVersion(const String& tag) {
         return tag.substring(1);
     }
     return tag;
+}
+
+bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
+    int firmware_priority = 0;
+    int littlefs_priority = 0;
+
+    for (JsonObject asset : assets) {
+        String name = asset["name"].as<String>();
+        String name_lower = name;
+        name_lower.toLowerCase();
+
+        if (!name_lower.endsWith(".bin")) {
+            continue;
+        }
+
+        if (name_lower.indexOf("bootstrap") >= 0) {
+            continue;
+        }
+
+        const String download = asset["browser_download_url"].as<String>();
+
+        if (name_lower.indexOf("littlefs") >= 0 || name_lower.indexOf("spiffs") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "littlefs.bin" || name_lower == "spiffs.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > littlefs_priority) {
+                littlefs_priority = priority;
+                littlefs_url = download;
+            }
+            continue;
+        }
+
+        if (name_lower.indexOf("ota") >= 0) {
+            continue;  // Skip merged OTA binaries for streaming updates
+        }
+
+        if (name_lower.indexOf("firmware") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "firmware.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > firmware_priority) {
+                firmware_priority = priority;
+                firmware_url = download;
+            }
+        }
+    }
+
+    return firmware_priority > 0 && littlefs_priority > 0;
+}
+
+bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
+    Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
+
+    WiFiClientSecure client;
+    client.setInsecure(); // TODO: Add proper certificate validation
+
+    HTTPClient http;
+    http.begin(client, url);
+    http.addHeader("User-Agent", "ESP32-Webex-Display");
+
+    int httpCode = http.GET();
+
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[OTA] %s download failed: %d\n", label, httpCode);
+        http.end();
+        return false;
+    }
+
+    int contentLength = http.getSize();
+    Serial.printf("[OTA] %s size: %d bytes\n", label, contentLength);
+
+    if (contentLength <= 0) {
+        Serial.printf("[OTA] Invalid content length for %s\n", label);
+        http.end();
+        return false;
+    }
+
+    if (update_type == U_SPIFFS) {
+        LittleFS.end();
+    }
+
+    if (!Update.begin(contentLength, update_type)) {
+        Serial.printf("[OTA] Not enough space for %s: %s\n", label, Update.errorString());
+        http.end();
+        return false;
+    }
+
+    Serial.printf("[OTA] Flashing %s...\n", label);
+
+    WiFiClient* stream = http.getStreamPtr();
+    size_t written = Update.writeStream(*stream);
+
+    if (written != static_cast<size_t>(contentLength)) {
+        Serial.printf("[OTA] Written only %d of %d bytes for %s\n", written, contentLength, label);
+        Update.abort();
+        http.end();
+        return false;
+    }
+
+    if (!Update.end()) {
+        Serial.printf("[OTA] %s update failed: %s\n", label, Update.errorString());
+        http.end();
+        return false;
+    }
+
+    http.end();
+    Serial.printf("[OTA] %s update applied\n", label);
+    return true;
 }

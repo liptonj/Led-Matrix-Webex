@@ -5,6 +5,43 @@
 
 #include "mdns_manager.h"
 
+namespace {
+String sanitizeHostname(const String& input) {
+    String sanitized = input;
+    sanitized.trim();
+    sanitized.toLowerCase();
+
+    String output;
+    output.reserve(sanitized.length());
+    char prev = '\0';
+
+    for (size_t i = 0; i < sanitized.length(); i++) {
+        char c = sanitized.charAt(i);
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+            output += c;
+            prev = c;
+            continue;
+        }
+        if (c == '-' || c == '_' || c == ' ') {
+            if (prev != '-') {
+                output += '-';
+                prev = '-';
+            }
+        }
+    }
+
+    while (output.endsWith("-")) {
+        output.remove(output.length() - 1);
+    }
+
+    if (output.isEmpty()) {
+        output = "webex-display";
+    }
+
+    return output;
+}
+}  // namespace
+
 MDNSManager::MDNSManager()
     : initialized(false), bridge_found(false), bridge_port(0), last_discovery(0) {
 }
@@ -16,14 +53,20 @@ MDNSManager::~MDNSManager() {
 }
 
 bool MDNSManager::begin(const String& hostname) {
-    if (!MDNS.begin(hostname.c_str())) {
+    const String sanitized = sanitizeHostname(hostname);
+    if (sanitized != hostname) {
+        Serial.printf("[MDNS] Sanitized hostname '%s' -> '%s'\n",
+                      hostname.c_str(), sanitized.c_str());
+    }
+
+    if (!MDNS.begin(sanitized.c_str())) {
         Serial.println("[MDNS] Failed to start mDNS!");
         return false;
     }
     
     initialized = true;
-    current_hostname = hostname;
-    Serial.printf("[MDNS] Started with hostname: %s.local\n", hostname.c_str());
+    current_hostname = sanitized;
+    Serial.printf("[MDNS] Started with hostname: %s.local\n", sanitized.c_str());
     return true;
 }
 

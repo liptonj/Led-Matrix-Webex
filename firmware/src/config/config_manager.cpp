@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include <ArduinoJson.h>
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
 
 // ESP-specific headers only for actual ESP32 builds
 #ifndef NATIVE_BUILD
@@ -14,7 +17,8 @@
 
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
-      cached_brightness(DEFAULT_BRIGHTNESS), cache_loaded(false) {
+      cached_brightness(DEFAULT_BRIGHTNESS), cached_scroll_speed_ms(DEFAULT_SCROLL_SPEED_MS),
+      cache_loaded(false) {
 }
 
 ConfigManager::~ConfigManager() {
@@ -32,6 +36,13 @@ bool ConfigManager::begin() {
     initialized = true;
     loadCache();
 
+#if defined(WEBEX_CLIENT_ID) && defined(WEBEX_CLIENT_SECRET)
+    if (cached_client_id.isEmpty() || cached_client_secret.isEmpty()) {
+        setWebexCredentials(String(WEBEX_CLIENT_ID), String(WEBEX_CLIENT_SECRET));
+        Serial.println("[CONFIG] Loaded Webex credentials from secrets.h");
+    }
+#endif
+
     Serial.println("[CONFIG] Configuration loaded successfully");
     return true;
 }
@@ -48,6 +59,7 @@ void ConfigManager::loadCache() {
     cached_token_expiry = loadUInt("webex_expiry", 0);
     cached_poll_interval = loadUInt("poll_interval", DEFAULT_POLL_INTERVAL);
     cached_brightness = loadUInt("brightness", DEFAULT_BRIGHTNESS);
+    cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
     cache_loaded = true;
 }
 
@@ -115,6 +127,18 @@ uint8_t ConfigManager::getBrightness() const {
 void ConfigManager::setBrightness(uint8_t brightness) {
     saveUInt("brightness", brightness);
     cached_brightness = brightness;
+}
+
+uint16_t ConfigManager::getScrollSpeedMs() const {
+    if (!cache_loaded) {
+        return loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
+    }
+    return cached_scroll_speed_ms;
+}
+
+void ConfigManager::setScrollSpeedMs(uint16_t speed_ms) {
+    saveUInt("scroll_speed_ms", speed_ms);
+    cached_scroll_speed_ms = speed_ms;
 }
 
 // Webex Configuration
@@ -407,6 +431,7 @@ String ConfigManager::exportConfig() const {
     doc["device_name"] = getDeviceName();
     doc["display_name"] = getDisplayName();
     doc["brightness"] = getBrightness();
+    doc["scroll_speed_ms"] = getScrollSpeedMs();
     doc["poll_interval"] = getWebexPollInterval();
     doc["xapi_poll"] = getXAPIPollInterval();
     doc["mqtt_broker"] = getMQTTBroker();
@@ -439,11 +464,32 @@ bool ConfigManager::importConfig(const String& json) {
     if (doc["brightness"].is<int>()) {
         setBrightness(doc["brightness"].as<uint8_t>());
     }
+    if (doc["scroll_speed_ms"].is<int>()) {
+        setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
+    }
     if (doc["poll_interval"].is<int>()) {
         setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
     }
     if (doc["xapi_poll"].is<int>()) {
         setXAPIPollInterval(doc["xapi_poll"].as<uint16_t>());
+    }
+    if (doc["mqtt_broker"].is<const char*>()) {
+        setMQTTConfig(
+            doc["mqtt_broker"].as<const char*>(),
+            doc["mqtt_port"] | 1883,
+            doc["mqtt_username"] | "",
+            doc["mqtt_password"] | "",
+            doc["mqtt_topic"] | "meraki/v1/mt/#"
+        );
+    }
+    if (doc["sensor_serial"].is<const char*>()) {
+        setSensorSerial(doc["sensor_serial"].as<const char*>());
+    }
+    if (doc["ota_url"].is<const char*>()) {
+        setOTAUrl(doc["ota_url"].as<const char*>());
+    }
+    if (doc["auto_update"].is<bool>()) {
+        setAutoUpdate(doc["auto_update"].as<bool>());
     }
 
     Serial.println("[CONFIG] Configuration imported successfully");

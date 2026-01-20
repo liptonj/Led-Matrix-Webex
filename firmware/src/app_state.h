@@ -19,6 +19,7 @@ struct AppState {
     bool wifi_connected = false;
     bool webex_authenticated = false;
     bool bridge_connected = false;
+    bool embedded_app_connected = false;
     bool xapi_connected = false;
     bool mqtt_connected = false;
     String webex_status = "unknown";

@@ -57,6 +57,11 @@ public:
     void clear();
 
     /**
+     * @brief Update display (for scrolling animations)
+     */
+    void update();
+
+    /**
      * @brief Show bootstrap mode startup screen
      * @param version Bootstrap firmware version
      */
@@ -95,22 +100,51 @@ public:
      */
     void showError(const String& error);
 
-    /**
-     * @brief Show status message
-     * @param line1 First line of text
-     * @param line2 Second line of text (optional)
-     * @param line3 Third line of text (optional)
-     */
-    void showStatus(const String& line1, const String& line2 = "", const String& line3 = "");
-
 private:
     MatrixPanel_I2S_DMA* dma_display;
     bool initialized;
 
+    enum class DisplayMode {
+        NONE,
+        BOOTSTRAP,
+        AP_MODE,
+        CONNECTING,
+        CONNECTED,
+        OTA_PROGRESS,
+        ERROR
+    };
+
+    DisplayMode mode;
+    bool needs_render;
+    unsigned long last_render_ms;
+
+    String current_ssid;
+    String current_ip;
+    String current_hostname;
+    String current_message;
+    String current_error;
+    String bootstrap_version;
+    int ota_progress;
+
     void drawText(int x, int y, const String& text, uint16_t color);
-    void drawSmallText(int x, int y, const String& text, uint16_t color);
     void drawCenteredText(int y, const String& text, uint16_t color);
     void drawProgressBar(int y, int progress, uint16_t color);
+    void drawScrollingText(int y, const String& text, uint16_t color, int padding = 0);
+    void drawScrollingTextWithOffset(int y, const String& text, uint16_t color, int offset, int padding = 0);
+    void drawLineText(int y, const String& text, uint16_t color, bool scroll_if_needed, bool center = false);
+    void drawWifiIcon(int x, int y, uint16_t color);
+    void drawWifiOffIcon(int x, int y, uint16_t color);
+    int textWidth(const String& text) const;
+    int clampTextY(int y) const;
+    bool shouldAnimate(unsigned long now) const;
+    int scrollOffsetForText(const String& text, unsigned long now, int padding = 0) const;
+    void render(unsigned long now);
+    void renderBootstrap();
+    void renderAPMode(unsigned long now);
+    void renderConnecting(unsigned long now);
+    void renderConnected(unsigned long now);
+    void renderOTAProgress(unsigned long now);
+    void renderError(unsigned long now);
 };
 
 #endif // BOOTSTRAP_DISPLAY_H

@@ -4,8 +4,72 @@
  */
 
 #include "web_setup.h"
+#include "debug.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <Update.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+
+#ifndef BOOTSTRAP_BUILD
+#define BOOTSTRAP_BUILD __DATE__ " " __TIME__
+#endif
+
+namespace {
+constexpr size_t OTA_BUNDLE_HEADER_SIZE = 16;
+const uint8_t OTA_BUNDLE_MAGIC[4] = {'L', 'M', 'W', 'B'};
+
+uint32_t read_le_u32(const uint8_t* data) {
+    return static_cast<uint32_t>(data[0]) |
+           (static_cast<uint32_t>(data[1]) << 8) |
+           (static_cast<uint32_t>(data[2]) << 16) |
+           (static_cast<uint32_t>(data[3]) << 24);
+}
+
+size_t get_ota_partition_size() {
+    const esp_partition_t* partition = esp_ota_get_next_update_partition(nullptr);
+    return partition ? partition->size : 0;
+}
+
+size_t get_fs_partition_size() {
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
+        nullptr
+    );
+    return partition ? partition->size : 0;
+}
+
+void log_ota_partition_info(const char* context) {
+    const esp_partition_t* partition = esp_ota_get_next_update_partition(nullptr);
+    if (!partition) {
+        Serial.printf("[WEB] %s OTA partition not found\n", context);
+        return;
+    }
+    Serial.printf("[WEB] %s OTA partition label=%s addr=0x%06x size=%u\n",
+                  context,
+                  partition->label,
+                  static_cast<unsigned>(partition->address),
+                  static_cast<unsigned>(partition->size));
+}
+
+void log_fs_partition_info(const char* context) {
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
+        nullptr
+    );
+    if (!partition) {
+        Serial.printf("[WEB] %s FS partition not found\n", context);
+        return;
+    }
+    Serial.printf("[WEB] %s FS partition label=%s addr=0x%06x size=%u\n",
+                  context,
+                  partition->label,
+                  static_cast<unsigned>(partition->address),
+                  static_cast<unsigned>(partition->size));
+}
+}  // namespace
 
 WebSetup::WebSetup()
     : server(nullptr)
@@ -17,7 +81,19 @@ WebSetup::WebSetup()
     , wifi_pending(false)
     , running(false)
     , captive_portal_active(false)
-    , selected_release_index(-1) {
+    , selected_release_index(-1)
+    , ota_upload_error("")
+    , ota_upload_size(0)
+    , ota_upload_written(0)
+    , ota_upload_next_log(0)
+    , ota_bundle_mode(false)
+    , ota_bundle_header_flushed(false)
+    , ota_bundle_header_filled(0)
+    , ota_bundle_app_size(0)
+    , ota_bundle_fs_size(0)
+    , ota_bundle_app_written(0)
+    , ota_bundle_fs_written(0)
+    , ota_bundle_fs_started(false) {
 }
 
 WebSetup::~WebSetup() {
@@ -40,14 +116,12 @@ void WebSetup::stop() {
     Serial.println("[WEB] Web server stopped");
 }
 
-bool WebSetup::isRunning() const {
-    return running;
-}
-
 void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* ota) {
+    LOG_FUNC_ENTRY(WEB_TAG);
+
     // Prevent double initialization
     if (running) {
-        Serial.println("[WEB] Web server already running, skipping initialization");
+        LOG_WARN(WEB_TAG, "Web server already running, skipping initialization");
         return;
     }
 
@@ -55,27 +129,38 @@ void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* 
     wifi_provisioner = wifi;
     ota_downloader = ota;
 
+    LOG_DEBUG(WEB_TAG, "Config store: %p, WiFi provisioner: %p, OTA downloader: %p",
+              config, wifi, ota);
+
     // Initialize LittleFS for static files
+    LOG_DEBUG(WEB_TAG, "Mounting LittleFS...");
     if (!LittleFS.begin(true)) {
-        Serial.println("[WEB] Failed to mount LittleFS, using embedded HTML");
+        LOG_WARN(WEB_TAG, "Failed to mount LittleFS, using embedded HTML");
+    } else {
+        LOG_INFO(WEB_TAG, "LittleFS mounted successfully");
     }
 
     // Create server on port 80
+    LOG_DEBUG(WEB_TAG, "Creating AsyncWebServer on port 80");
     server = new AsyncWebServer(80);
 
     // Setup routes
+    LOG_DEBUG(WEB_TAG, "Setting up routes...");
     setupRoutes();
+    LOG_DEBUG(WEB_TAG, "Routes configured");
 
     // Setup captive portal only if AP is active
     if (wifi_provisioner && wifi_provisioner->isAPActive()) {
+        LOG_INFO(WEB_TAG, "AP is active, setting up captive portal");
         setupCaptivePortal();
     } else {
-        Serial.println("[WEB] Skipping captive portal (AP not active)");
+        LOG_DEBUG(WEB_TAG, "Skipping captive portal (AP not active)");
     }
 
     // Start server
     server->begin();
     running = true;
+    LOG_INFO(WEB_TAG, "Web server started on port 80");
 
     Serial.println("[WEB] Bootstrap web server started on port 80");
 }
@@ -112,16 +197,7 @@ void WebSetup::setupCaptivePortal() {
 }
 
 void WebSetup::setupRoutes() {
-    // Serve static files from LittleFS if available
-    if (LittleFS.exists("/index.html")) {
-        server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-    } else {
-        // Serve embedded HTML if LittleFS not available
-        server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
-            handleRoot(request);
-        });
-    }
-
+    // IMPORTANT: Register API endpoints FIRST, before static file handler
     // API endpoints
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
@@ -158,12 +234,25 @@ void WebSetup::setupRoutes() {
     server->on("/api/ota-progress", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleOTAProgress(request);
     });
-    
+
+    server->on("/api/ota/ping", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        JsonDocument doc;
+        doc["ok"] = true;
+        doc["uptime_ms"] = millis();
+        doc["free_heap"] = ESP.getFreeHeap();
+
+        String response;
+        serializeJson(doc, response);
+        request->send(200, "application/json", response);
+        Serial.printf("[WEB] OTA ping from %s\n",
+                      request->client() ? request->client()->remoteIP().toString().c_str() : "unknown");
+    });
+
     // Fetch available releases (including beta)
     server->on("/api/releases", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleGetReleases(request);
     });
-    
+
     // Install specific release by index
     server->on("/api/install-release", HTTP_POST,
         [](AsyncWebServerRequest* request) {},
@@ -172,6 +261,344 @@ void WebSetup::setupRoutes() {
             handleInstallRelease(request, data, len);
         }
     );
+
+    server->on("/api/ota/upload", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            bool success = ota_upload_error.isEmpty() && !Update.hasError();
+            JsonDocument doc;
+            doc["success"] = success;
+            doc["message"] = success
+                ? "Upload complete. Rebooting..."
+                : (ota_upload_error.isEmpty() ? "Upload failed" : ota_upload_error);
+
+            String response;
+            serializeJson(doc, response);
+
+            request->send(success ? 200 : 400, "application/json", response);
+
+            if (success) {
+                delay(1000);
+                ESP.restart();
+            }
+        },
+        [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+            if (index == 0) {
+                ota_upload_error = "";
+                ota_upload_size = request->contentLength();
+                ota_upload_written = 0;
+                ota_upload_next_log = 64 * 1024;
+                ota_bundle_mode = false;
+                ota_bundle_header_flushed = false;
+                ota_bundle_header_filled = 0;
+                ota_bundle_app_size = 0;
+                ota_bundle_fs_size = 0;
+                ota_bundle_app_written = 0;
+                ota_bundle_fs_written = 0;
+                ota_bundle_fs_started = false;
+
+                LOG_INFO(WEB_TAG, "OTA upload start: %s (%u bytes)",
+                         filename.c_str(), static_cast<unsigned>(ota_upload_size));
+                Serial.printf("[WEB] OTA upload start (index=0) file=%s size=%u\n",
+                              filename.c_str(),
+                              static_cast<unsigned>(ota_upload_size));
+            }
+
+            if (!ota_upload_error.isEmpty()) {
+                if (final) {
+                    Update.abort();
+                }
+                return;
+            }
+
+            size_t offset = 0;
+            if (ota_bundle_header_filled < OTA_BUNDLE_HEADER_SIZE) {
+                size_t to_copy = min(OTA_BUNDLE_HEADER_SIZE - ota_bundle_header_filled, len);
+                memcpy(ota_bundle_header + ota_bundle_header_filled, data, to_copy);
+                ota_bundle_header_filled += to_copy;
+                offset += to_copy;
+
+                if (ota_bundle_header_filled == OTA_BUNDLE_HEADER_SIZE) {
+                    if (memcmp(ota_bundle_header, OTA_BUNDLE_MAGIC, sizeof(OTA_BUNDLE_MAGIC)) == 0) {
+                        ota_bundle_mode = true;
+                        ota_bundle_app_size = read_le_u32(ota_bundle_header + 4);
+                        ota_bundle_fs_size = read_le_u32(ota_bundle_header + 8);
+                        size_t expected_size = OTA_BUNDLE_HEADER_SIZE + ota_bundle_app_size + ota_bundle_fs_size;
+
+                        if (ota_bundle_app_size == 0 || ota_bundle_fs_size == 0) {
+                            ota_upload_error = "Invalid OTA bundle sizes";
+                        } else if (ota_upload_size > 0 && ota_upload_size < expected_size) {
+                            ota_upload_error = "OTA bundle size mismatch";
+                        } else if (get_ota_partition_size() > 0 &&
+                                   ota_bundle_app_size > get_ota_partition_size()) {
+                            ota_upload_error = "App image too large for OTA partition";
+                        } else if (get_fs_partition_size() > 0 &&
+                                   ota_bundle_fs_size > get_fs_partition_size()) {
+                            ota_upload_error = "LittleFS image too large for partition";
+                        } else if (!Update.begin(ota_bundle_app_size, U_FLASH)) {
+                            String err = Update.errorString();
+                            ota_upload_error = (err.isEmpty() || err == "No Error")
+                                ? "Failed to start OTA update"
+                                : err;
+                            Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                          static_cast<unsigned>(Update.getError()),
+                                          ota_upload_error.c_str());
+                            log_ota_partition_info("Update.begin app failed");
+                        } else {
+                            LOG_INFO(WEB_TAG, "OTA bundle detected: app=%u fs=%u",
+                                     static_cast<unsigned>(ota_bundle_app_size),
+                                     static_cast<unsigned>(ota_bundle_fs_size));
+                            Serial.printf("[WEB] OTA bundle detected app=%u fs=%u\n",
+                                          static_cast<unsigned>(ota_bundle_app_size),
+                                          static_cast<unsigned>(ota_bundle_fs_size));
+                        }
+                        if (!ota_upload_error.isEmpty()) {
+                            Serial.printf("[WEB] OTA bundle error: %s\n", ota_upload_error.c_str());
+                        }
+                    } else {
+                        size_t total = ota_upload_size;
+                        size_t ota_partition = get_ota_partition_size();
+                        if (total > 0 && ota_partition > 0 && total > ota_partition) {
+                            ota_upload_error = "App image too large for OTA partition";
+                        } else {
+                            if (total == 0) {
+                                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                                    String err = Update.errorString();
+                                    ota_upload_error = (err.isEmpty() || err == "No Error")
+                                        ? "Failed to start OTA update"
+                                        : err;
+                                    Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                                  static_cast<unsigned>(Update.getError()),
+                                                  ota_upload_error.c_str());
+                                    log_ota_partition_info("Update.begin app failed");
+                                }
+                            } else if (!Update.begin(total)) {
+                                String err = Update.errorString();
+                                ota_upload_error = (err.isEmpty() || err == "No Error")
+                                    ? "Failed to start OTA update"
+                                    : err;
+                                Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                              static_cast<unsigned>(Update.getError()),
+                                              ota_upload_error.c_str());
+                                log_ota_partition_info("Update.begin app failed");
+                            }
+                        }
+                        if (!ota_upload_error.isEmpty()) {
+                            Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
+                        }
+                    }
+                } else {
+                    if (final) {
+                        ota_upload_error = "Incomplete OTA upload";
+                    }
+                    return;
+                }
+            }
+
+            auto write_chunk = [this](const uint8_t* buffer, size_t size) -> size_t {
+                if (size == 0 || !ota_upload_error.isEmpty()) {
+                    return 0;
+                }
+                size_t written = Update.write(const_cast<uint8_t*>(buffer), size);
+                if (written != size) {
+                    ota_upload_error = Update.errorString();
+                    Serial.printf("[WEB] OTA write error: wrote=%u expected=%u err=%s\n",
+                                  static_cast<unsigned>(written),
+                                  static_cast<unsigned>(size),
+                                  ota_upload_error.c_str());
+                }
+                return written;
+            };
+
+            if (ota_bundle_mode) {
+                const uint8_t* ptr = data + offset;
+                size_t remaining = len - offset;
+                while (remaining > 0 && ota_upload_error.isEmpty()) {
+                    delay(0);
+                    if (ota_bundle_app_written < ota_bundle_app_size) {
+                        size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
+                        size_t written = write_chunk(ptr, to_write);
+                        ota_bundle_app_written += written;
+                        ota_upload_written += written;
+                        ptr += to_write;
+                        remaining -= to_write;
+
+                        if (ota_bundle_app_written == ota_bundle_app_size && ota_upload_error.isEmpty()) {
+                            if (!Update.end(true)) {
+                                ota_upload_error = Update.errorString();
+                                break;
+                            }
+                            LOG_INFO(WEB_TAG, "OTA bundle app complete, starting LittleFS write");
+                            if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
+                                String err = Update.errorString();
+                                ota_upload_error = (err.isEmpty() || err == "No Error")
+                                    ? "Failed to start LittleFS update"
+                                    : err;
+                                Serial.printf("[WEB] Update.begin LittleFS failed: code=%u err=%s\n",
+                                              static_cast<unsigned>(Update.getError()),
+                                              ota_upload_error.c_str());
+                                log_fs_partition_info("Update.begin LittleFS failed");
+                                break;
+                            }
+                            ota_bundle_fs_started = true;
+                        }
+                    } else {
+                        if (ota_bundle_fs_written >= ota_bundle_fs_size) {
+                            ota_upload_error = "OTA bundle has extra data";
+                            break;
+                        }
+                        size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
+                        size_t written = write_chunk(ptr, to_write);
+                        ota_bundle_fs_written += written;
+                        ota_upload_written += written;
+                        ptr += to_write;
+                        remaining -= to_write;
+                    }
+                    if (ota_upload_written >= ota_upload_next_log) {
+                        size_t total = ota_upload_size > 0
+                            ? ota_upload_size
+                            : (ota_bundle_app_size + ota_bundle_fs_size + OTA_BUNDLE_HEADER_SIZE);
+                        Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
+                                      static_cast<unsigned>(ota_upload_written),
+                                      static_cast<unsigned>(total),
+                                      static_cast<unsigned>(ESP.getFreeHeap()));
+                        ota_upload_next_log += 64 * 1024;
+                    }
+                }
+            } else {
+                if (!ota_bundle_header_flushed) {
+                    ota_upload_written += write_chunk(ota_bundle_header, ota_bundle_header_filled);
+                    ota_bundle_header_flushed = true;
+                }
+                ota_upload_written += write_chunk(data + offset, len - offset);
+                delay(0);
+                if (ota_upload_written >= ota_upload_next_log) {
+                    size_t total = ota_upload_size > 0 ? ota_upload_size : 0;
+                    Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
+                                  static_cast<unsigned>(ota_upload_written),
+                                  static_cast<unsigned>(total),
+                                  static_cast<unsigned>(ESP.getFreeHeap()));
+                    ota_upload_next_log += 64 * 1024;
+                }
+            }
+
+            if (final) {
+                if (ota_upload_error.isEmpty()) {
+                    if (ota_bundle_mode) {
+                        if (ota_bundle_app_written != ota_bundle_app_size ||
+                            ota_bundle_fs_written != ota_bundle_fs_size) {
+                            ota_upload_error = "OTA bundle incomplete";
+                        } else if (ota_bundle_fs_started && !Update.end(true)) {
+                            ota_upload_error = Update.errorString();
+                        }
+                    } else if (!Update.end(true)) {
+                        ota_upload_error = Update.errorString();
+                    }
+                } else {
+                    Update.abort();
+                }
+                LOG_INFO(WEB_TAG, "OTA upload %s (%u bytes)",
+                         ota_upload_error.isEmpty() ? "complete" : "failed",
+                         static_cast<unsigned>(ota_upload_size));
+                Serial.printf("[WEB] OTA upload %s size=%u app_written=%u fs_written=%u app_or_bin_written=%u\n",
+                              ota_upload_error.isEmpty() ? "complete" : "failed",
+                              static_cast<unsigned>(ota_upload_size),
+                              static_cast<unsigned>(ota_bundle_app_written),
+                              static_cast<unsigned>(ota_bundle_fs_written),
+                              static_cast<unsigned>(ota_upload_written));
+                if (!ota_upload_error.isEmpty()) {
+                    Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
+                }
+            }
+        }
+    );
+
+    server->on("/api/ota/upload-fs", HTTP_POST,
+        [this](AsyncWebServerRequest* request) {
+            bool success = ota_upload_error.isEmpty() && !Update.hasError();
+            JsonDocument doc;
+            doc["success"] = success;
+            doc["message"] = success
+                ? "LittleFS upload complete. Rebooting..."
+                : (ota_upload_error.isEmpty() ? "LittleFS upload failed" : ota_upload_error);
+
+            String response;
+            serializeJson(doc, response);
+
+            request->send(success ? 200 : 400, "application/json", response);
+
+            if (success) {
+                delay(1000);
+                ESP.restart();
+            }
+        },
+        [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+            if (index == 0) {
+                ota_upload_error = "";
+                ota_upload_size = request->contentLength();
+
+                LOG_INFO(WEB_TAG, "LittleFS upload start: %s (%u bytes)",
+                         filename.c_str(), static_cast<unsigned>(ota_upload_size));
+
+                size_t total = ota_upload_size;
+                size_t fs_partition = get_fs_partition_size();
+                if (total > 0 && fs_partition > 0 && total > fs_partition) {
+                    ota_upload_error = "LittleFS image too large for partition";
+                } else {
+                    LittleFS.end();
+                    if (total == 0) {
+                        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS)) {
+                            String err = Update.errorString();
+                            ota_upload_error = (err.isEmpty() || err == "No Error")
+                                ? "Failed to start LittleFS update"
+                                : err;
+                            Serial.printf("[WEB] Update.begin LittleFS failed: code=%u err=%s\n",
+                                          static_cast<unsigned>(Update.getError()),
+                                          ota_upload_error.c_str());
+                            log_fs_partition_info("Update.begin LittleFS failed");
+                        }
+                    } else if (!Update.begin(total, U_SPIFFS)) {
+                        String err = Update.errorString();
+                        ota_upload_error = (err.isEmpty() || err == "No Error")
+                            ? "Failed to start LittleFS update"
+                            : err;
+                        Serial.printf("[WEB] Update.begin LittleFS failed: code=%u err=%s\n",
+                                      static_cast<unsigned>(Update.getError()),
+                                      ota_upload_error.c_str());
+                        log_fs_partition_info("Update.begin LittleFS failed");
+                    }
+                }
+            }
+
+            if (ota_upload_error.isEmpty()) {
+                if (Update.write(data, len) != len) {
+                    ota_upload_error = Update.errorString();
+                }
+            }
+
+            if (final) {
+                if (ota_upload_error.isEmpty()) {
+                    if (!Update.end(true)) {
+                        ota_upload_error = Update.errorString();
+                    }
+                } else {
+                    Update.abort();
+                }
+                LOG_INFO(WEB_TAG, "LittleFS upload %s (%u bytes)",
+                         ota_upload_error.isEmpty() ? "complete" : "failed",
+                         static_cast<unsigned>(ota_upload_size));
+            }
+        }
+    );
+
+    // AFTER API routes: Serve static files from LittleFS or embedded HTML
+    if (LittleFS.exists("/index.html")) {
+        server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+    } else {
+        // Serve embedded HTML if LittleFS not available
+        server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
+            handleRoot(request);
+        });
+    }
 
     // Captive portal detection endpoints - redirect to setup page
     // Apple
@@ -203,15 +630,22 @@ void WebSetup::setupRoutes() {
         request->redirect("http://192.168.4.1/");
     });
 
-    // Fallback - redirect any unknown request to setup page (captive portal behavior)
+    // Fallback - redirect unknown requests only in captive portal mode
     server->onNotFound([this](AsyncWebServerRequest* request) {
         // If it's an API request, return 404
         if (request->url().startsWith("/api/")) {
+            if (request->url().startsWith("/api/ota/")) {
+                Serial.printf("[WEB] OTA API not found: %s\n", request->url().c_str());
+            }
             request->send(404, "application/json", "{\"error\":\"Not found\"}");
             return;
         }
-        // Otherwise redirect to captive portal
-        request->redirect("http://192.168.4.1/");
+        // Redirect only when captive portal is active (AP mode)
+        if (captive_portal_active) {
+            request->redirect("http://192.168.4.1/");
+            return;
+        }
+        request->send(404, "text/plain", "Not found");
     });
 }
 
@@ -291,6 +725,18 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 </div>
                 <button class="btn btn-secondary" onclick="saveOTAUrl()">Save URL</button>
             </div>
+            <div class="form-group" style="margin-top:15px">
+                <label>Manual Firmware Upload (.bin or bundle)</label>
+                <input type="file" id="manual-file" accept=".bin">
+                <button class="btn btn-secondary" onclick="startManualUpload()" id="manual-upload-btn" disabled>Upload Firmware</button>
+                <div id="manual-upload-status" class="status">Select a firmware or OTA bundle file to upload</div>
+            </div>
+            <div class="form-group" style="margin-top:15px">
+                <label>Manual LittleFS Upload (.bin)</label>
+                <input type="file" id="manual-fs-file" accept=".bin">
+                <button class="btn btn-secondary" onclick="startManualFsUpload()" id="manual-fs-upload-btn" disabled>Upload LittleFS</button>
+                <div id="manual-fs-upload-status" class="status">Select a filesystem image to upload</div>
+            </div>
         </div>
 
         <div class="card">
@@ -299,19 +745,27 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
         </div>
     </div>
     <script>
+        var scannedNetworks=[];
+        var isWifiConnected=false;
         function scanNetworks(){
-            document.getElementById('networks').innerHTML='Scanning...';
-            fetch('/api/scan').then(r=>r.json()).then(d=>{
-                let html='';
-                d.networks.forEach(n=>{
-                    html+=`<div class="network" onclick="selectNetwork('${n.ssid}')">
-                        <span>${n.ssid}</span><span>${n.rssi}dBm ${n.encrypted?'🔒':''}</span>
-                    </div>`;
-                });
-                document.getElementById('networks').innerHTML=html||'No networks found';
-            }).catch(()=>document.getElementById('networks').innerHTML='Scan failed');
+            document.getElementById('networks').innerHTML='<div style="text-align:center;padding:20px">Scanning...</div>';
+            fetch('/api/scan')
+            .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+            .then(function(d){
+                scannedNetworks=d.networks||[];
+                var html='';
+                for(var i=0;i<scannedNetworks.length;i++){
+                    var n=scannedNetworks[i];
+                    if(n.ssid){
+                        html+='<div class="network" onclick="selectNetwork('+i+')"><span>'+n.ssid+'</span><span>'+n.rssi+'dBm '+(n.encrypted?'&#128274;':'')+'</span></div>';
+                    }
+                }
+                document.getElementById('networks').innerHTML=html||'<div style="text-align:center;padding:10px">No networks found</div>';
+            }).catch(function(e){
+                document.getElementById('networks').innerHTML='<div style="text-align:center;padding:10px;color:#ff6b6b">Scan failed</div>';
+            });
         }
-        function selectNetwork(ssid){document.getElementById('ssid').value=ssid;}
+        function selectNetwork(idx){document.getElementById('ssid').value=scannedNetworks[idx].ssid;}
         function saveWifi(e){
             e.preventDefault();
             const ssid=document.getElementById('ssid').value;
@@ -325,20 +779,39 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
             }).catch(()=>alert('Failed to save WiFi'));
         }
         function loadReleases(){
-            document.getElementById('ota-status').textContent='Loading versions...';
-            fetch('/api/releases').then(r=>r.json()).then(d=>{
+            if(!isWifiConnected){
+                document.getElementById('ota-status').textContent='Connect to WiFi to load versions';
+                return;
+            }
+            document.getElementById('ota-status').textContent='Loading versions from GitHub...';
+            const controller=new AbortController();
+            const timeout=setTimeout(()=>controller.abort(),15000);
+            fetch('/api/releases',{signal:controller.signal})
+            .then(r=>{clearTimeout(timeout);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+            .then(d=>{
                 const select=document.getElementById('release-select');
                 select.innerHTML='<option value="-1">Latest Stable (Auto)</option>';
-                d.releases.forEach(r=>{
-                    const beta=r.is_beta?' [BETA]':'';
-                    const opt=document.createElement('option');
-                    opt.value=r.index;
-                    opt.textContent=r.version+beta;
-                    if(r.is_beta)opt.style.color='#ffcc00';
-                    select.appendChild(opt);
-                });
-                document.getElementById('ota-status').textContent='Found '+d.count+' versions';
-            }).catch(()=>document.getElementById('ota-status').textContent='Failed to load versions');
+                if(!d.cached&&d.error){
+                    document.getElementById('ota-status').textContent=d.error;
+                    return;
+                }
+                if(d.releases&&d.releases.length>0){
+                    d.releases.forEach(r=>{
+                        const beta=r.is_beta?' [BETA]':'';
+                        const opt=document.createElement('option');
+                        opt.value=r.index;
+                        opt.textContent=r.version+beta;
+                        if(r.is_beta)opt.style.color='#ffcc00';
+                        select.appendChild(opt);
+                    });
+                    document.getElementById('ota-status').textContent='Found '+d.count+' versions - select and install';
+                }else{
+                    document.getElementById('ota-status').textContent='No releases found (use Latest Stable)';
+                }
+            }).catch(e=>{
+                clearTimeout(timeout);
+                document.getElementById('ota-status').textContent='Error: '+(e.name==='AbortError'?'Request timeout':''+e.message);
+            });
         }
         function installSelected(){
             const idx=parseInt(document.getElementById('release-select').value);
@@ -383,9 +856,128 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 html+=`IP: ${d.ip_address}<br>`;
                 html+=`Version: ${d.version}`;
                 document.getElementById('device-status').innerHTML=html;
+                isWifiConnected=!!d.wifi_connected;
             });
         }
+        function initManualUpload(){
+            const input=document.getElementById('manual-file');
+            const btn=document.getElementById('manual-upload-btn');
+            const status=document.getElementById('manual-upload-status');
+            if(!input||!btn||!status){return;}
+            input.addEventListener('change',()=>{
+                const hasFile=input.files&&input.files.length>0;
+                btn.disabled=!hasFile;
+                status.textContent=hasFile?'Ready to upload.':'Select a firmware or OTA bundle file to upload';
+            });
+        }
+        function initManualFsUpload(){
+            const input=document.getElementById('manual-fs-file');
+            const btn=document.getElementById('manual-fs-upload-btn');
+            const status=document.getElementById('manual-fs-upload-status');
+            if(!input||!btn||!status){return;}
+            input.addEventListener('change',()=>{
+                const hasFile=input.files&&input.files.length>0;
+                btn.disabled=!hasFile;
+                status.textContent=hasFile?'Ready to upload.':'Select a filesystem image to upload';
+            });
+        }
+        function startManualUpload(){
+            const input=document.getElementById('manual-file');
+            const btn=document.getElementById('manual-upload-btn');
+            const status=document.getElementById('manual-upload-status');
+            if(!input||!btn||!status||!input.files||input.files.length===0){
+                if(status)status.textContent='No file selected';
+                return;
+            }
+            if(!confirm('Upload firmware or OTA bundle file? The device will restart when complete.')){
+                return;
+            }
+            const file=input.files[0];
+            const formData=new FormData();
+            formData.append('firmware', file, file.name);
+            btn.disabled=true;
+            status.textContent='Uploading...';
+            const xhr=new XMLHttpRequest();
+            xhr.open('POST','/api/ota/upload');
+            xhr.upload.onprogress=(event)=>{
+                if(!event.lengthComputable)return;
+                const percent=Math.round((event.loaded/event.total)*100);
+                status.textContent='Uploading... '+percent+'%';
+            };
+            xhr.onload=()=>{
+                let message='Upload complete. Rebooting...';
+                let wasSuccessful=xhr.status>=200&&xhr.status<300;
+                if(xhr.responseText){
+                    try{
+                        const response=JSON.parse(xhr.responseText);
+                        if(typeof response.success==='boolean'){
+                            wasSuccessful=response.success;
+                        }
+                        message=response.message||message;
+                    }catch(e){}
+                }
+                status.textContent=message;
+                if(!wasSuccessful){
+                    btn.disabled=false;
+                }
+            };
+            xhr.onerror=()=>{
+                status.textContent='Upload failed. Please try again.';
+                btn.disabled=false;
+            };
+            xhr.send(formData);
+        }
+        function startManualFsUpload(){
+            const input=document.getElementById('manual-fs-file');
+            const btn=document.getElementById('manual-fs-upload-btn');
+            const status=document.getElementById('manual-fs-upload-status');
+            if(!input||!btn||!status||!input.files||input.files.length===0){
+                if(status)status.textContent='No file selected';
+                return;
+            }
+            if(!confirm('Upload LittleFS image? The device will restart when complete.')){
+                return;
+            }
+            const file=input.files[0];
+            const formData=new FormData();
+            formData.append('littlefs', file, file.name);
+            btn.disabled=true;
+            status.textContent='Uploading...';
+            const xhr=new XMLHttpRequest();
+            xhr.open('POST','/api/ota/upload-fs');
+            xhr.upload.onprogress=(event)=>{
+                if(!event.lengthComputable)return;
+                const percent=Math.round((event.loaded/event.total)*100);
+                status.textContent='Uploading... '+percent+'%';
+            };
+            xhr.onload=()=>{
+                let message='Upload complete. Rebooting...';
+                let wasSuccessful=xhr.status>=200&&xhr.status<300;
+                if(xhr.responseText){
+                    try{
+                        const response=JSON.parse(xhr.responseText);
+                        if(typeof response.success==='boolean'){
+                            wasSuccessful=response.success;
+                        }
+                        message=response.message||message;
+                    }catch(e){}
+                }
+                status.textContent=message;
+                if(!wasSuccessful){
+                    btn.disabled=false;
+                }
+            };
+            xhr.onerror=()=>{
+                status.textContent='Upload failed. Please try again.';
+                btn.disabled=false;
+            };
+            xhr.send(formData);
+        }
         loadStatus();setInterval(loadStatus,5000);
+        initManualUpload();
+        initManualFsUpload();
+        // Auto-load releases on page load
+        setTimeout(loadReleases, 1000);
     </script>
 </body>
 </html>
@@ -399,7 +991,6 @@ void WebSetup::handleStatus(AsyncWebServerRequest* request) {
 
     doc["wifi_connected"] = wifi_provisioner->isConnected();
     doc["ap_active"] = wifi_provisioner->isAPActive();
-    doc["smartconfig_active"] = wifi_provisioner->isSmartConfigActive();
     doc["ip_address"] = wifi_provisioner->getIPAddress().toString();
     doc["ap_ip"] = wifi_provisioner->getAPIPAddress().toString();
 
@@ -408,6 +999,7 @@ void WebSetup::handleStatus(AsyncWebServerRequest* request) {
     #else
     doc["version"] = "0.0.0-dev";
     #endif
+    doc["build"] = BOOTSTRAP_BUILD;
 
     doc["free_heap"] = ESP.getFreeHeap();
     doc["ota_url"] = config_store->getOTAUrl();
@@ -431,20 +1023,33 @@ void WebSetup::handleConfig(AsyncWebServerRequest* request) {
 }
 
 void WebSetup::handleScan(AsyncWebServerRequest* request) {
-    int count = wifi_provisioner->scanNetworks();
+    LOG_FUNC_ENTRY(WEB_TAG);
+
+    // Use cached scan results from boot - avoid blocking the web server
+    // If no cached results, return empty and let client retry
+    int count = wifi_provisioner->getScannedNetworkCount();
+
+    LOG_DEBUG(WEB_TAG, "Scan request - returning %d cached networks", count);
 
     JsonDocument doc;
     JsonArray networks = doc["networks"].to<JsonArray>();
 
     for (int i = 0; i < count; i++) {
-        JsonObject network = networks.add<JsonObject>();
-        network["ssid"] = wifi_provisioner->getScannedSSID(i);
-        network["rssi"] = wifi_provisioner->getScannedRSSI(i);
-        network["encrypted"] = wifi_provisioner->isScannedNetworkEncrypted(i);
+        String ssid = wifi_provisioner->getScannedSSID(i);
+        if (ssid.length() > 0) {  // Skip empty SSIDs
+            JsonObject network = networks.add<JsonObject>();
+            network["ssid"] = ssid;
+            network["rssi"] = wifi_provisioner->getScannedRSSI(i);
+            network["encrypted"] = wifi_provisioner->isScannedNetworkEncrypted(i);
+        }
     }
+
+    doc["cached"] = true;
+    doc["count"] = networks.size();
 
     String response;
     serializeJson(doc, response);
+    Serial.printf("[WEB] Scan response: %s\n", response.c_str());
     request->send(200, "application/json", response);
 }
 
@@ -542,14 +1147,21 @@ void WebSetup::clearWiFiPending() {
 }
 
 void WebSetup::handleGetReleases(AsyncWebServerRequest* request) {
-    Serial.println("[WEB] Fetching available releases...");
-    
-    // Fetch all releases including prereleases
-    int count = ota_downloader->fetchAvailableReleases(true);  // true = include betas
-    
+    LOG_FUNC_ENTRY(WEB_TAG);
+
+    // Return cached releases immediately - don't block the web server
+    // Releases are fetched in background on boot
+
+    int count = ota_downloader->getReleaseCount();
+    bool cached = ota_downloader->hasReleasesCached();
+    String fetch_error = ota_downloader->getReleaseFetchError();
+
+    LOG_DEBUG(WEB_TAG, "Releases request - cached: %s, count: %d",
+              cached ? "yes" : "no", count);
+
     JsonDocument doc;
     JsonArray releases = doc["releases"].to<JsonArray>();
-    
+
     for (int i = 0; i < count; i++) {
         ReleaseInfo release = ota_downloader->getRelease(i);
         if (release.valid) {
@@ -560,45 +1172,58 @@ void WebSetup::handleGetReleases(AsyncWebServerRequest* request) {
             rel["published"] = release.published_at;
         }
     }
-    
+
     doc["count"] = count;
-    
+    doc["cached"] = cached;
+    doc["last_fetch_ms"] = ota_downloader->getLastReleaseFetchMs();
+
+    if (!fetch_error.isEmpty()) {
+        doc["error"] = fetch_error;
+    }
+
+    // If not cached yet, tell client to retry
+    if (!cached && fetch_error.isEmpty()) {
+        doc["message"] = "Fetching releases (may take up to 60s)...";
+        doc["retry_after_ms"] = 5000;  // Tell client to retry after 5s
+    }
+
     String response;
     serializeJson(doc, response);
+    Serial.printf("[WEB] Releases response: %s\n", response.c_str());
     request->send(200, "application/json", response);
 }
 
 void WebSetup::handleInstallRelease(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     String body = String((char*)data).substring(0, len);
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
-    
+
     if (error) {
         request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
         return;
     }
-    
+
     int index = doc["index"].as<int>();
-    
+
     ReleaseInfo release = ota_downloader->getRelease(index);
     if (!release.valid) {
         request->send(400, "application/json", "{\"error\":\"Invalid release index\"}");
         return;
     }
-    
+
     Serial.printf("[WEB] Installing release %d: %s\n", index, release.version.c_str());
-    
+
     // Store the index for installation
     selected_release_index = index;
     ota_pending = true;
-    
+
     JsonDocument response;
     response["success"] = true;
     response["message"] = "Installing " + release.version;
     response["version"] = release.version;
     response["is_beta"] = release.is_prerelease;
-    
+
     String responseStr;
     serializeJson(response, responseStr);
     request->send(200, "application/json", responseStr);

@@ -209,10 +209,20 @@
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncWebSocket.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncWebSynchronization.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncEventSource.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/DNSServer/src/DNSServer.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h \
  src/config_store.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
  src/wifi_provisioner.h src/ota_downloader.h \
  .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.h \
  .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.hpp \
- .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson/Configuration.hpp
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson/Configuration.hpp \
+ src/debug.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Update/src/Update.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/MD5Builder.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_rom/include/esp_rom_md5.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/app_update/include/esp_ota_ops.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_image_format.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_flash_partitions.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_app_format.h

@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
+#include "esp_task_wdt.h"
 
 #include "boot_validator.h"
 #include "config/config_manager.h"
@@ -54,6 +55,10 @@ void check_for_updates();
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    
+    // CRITICAL: Configure watchdog timeout FIRST to prevent boot loops
+    // during slow initialization (display, WiFi, etc.)
+    esp_task_wdt_init(30, false);  // 30 second timeout, no panic
 
     Serial.println();
     Serial.println("===========================================");
@@ -79,11 +84,19 @@ void setup() {
 
     // Initialize display
     Serial.println("[INIT] Initializing LED matrix...");
+    Serial.flush();
+    
+    // CRITICAL: Feed watchdog before long operation
+    delay(10);
+    
     if (!matrix_display.begin()) {
-        Serial.println("[ERROR] Failed to initialize display!");
-        // Display failure is not critical - continue without display
+        Serial.println("[WARN] Display initialization failed - continuing without display");
+        // Don't fail boot - continue without display
+    } else {
+        Serial.println("[INIT] Display ready!");
+        matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
+        matrix_display.showStartupScreen(FIRMWARE_VERSION);
     }
-    matrix_display.showStartupScreen(FIRMWARE_VERSION);
 
     // Setup WiFi (includes AP mode fallback if connection fails)
     Serial.println("[INIT] Setting up WiFi...");
@@ -171,6 +184,16 @@ void loop() {
     // Process web server requests
     web_server.loop();
 
+    // Complete OAuth flow if callback was received
+    if (web_server.hasPendingOAuthCode()) {
+        String code = web_server.consumePendingOAuthCode();
+        String redirect_uri = web_server.getPendingOAuthRedirectUri();
+        bool auth_ok = webex_client.handleOAuthCallback(code, redirect_uri);
+        app_state.webex_authenticated = auth_ok;
+        web_server.clearPendingOAuth();
+        Serial.printf("[WEBEX] OAuth exchange %s\n", auth_ok ? "successful" : "failed");
+    }
+
     // Process bridge client
     if (bridge_client.isConnected()) {
         bridge_client.loop();
@@ -215,8 +238,13 @@ void loop() {
     }
 
     // Process MQTT
-    if (mqtt_client.isConnected()) {
+    if (app_state.wifi_connected && config_manager.hasMQTTConfig()) {
+        if (!mqtt_client.isInitialized()) {
+            mqtt_client.begin(&config_manager);
+        }
+
         mqtt_client.loop();
+        app_state.mqtt_connected = mqtt_client.isConnected();
 
         // Check for sensor updates
         if (mqtt_client.hasUpdate()) {
@@ -227,6 +255,8 @@ void loop() {
             app_state.air_quality_index = data.air_quality_index;
             app_state.mqtt_connected = true;
         }
+    } else {
+        app_state.mqtt_connected = false;
     }
 
     // Check for OTA updates (hourly)
@@ -266,6 +296,7 @@ void loop() {
 void setup_wifi() {
     String ssid = config_manager.getWiFiSSID();
     String password = config_manager.getWiFiPassword();
+    matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
 
     // Always scan for networks first so they're available in the web interface
     Serial.println("[WIFI] Scanning for networks...");
@@ -283,8 +314,8 @@ void setup_wifi() {
         // Start AP mode for configuration
         Serial.println("[WIFI] No WiFi configured, starting AP mode...");
         WiFi.mode(WIFI_AP);
-        WiFi.softAP("Webex-Display-Setup", "webexdisplay");
-        Serial.printf("[WIFI] AP started: SSID='Webex-Display-Setup', IP=%s\n",
+        WiFi.softAP("Webex-Display-Setup");
+        Serial.printf("[WIFI] AP started (open): SSID='Webex-Display-Setup', IP=%s\n",
                       WiFi.softAPIP().toString().c_str());
         matrix_display.showAPMode(WiFi.softAPIP().toString());
         return;
@@ -304,8 +335,8 @@ void setup_wifi() {
     if (!network_found) {
         Serial.printf("[WIFI] Configured network '%s' NOT found! Starting AP mode...\n", ssid.c_str());
         WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup", "webexdisplay");
-        Serial.printf("[WIFI] AP started for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
+        WiFi.softAP("Webex-Display-Setup");
+        Serial.printf("[WIFI] AP started (open) for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
         matrix_display.showAPMode(WiFi.softAPIP().toString());
         return;
     }
@@ -332,8 +363,8 @@ void setup_wifi() {
     } else {
         Serial.println("[WIFI] Connection failed, starting AP mode for reconfiguration...");
         WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup", "webexdisplay");
-        Serial.printf("[WIFI] AP started: IP=%s\n", WiFi.softAPIP().toString().c_str());
+        WiFi.softAP("Webex-Display-Setup");
+        Serial.printf("[WIFI] AP started (open): IP=%s\n", WiFi.softAPIP().toString().c_str());
         matrix_display.showAPMode(WiFi.softAPIP().toString());
     }
 }
@@ -354,7 +385,21 @@ void handle_wifi_connection() {
         app_state.wifi_connected = false;
         WiFi.reconnect();
     } else if (WiFi.status() == WL_CONNECTED) {
+        if (!app_state.wifi_connected) {
+            Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
+        }
         app_state.wifi_connected = true;
+
+        if (!mdns_manager.isInitialized()) {
+            Serial.println("[MDNS] Starting mDNS after reconnect...");
+            if (mdns_manager.begin(config_manager.getDeviceName())) {
+                mdns_manager.advertiseHTTP(80);
+            }
+        }
+
+        if (!app_state.time_synced) {
+            setup_time();
+        }
     }
 }
 
@@ -369,6 +414,22 @@ void update_display() {
         return;
     }
     last_update = millis();
+    matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
+
+    // If Webex is unavailable, keep showing a generic screen with IP
+    if (!app_state.wifi_connected) {
+        matrix_display.showWifiDisconnected();
+        return;
+    }
+
+    // If Webex is unavailable, keep showing a generic screen with IP
+    if (app_state.wifi_connected &&
+        !app_state.bridge_connected &&
+        !app_state.xapi_connected &&
+        !app_state.webex_authenticated) {
+        matrix_display.showUnconfigured(WiFi.localIP().toString());
+        return;
+    }
 
     // Build display data
     DisplayData data;

@@ -158,10 +158,10 @@ void XAPIWebSocket::parseStatusUpdate(const String& message) {
         JsonObject params = doc["params"];
         
         // Microphone mute status
-        if (params.containsKey("Status")) {
+        if (params["Status"].is<JsonObject>()) {
             JsonObject status = params["Status"];
             
-            if (status.containsKey("Audio")) {
+            if (status["Audio"].is<JsonObject>()) {
                 JsonObject audio = status["Audio"];
                 if (audio["Microphones"]["Mute"].is<String>()) {
                     String mute = audio["Microphones"]["Mute"].as<String>();
@@ -170,7 +170,7 @@ void XAPIWebSocket::parseStatusUpdate(const String& message) {
                 }
             }
             
-            if (status.containsKey("Video")) {
+            if (status["Video"].is<JsonObject>()) {
                 JsonObject video = status["Video"];
                 if (video["Input"]["MainVideoSource"].is<String>()) {
                     String source = video["Input"]["MainVideoSource"].as<String>();
@@ -179,7 +179,7 @@ void XAPIWebSocket::parseStatusUpdate(const String& message) {
                 }
             }
             
-            if (status.containsKey("Call")) {
+            if (status["Call"].is<JsonArray>()) {
                 // Check if there's an active call
                 JsonArray calls = status["Call"].as<JsonArray>();
                 current_state.in_call = (calls.size() > 0);

@@ -9,6 +9,7 @@
 #define OTA_DOWNLOADER_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include "config_store.h"
 
 // OTA Configuration
@@ -40,6 +41,7 @@ enum class OTAStatus {
 struct ReleaseInfo {
     String version;
     String firmware_url;
+    String littlefs_url;
     bool is_prerelease;
     String published_at;
     bool valid;
@@ -110,7 +112,7 @@ public:
      * @param firmware_url Direct URL to .bin file
      * @return true if successful
      */
-    bool downloadAndInstall(const String& firmware_url);
+    bool downloadAndInstall(const String& firmware_url, const String& littlefs_url);
     
     /**
      * @brief Fetch available releases from GitHub
@@ -178,20 +180,12 @@ private:
     String release_fetch_error;
     unsigned long last_release_fetch_ms;
 
-    /**
-     * @brief Fetch and parse GitHub releases JSON
-     * @param releases_url GitHub API URL for releases
-     * @param firmware_url Output: URL to firmware binary
-     * @return true if firmware URL found
-     */
-    bool fetchFirmwareUrl(const String& releases_url, String& firmware_url);
-
-    /**
-     * @brief Download firmware and flash to OTA partition
-     * @param firmware_url Direct URL to firmware binary
-     * @return true if successful
-     */
-    bool downloadFirmware(const String& firmware_url);
+    bool selectReleaseAssets(const JsonArray& assets, String& firmware_url, String& littlefs_url);
+    bool downloadAndInstallBinary(const String& url,
+                                  int update_type,
+                                  const char* label,
+                                  int start_progress,
+                                  int end_progress);
 
     void updateStatus(OTAStatus new_status, const String& message);
     void updateProgress(int new_progress, const String& message);

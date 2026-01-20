@@ -11,6 +11,7 @@ const API = {
     webexAuth: '/api/webex/auth',
     otaCheck: '/api/ota/check',
     otaUpdate: '/api/ota/update',
+    otaUpload: '/api/ota/upload',
     reboot: '/api/reboot',
     factoryReset: '/api/factory-reset'
 };
@@ -22,9 +23,18 @@ let statusInterval = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
+
+    const params = new URLSearchParams(window.location.search);
+    const isPortal = params.get('portal') === '1';
+    if (isPortal) {
+        showTab('wifi');
+        hideNonWifiTabs();
+    }
+
     loadStatus();
     loadConfig();
     initEventListeners();
+    initPasswordToggle(isPortal);
 
     // Start status polling
     statusInterval = setInterval(loadStatus, 5000);
@@ -36,17 +46,56 @@ function initTabs() {
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabId = tab.dataset.tab;
-
-            // Update active tab button
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-
-            // Show active content
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(tabId).classList.add('active');
+            showTab(tabId);
         });
+    });
+}
+
+function initPasswordToggle(isPortal) {
+    const passwordInput = document.getElementById('wifi-password');
+    const toggle = document.getElementById('wifi-show-password');
+    if (!passwordInput || !toggle) {
+        return;
+    }
+    toggle.addEventListener('change', () => {
+        passwordInput.type = toggle.checked ? 'text' : 'password';
+    });
+
+    // In captive portal mode, default to showing password
+    if (isPortal) {
+        toggle.checked = true;
+        passwordInput.type = 'text';
+    }
+}
+
+function showTab(tabId) {
+    const tabs = document.querySelectorAll('.tab-btn');
+    tabs.forEach(t => t.classList.remove('active'));
+    const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    const activeContent = document.getElementById(tabId);
+    if (activeContent) {
+        activeContent.classList.add('active');
+    }
+}
+
+function hideNonWifiTabs() {
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.dataset.tab !== 'wifi') {
+            btn.style.display = 'none';
+        }
+    });
+
+    document.querySelectorAll('.tab-content').forEach(content => {
+        if (content.id !== 'wifi') {
+            content.style.display = 'none';
+        }
     });
 }
 
@@ -124,14 +173,44 @@ async function loadConfig() {
         document.getElementById('display-name').value = config.display_name || '';
         document.getElementById('brightness').value = config.brightness || 128;
         document.getElementById('brightness-value').textContent = config.brightness || 128;
+        document.getElementById('scroll-speed').value = config.scroll_speed_ms || 250;
+        document.getElementById('scroll-speed-value').textContent = config.scroll_speed_ms || 250;
         document.getElementById('poll-interval').value = config.poll_interval || 30;
         document.getElementById('xapi-device-id').value = config.xapi_device_id || '';
+        
+        // MQTT configuration
         document.getElementById('mqtt-broker').value = config.mqtt_broker || '';
         document.getElementById('mqtt-port').value = config.mqtt_port || 1883;
         document.getElementById('mqtt-topic').value = config.mqtt_topic || 'meraki/v1/mt/#';
+        document.getElementById('mqtt-username').value = config.mqtt_username || '';
+        
+        // MQTT password - show placeholder if exists
+        const mqttPasswordInput = document.getElementById('mqtt-password');
+        if (config.has_mqtt_password) {
+            mqttPasswordInput.placeholder = config.mqtt_password_masked || '••••••••';
+        } else {
+            mqttPasswordInput.placeholder = 'Enter MQTT password';
+        }
+        mqttPasswordInput.value = ''; // Never populate password fields
+        
         document.getElementById('sensor-serial').value = config.sensor_serial || '';
         document.getElementById('ota-url').value = config.ota_url || '';
         document.getElementById('auto-update').checked = config.auto_update || false;
+
+        // Webex credentials - show placeholders if they exist
+        const clientIdInput = document.getElementById('webex-client-id');
+        const clientSecretInput = document.getElementById('webex-client-secret');
+        
+        if (config.has_webex_credentials) {
+            clientIdInput.placeholder = config.webex_client_id_masked || 'Client ID saved';
+            clientSecretInput.placeholder = config.webex_client_secret_masked || '••••••••';
+        } else {
+            clientIdInput.placeholder = 'Enter Webex Client ID';
+            clientSecretInput.placeholder = 'Enter Webex Client Secret';
+        }
+        // Never populate credential fields - leave empty for security
+        clientIdInput.value = '';
+        clientSecretInput.value = '';
 
         // Update auth status
         const authStatus = document.getElementById('webex-auth-status');
@@ -155,6 +234,9 @@ function initEventListeners() {
     // Brightness slider
     document.getElementById('brightness').addEventListener('input', (e) => {
         document.getElementById('brightness-value').textContent = e.target.value;
+    });
+    document.getElementById('scroll-speed').addEventListener('input', (e) => {
+        document.getElementById('scroll-speed-value').textContent = e.target.value;
     });
 
     // WiFi scan
@@ -181,6 +263,7 @@ function initEventListeners() {
     // OTA buttons
     document.getElementById('check-update').addEventListener('click', checkForUpdate);
     document.getElementById('perform-update').addEventListener('click', performUpdate);
+    initManualUpload();
 
     // System buttons
     document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
@@ -224,12 +307,16 @@ async function scanWifi() {
 async function saveWifi(e) {
     e.preventDefault();
 
-    const formData = new FormData(e.target);
+    const ssidRaw = document.getElementById('wifi-ssid').value;
+    const passwordRaw = document.getElementById('wifi-password').value;
+    const ssid = ssidRaw.replace(/[\r\n\t]/g, '').trim();
+    const password = passwordRaw.replace(/[\r\n\t]/g, '');
 
     try {
         const response = await fetch(API.wifiSave, {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ssid, password })
         });
         const data = await response.json();
         alert(data.message || 'WiFi saved!');
@@ -242,21 +329,49 @@ async function saveWifi(e) {
 async function saveWebexCredentials(e) {
     e.preventDefault();
 
+    const clientId = document.getElementById('webex-client-id').value.trim();
+    const clientSecret = document.getElementById('webex-client-secret').value.trim();
+
+    // If both fields are empty and credentials exist, warn user
+    if (!clientId && !clientSecret && config.has_webex_credentials) {
+        if (!confirm('Both fields are empty. Do you want to clear the saved credentials?')) {
+            return;
+        }
+    }
+
+    // If only one field is filled, require both
+    if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+        alert('Both Client ID and Client Secret are required. Leave both empty to keep existing credentials.');
+        return;
+    }
+
+    // If both are empty and no credentials exist, require them
+    if (!clientId && !clientSecret && !config.has_webex_credentials) {
+        alert('Please enter both Client ID and Client Secret');
+        return;
+    }
+
     const data = {
-        webex_client_id: document.getElementById('webex-client-id').value,
-        webex_client_secret: document.getElementById('webex-client-secret').value
+        webex_client_id: clientId,
+        webex_client_secret: clientSecret
     };
 
     try {
-        await fetch(API.config, {
+        const response = await fetch(API.config, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        alert('Webex credentials saved!');
-        loadConfig();
+        
+        if (response.ok) {
+            alert('Webex credentials saved successfully!');
+            loadConfig();
+        } else {
+            alert('Failed to save credentials - server returned error');
+        }
     } catch (error) {
-        alert('Failed to save credentials');
+        console.error('Error saving credentials:', error);
+        alert('Failed to save credentials - network error');
     }
 }
 
@@ -266,9 +381,17 @@ async function startWebexAuth() {
         const data = await response.json();
 
         if (data.auth_url) {
+            const redirectField = document.getElementById('webex-redirect-uri');
+            const redirectNote = document.getElementById('webex-redirect-note');
+            if (redirectField && data.redirect_uri) {
+                redirectField.value = data.redirect_uri;
+            }
+            if (redirectNote && data.redirect_uri) {
+                redirectNote.textContent = `Add this redirect URI to your Webex Integration: ${data.redirect_uri}`;
+            }
             window.open(data.auth_url, '_blank');
         } else {
-            alert('Failed to get authorization URL');
+            alert(data.error || 'Failed to get authorization URL');
         }
     } catch (error) {
         alert('Failed to start authorization');
@@ -298,24 +421,45 @@ async function saveXAPIConfig(e) {
 async function saveMQTTConfig(e) {
     e.preventDefault();
 
+    const broker = document.getElementById('mqtt-broker').value.trim();
+    
+    if (!broker) {
+        alert('MQTT Broker address is required');
+        return;
+    }
+
+    const password = document.getElementById('mqtt-password').value;
+    
     const data = {
-        mqtt_broker: document.getElementById('mqtt-broker').value,
-        mqtt_port: parseInt(document.getElementById('mqtt-port').value),
-        mqtt_username: document.getElementById('mqtt-username').value,
-        mqtt_password: document.getElementById('mqtt-password').value,
-        mqtt_topic: document.getElementById('mqtt-topic').value,
-        sensor_serial: document.getElementById('sensor-serial').value
+        mqtt_broker: broker,
+        mqtt_port: parseInt(document.getElementById('mqtt-port').value) || 1883,
+        mqtt_username: document.getElementById('mqtt-username').value.trim(),
+        mqtt_topic: document.getElementById('mqtt-topic').value.trim() || 'meraki/v1/mt/#',
+        sensor_serial: document.getElementById('sensor-serial').value.trim()
     };
+    
+    // Only include password if user entered a new one
+    // If empty, backend will keep existing password
+    if (password) {
+        data.mqtt_password = password;
+    }
 
     try {
-        await fetch(API.config, {
+        const response = await fetch(API.config, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        alert('MQTT configuration saved!');
+        
+        if (response.ok) {
+            alert('MQTT configuration saved successfully!');
+            loadConfig();
+        } else {
+            alert('Failed to save MQTT config - server returned error');
+        }
     } catch (error) {
-        alert('Failed to save MQTT config');
+        console.error('Error saving MQTT config:', error);
+        alert('Failed to save MQTT config - network error');
     }
 }
 
@@ -326,7 +470,8 @@ async function saveDisplaySettings(e) {
     const data = {
         display_name: document.getElementById('display-name').value,
         brightness: parseInt(document.getElementById('brightness').value),
-        poll_interval: parseInt(document.getElementById('poll-interval').value)
+        poll_interval: parseInt(document.getElementById('poll-interval').value),
+        scroll_speed_ms: parseInt(document.getElementById('scroll-speed').value)
     };
 
     try {
@@ -378,6 +523,84 @@ async function performUpdate() {
     } catch (error) {
         alert('Failed to start update');
     }
+}
+
+function initManualUpload() {
+    const fileInput = document.getElementById('ota-file');
+    const uploadBtn = document.getElementById('ota-upload-btn');
+    const statusEl = document.getElementById('ota-upload-status');
+
+    if (!fileInput || !uploadBtn || !statusEl) {
+        return;
+    }
+
+    fileInput.addEventListener('change', () => {
+        const hasFile = fileInput.files && fileInput.files.length > 0;
+        uploadBtn.disabled = !hasFile;
+        statusEl.textContent = hasFile ? 'Ready to upload.' : 'Select a firmware file to upload.';
+    });
+
+    uploadBtn.addEventListener('click', () => {
+        uploadFirmware({ fileInput, uploadBtn, statusEl });
+    });
+}
+
+function uploadFirmware({ fileInput, uploadBtn, statusEl }) {
+    if (!fileInput.files || fileInput.files.length === 0) {
+        statusEl.textContent = 'No file selected.';
+        return;
+    }
+
+    if (!confirm('Upload firmware file? The device will restart when complete.')) {
+        return;
+    }
+
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('firmware', file, file.name);
+
+    uploadBtn.disabled = true;
+    statusEl.textContent = 'Uploading...';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', API.otaUpload);
+
+    xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) {
+            return;
+        }
+        const percent = Math.round((event.loaded / event.total) * 100);
+        statusEl.textContent = `Uploading... ${percent}%`;
+    };
+
+    xhr.onload = () => {
+        let message = 'Upload complete. Rebooting...';
+        let wasSuccessful = xhr.status >= 200 && xhr.status < 300;
+
+        if (xhr.responseText) {
+            try {
+                const response = JSON.parse(xhr.responseText);
+                if (typeof response.success === 'boolean') {
+                    wasSuccessful = response.success;
+                }
+                message = response.message || message;
+            } catch (error) {
+                console.error('Upload response parse failed:', error);
+            }
+        }
+
+        statusEl.textContent = message;
+        if (!wasSuccessful) {
+            uploadBtn.disabled = false;
+        }
+    };
+
+    xhr.onerror = () => {
+        statusEl.textContent = 'Upload failed. Please try again.';
+        uploadBtn.disabled = false;
+    };
+
+    xhr.send(formData);
 }
 
 // System Functions

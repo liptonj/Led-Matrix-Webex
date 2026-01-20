@@ -100,11 +100,21 @@
                 <form id="wifi-form">
                     <div class="form-group">
                         <label for="wifi-ssid">SSID:</label>
-                        <input type="text" id="wifi-ssid" name="ssid" required>
+                        <input type="text" id="wifi-ssid" name="ssid" required
+                               autocomplete="off" autocapitalize="off"
+                               autocorrect="off" spellcheck="false">
                     </div>
                     <div class="form-group">
                         <label for="wifi-password">Password:</label>
-                        <input type="password" id="wifi-password" name="password">
+                        <input type="password" id="wifi-password" name="password"
+                               autocomplete="off" autocapitalize="off"
+                               autocorrect="off" spellcheck="false">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="wifi-show-password">
+                            Show password
+                        </label>
                     </div>
                     <button type="submit" class="btn btn-primary">Save & Connect</button>
                 </form>
@@ -120,10 +130,12 @@
                     <div class="form-group">
                         <label for="webex-client-id">Client ID:</label>
                         <input type="text" id="webex-client-id" name="client_id">
+                        <p class="help-text">Leave empty to keep existing credentials</p>
                     </div>
                     <div class="form-group">
                         <label for="webex-client-secret">Client Secret:</label>
                         <input type="password" id="webex-client-secret" name="client_secret">
+                        <p class="help-text">Leave empty to keep existing credentials</p>
                     </div>
                     <button type="submit" class="btn btn-primary">Save Credentials</button>
                 </form>
@@ -132,6 +144,8 @@
                     <h3>Authorization</h3>
                     <p id="auth-status">Status: <span id="webex-auth-status">Not connected</span></p>
                     <button id="webex-auth-btn" class="btn">Connect to Webex</button>
+                    <p class="help-text" id="webex-redirect-note">Redirect URI will appear here after clicking Connect.</p>
+                    <input type="text" id="webex-redirect-uri" readonly>
                 </div>
                 <hr>
                 <div class="form-group">
@@ -170,10 +184,12 @@
                     <div class="form-group">
                         <label for="mqtt-username">Username:</label>
                         <input type="text" id="mqtt-username" name="username">
+                        <p class="help-text">Optional - leave empty if not required</p>
                     </div>
                     <div class="form-group">
                         <label for="mqtt-password">Password:</label>
                         <input type="password" id="mqtt-password" name="password">
+                        <p class="help-text">Optional - leave empty to keep existing password</p>
                     </div>
                     <div class="form-group">
                         <label for="mqtt-topic">Topic:</label>
@@ -202,6 +218,11 @@
                         <label for="brightness">Brightness:</label>
                         <input type="range" id="brightness" name="brightness" min="10" max="255" value="128">
                         <span id="brightness-value">128</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="scroll-speed">Scroll Speed (ms):</label>
+                        <input type="range" id="scroll-speed" name="scroll_speed_ms" min="80" max="600" value="250">
+                        <span id="scroll-speed-value">250</span>
                     </div>
                     <button type="submit" class="btn btn-primary">Save Display Settings</button>
                 </form>
@@ -252,6 +273,13 @@
                     <label>
                         <input type="checkbox" id="auto-update"> Enable automatic updates
                     </label>
+                </div>
+                <hr>
+                <div class="form-group">
+                    <label for="ota-file">Manual Firmware Upload (.bin)</label>
+                    <input type="file" id="ota-file" accept=".bin">
+                    <button id="ota-upload-btn" class="btn btn-secondary" disabled>Upload Firmware</button>
+                    <p class="help-text" id="ota-upload-status">Select a firmware file to upload.</p>
                 </div>
             </div>
 

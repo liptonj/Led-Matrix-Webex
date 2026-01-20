@@ -52,6 +52,12 @@ public:
     bool isConnected();
 
     /**
+     * @brief Check if client has been initialized
+     * @return true if begin() has been called
+     */
+    bool isInitialized() const { return config_manager != nullptr; }
+
+    /**
      * @brief Check if there's a pending update
      * @return true if update available
      */

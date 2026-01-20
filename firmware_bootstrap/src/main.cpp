@@ -3,7 +3,7 @@
  * @brief ESP32-S3 Webex Status Display - Bootstrap Firmware
  *
  * Minimal bootstrap firmware that handles:
- * - WiFi provisioning (AP mode + SmartConfig)
+ * - WiFi provisioning (AP mode)
  * - OTA download of the full firmware from GitHub Releases
  * - Display IP address and mDNS hostname on LED matrix
  *
@@ -15,7 +15,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
 
+#include "debug.h"
 #include "config_store.h"
 #include "wifi_provisioner.h"
 #include "ota_downloader.h"
@@ -40,11 +42,18 @@ WebSetup web_setup;
 BootstrapDisplay display;
 
 // State
-bool initial_connection_attempted = false;
 bool ota_in_progress = false;
 unsigned long last_status_print = 0;
 unsigned long last_ip_print = 0;
 String mdns_hostname = MDNS_HOSTNAME;
+bool releases_fetch_in_progress = false;
+bool mdns_started = false;
+bool wifi_connected_handled = false;
+unsigned long last_releases_fetch_attempt = 0;
+int releases_fetch_retry_count = 0;
+const int MAX_FETCH_RETRIES = 3;
+unsigned long wifi_connected_time = 0;
+bool releases_cached_message_shown = false;  // Only show message once
 
 // Forward declarations
 void print_startup_banner();
@@ -55,6 +64,65 @@ void print_status();
 void print_connection_info();
 void start_mdns();
 void ota_progress_callback(int progress, const char* message);
+void fetch_releases_task(void* param);
+void ensure_releases_fetch_started();
+void handle_connected_state();
+
+/**
+ * @brief Background task to fetch releases from GitHub
+ */
+void fetch_releases_task(void* param) {
+    releases_fetch_in_progress = true;
+    unsigned long start_time = millis();
+    
+    Serial.println("[TASK] ========================================");
+    Serial.println("[TASK] Background fetch of releases starting...");
+    Serial.printf("[TASK] Free heap before: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("[TASK] Stack high water mark: %d bytes\n", uxTaskGetStackHighWaterMark(NULL));
+    
+    // Wait for network/DNS to fully stabilize - increased from 1s to 3s
+    // This helps with inconsistent DNS resolution on some routers
+    Serial.println("[TASK] Waiting for network/DNS stabilization (3s)...");
+    delay(3000);
+    
+    // Verify internet connectivity before attempting fetch
+    Serial.println("[TASK] Verifying internet connectivity...");
+    IPAddress github_ip;
+    if (!WiFi.hostByName("api.github.com", github_ip)) {
+        Serial.println("[TASK] ✗ DNS resolution failed for api.github.com");
+        Serial.println("[TASK] Network may not have internet access or DNS is not working");
+        releases_fetch_retry_count++;
+        releases_fetch_in_progress = false;
+        vTaskDelete(NULL);
+        return;
+    }
+    Serial.printf("[TASK] ✓ DNS resolved api.github.com to %s\n", github_ip.toString().c_str());
+    
+    int count = ota_downloader.fetchAvailableReleases(true);
+    
+    unsigned long elapsed = millis() - start_time;
+    
+    if (count > 0) {
+        Serial.printf("[TASK] ✓ Successfully fetched %d releases in %lu ms\n", count, elapsed);
+        Serial.printf("[TASK] Releases are now cached and available\n");
+        releases_fetch_retry_count = 0;  // Reset retry counter on success
+    } else {
+        String error = ota_downloader.getReleaseFetchError();
+        Serial.printf("[TASK] ✗ Failed to fetch releases (took %lu ms)\n", elapsed);
+        if (!error.isEmpty()) {
+            Serial.printf("[TASK] Error: %s\n", error.c_str());
+        }
+        releases_fetch_retry_count++;
+        Serial.printf("[TASK] Retry attempt %d/%d\n", releases_fetch_retry_count, MAX_FETCH_RETRIES);
+    }
+    
+    Serial.printf("[TASK] Free heap after: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("[TASK] Stack high water mark: %d bytes\n", uxTaskGetStackHighWaterMark(NULL));
+    Serial.println("[TASK] ========================================");
+    
+    releases_fetch_in_progress = false;
+    vTaskDelete(NULL);  // Task complete, delete self
+}
 
 /**
  * @brief Arduino setup function
@@ -63,6 +131,11 @@ void setup() {
     // Initialize serial
     Serial.begin(115200);
     delay(1000);  // Wait for serial to stabilize
+    
+    Serial.println("\n\n[BOOT] ========================================");
+    Serial.println("[BOOT] ESP32-S3 Bootstrap Firmware Starting");
+    Serial.println("[BOOT] ========================================\n");
+    Serial.printf("[BOOT] Reset reason: %d\n", static_cast<int>(esp_reset_reason()));
 
     print_startup_banner();
 
@@ -74,9 +147,13 @@ void setup() {
 
     // Initialize configuration store
     Serial.println("[BOOT] Initializing configuration...");
+    Serial.flush();  // Ensure output before potential hang
     if (!config_store.begin()) {
         Serial.println("[BOOT] WARNING: Failed to initialize config store");
     }
+    config_store.ensureDefaults();
+    Serial.println("[BOOT] Configuration initialized successfully");
+    Serial.flush();
 
     // Initialize components
     wifi_provisioner.begin(&config_store);
@@ -106,7 +183,7 @@ void setup() {
  * @brief Arduino main loop
  */
 void loop() {
-    // Process WiFi provisioner (SmartConfig events)
+    // Process WiFi provisioner
     wifi_provisioner.loop();
 
     // Process web server
@@ -114,6 +191,21 @@ void loop() {
 
     // Handle pending actions from web interface
     handle_pending_actions();
+
+    // Handle post-connection setup for any connection path
+    handle_connected_state();
+
+    // Surface OTA errors on the display if OTA fails
+    if (ota_in_progress) {
+        OTAStatus status = ota_downloader.getStatus();
+        if (status >= OTAStatus::ERROR_NO_URL) {
+            display.showError(ota_downloader.getStatusMessage());
+            ota_in_progress = false;
+        }
+    }
+
+    // Update display animations (scrolling text)
+    display.update();
 
     // Print connection info every 10 seconds (so it's visible when serial connects)
     if (millis() - last_ip_print >= 10000) {
@@ -152,8 +244,6 @@ void print_startup_banner() {
  * @brief Attempt connection with stored WiFi credentials
  */
 void attempt_stored_wifi_connection() {
-    initial_connection_attempted = true;
-
     String ssid = config_store.getWiFiSSID();
     Serial.printf("[BOOT] Attempting to connect to '%s'...\n", ssid.c_str());
 
@@ -216,6 +306,9 @@ void attempt_stored_wifi_connection() {
                 Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n", 
                               WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
                 Serial.println("[BOOT] Use web interface to retry OTA or reconfigure");
+                
+                // Start background task to fetch releases for web UI
+                ensure_releases_fetch_started();
             }
         } else {
             // Start web server for configuration
@@ -224,6 +317,9 @@ void attempt_stored_wifi_connection() {
             Serial.println("[BOOT] Use web interface to configure and install firmware");
             Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n", 
                           WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
+            
+            // Start background task to fetch releases
+            ensure_releases_fetch_started();
         }
     } else {
         Serial.println("[BOOT] WiFi connection failed");
@@ -234,12 +330,12 @@ void attempt_stored_wifi_connection() {
 }
 
 /**
- * @brief Start WiFi provisioning mode (AP + SmartConfig)
+ * @brief Start WiFi provisioning mode (AP)
  */
 void start_provisioning_mode() {
     Serial.println("[BOOT] Starting provisioning mode...");
 
-    // Start AP with SmartConfig listener (this will use cached scan results)
+    // Start AP (this will use cached scan results)
     wifi_provisioner.startAPWithSmartConfig();
 
     // Show AP mode on display
@@ -306,6 +402,9 @@ void handle_pending_actions() {
             // Show connected status
             display.showConnected(WiFi.localIP().toString(), mdns_hostname);
 
+            // Start background task to fetch releases for web UI
+            ensure_releases_fetch_started();
+
             // Stay in station mode but keep web server running
             // User can trigger OTA via web interface
         } else {
@@ -351,6 +450,105 @@ void handle_pending_actions() {
 }
 
 /**
+ * @brief Ensure releases fetch runs with backoff and retry limits
+ */
+void ensure_releases_fetch_started() {
+    if (!wifi_provisioner.isConnected()) {
+        Serial.println("[TASK] Cannot start release fetch - WiFi not connected");
+        return;
+    }
+
+    // Check if we've exceeded maximum retries
+    if (releases_fetch_retry_count >= MAX_FETCH_RETRIES && !ota_downloader.hasReleasesCached()) {
+        Serial.printf("[TASK] Maximum retry attempts reached (%d/%d), giving up\n", 
+                      releases_fetch_retry_count, MAX_FETCH_RETRIES);
+        Serial.println("[TASK] User can manually trigger fetch via web UI");
+        return;
+    }
+
+    if (ota_downloader.hasReleasesCached()) {
+        if (!releases_cached_message_shown) {
+            Serial.printf("[TASK] Releases already cached (%d available)\n", 
+                          ota_downloader.getReleaseCount());
+            releases_cached_message_shown = true;
+        }
+        return;
+    }
+
+    unsigned long now = millis();
+    if (releases_fetch_in_progress) {
+        unsigned long elapsed = now - last_releases_fetch_attempt;
+        Serial.printf("[TASK] Release fetch already in progress (elapsed: %lu ms)\n", elapsed);
+        return;
+    }
+
+    // Exponential backoff based on retry count
+    unsigned long backoff_time = 10000 * (1 << min(releases_fetch_retry_count, 2));  // 10s, 20s, 40s
+    if (last_releases_fetch_attempt != 0 && (now - last_releases_fetch_attempt) < backoff_time) {
+        unsigned long wait_time = backoff_time - (now - last_releases_fetch_attempt);
+        Serial.printf("[TASK] Waiting %lu ms before next fetch attempt (backoff)\n", wait_time);
+        return;
+    }
+
+    // Verify we have enough heap memory for the task
+    size_t free_heap = ESP.getFreeHeap();
+    if (free_heap < 30000) {  // Need at least 30KB free
+        Serial.printf("[TASK] ERROR: Insufficient heap memory (%d bytes), cannot create fetch task\n", free_heap);
+        Serial.println("[TASK] Will retry after memory is freed");
+        return;
+    }
+
+    last_releases_fetch_attempt = now;
+    
+    Serial.printf("[TASK] Creating release fetch task (stack: 12288 bytes, free heap: %d)\n", free_heap);
+    
+    // Increased stack from 8192 to 12288 bytes for larger JSON parsing
+    BaseType_t result = xTaskCreate(fetch_releases_task, "FetchReleases", 12288, NULL, 1, NULL);
+    
+    if (result != pdPASS) {
+        Serial.println("[TASK] ERROR: Failed to create release fetch task!");
+        Serial.println("[TASK] FreeRTOS may be out of resources");
+        releases_fetch_in_progress = false;
+        releases_fetch_retry_count++;
+    } else {
+        Serial.println("[TASK] Release fetch task created successfully");
+    }
+}
+
+/**
+ * @brief Handle actions once WiFi is connected
+ */
+void handle_connected_state() {
+    if (wifi_provisioner.isConnected()) {
+        // Track when WiFi first connected
+        if (wifi_connected_time == 0) {
+            wifi_connected_time = millis();
+        }
+        
+        if (!mdns_started) {
+            start_mdns();
+        }
+
+        if (!wifi_connected_handled && !ota_in_progress) {
+            display.showConnected(WiFi.localIP().toString(), mdns_hostname);
+            wifi_connected_handled = true;
+        }
+
+        // Only try fetching releases after WiFi has been stable for at least 2 seconds
+        // This prevents premature fetch attempts during DHCP/DNS setup
+        if (millis() - wifi_connected_time > 2000) {
+            ensure_releases_fetch_started();
+        }
+        return;
+    }
+
+    // Reset flags on disconnect so we re-run setup on reconnect
+    mdns_started = false;
+    wifi_connected_handled = false;
+    wifi_connected_time = 0;  // Reset connection time
+}
+
+/**
  * @brief Print current status
  */
 void print_status() {
@@ -365,10 +563,6 @@ void print_status() {
 
     if (wifi_provisioner.isAPActive()) {
         Serial.printf("  AP Active: Yes (IP: %s)\n", WiFi.softAPIP().toString().c_str());
-    }
-
-    if (wifi_provisioner.isSmartConfigActive()) {
-        Serial.println("  SmartConfig: Listening");
     }
 
     Serial.printf("  Free Heap: %d bytes\n", ESP.getFreeHeap());
@@ -407,23 +601,21 @@ void print_connection_info() {
  * @brief Start mDNS service
  */
 void start_mdns() {
-    // Generate unique hostname using chip ID if needed
-    uint32_t chipId = 0;
-    for (int i = 0; i < 17; i += 8) {
-        chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
+    mdns_hostname = MDNS_HOSTNAME;
+
+    // Retry a few times to avoid transient failures
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        if (MDNS.begin(MDNS_HOSTNAME)) {
+            mdns_started = true;
+            Serial.printf("[BOOT] mDNS started: %s.local\n", mdns_hostname.c_str());
+            MDNS.addService("http", "tcp", 80);
+            return;
+        }
+        Serial.printf("[BOOT] mDNS start failed (attempt %d/3)\n", attempt);
+        delay(300);
     }
-    
-    // Use base hostname + last 4 hex digits of chip ID for uniqueness
-    char hostname[32];
-    snprintf(hostname, sizeof(hostname), "%s-%04X", MDNS_HOSTNAME, (uint16_t)(chipId & 0xFFFF));
-    mdns_hostname = String(hostname);
-    
-    if (MDNS.begin(hostname)) {
-        Serial.printf("[BOOT] mDNS started: %s.local\n", hostname);
-        MDNS.addService("http", "tcp", 80);
-    } else {
-        Serial.println("[BOOT] mDNS failed to start");
-    }
+
+    Serial.println("[BOOT] mDNS failed to start (no fallback)");
 }
 
 /**

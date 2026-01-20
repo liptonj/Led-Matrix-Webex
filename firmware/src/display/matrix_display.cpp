@@ -1,6 +1,7 @@
 /**
  * @file matrix_display.cpp
  * @brief LED Matrix Display Driver Implementation
+ * Based on working SimpleTestShapes.ino example with FM6047 driver
  */
 
 #include "matrix_display.h"
@@ -17,71 +18,103 @@ MatrixDisplay::~MatrixDisplay() {
 }
 
 bool MatrixDisplay::begin() {
-    // Configure HUB75 pins based on board type
+    // Don't call Serial.begin() here - main.cpp already did it
+    delay(10);
+    
+    Serial.println(">>> Display init START");
+    Serial.flush();
+    yield(); // Feed watchdog
+    
 #if defined(ESP32_S3_BOARD)
-    // ESP32-S3 pin configuration
+    // Seengreat adapter pin configuration for ESP32-S3
     HUB75_I2S_CFG::i2s_pins _pins = {
-        42, // R1
-        41, // G1
-        40, // B1
-        38, // R2
-        39, // G2
-        37, // B2
-        45, // A
-        36, // B
-        48, // C
-        35, // D
-        21, // E
-        2,  // CLK
-        47, // LAT
-        14  // OE
+        37, 6, 36,    // R1, G1, B1
+        35, 5, 0,     // R2, G2, B2
+        45, 1, 48, 2, 4,  // A, B, C, D, E
+        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
     };
+    
+    Serial.println(">>> Using S3 pins");
 #else
-    // ESP32 (standard) pin configuration
+    // Default ESP32 pins
     HUB75_I2S_CFG::i2s_pins _pins = {
-        25, // R1
-        26, // G1
-        27, // B1
-        14, // R2
-        12, // G2
-        13, // B2
-        23, // A
-        19, // B
-        5,  // C
-        17, // D
-        32, // E (active for 1/32 scan, directly active for 1/16 scan panels)
-        16, // CLK
-        4,  // LAT
-        15  // OE
+        25, 26, 27, 14, 12, 13,
+        23, 19, 5, 17, 32,
+        16, 4, 15
     };
+    Serial.println(">>> Using default pins");
 #endif
+    Serial.flush();
+    yield(); // Feed watchdog
 
-    // Matrix configuration
+    // Module configuration
+    Serial.println(">>> Creating config");
+    Serial.flush();
+    yield();
+    
     HUB75_I2S_CFG mxconfig(
-        PANEL_RES_X,   // width
-        PANEL_RES_Y,   // height
-        PANEL_CHAIN,   // chain length
-        _pins          // pin configuration
+        PANEL_RES_X,   // 64 pixels wide
+        PANEL_RES_Y,   // 32 pixels tall
+        PANEL_CHAIN,   // 1 panel
+        _pins          // Pin configuration
     );
-
-    // Configure for 1/16 scan panel
-    mxconfig.driver = HUB75_I2S_CFG::FM6126A;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
+    
     mxconfig.clkphase = false;
-
-    // Create display instance
+    mxconfig.driver = HUB75_I2S_CFG::FM6126A;
+    // Reduce visible flicker: higher refresh + stable latch blanking
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+    mxconfig.min_refresh_rate = 120;
+    mxconfig.latch_blanking = 1;
+    
+    Serial.println(">>> Creating display object");
+    Serial.flush();
+    yield();
+    
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-
-    if (!dma_display->begin()) {
-        Serial.println("[DISPLAY] Failed to initialize matrix!");
+    
+    if (!dma_display) {
+        Serial.println(">>> FAILED to create display");
         return false;
     }
-
+    
+    Serial.println(">>> Calling begin()");
+    Serial.flush();
+    yield();
+    
+    if (!dma_display->begin()) {
+        Serial.println(">>> begin() FAILED");
+        delete dma_display;
+        dma_display = nullptr;
+        return false;
+    }
+    
+    Serial.println(">>> Setting brightness");
+    Serial.flush();
+    yield();
+    
+    brightness = 255;
     dma_display->setBrightness8(brightness);
+    
+    Serial.println(">>> Clearing screen");
+    Serial.flush();
+    yield();
+    
     dma_display->clearScreen();
-
+    
+    Serial.println(">>> Drawing WEBEX text");
+    Serial.flush();
+    yield();
+    
+    dma_display->fillScreen(dma_display->color444(0, 0, 0));
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(dma_display->color444(0, 15, 15));
+    dma_display->setCursor(8, 12);
+    dma_display->print("WEBEX");
+    
+    Serial.println(">>> Display init COMPLETE");
+    Serial.flush();
+    
     initialized = true;
-    Serial.println("[DISPLAY] Matrix initialized successfully");
     return true;
 }
 
@@ -134,17 +167,11 @@ void MatrixDisplay::update(const DisplayData& data) {
         // y=8: Status text centered
         drawCenteredText(9, getStatusText(data.webex_status), status_color);
 
-        // y=16: Separator
-        dma_display->drawFastHLine(0, 16, MATRIX_WIDTH, COLOR_GRAY);
-
         // y=17-24: Date and Time in status color
         if (data.time_valid) {
             String datetime = formatDate(data.month, data.day) + " " + formatTime(data.hour, data.minute);
             drawCenteredText(18, datetime, status_color);
         }
-
-        // y=25: Separator
-        dma_display->drawFastHLine(0, 25, MATRIX_WIDTH, COLOR_GRAY);
 
         // y=26-31: Sensor data
         if (data.show_sensors) {
@@ -186,33 +213,84 @@ void MatrixDisplay::showStartupScreen(const char* version) {
 void MatrixDisplay::showAPMode(const String& ip_address) {
     if (!initialized) return;
 
-    dma_display->clearScreen();
-    drawText(4, 2, "SETUP", COLOR_YELLOW);
-    drawSmallText(2, 12, "Connect to:", COLOR_WHITE);
-    drawSmallText(2, 19, "Webex-Setup", COLOR_CYAN);
-    drawSmallText(2, 26, ip_address, COLOR_GREEN);
+    const String ip_text = normalizeIpText(ip_address);
+    const String screen_key = "ap:" + ip_text;
+    const bool screen_changed = (last_static_key != screen_key);
+    last_static_key = screen_key;
+
+    if (screen_changed) {
+        dma_display->clearScreen();
+        drawText(2, 2, "WEBEX", COLOR_CYAN);
+        drawText(2, 11, "DISPLAY", COLOR_WHITE);
+        drawSmallText(2, 20, "Open WiFi AP", COLOR_YELLOW);
+    }
+    drawScrollingText(22, ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "ap");
+}
+
+void MatrixDisplay::showUnconfigured(const String& ip_address) {
+    if (!initialized) return;
+
+    const String ip_text = normalizeIpText(ip_address);
+    const String screen_key = "unconfig:" + ip_text;
+    const bool screen_changed = (last_static_key != screen_key);
+    last_static_key = screen_key;
+
+    if (screen_changed) {
+        dma_display->clearScreen();
+        drawText(2, 2, "WEBEX", COLOR_CYAN);
+        drawText(2, 11, "DISPLAY", COLOR_WHITE);
+    }
+    drawScrollingText(22, ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "unconfig");
+}
+
+void MatrixDisplay::showWifiDisconnected() {
+    if (!initialized) return;
+
+    const String screen_key = "wifi_offline";
+    const bool screen_changed = (last_static_key != screen_key);
+    last_static_key = screen_key;
+
+    if (screen_changed) {
+        dma_display->clearScreen();
+
+        // Draw WiFi icon centered, disconnected (red)
+        int icon_x = (MATRIX_WIDTH - 7) / 2;
+        int icon_y = 6;
+        drawWifiIcon(icon_x, icon_y, false);
+
+        drawCenteredText(16, "WIFI OFFLINE", COLOR_YELLOW);
+        drawCenteredText(24, "NO CONNECTION", COLOR_WHITE);
+    }
 }
 
 void MatrixDisplay::showConnecting(const String& ssid) {
     if (!initialized) return;
 
-    dma_display->clearScreen();
-    drawText(2, 8, "Connecting", COLOR_YELLOW);
+    const String screen_key = "connecting:" + ssid;
+    const bool screen_changed = (last_static_key != screen_key);
+    last_static_key = screen_key;
 
-    String short_ssid = ssid;
-    if (short_ssid.length() > 12) {
-        short_ssid = short_ssid.substring(0, 12);
+    if (screen_changed) {
+        dma_display->clearScreen();
+        drawText(2, 2, "CONNECTING", COLOR_YELLOW);
     }
-    drawSmallText(2, 20, short_ssid, COLOR_WHITE);
+
+    drawScrollingText(22, ssid, COLOR_WHITE, MATRIX_WIDTH - 4, "connecting");
 }
 
 void MatrixDisplay::showConnected(const String& ip_address) {
     if (!initialized) return;
 
-    dma_display->clearScreen();
-    drawText(4, 8, "Connected!", COLOR_GREEN);
-    drawSmallText(2, 22, ip_address, COLOR_WHITE);
-    delay(2000);
+    const String ip_text = normalizeIpText(ip_address);
+    const String screen_key = "connected:" + ip_text;
+    const bool screen_changed = (last_static_key != screen_key);
+    last_static_key = screen_key;
+
+    if (screen_changed) {
+        dma_display->clearScreen();
+        drawText(2, 2, "CONNECTED", COLOR_GREEN);
+    }
+    drawScrollingText(22, ip_text, COLOR_WHITE, MATRIX_WIDTH - 4, "connected");
 }
 
 void MatrixDisplay::showUpdating(const String& version) {
@@ -287,6 +365,10 @@ void MatrixDisplay::setBrightness(uint8_t b) {
     if (initialized) {
         dma_display->setBrightness8(brightness);
     }
+}
+
+void MatrixDisplay::setScrollSpeedMs(uint16_t speed_ms) {
+    scroll_speed_ms = speed_ms;
 }
 
 void MatrixDisplay::drawLargeStatusCircle(int center_x, int center_y, uint16_t color) {
@@ -392,6 +474,73 @@ void MatrixDisplay::drawSmallText(int x, int y, const String& text, uint16_t col
     dma_display->print(text);
 }
 
+void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key) {
+    const int char_width = 6;
+    const int max_chars = max_width / char_width;
+
+    ScrollState* state = nullptr;
+    if (key == "ap") {
+        state = &ap_scroll;
+    } else if (key == "unconfig") {
+        state = &unconfig_scroll;
+    } else if (key == "connecting") {
+        state = &connecting_scroll;
+    } else if (key == "connected") {
+        state = &connected_scroll;
+    }
+
+    if (!state) {
+        drawSmallText(2, y, text, color);
+        return;
+    }
+
+    if (state->text != text) {
+        state->text = text;
+        state->offset = 0;
+        state->last_ms = 0;
+    }
+
+    // Clear only the text line to reduce flicker
+    dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
+
+    if (text.length() <= max_chars) {
+        drawSmallText(2, y, text, color);
+        return;
+    }
+
+    const unsigned long now = millis();
+    if (now - state->last_ms > scroll_speed_ms) {
+        state->offset++;
+        state->last_ms = now;
+    }
+
+    // Add spacer so text doesn't appear squished at the wrap point
+    const String scroll_text = text + "   ";
+    const int text_width = scroll_text.length() * char_width;
+    const int wrap_width = text_width + max_width;
+    if (state->offset > wrap_width) {
+        state->offset = 0;
+    }
+
+    // Start just off the right edge and scroll left
+    const int x = 2 + max_width - state->offset;
+    drawSmallText(x, y, scroll_text, color);
+}
+
+String MatrixDisplay::normalizeIpText(const String& input) {
+    String out;
+    out.reserve(input.length());
+    char last = '\0';
+    for (size_t i = 0; i < input.length(); i++) {
+        char c = input[i];
+        if (c == '.' && last == '.') {
+            continue;
+        }
+        out += c;
+        last = c;
+    }
+    return out;
+}
 void MatrixDisplay::drawCenteredText(int y, const String& text, uint16_t color) {
     // Each character is 6 pixels wide in default font
     int text_width = text.length() * 6;

@@ -199,9 +199,15 @@
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/Udp.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/cbuf.h \
- src/config_store.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src/ESPmDNS.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/mdns/include/mdns.h \
+ src/debug.h src/config_store.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
- src/wifi_provisioner.h src/ota_downloader.h src/web_setup.h \
+ src/wifi_provisioner.h src/ota_downloader.h \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.h \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson.hpp \
+ .pio/libdeps/esp32s3/ArduinoJson/src/ArduinoJson/Configuration.hpp \
+ src/web_setup.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/ESPAsyncWebServer.h \
  /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/FS/src/FS.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/StringArray.h \
@@ -212,4 +218,45 @@
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncWebSocket.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncWebSynchronization.h \
  .pio/libdeps/esp32s3/ESP\ Async\ WebServer/src/AsyncEventSource.h \
- /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/DNSServer/src/DNSServer.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiUdp.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/LittleFS/src/LittleFS.h \
+ src/bootstrap_display.h \
+ .pio/libdeps/esp32s3/ESP32\ HUB75\ LED\ MATRIX\ PANEL\ DMA\ Display/src/ESP32-HUB75-MatrixPanel-I2S-DMA.h \
+ .pio/libdeps/esp32s3/ESP32\ HUB75\ LED\ MATRIX\ PANEL\ DMA\ Display/src/platforms/platform_detect.hpp \
+ .pio/libdeps/esp32s3/ESP32\ HUB75\ LED\ MATRIX\ PANEL\ DMA\ Display/src/platforms/esp32s3/gdma_lcd_parallel16.hpp \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_lcd/include/esp_lcd_panel_io.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_lcd/include/esp_lcd_types.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/lcd_types.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/esp32s3/include/hal/gpio_ll.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/rtc_cntl_reg.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/rtc_io_reg.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/usb_serial_jtag_reg.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/lcd_hal.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/esp_private/gdma.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/gdma_channel.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/gdma_types.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_rom/include/esp_rom_gpio.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/gpio_pins.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/dma_types.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/gpio_hal.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/esp32s3/include/hal/lcd_ll.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/platform_port/include/hal/misc.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/lcd_cam_reg.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/lcd_cam_struct.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/platform_port/include/hal/assert.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/heap/include/esp_heap_caps_init.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/heap/include/soc/soc_memory_layout.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/heap/include/heap_memory_layout.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/periph_ctrl.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/soc/esp32s3/include/soc/periph_defs.h \
+ .pio/libdeps/esp32s3/ESP32\ HUB75\ LED\ MATRIX\ PANEL\ DMA\ Display/src/platforms/esp32s3/esp32s3-default-pins.hpp \
+ .pio/libdeps/esp32s3/Adafruit\ GFX\ Library/Adafruit_GFX.h \
+ .pio/libdeps/esp32s3/Adafruit\ GFX\ Library/gfxfont.h \
+ .pio/libdeps/esp32s3/Adafruit\ BusIO/Adafruit_I2CDevice.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src/Wire.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal.h \
+ .pio/libdeps/esp32s3/Adafruit\ BusIO/Adafruit_SPIDevice.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src/SPI.h \
+ /Users/jolipton/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h \
+ .pio/libdeps/esp32s3/ESP32\ HUB75\ LED\ MATRIX\ PANEL\ DMA\ Display/src/cie_luts.h

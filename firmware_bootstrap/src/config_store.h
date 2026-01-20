@@ -82,7 +82,7 @@ public:
     /**
      * @brief Clear all stored configuration
      */
-    void clear();
+    void ensureDefaults();
 
 private:
     mutable Preferences preferences;  // mutable to allow getString in const methods

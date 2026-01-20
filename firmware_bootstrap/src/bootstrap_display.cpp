@@ -6,7 +6,18 @@
 #include "bootstrap_display.h"
 
 BootstrapDisplay::BootstrapDisplay()
-    : dma_display(nullptr), initialized(false) {
+    : dma_display(nullptr),
+      initialized(false),
+      mode(DisplayMode::NONE),
+      needs_render(false),
+      last_render_ms(0),
+      current_ssid(""),
+      current_ip(""),
+      current_hostname(""),
+      current_message(""),
+      current_error(""),
+      bootstrap_version(""),
+      ota_progress(0) {
 }
 
 BootstrapDisplay::~BootstrapDisplay() {
@@ -30,20 +41,9 @@ bool BootstrapDisplay::begin() {
 #else
     // ESP32 (standard) pin configuration
     HUB75_I2S_CFG::i2s_pins _pins = {
-        25, // R1
-        26, // G1
-        27, // B1
-        14, // R2
-        12, // G2
-        13, // B2
-        23, // A
-        19, // B
-        5,  // C
-        17, // D
-        32, // E
-        16, // CLK
-        4,  // LAT
-        15  // OE
+        25, 26, 27, 14, 12, 13,
+        23, 19, 5, 17, 32,
+        16, 4, 15
     };
 #endif
 
@@ -74,6 +74,7 @@ bool BootstrapDisplay::begin() {
     }
 
     dma_display->setBrightness8(255);
+    dma_display->clearScreen();
 
     initialized = true;
     Serial.println("[DISPLAY] Matrix initialized successfully");
@@ -85,39 +86,244 @@ void BootstrapDisplay::clear() {
     dma_display->clearScreen();
 }
 
+void BootstrapDisplay::update() {
+    if (!initialized) return;
+
+    unsigned long now = millis();
+    if (!needs_render && !shouldAnimate(now)) {
+        return;
+    }
+
+    render(now);
+    last_render_ms = now;
+    needs_render = false;
+}
+
 void BootstrapDisplay::drawText(int x, int y, const String& text, uint16_t color) {
     if (!initialized) return;
     dma_display->setTextColor(color);
     dma_display->setTextSize(1);
-    dma_display->setCursor(x, y);
+    dma_display->setTextWrap(false);
+    dma_display->setCursor(x, clampTextY(y));
     dma_display->print(text);
-}
-
-void BootstrapDisplay::drawSmallText(int x, int y, const String& text, uint16_t color) {
-    // Using same size for simplicity (font is already small)
-    drawText(x, y, text, color);
 }
 
 void BootstrapDisplay::drawCenteredText(int y, const String& text, uint16_t color) {
     if (!initialized) return;
     // Each character is ~6 pixels wide
-    int textWidth = text.length() * 6;
-    int x = (MATRIX_WIDTH - textWidth) / 2;
+    int width = textWidth(text);
+    int x = (MATRIX_WIDTH - width) / 2;
     if (x < 0) x = 0;
     drawText(x, y, text, color);
 }
 
+void BootstrapDisplay::drawScrollingText(int y, const String& text, uint16_t color, int padding) {
+    if (!initialized) return;
+
+    int width = textWidth(text);
+    int available_width = MATRIX_WIDTH - padding;
+    if (width <= available_width) {
+        drawText(padding, y, text, color);
+        return;
+    }
+
+    int offset = scrollOffsetForText(text, millis(), padding);
+    drawScrollingTextWithOffset(y, text, color, offset, padding);
+}
+
+void BootstrapDisplay::drawScrollingTextWithOffset(int y, const String& text, uint16_t color, int offset, int padding) {
+    if (!initialized) return;
+
+    int x = MATRIX_WIDTH - offset;
+    drawText(x, y, text, color);
+}
+
+void BootstrapDisplay::drawLineText(int y, const String& text, uint16_t color, bool scroll_if_needed, bool center) {
+    if (!initialized || text.isEmpty()) return;
+    if (center) {
+        drawCenteredText(y, text, color);
+        return;
+    }
+    if (scroll_if_needed) {
+        drawScrollingText(y, text, color, 0);
+        return;
+    }
+    drawText(0, y, text, color);
+}
+
+void BootstrapDisplay::drawWifiIcon(int x, int y, uint16_t color) {
+    if (!initialized) return;
+
+    // Simple 5x5 WiFi icon
+    dma_display->drawPixel(x + 2, y + 4, color);
+    dma_display->drawPixel(x + 1, y + 3, color);
+    dma_display->drawPixel(x + 3, y + 3, color);
+    dma_display->drawPixel(x + 0, y + 2, color);
+    dma_display->drawPixel(x + 4, y + 2, color);
+    dma_display->drawPixel(x + 1, y + 1, color);
+    dma_display->drawPixel(x + 3, y + 1, color);
+}
+
+void BootstrapDisplay::drawWifiOffIcon(int x, int y, uint16_t color) {
+    if (!initialized) return;
+
+    // WiFi icon outline + slash
+    drawWifiIcon(x, y, color);
+    dma_display->drawLine(x, y + 4, x + 4, y, color);
+}
+
+int BootstrapDisplay::textWidth(const String& text) const {
+    return text.length() * 6;
+}
+
+int BootstrapDisplay::clampTextY(int y) const {
+    const int max_y = MATRIX_HEIGHT - 8;
+    return y > max_y ? max_y : y;
+}
+
+int BootstrapDisplay::scrollOffsetForText(const String& text, unsigned long now, int padding) const {
+    int width = textWidth(text);
+    int available_width = MATRIX_WIDTH - padding;
+    if (width <= available_width) {
+        return 0;
+    }
+
+    const int gap_pixels = 12;
+    const unsigned long frame_interval_ms = 80;
+    int total_width = width + MATRIX_WIDTH + gap_pixels;
+    return static_cast<int>((now / frame_interval_ms) % total_width);
+}
+
+bool BootstrapDisplay::shouldAnimate(unsigned long now) const {
+    const unsigned long frame_interval_ms = 80;
+    if (now - last_render_ms < frame_interval_ms) {
+        return false;
+    }
+
+    if (mode == DisplayMode::AP_MODE) {
+        return textWidth("WiFi: " + current_ssid) > MATRIX_WIDTH ||
+               textWidth("IP: " + current_ip) > MATRIX_WIDTH;
+    }
+    if (mode == DisplayMode::CONNECTED) {
+        return textWidth("IP: " + current_ip) > MATRIX_WIDTH ||
+               textWidth("mDNS: " + current_hostname + ".local") > MATRIX_WIDTH;
+    }
+    if (mode == DisplayMode::CONNECTING) {
+        return textWidth(current_ssid) > MATRIX_WIDTH;
+    }
+    if (mode == DisplayMode::OTA_PROGRESS) {
+        String status = String(ota_progress) + "% " + current_message;
+        return textWidth(status) > MATRIX_WIDTH;
+    }
+    if (mode == DisplayMode::ERROR) {
+        return textWidth(current_error) > MATRIX_WIDTH;
+    }
+    return false;
+}
+
+void BootstrapDisplay::render(unsigned long now) {
+    if (!initialized) return;
+
+    dma_display->clearScreen();
+    switch (mode) {
+        case DisplayMode::BOOTSTRAP:
+            renderBootstrap();
+            break;
+        case DisplayMode::AP_MODE:
+            renderAPMode(now);
+            break;
+        case DisplayMode::CONNECTING:
+            renderConnecting(now);
+            break;
+        case DisplayMode::CONNECTED:
+            renderConnected(now);
+            break;
+        case DisplayMode::OTA_PROGRESS:
+            renderOTAProgress(now);
+            break;
+        case DisplayMode::ERROR:
+            renderError(now);
+            break;
+        case DisplayMode::NONE:
+        default:
+            break;
+    }
+}
+
+void BootstrapDisplay::renderBootstrap() {
+    drawCenteredText(0, "5LS", COLOR_CYAN);
+    drawCenteredText(10, "STATUS", COLOR_WHITE);
+    drawCenteredText(20, "v" + bootstrap_version, COLOR_GRAY);
+}
+
+void BootstrapDisplay::renderAPMode(unsigned long now) {
+    (void)now;
+    drawWifiOffIcon(1, 1, COLOR_GRAY);
+    drawText(8, 0, "SETUP MODE", COLOR_YELLOW);
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+
+    drawLineText(10, "WiFi: " + current_ssid, COLOR_CYAN, true);
+    drawLineText(20, "IP: " + current_ip, COLOR_GREEN, true);
+}
+
+void BootstrapDisplay::renderConnecting(unsigned long now) {
+    (void)now;
+    drawWifiOffIcon(1, 1, COLOR_YELLOW);
+    drawText(8, 0, "CONNECTING", COLOR_YELLOW);
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+    drawLineText(10, current_ssid, COLOR_WHITE, true);
+    drawCenteredText(24, "Please wait", COLOR_GRAY);
+}
+
+void BootstrapDisplay::renderConnected(unsigned long now) {
+    (void)now;
+    drawWifiIcon(1, 1, COLOR_GREEN);
+    drawText(8, 0, "BOOTSTRAP", COLOR_GREEN);
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+
+    String ip_line = "IP: " + current_ip;
+    String mdns_line = "HOST: " + current_hostname + ".local";
+    int ip_offset = scrollOffsetForText(ip_line, millis(), 0);
+    int mdns_offset = scrollOffsetForText(mdns_line, millis(), 0);
+    int synced_offset = max(ip_offset, mdns_offset);
+
+    if (synced_offset > 0) {
+        drawScrollingTextWithOffset(10, ip_line, COLOR_CYAN, synced_offset, 0);
+        drawScrollingTextWithOffset(20, mdns_line, COLOR_GREEN, synced_offset, 0);
+    } else {
+        drawLineText(10, ip_line, COLOR_CYAN, false);
+        drawLineText(20, mdns_line, COLOR_GREEN, false);
+    }
+}
+
+void BootstrapDisplay::renderOTAProgress(unsigned long now) {
+    (void)now;
+    drawCenteredText(0, "UPDATING", COLOR_ORANGE);
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+    drawProgressBar(12, ota_progress, COLOR_CYAN);
+
+    String status = String(ota_progress) + "% " + current_message;
+    drawLineText(20, status, COLOR_WHITE, true);
+}
+
+void BootstrapDisplay::renderError(unsigned long now) {
+    (void)now;
+    drawCenteredText(0, "ERROR", COLOR_RED);
+    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+    drawLineText(14, current_error, COLOR_WHITE, true, true);
+}
+
 void BootstrapDisplay::drawProgressBar(int y, int progress, uint16_t color) {
     if (!initialized) return;
-    
+
     // Draw progress bar background
     int barWidth = MATRIX_WIDTH - 8;
     int barHeight = 6;
     int x = 4;
-    
+
     // Background
     dma_display->drawRect(x, y, barWidth, barHeight, COLOR_GRAY);
-    
+
     // Fill
     int fillWidth = (progress * (barWidth - 2)) / 100;
     if (fillWidth > 0) {
@@ -127,157 +333,58 @@ void BootstrapDisplay::drawProgressBar(int y, int progress, uint16_t color) {
 
 void BootstrapDisplay::showBootstrap(const char* version) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    // Title
-    drawCenteredText(2, "BOOTSTRAP", COLOR_CYAN);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 10, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Status
-    drawCenteredText(13, "LOADING...", COLOR_YELLOW);
-    
-    // Version
-    char ver_str[16];
-    snprintf(ver_str, sizeof(ver_str), "v%s", version);
-    drawCenteredText(24, ver_str, COLOR_GRAY);
+
+    bootstrap_version = String(version);
+    mode = DisplayMode::BOOTSTRAP;
+    needs_render = true;
+    update();
 }
 
 void BootstrapDisplay::showAPMode(const String& ssid, const String& ip) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    // Title
-    drawCenteredText(0, "SETUP MODE", COLOR_YELLOW);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // WiFi info
-    drawText(2, 10, "WiFi:", COLOR_WHITE);
-    
-    // SSID (may need truncation)
-    String displaySSID = ssid;
-    if (displaySSID.length() > 10) {
-        displaySSID = displaySSID.substring(0, 10);
-    }
-    drawText(2, 17, displaySSID, COLOR_CYAN);
-    
-    // IP address
-    drawText(2, 25, ip, COLOR_GREEN);
+
+    current_ssid = ssid;
+    current_ip = ip;
+    mode = DisplayMode::AP_MODE;
+    needs_render = true;
+    update();
 }
 
 void BootstrapDisplay::showConnecting(const String& ssid) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    drawCenteredText(4, "CONNECTING", COLOR_YELLOW);
-    
-    dma_display->drawFastHLine(0, 12, MATRIX_WIDTH, COLOR_GRAY);
-    
-    String displaySSID = ssid;
-    if (displaySSID.length() > 10) {
-        displaySSID = displaySSID.substring(0, 10);
-    }
-    drawCenteredText(16, displaySSID, COLOR_WHITE);
-    
-    drawCenteredText(25, "Please wait", COLOR_GRAY);
+
+    current_ssid = ssid;
+    mode = DisplayMode::CONNECTING;
+    needs_render = true;
+    update();
 }
 
 void BootstrapDisplay::showConnected(const String& ip, const String& hostname) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    // Title
-    drawCenteredText(0, "CONNECTED", COLOR_GREEN);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // IP address
-    drawText(2, 10, "IP:", COLOR_WHITE);
-    drawText(20, 10, ip, COLOR_CYAN);
-    
-    // mDNS hostname
-    drawText(2, 18, "mDNS:", COLOR_WHITE);
-    String displayHost = hostname;
-    if (displayHost.length() > 8) {
-        displayHost = displayHost.substring(0, 8);
-    }
-    drawText(2, 25, displayHost + ".local", COLOR_GREEN);
+
+    current_ip = ip;
+    current_hostname = hostname;
+    mode = DisplayMode::CONNECTED;
+    needs_render = true;
+    update();
 }
 
 void BootstrapDisplay::showOTAProgress(int progress, const String& message) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    // Title
-    drawCenteredText(0, "UPDATING", COLOR_ORANGE);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Progress bar
-    drawProgressBar(12, progress, COLOR_CYAN);
-    
-    // Percentage
-    char pct_str[8];
-    snprintf(pct_str, sizeof(pct_str), "%d%%", progress);
-    drawCenteredText(20, pct_str, COLOR_WHITE);
-    
-    // Status message (truncate if needed)
-    String displayMsg = message;
-    if (displayMsg.length() > 10) {
-        displayMsg = displayMsg.substring(0, 10);
-    }
-    drawCenteredText(27, displayMsg, COLOR_GRAY);
+
+    ota_progress = progress;
+    current_message = message;
+    mode = DisplayMode::OTA_PROGRESS;
+    needs_render = true;
+    update();
 }
 
 void BootstrapDisplay::showError(const String& error) {
     if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    drawCenteredText(4, "ERROR", COLOR_RED);
-    
-    dma_display->drawFastHLine(0, 12, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Wrap error message if needed
-    String displayError = error;
-    if (displayError.length() > 10) {
-        // Show first part
-        drawCenteredText(15, displayError.substring(0, 10), COLOR_WHITE);
-        if (displayError.length() > 20) {
-            drawCenteredText(23, displayError.substring(10, 20), COLOR_WHITE);
-        } else {
-            drawCenteredText(23, displayError.substring(10), COLOR_WHITE);
-        }
-    } else {
-        drawCenteredText(18, displayError, COLOR_WHITE);
-    }
+
+    current_error = error;
+    mode = DisplayMode::ERROR;
+    needs_render = true;
+    update();
 }
 
-void BootstrapDisplay::showStatus(const String& line1, const String& line2, const String& line3) {
-    if (!initialized) return;
-    
-    dma_display->clearScreen();
-    
-    if (!line1.isEmpty()) {
-        drawCenteredText(4, line1, COLOR_CYAN);
-    }
-    
-    if (!line2.isEmpty()) {
-        dma_display->drawFastHLine(0, 12, MATRIX_WIDTH, COLOR_GRAY);
-        drawCenteredText(15, line2, COLOR_WHITE);
-    }
-    
-    if (!line3.isEmpty()) {
-        drawCenteredText(24, line3, COLOR_GREEN);
-    }
-}
