@@ -35,5 +35,5 @@ The manifest.json file is generated during the build process by fetching release
 
 ## URLs
 
-- Production: https://led-matrix-webex.pages.dev
-- Custom domain: (configure in Cloudflare Pages settings)
+- Production: https://display.5ls.us
+- Cloudflare Pages: https://led-matrix-webex.pages.dev
