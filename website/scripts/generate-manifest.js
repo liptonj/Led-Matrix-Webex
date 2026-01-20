@@ -10,14 +10,23 @@ const fs = require('fs');
 const path = require('path');
 
 const GITHUB_API = 'https://api.github.com/repos/liptonj/Led-Matrix-Webex/releases';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GITHUB_API_TOKEN;
 const OUTPUT_FILE = path.join(__dirname, '../public/js/manifest.json');
 
 function fetchReleases() {
     return new Promise((resolve, reject) => {
+        const headers = {
+            'User-Agent': 'LED-Matrix-Webex-Website',
+            'Accept': 'application/vnd.github.v3+json'
+        };
+
+        if (GITHUB_TOKEN) {
+            headers.Authorization = `Bearer ${GITHUB_TOKEN}`;
+        }
+
         const options = {
             headers: {
-                'User-Agent': 'LED-Matrix-Webex-Website',
-                'Accept': 'application/vnd.github.v3+json'
+                ...headers
             }
         };
 

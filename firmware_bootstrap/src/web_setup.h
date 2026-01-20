@@ -71,7 +71,7 @@ public:
      * @brief Clear WiFi pending flag
      */
     void clearWiFiPending();
-    
+
     /**
      * @brief Get selected release index for OTA
      * @return Release index, or -1 for auto (latest stable)
@@ -98,6 +98,8 @@ private:
     size_t ota_upload_size;
     size_t ota_upload_written;
     size_t ota_upload_next_log;
+    size_t ota_upload_received;
+    bool ota_upload_in_progress;
     bool ota_bundle_mode;
     bool ota_bundle_header_flushed;
     size_t ota_bundle_header_filled;
@@ -126,7 +128,7 @@ private:
     void handleOTAProgress(AsyncWebServerRequest* request);
     void handleGetReleases(AsyncWebServerRequest* request);
     void handleInstallRelease(AsyncWebServerRequest* request, uint8_t* data, size_t len);
-    
+
     // State for selected release
     int selected_release_index;
 };

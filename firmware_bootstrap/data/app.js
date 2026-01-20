@@ -31,8 +31,10 @@ const versionSpan = document.getElementById('version');
 
 // State
 let otaInProgress = false;
+let manualUploadInProgress = false;
 let availableReleases = [];
 let isWifiConnected = false;
+let statusIntervalId = null;
 
 /**
  * Fetch with timeout guard
@@ -134,6 +136,9 @@ async function saveWifi(event) {
  * Load available firmware releases from GitHub
  */
 async function loadReleases() {
+    if (manualUploadInProgress) {
+        return;
+    }
     if (!isWifiConnected) {
         setStatus('ready', 'Connect to WiFi to load versions');
         return;
@@ -285,6 +290,9 @@ async function saveOTAUrl() {
  * Update device status display
  */
 async function updateStatus() {
+    if (manualUploadInProgress) {
+        return;
+    }
     try {
         const response = await fetchWithTimeout('/api/status', {}, 8000);
         const data = await response.json();
@@ -369,7 +377,7 @@ updateStatus();
 setTimeout(loadReleases, 2000);
 
 // Poll status every 5 seconds
-setInterval(updateStatus, 5000);
+statusIntervalId = setInterval(updateStatus, 5000);
 
 /**
  * Manual firmware upload
@@ -420,6 +428,14 @@ async function startManualUpload() {
     }
 
     manualUploadStatus.textContent = 'Uploading...';
+    manualUploadInProgress = true;
+    if (statusIntervalId) {
+        clearInterval(statusIntervalId);
+        statusIntervalId = null;
+    }
+    if (refreshReleasesBtn) {
+        refreshReleasesBtn.disabled = true;
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', uploadUrl.toString());
@@ -452,16 +468,37 @@ async function startManualUpload() {
         if (!wasSuccessful) {
             manualUploadBtn.disabled = false;
         }
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.onerror = () => {
         manualUploadStatus.textContent = 'Upload failed. Please try again.';
         manualUploadBtn.disabled = false;
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.ontimeout = () => {
         manualUploadStatus.textContent = 'Upload timed out. Please try again.';
         manualUploadBtn.disabled = false;
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.send(formData);
@@ -506,6 +543,14 @@ async function startManualFsUpload() {
     }
 
     manualFsUploadStatus.textContent = 'Uploading...';
+    manualUploadInProgress = true;
+    if (statusIntervalId) {
+        clearInterval(statusIntervalId);
+        statusIntervalId = null;
+    }
+    if (refreshReleasesBtn) {
+        refreshReleasesBtn.disabled = true;
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', uploadUrl.toString());
@@ -538,16 +583,37 @@ async function startManualFsUpload() {
         if (!wasSuccessful) {
             manualFsUploadBtn.disabled = false;
         }
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.onerror = () => {
         manualFsUploadStatus.textContent = 'Upload failed. Please try again.';
         manualFsUploadBtn.disabled = false;
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.ontimeout = () => {
         manualFsUploadStatus.textContent = 'Upload timed out. Please try again.';
         manualFsUploadBtn.disabled = false;
+        manualUploadInProgress = false;
+        if (!statusIntervalId) {
+            statusIntervalId = setInterval(updateStatus, 5000);
+        }
+        if (refreshReleasesBtn) {
+            refreshReleasesBtn.disabled = false;
+        }
     };
 
     xhr.send(formData);
