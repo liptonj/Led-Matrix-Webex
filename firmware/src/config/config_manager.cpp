@@ -36,6 +36,7 @@ bool ConfigManager::begin() {
 
     initialized = true;
     loadCache();
+    migrateLegacyOtaUrl();
 
 #if defined(WEBEX_CLIENT_ID) && defined(WEBEX_CLIENT_SECRET)
     if (cached_client_id.isEmpty() || cached_client_secret.isEmpty()) {
@@ -66,6 +67,29 @@ bool ConfigManager::begin() {
     return true;
 }
 
+void ConfigManager::migrateLegacyOtaUrl() {
+#ifdef DEFAULT_OTA_URL
+    String stored_url = loadString("ota_url");
+    if (stored_url.isEmpty()) {
+        return;
+    }
+    String default_url = DEFAULT_OTA_URL;
+    if (stored_url == default_url) {
+        return;
+    }
+
+    bool is_legacy = stored_url == "https://api.github.com/repos/liptonj/Led-Matrix-Webex/releases/latest"
+        || stored_url == "https://display.5ls.us/manifest.json";
+
+    if (!is_legacy) {
+        return;
+    }
+
+    saveString("ota_url", default_url);
+    Serial.printf("[CONFIG] OTA URL migrated to %s\n", default_url.c_str());
+#endif
+}
+
 void ConfigManager::loadCache() {
     cached_ssid = loadString("wifi_ssid");
     cached_password = loadString("wifi_pass");
@@ -79,6 +103,16 @@ void ConfigManager::loadCache() {
     cached_poll_interval = loadUInt("poll_interval", DEFAULT_POLL_INTERVAL);
     cached_brightness = loadUInt("brightness", DEFAULT_BRIGHTNESS);
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
+    
+    // Silently check MQTT config without noisy errors
+    preferences.begin(NAMESPACE, true);  // Read-only mode
+    cached_mqtt_broker = preferences.getString("mqtt_broker", "");
+    cached_mqtt_port = preferences.getUShort("mqtt_port", 1883);
+    cached_mqtt_username = preferences.getString("mqtt_user", "");
+    cached_mqtt_password = preferences.getString("mqtt_pass", "");
+    cached_mqtt_topic = preferences.getString("mqtt_topic", "");
+    preferences.end();
+    
     cache_loaded = true;
 }
 
@@ -282,23 +316,38 @@ void ConfigManager::setXAPIPollInterval(uint16_t seconds) {
 // MQTT Configuration
 
 String ConfigManager::getMQTTBroker() const {
-    return loadString("mqtt_broker");
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_mqtt_broker;
 }
 
 uint16_t ConfigManager::getMQTTPort() const {
-    return loadUInt("mqtt_port", 1883);
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_mqtt_port;
 }
 
 String ConfigManager::getMQTTUsername() const {
-    return loadString("mqtt_user");
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_mqtt_username;
 }
 
 String ConfigManager::getMQTTPassword() const {
-    return loadString("mqtt_pass");
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_mqtt_password;
 }
 
 String ConfigManager::getMQTTTopic() const {
-    return loadString("mqtt_topic", "meraki/v1/mt/#");
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_mqtt_topic.isEmpty() ? "meraki/v1/mt/#" : cached_mqtt_topic;
 }
 
 void ConfigManager::setMQTTConfig(const String& broker, uint16_t port,

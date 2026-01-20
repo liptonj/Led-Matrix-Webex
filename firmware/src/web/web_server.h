@@ -56,6 +56,17 @@ private:
     String last_oauth_redirect_uri;
     String pending_oauth_code;
     String pending_oauth_redirect_uri;
+    
+    // OTA bundle handling
+    uint8_t ota_bundle_header[16];
+    size_t ota_bundle_header_filled;
+    bool ota_bundle_mode;
+    bool ota_bundle_header_flushed;
+    size_t ota_bundle_app_size;
+    size_t ota_bundle_fs_size;
+    size_t ota_bundle_app_written;
+    size_t ota_bundle_fs_written;
+    bool ota_bundle_fs_started;
 
     void setupCaptivePortal();
     String buildRedirectUri() const;

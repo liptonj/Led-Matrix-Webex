@@ -253,6 +253,7 @@ void loop() {
             app_state.humidity = data.humidity;
             app_state.door_status = data.door_status;
             app_state.air_quality_index = data.air_quality_index;
+            app_state.tvoc = data.tvoc;
             app_state.mqtt_connected = true;
         }
     } else {
@@ -426,7 +427,8 @@ void update_display() {
     if (app_state.wifi_connected &&
         !app_state.bridge_connected &&
         !app_state.xapi_connected &&
-        !app_state.webex_authenticated) {
+        !app_state.webex_authenticated &&
+        !app_state.mqtt_connected) {
         matrix_display.showUnconfigured(WiFi.localIP().toString());
         return;
     }
@@ -443,6 +445,7 @@ void update_display() {
     data.humidity = app_state.humidity;
     data.door_status = app_state.door_status;
     data.air_quality_index = app_state.air_quality_index;
+    data.tvoc = app_state.tvoc;
     data.show_sensors = app_state.mqtt_connected;
 
     // Connection indicators

@@ -30,6 +30,7 @@ struct AppState {
     float humidity = 0.0f;
     String door_status = "";
     int air_quality_index = 0;      // Air quality as numeric index (0-500)
+    float tvoc = 0.0f;              // TVOC in ppb
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
     // Time tracking

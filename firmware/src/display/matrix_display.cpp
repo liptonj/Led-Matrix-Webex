@@ -21,7 +21,8 @@ bool MatrixDisplay::begin() {
     // Don't call Serial.begin() here - main.cpp already did it
     delay(10);
     
-    Serial.println(">>> Display init START");
+    Serial.println("===============================================");
+    Serial.println("[DISPLAY] Initialization starting...");
     Serial.flush();
     yield(); // Feed watchdog
     
@@ -34,6 +35,7 @@ bool MatrixDisplay::begin() {
 
     // Configure HUB75 pins based on board type
 #if defined(ESP32_S3_BOARD)
+    Serial.println("[DISPLAY] Configuring for ESP32-S3 board");
     // Seengreat adapter pin configuration for ESP32-S3 (working pins)
     mxconfig.gpio.r1 = 37;
     mxconfig.gpio.g1 = 6;
@@ -50,6 +52,7 @@ bool MatrixDisplay::begin() {
     mxconfig.gpio.oe = 21;
     mxconfig.gpio.clk = 47;
 #else
+    Serial.println("[DISPLAY] Configuring for ESP32 standard board");
     // Default ESP32 pins
     mxconfig.gpio.r1 = 25;
     mxconfig.gpio.g1 = 26;
@@ -67,6 +70,8 @@ bool MatrixDisplay::begin() {
     mxconfig.gpio.clk = 16;
 #endif
     
+    Serial.println("[DISPLAY] Pin configuration set");
+    
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
     // Reduce visible flicker: higher refresh + stable latch blanking
@@ -74,18 +79,23 @@ bool MatrixDisplay::begin() {
     mxconfig.min_refresh_rate = 120;
     mxconfig.latch_blanking = 1;
     
+    Serial.println("[DISPLAY] Creating DMA display object...");
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
     
     if (!dma_display) {
+        Serial.println("[DISPLAY] ERROR: Failed to allocate display object");
         return false;
     }
     
+    Serial.println("[DISPLAY] Calling begin() on display...");
     if (!dma_display->begin()) {
+        Serial.println("[DISPLAY] ERROR: Display begin() failed");
         delete dma_display;
         dma_display = nullptr;
         return false;
     }
     
+    Serial.println("[DISPLAY] Setting brightness and clearing screen...");
     brightness = 255;
     dma_display->setBrightness8(brightness);
     dma_display->clearScreen();
@@ -96,7 +106,10 @@ bool MatrixDisplay::begin() {
     dma_display->setCursor(8, 12);
     dma_display->print("WEBEX");
     
-    Serial.println(">>> Display init COMPLETE");
+    Serial.println("[DISPLAY] Initialization complete");
+    Serial.printf("[DISPLAY] Matrix size: %dx%d pixels\n", MATRIX_WIDTH, MATRIX_HEIGHT);
+    Serial.printf("[DISPLAY] Brightness: %d/255\n", brightness);
+    Serial.println("===============================================");
     Serial.flush();
     
     initialized = true;
@@ -177,10 +190,15 @@ void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
     snprintf(humid_str, sizeof(humid_str), "%d%%", (int)data.humidity);
     drawSmallText(22, y, humid_str, COLOR_CYAN);
 
-    // Air quality right
-    char aq_str[8];
-    snprintf(aq_str, sizeof(aq_str), "AQ%d", data.air_quality_index);
-    drawSmallText(44, y, aq_str, COLOR_CYAN);
+    // TVOC right
+    char tvoc_str[8];
+    if (data.tvoc >= 1000.0f) {
+        int tvoc_k = (int)((data.tvoc + 500.0f) / 1000.0f);
+        snprintf(tvoc_str, sizeof(tvoc_str), "T%dk", tvoc_k);
+    } else {
+        snprintf(tvoc_str, sizeof(tvoc_str), "TV%d", (int)data.tvoc);
+    }
+    drawSmallText(44, y, tvoc_str, COLOR_CYAN);
 }
 
 void MatrixDisplay::showStartupScreen(const char* version) {

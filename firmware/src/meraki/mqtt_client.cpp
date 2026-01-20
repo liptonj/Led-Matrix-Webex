@@ -5,6 +5,35 @@
 
 #include "mqtt_client.h"
 #include <ArduinoJson.h>
+#include <cctype>
+
+namespace {
+String normalizeSensorId(const String& input) {
+    String out;
+    out.reserve(input.length());
+    for (size_t i = 0; i < input.length(); i++) {
+        char c = input[i];
+        if (std::isalnum(static_cast<unsigned char>(c))) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    return out;
+}
+
+String extractSensorFromTopic(const String& topic) {
+    const int ble_index = topic.indexOf("/ble/");
+    if (ble_index == -1) {
+        return "";
+    }
+    const int start = ble_index + 5;
+    const int end = topic.indexOf('/', start);
+    if (end == -1 || end <= start) {
+        return "";
+    }
+    return topic.substring(start, end);
+}
+
+} // namespace
 
 // Global instance for callback
 MerakiMQTTClient* g_mqtt_instance = nullptr;
@@ -31,7 +60,7 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
     uint16_t port = config_manager->getMQTTPort();
 
     if (broker.isEmpty()) {
-        Serial.println("[MQTT] No broker configured");
+        Serial.println("[MQTT] No broker configured - MQTT module disabled");
         return;
     }
 
@@ -128,6 +157,16 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         return;
     }
 
+    const String configured_mac = config_manager ? config_manager->getSensorSerial() : "";
+    if (!configured_mac.isEmpty()) {
+        const String target_mac = normalizeSensorId(configured_mac);
+        const String topic_sensor = extractSensorFromTopic(topic);
+        if (topic_sensor.isEmpty() || normalizeSensorId(topic_sensor) != target_mac) {
+            Serial.printf("[MQTT] Ignored message for sensor %s\n", topic_sensor.c_str());
+            return;
+        }
+    }
+
     // Extract metric type from topic
     int lastSlash = topic.lastIndexOf('/');
     if (lastSlash == -1) return;
@@ -140,19 +179,28 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         float temp_value = 0.0f;
         bool is_fahrenheit = false;
 
-        // Check if payload has explicit unit field
-        if (doc["unit"].is<const char*>()) {
+        // Check for explicit unit field with value
+        if (doc["unit"].is<const char*>() && doc["value"].is<float>()) {
             const char* unit = doc["unit"];
             temp_value = doc["value"] | 0.0f;
             is_fahrenheit = (strcmp(unit, "fahrenheit") == 0 || strcmp(unit, "F") == 0);
         }
-        // Check for separate celsius/fahrenheit fields
-        else if (doc["celsius"].is<float>() || doc["temperatureC"].is<float>()) {
-            temp_value = doc["celsius"] | doc["temperatureC"] | 0.0f;
+        // Meraki MT15 format: explicit celsius/fahrenheit fields
+        else if (doc["celsius"].is<float>()) {
+            temp_value = doc["celsius"] | 0.0f;
             is_fahrenheit = false;
         }
-        else if (doc["fahrenheit"].is<float>() || doc["temperatureF"].is<float>()) {
-            temp_value = doc["fahrenheit"] | doc["temperatureF"] | 0.0f;
+        else if (doc["fahrenheit"].is<float>()) {
+            temp_value = doc["fahrenheit"] | 0.0f;
+            is_fahrenheit = true;
+        }
+        // Legacy fields
+        else if (doc["temperatureC"].is<float>()) {
+            temp_value = doc["temperatureC"] | 0.0f;
+            is_fahrenheit = false;
+        }
+        else if (doc["temperatureF"].is<float>()) {
+            temp_value = doc["temperatureF"] | 0.0f;
             is_fahrenheit = true;
         }
         // Default: assume value field, try to detect by range
@@ -174,7 +222,11 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         update_pending = true;
 
     } else if (metric == "humidity") {
-        sensor_data.humidity = doc["value"] | 0.0f;
+        if (doc["humidity"].is<float>()) {
+            sensor_data.humidity = doc["humidity"] | 0.0f;
+        } else {
+            sensor_data.humidity = doc["value"] | 0.0f;
+        }
         update_pending = true;
         Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor_data.humidity);
 
@@ -191,9 +243,18 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         Serial.printf("[MQTT] Water: %s\n", sensor_data.water_status.c_str());
 
     } else if (metric == "tvoc") {
-        sensor_data.tvoc = doc["value"] | 0.0f;
+        if (doc["tvoc"].is<float>()) {
+            sensor_data.tvoc = doc["tvoc"] | 0.0f;
+        } else {
+            sensor_data.tvoc = doc["value"] | 0.0f;
+        }
         update_pending = true;
-        Serial.printf("[MQTT] TVOC: %.1f ppb\n", sensor_data.tvoc);
+        Serial.printf("[MQTT] TVOC: %.1f\n", sensor_data.tvoc);
+
+    } else if (metric == "iaqIndex") {
+        sensor_data.air_quality_index = doc["iaqIndex"] | doc["value"] | 0;
+        update_pending = true;
+        Serial.printf("[MQTT] IAQ Index: %d\n", sensor_data.air_quality_index);
 
     } else if (metric == "iaq") {
         sensor_data.iaq = doc["value"] | 0;

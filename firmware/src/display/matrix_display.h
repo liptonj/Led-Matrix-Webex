@@ -51,6 +51,7 @@ struct DisplayData {
     float humidity = 0.0f;
     String door_status = "";
     int air_quality_index = 0;      // Air quality as numeric value (0-500)
+    float tvoc = 0.0f;              // TVOC in ppb
     bool show_sensors = false;
     bool wifi_connected = false;
     bool bridge_connected = false;

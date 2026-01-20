@@ -4,12 +4,14 @@
  */
 
 #include "web_server.h"
+#include "ota_bundle.h"
 #include "../ota/ota_manager.h"
 #include "../webex/oauth_handler.h"
 #include <ArduinoJson.h>
 #include <ctype.h>
 #include <WiFi.h>
 #include <Update.h>
+#include <esp_ota_ops.h>
 
 // External reference to OTA manager for update functionality
 extern OTAManager ota_manager;
@@ -54,7 +56,11 @@ String urlEncode(const String& str) {
 WebServerManager::WebServerManager()
     : server(nullptr), dns_server(nullptr), config_manager(nullptr), app_state(nullptr),
       module_manager(nullptr), running(false), captive_portal_active(false),
-      ota_upload_in_progress(false), ota_upload_error(""), ota_upload_size(0) {
+      ota_upload_in_progress(false), ota_upload_error(""), ota_upload_size(0),
+      ota_bundle_header_filled(0), ota_bundle_mode(false),
+      ota_bundle_header_flushed(false), ota_bundle_app_size(0), ota_bundle_fs_size(0),
+      ota_bundle_app_written(0), ota_bundle_fs_written(0), ota_bundle_fs_started(false) {
+    memset(ota_bundle_header, 0, sizeof(ota_bundle_header));
 }
 
 WebServerManager::~WebServerManager() {
@@ -197,40 +203,156 @@ void WebServerManager::setupRoutes() {
             }
         },
         [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
+            // Initialize on first chunk
             if (index == 0) {
                 ota_upload_in_progress = true;
                 ota_upload_error = "";
                 ota_upload_size = request->contentLength();
+                ota_bundle_header_filled = 0;
+                ota_bundle_mode = false;
+                ota_bundle_header_flushed = false;
+                ota_bundle_app_size = 0;
+                ota_bundle_fs_size = 0;
+                ota_bundle_app_written = 0;
+                ota_bundle_fs_written = 0;
+                ota_bundle_fs_started = false;
 
                 Serial.printf("[WEB] OTA upload start: %s (%u bytes)\n",
                               filename.c_str(), static_cast<unsigned>(ota_upload_size));
-
-                size_t total = ota_upload_size;
-                if (total == 0) {
-                    ota_upload_error = "Missing content length";
-                } else if (!Update.begin(total)) {
-                    ota_upload_error = Update.errorString();
-                }
             }
 
             if (ota_upload_error.isEmpty()) {
-                if (Update.write(data, len) != len) {
-                    ota_upload_error = Update.errorString();
+                size_t offset = 0;
+                
+                // Read and parse bundle header if needed
+                if (ota_bundle_header_filled < OTABundle::HEADER_SIZE) {
+                    size_t to_copy = min(OTABundle::HEADER_SIZE - ota_bundle_header_filled, len);
+                    memcpy(ota_bundle_header + ota_bundle_header_filled, data, to_copy);
+                    ota_bundle_header_filled += to_copy;
+                    offset += to_copy;
+
+                    // Header complete - check if bundle
+                    if (ota_bundle_header_filled == OTABundle::HEADER_SIZE) {
+                        if (OTABundle::is_bundle(ota_bundle_header)) {
+                            ota_bundle_mode = true;
+                            OTABundle::parse_header(ota_bundle_header, ota_bundle_app_size, ota_bundle_fs_size);
+                            
+                            Serial.printf("[WEB] OTA bundle detected: app=%u fs=%u\n",
+                                          static_cast<unsigned>(ota_bundle_app_size),
+                                          static_cast<unsigned>(ota_bundle_fs_size));
+
+                            // Start app update
+                            if (!Update.begin(ota_bundle_app_size, U_FLASH)) {
+                                ota_upload_error = Update.errorString();
+                                Serial.printf("[WEB] Update.begin app failed: %s\n", ota_upload_error.c_str());
+                            }
+                        } else {
+                            // Not a bundle - regular firmware
+                            size_t total = ota_upload_size;
+                            if (total == 0) {
+                                ota_upload_error = "Missing content length";
+                            } else if (!Update.begin(total, U_FLASH)) {
+                                ota_upload_error = Update.errorString();
+                                Serial.printf("[WEB] Update.begin firmware failed: %s\n", ota_upload_error.c_str());
+                            }
+                        }
+                    } else {
+                        // Header not complete yet
+                        return;
+                    }
+                }
+
+                // Process payload
+                if (ota_bundle_mode) {
+                    // Bundle mode - write app then FS
+                    const uint8_t* ptr = data + offset;
+                    size_t remaining = len - offset;
+                    
+                    while (remaining > 0 && ota_upload_error.isEmpty()) {
+                        if (ota_bundle_app_written < ota_bundle_app_size) {
+                            // Writing app
+                            size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
+                            if (Update.write(ptr, to_write) != to_write) {
+                                ota_upload_error = Update.errorString();
+                                break;
+                            }
+                            ota_bundle_app_written += to_write;
+                            ptr += to_write;
+                            remaining -= to_write;
+
+                            // App complete - start FS
+                            if (ota_bundle_app_written == ota_bundle_app_size) {
+                                if (!Update.end(true)) {
+                                    ota_upload_error = Update.errorString();
+                                    break;
+                                }
+                                Serial.println("[WEB] OTA bundle app complete, starting FS");
+                                
+                                LittleFS.end();
+                                if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
+                                    ota_upload_error = Update.errorString();
+                                    Serial.printf("[WEB] Update.begin FS failed: %s\n", ota_upload_error.c_str());
+                                    break;
+                                }
+                                ota_bundle_fs_started = true;
+                            }
+                        } else {
+                            // Writing FS
+                            size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
+                            if (Update.write(ptr, to_write) != to_write) {
+                                ota_upload_error = Update.errorString();
+                                break;
+                            }
+                            ota_bundle_fs_written += to_write;
+                            ptr += to_write;
+                            remaining -= to_write;
+                        }
+                    }
+                } else {
+                    // Regular firmware mode
+                    if (!ota_bundle_header_flushed) {
+                        // Write buffered header
+                        if (Update.write(ota_bundle_header, ota_bundle_header_filled) != ota_bundle_header_filled) {
+                            ota_upload_error = Update.errorString();
+                        }
+                        ota_bundle_header_flushed = true;
+                    }
+                    
+                    if (ota_upload_error.isEmpty() && offset < len) {
+                        if (Update.write(data + offset, len - offset) != (len - offset)) {
+                            ota_upload_error = Update.errorString();
+                        }
+                    }
                 }
             }
 
             if (final) {
                 if (ota_upload_error.isEmpty()) {
-                    if (!Update.end(true)) {
-                        ota_upload_error = Update.errorString();
+                    if (ota_bundle_mode) {
+                        // Verify bundle completion
+                        if (ota_bundle_app_written != ota_bundle_app_size ||
+                            ota_bundle_fs_written != ota_bundle_fs_size) {
+                            ota_upload_error = "OTA bundle incomplete";
+                        } else if (ota_bundle_fs_started && !Update.end(true)) {
+                            ota_upload_error = Update.errorString();
+                        }
+                    } else {
+                        // Regular firmware
+                        if (!Update.end(true)) {
+                            ota_upload_error = Update.errorString();
+                        }
                     }
                 } else {
                     Update.abort();
                 }
+                
                 ota_upload_in_progress = false;
                 Serial.printf("[WEB] OTA upload %s (%u bytes)\n",
                               ota_upload_error.isEmpty() ? "complete" : "failed",
                               static_cast<unsigned>(ota_upload_size));
+                if (!ota_upload_error.isEmpty()) {
+                    Serial.printf("[WEB] OTA error: %s\n", ota_upload_error.c_str());
+                }
             }
         }
     );

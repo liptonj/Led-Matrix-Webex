@@ -1,15 +1,19 @@
 name: Deploy Website to Cloudflare Pages
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["CI/CD"]
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
       deployments: write
@@ -23,8 +27,15 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Wait for release to be available
+        run: |
+          echo "Waiting 10 seconds for GitHub release to be fully available..."
+          sleep 10
+
       - name: Generate manifest from GitHub releases
         working-directory: website
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/generate-manifest.js
 
       - name: Publish to Cloudflare Pages

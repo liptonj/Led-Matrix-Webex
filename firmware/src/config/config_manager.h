@@ -118,6 +118,11 @@ private:
     mutable uint16_t cached_poll_interval;
     mutable uint8_t cached_brightness;
     mutable uint16_t cached_scroll_speed_ms;
+    mutable String cached_mqtt_broker;
+    mutable uint16_t cached_mqtt_port;
+    mutable String cached_mqtt_username;
+    mutable String cached_mqtt_password;
+    mutable String cached_mqtt_topic;
     mutable bool cache_loaded;
 
     void loadCache();
@@ -127,6 +132,7 @@ private:
     uint32_t loadUInt(const char* key, uint32_t default_value = 0) const;
     void saveBool(const char* key, bool value);
     bool loadBool(const char* key, bool default_value = false) const;
+    void migrateLegacyOtaUrl();
 };
 
 #endif // CONFIG_MANAGER_H

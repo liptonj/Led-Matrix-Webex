@@ -59,6 +59,7 @@ def _apply_env_defines() -> None:
     if client_id and client_secret:
         defines.append(("WEBEX_CLIENT_ID", f'\\"{client_id}\\"'))
         defines.append(("WEBEX_CLIENT_SECRET", f'\\"{client_secret}\\"'))
+        print(f"[ENV] Webex credentials loaded: Client ID={client_id[:8]}***")
 
     if mqtt_broker:
         defines.append(("MQTT_BROKER", f'\\"{mqtt_broker}\\"'))
@@ -68,10 +69,13 @@ def _apply_env_defines() -> None:
             defines.append(("MQTT_USERNAME", f'\\"{mqtt_username}\\"'))
         if mqtt_password:
             defines.append(("MQTT_PASSWORD", f'\\"{mqtt_password}\\"'))
+        print(f"[ENV] MQTT config loaded: Broker={mqtt_broker}")
 
     if defines:
         env.Append(CPPDEFINES=defines)
         print("[ENV] Build defines injected from .env")
+    else:
+        print("[ENV] No credentials found in .env file")
 
 
 def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
