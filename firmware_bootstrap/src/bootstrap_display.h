@@ -13,13 +13,7 @@
 
 #include <Arduino.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-
-// Matrix configuration
-#define MATRIX_WIDTH 64
-#define MATRIX_HEIGHT 32
-#define PANEL_RES_X 64
-#define PANEL_RES_Y 32
-#define PANEL_CHAIN 1
+#include "display_config.h"
 
 // Colors (RGB565)
 #define COLOR_BLACK   0x0000

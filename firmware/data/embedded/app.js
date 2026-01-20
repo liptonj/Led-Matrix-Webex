@@ -359,18 +359,29 @@ async function loadDisplayStatus() {
             document.getElementById('temperature').textContent = tempF.toFixed(1) + '°F';
             document.getElementById('sensor-temp').textContent = tempF.toFixed(1) + '°F';
         }
-        if (data.humidity) {
+        if (data.humidity != null && data.humidity !== undefined) {
             document.getElementById('humidity').textContent = data.humidity.toFixed(1) + '%';
             document.getElementById('sensor-humidity').textContent = data.humidity.toFixed(1) + '%';
+        } else {
+            document.getElementById('humidity').textContent = '--';
+            document.getElementById('sensor-humidity').textContent = '--';
         }
-        document.getElementById('air-quality').textContent = data.air_quality || '--';
-        document.getElementById('sensor-aq').textContent = data.air_quality || '--';
+        // Handle air_quality - 0 is a valid value, so check for null/undefined explicitly
+        if (data.air_quality != null && data.air_quality !== undefined) {
+            document.getElementById('air-quality').textContent = data.air_quality.toString();
+            document.getElementById('sensor-aq').textContent = data.air_quality.toString();
+        } else {
+            document.getElementById('air-quality').textContent = '--';
+            document.getElementById('sensor-aq').textContent = '--';
+        }
         document.getElementById('door-status').textContent = data.door_status || '--';
         document.getElementById('sensor-door').textContent = data.door_status || '--';
         
         // System info
         document.getElementById('firmware-version').textContent = data.firmware_version || '--';
+        document.getElementById('firmware-build-id').textContent = data.firmware_build_id || '--';
         document.getElementById('current-version').textContent = data.firmware_version || '--';
+        document.getElementById('current-build-id').textContent = data.firmware_build_id || '--';
         document.getElementById('app-version').textContent = 'v' + (data.firmware_version || '1.0.0');
         document.getElementById('ip-address').textContent = data.ip_address || '--';
         document.getElementById('mac-address').textContent = data.mac_address || '--';

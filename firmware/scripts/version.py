@@ -8,6 +8,7 @@ the 'Import' function and 'env' object at runtime.
 # pyright: reportUndefinedVariable=false, reportUnboundVariable=false
 # mypy: disable-error-code="name-defined"
 import subprocess
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -44,19 +45,29 @@ def get_git_commit() -> str:
         return "unknown"
 
 
+def get_build_id() -> str:
+    """Get a build ID based on epoch seconds."""
+    try:
+        return str(int(time.time()))
+    except (OSError, ValueError):
+        return "unknown"
+
+
 def main() -> None:
     """Inject version build flags into PlatformIO environment."""
     build_version = get_git_version()
     build_commit = get_git_commit()
+    build_id = get_build_id()
 
     env.Append(  # noqa: F821
         CPPDEFINES=[
             ("BUILD_VERSION", f'\\"{build_version}\\"'),
             ("BUILD_COMMIT", f'\\"{build_commit}\\"'),
+            ("BUILD_ID", f'\\"{build_id}\\"'),
         ]
     )
 
-    print(f"Build version: {build_version} ({build_commit})")
+    print(f"Build version: {build_version} ({build_commit}) [{build_id}]")
 
 
 main()

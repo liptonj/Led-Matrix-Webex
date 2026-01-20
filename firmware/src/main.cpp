@@ -21,6 +21,7 @@
 #include "bridge/bridge_client.h"
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
+#include "time/time_manager.h"
 
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
@@ -55,7 +56,7 @@ void check_for_updates();
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    
+
     // CRITICAL: Configure watchdog timeout FIRST to prevent boot loops
     // during slow initialization (display, WiFi, etc.)
     esp_task_wdt_init(30, false);  // 30 second timeout, no panic
@@ -85,15 +86,16 @@ void setup() {
     // Initialize display
     Serial.println("[INIT] Initializing LED matrix...");
     Serial.flush();
-    
+
     // CRITICAL: Feed watchdog before long operation
     delay(10);
-    
+
     if (!matrix_display.begin()) {
         Serial.println("[WARN] Display initialization failed - continuing without display");
         // Don't fail boot - continue without display
     } else {
         Serial.println("[INIT] Display ready!");
+        matrix_display.setBrightness(config_manager.getBrightness());
         matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
         matrix_display.showStartupScreen(FIRMWARE_VERSION);
     }
@@ -300,7 +302,7 @@ void loop() {
         if (app_state.wifi_connected) {
             Serial.println();
             Serial.println("=== WEBEX STATUS DISPLAY ===");
-            Serial.printf("IP: %s | mDNS: %s.local\n", 
+            Serial.printf("IP: %s | mDNS: %s.local\n",
                           WiFi.localIP().toString().c_str(),
                           mdns_manager.getHostname().c_str());
             Serial.printf("Status: %s | Bridge: %s | MQTT: %s\n",
@@ -332,7 +334,7 @@ void setup_wifi() {
     delay(100);
     int network_count = WiFi.scanNetworks();
     Serial.printf("[WIFI] Found %d networks\n", network_count);
-    
+
     // List networks found
     for (int i = 0; i < min(network_count, 10); i++) {
         Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
@@ -354,12 +356,12 @@ void setup_wifi() {
     for (int i = 0; i < network_count; i++) {
         if (WiFi.SSID(i) == ssid) {
             network_found = true;
-            Serial.printf("[WIFI] Configured network '%s' found (signal: %d dBm)\n", 
+            Serial.printf("[WIFI] Configured network '%s' found (signal: %d dBm)\n",
                           ssid.c_str(), WiFi.RSSI(i));
             break;
         }
     }
-    
+
     if (!network_found) {
         Serial.printf("[WIFI] Configured network '%s' NOT found! Starting AP mode...\n", ssid.c_str());
         WiFi.mode(WIFI_AP_STA);
@@ -446,6 +448,7 @@ void update_display() {
         return;
     }
     last_update = millis();
+    matrix_display.setBrightness(config_manager.getBrightness());
     matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
 
     // If Webex is unavailable, keep showing a generic screen with IP
@@ -487,17 +490,30 @@ void update_display() {
     data.wifi_connected = app_state.wifi_connected;
     data.bridge_connected = app_state.bridge_connected;
 
-    // Get current time
-    if (app_state.time_synced) {
+    // Get current time (cache once per second)
+    static struct tm last_timeinfo;
+    static bool has_time = false;
+    static unsigned long last_time_check_ms = 0;
+    if (millis() - last_time_check_ms >= 1000) {
+        last_time_check_ms = millis();
         struct tm timeinfo;
         if (getLocalTime(&timeinfo)) {
-            data.hour = timeinfo.tm_hour;
-            data.minute = timeinfo.tm_min;
-            data.day = timeinfo.tm_mday;
-            data.month = timeinfo.tm_mon + 1;  // tm_mon is 0-11
-            data.time_valid = true;
+            last_timeinfo = timeinfo;
+            has_time = true;
+            app_state.time_synced = true;
+        } else if (!app_state.time_synced) {
+            has_time = false;
         }
     }
+    if (has_time) {
+        data.hour = last_timeinfo.tm_hour;
+        data.minute = last_timeinfo.tm_min;
+        data.day = last_timeinfo.tm_mday;
+        data.month = last_timeinfo.tm_mon + 1;  // tm_mon is 0-11
+        data.time_valid = true;
+    }
+    data.use_24h = config_manager.use24HourTime();
+    data.date_format = config_manager.getDateFormatCode();
 
     matrix_display.update(data);
 }
@@ -506,25 +522,7 @@ void update_display() {
  * @brief Setup NTP time synchronization
  */
 void setup_time() {
-    // Configure NTP with timezone (default to UTC, can be configured later)
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-
-    // Wait for time to sync (up to 10 seconds)
-    Serial.println("[TIME] Waiting for NTP sync...");
-    struct tm timeinfo;
-    int attempts = 0;
-    while (!getLocalTime(&timeinfo) && attempts < 20) {
-        delay(500);
-        attempts++;
-    }
-
-    if (getLocalTime(&timeinfo)) {
-        app_state.time_synced = true;
-        Serial.printf("[TIME] Time synced: %02d:%02d:%02d\n",
-                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    } else {
-        Serial.println("[TIME] Failed to sync time");
-    }
+    applyTimeConfig(config_manager, &app_state);
 }
 
 /**

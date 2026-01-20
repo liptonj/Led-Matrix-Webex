@@ -9,6 +9,21 @@
 #include <WiFiClientSecure.h>
 #include <Update.h>
 #include <LittleFS.h>
+#ifndef NATIVE_BUILD
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#endif
+
+namespace {
+void configureHttpClient(HTTPClient& http) {
+#if defined(HTTPC_STRICT_FOLLOW_REDIRECTS)
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+#elif defined(HTTPC_FORCE_FOLLOW_REDIRECTS)
+    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+#endif
+    http.setTimeout(15000);
+}
+}  // namespace
 
 OTAManager::OTAManager()
     : update_available(false), use_manifest_mode(false) {
@@ -57,6 +72,7 @@ bool OTAManager::checkUpdateFromManifest() {
     
     HTTPClient http;
     http.begin(client, manifest_url);
+    configureHttpClient(http);
     http.addHeader("User-Agent", "ESP32-Webex-Display");
     
     int httpCode = http.GET();
@@ -130,6 +146,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     
     HTTPClient http;
     http.begin(client, update_url);
+    configureHttpClient(http);
     http.addHeader("User-Agent", "ESP32-Webex-Display");
     http.addHeader("Accept", "application/vnd.github.v3+json");
     
@@ -310,6 +327,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     HTTPClient http;
     http.begin(client, url);
+    configureHttpClient(http);
     http.addHeader("User-Agent", "ESP32-Webex-Display");
 
     int httpCode = http.GET();
@@ -328,6 +346,26 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         http.end();
         return false;
     }
+
+#ifndef NATIVE_BUILD
+    const esp_partition_t* target_partition = nullptr;
+    if (update_type == U_FLASH) {
+        target_partition = esp_ota_get_next_update_partition(nullptr);
+        if (!target_partition) {
+            Serial.println("[OTA] No OTA partition available (missing ota_1?)");
+            http.end();
+            return false;
+        }
+        Serial.printf("[OTA] Target partition: %s (%d bytes)\n",
+                      target_partition->label, target_partition->size);
+        if (static_cast<size_t>(contentLength) > target_partition->size) {
+            Serial.printf("[OTA] %s too large for partition (%d > %d)\n",
+                          label, contentLength, target_partition->size);
+            http.end();
+            return false;
+        }
+    }
+#endif
 
     if (update_type == U_SPIFFS) {
         LittleFS.end();
@@ -356,6 +394,18 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         http.end();
         return false;
     }
+
+#ifndef NATIVE_BUILD
+    if (update_type == U_FLASH && target_partition) {
+        esp_err_t err = esp_ota_set_boot_partition(target_partition);
+        if (err != ESP_OK) {
+            Serial.printf("[OTA] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            http.end();
+            return false;
+        }
+        Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
+    }
+#endif
 
     http.end();
     Serial.printf("[OTA] %s update applied\n", label);

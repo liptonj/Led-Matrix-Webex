@@ -981,7 +981,8 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
             fetch('/api/status').then(r=>r.json()).then(d=>{
                 let html=`WiFi: ${d.wifi_connected?'Connected':'Disconnected'}<br>`;
                 html+=`IP: ${d.ip_address}<br>`;
-                html+=`Version: ${d.version}`;
+                html+=`Version: ${d.version}<br>`;
+                html+=`Build ID: ${d.build||'--'}`;
                 document.getElementById('device-status').innerHTML=html;
                 isWifiConnected=!!d.wifi_connected;
             });
@@ -1020,12 +1021,11 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 return;
             }
             const file=input.files[0];
-            const formData=new FormData();
-            formData.append('firmware', file, file.name);
             btn.disabled=true;
             status.textContent='Uploading...';
             const xhr=new XMLHttpRequest();
             xhr.open('POST','/api/ota/upload');
+            xhr.setRequestHeader('Content-Type','application/octet-stream');
             xhr.upload.onprogress=(event)=>{
                 if(!event.lengthComputable)return;
                 const percent=Math.round((event.loaded/event.total)*100);
@@ -1052,7 +1052,7 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 status.textContent='Upload failed. Please try again.';
                 btn.disabled=false;
             };
-            xhr.send(formData);
+            xhr.send(file);
         }
         function startManualFsUpload(){
             const input=document.getElementById('manual-fs-file');
@@ -1066,12 +1066,11 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 return;
             }
             const file=input.files[0];
-            const formData=new FormData();
-            formData.append('littlefs', file, file.name);
             btn.disabled=true;
             status.textContent='Uploading...';
             const xhr=new XMLHttpRequest();
             xhr.open('POST','/api/ota/upload-fs');
+            xhr.setRequestHeader('Content-Type','application/octet-stream');
             xhr.upload.onprogress=(event)=>{
                 if(!event.lengthComputable)return;
                 const percent=Math.round((event.loaded/event.total)*100);
@@ -1098,7 +1097,7 @@ void WebSetup::handleRoot(AsyncWebServerRequest* request) {
                 status.textContent='Upload failed. Please try again.';
                 btn.disabled=false;
             };
-            xhr.send(formData);
+            xhr.send(file);
         }
         loadStatus();setInterval(loadStatus,5000);
         initManualUpload();

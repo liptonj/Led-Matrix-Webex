@@ -28,6 +28,7 @@ const manualFsUploadStatus = document.getElementById('manual-fs-upload-status');
 const wifiStatus = document.getElementById('wifi-status');
 const ipAddress = document.getElementById('ip-address');
 const versionSpan = document.getElementById('version');
+const buildIdSpan = document.getElementById('build-id');
 
 // State
 let otaInProgress = false;
@@ -303,13 +304,8 @@ async function updateStatus() {
 
         ipAddress.textContent = data.ip_address || '--';
 
-        if (data.version) {
-            versionSpan.textContent = data.build
-                ? `${data.version} (${data.build})`
-                : data.version;
-        } else {
-            versionSpan.textContent = '--';
-        }
+        versionSpan.textContent = data.version || '--';
+        buildIdSpan.textContent = data.build || '--';
 
         // Enable install button only when WiFi is connected
         if (data.wifi_connected && !otaInProgress) {

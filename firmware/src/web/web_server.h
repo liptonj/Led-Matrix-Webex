@@ -10,6 +10,7 @@
 #include <ESPAsyncWebServer.h>
 #include <DNSServer.h>
 #include <LittleFS.h>
+#include <esp_partition.h>
 #include "../config/config_manager.h"
 #include "../app_state.h"
 #include "../modules/module_manager.h"
@@ -67,6 +68,11 @@ private:
     size_t ota_bundle_app_written;
     size_t ota_bundle_fs_written;
     bool ota_bundle_fs_started;
+    String config_body_buffer;
+    size_t config_body_expected;
+    String embedded_body_buffer;
+    size_t embedded_body_expected;
+    const esp_partition_t* ota_upload_target;
 
     void setupCaptivePortal();
     String buildRedirectUri() const;
@@ -76,18 +82,19 @@ private:
     void handleRoot(AsyncWebServerRequest* request);
     void handleStatus(AsyncWebServerRequest* request);
     void handleConfig(AsyncWebServerRequest* request);
-    void handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
     void handleWifiScan(AsyncWebServerRequest* request);
     void handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleWebexAuth(AsyncWebServerRequest* request);
     void handleOAuthCallback(AsyncWebServerRequest* request);
     void handleCheckUpdate(AsyncWebServerRequest* request);
     void handlePerformUpdate(AsyncWebServerRequest* request);
+    void handleBootToFactory(AsyncWebServerRequest* request);
     void handleReboot(AsyncWebServerRequest* request);
     void handleFactoryReset(AsyncWebServerRequest* request);
     
     // Embedded app API handlers
-    void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
     void handleEmbeddedStatusGet(AsyncWebServerRequest* request);
     
     // Module management API handlers
@@ -98,6 +105,13 @@ private:
     
     // Utility
     String getContentType(const String& filename);
+    void handleOTAUploadChunk(AsyncWebServerRequest* request,
+                              const String& filename,
+                              size_t index,
+                              uint8_t* data,
+                              size_t len,
+                              bool final,
+                              size_t total);
 
 public:
     bool hasPendingOAuthCode() const { return !pending_oauth_code.isEmpty(); }

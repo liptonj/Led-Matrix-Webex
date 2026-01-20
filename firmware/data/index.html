@@ -19,6 +19,7 @@
             <button class="tab-btn" data-tab="webex">Webex</button>
             <button class="tab-btn" data-tab="sensors">Sensors</button>
             <button class="tab-btn" data-tab="display">Display</button>
+            <button class="tab-btn" data-tab="time">Time</button>
             <button class="tab-btn" data-tab="system">System</button>
         </nav>
 
@@ -252,6 +253,41 @@
             </div>
         </section>
 
+        <!-- Time Tab -->
+        <section id="time" class="tab-content">
+            <div class="card">
+                <h2>Time Settings</h2>
+                <form id="time-form">
+                    <div class="form-group">
+                        <label for="time-format">Time Format:</label>
+                        <select id="time-format" name="time_format">
+                            <option value="24h">24-hour</option>
+                            <option value="12h">12-hour</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="date-format">Date Format:</label>
+                        <select id="date-format" name="date_format">
+                            <option value="mdy">JAN8</option>
+                            <option value="dmy">8JAN</option>
+                            <option value="numeric">MM/DD</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="time-zone">Time Zone:</label>
+                        <select id="time-zone" name="time_zone"></select>
+                        <p class="help-text">Daylight saving time is applied automatically where supported.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ntp-server">NTP Server:</label>
+                        <input type="text" id="ntp-server" name="ntp_server" placeholder="pool.ntp.org">
+                        <p class="help-text">Default: pool.ntp.org</p>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save Time Settings</button>
+                </form>
+            </div>
+        </section>
+
         <!-- System Tab -->
         <section id="system" class="tab-content">
             <div class="card">
@@ -260,6 +296,18 @@
                     <div class="status-item">
                         <span class="label">Firmware Version:</span>
                         <span id="firmware-version" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Build ID:</span>
+                        <span id="firmware-build-id" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Running Partition:</span>
+                        <span id="running-partition" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Boot Partition:</span>
+                        <span id="boot-partition" class="value">--</span>
                     </div>
                     <div class="status-item">
                         <span class="label">IP Address:</span>
@@ -284,6 +332,7 @@
                 <h2>Firmware Update</h2>
                 <div class="update-section">
                     <p>Current: <span id="current-version">--</span></p>
+                    <p>Build ID: <span id="current-build-id">--</span></p>
                     <p>Latest: <span id="latest-version">Checking...</span></p>
                     <button id="check-update" class="btn">Check for Updates</button>
                     <button id="perform-update" class="btn btn-warning" disabled>Install Update</button>
@@ -309,6 +358,7 @@
             <div class="card danger-zone">
                 <h2>Danger Zone</h2>
                 <button id="reboot-btn" class="btn btn-warning">Reboot Device</button>
+                <button id="boot-bootstrap-btn" class="btn btn-warning">Reboot to Bootstrap</button>
                 <button id="factory-reset-btn" class="btn btn-danger">Factory Reset</button>
             </div>
         </section>

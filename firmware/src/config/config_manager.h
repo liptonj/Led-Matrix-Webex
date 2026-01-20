@@ -83,6 +83,7 @@ public:
     String getMQTTTopic() const;
     String getSensorSerial() const;
     String getSensorMacs() const;
+    String getSensorMacsRaw() const;
     String getDisplaySensorMac() const;
     String getDisplayMetric() const;
     void setMQTTConfig(const String& broker, uint16_t port,
@@ -99,6 +100,18 @@ public:
     void setOTAUrl(const String& url);
     bool getAutoUpdate() const;
     void setAutoUpdate(bool enabled);
+
+    // Time Configuration
+    String getTimeZone() const;
+    void setTimeZone(const String& time_zone);
+    String getNtpServer() const;
+    void setNtpServer(const String& server);
+    String getTimeFormat() const;
+    void setTimeFormat(const String& format);
+    bool use24HourTime() const;
+    String getDateFormat() const;
+    void setDateFormat(const String& format);
+    uint8_t getDateFormatCode() const;
 
     // Factory reset
     void factoryReset();
@@ -132,6 +145,10 @@ private:
     mutable String cached_sensor_macs;
     mutable String cached_display_sensor_mac;
     mutable String cached_display_metric;
+    mutable String cached_time_zone;
+    mutable String cached_ntp_server;
+    mutable String cached_time_format;
+    mutable String cached_date_format;
     mutable bool cache_loaded;
 
     void loadCache() const;

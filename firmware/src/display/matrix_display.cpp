@@ -7,6 +7,52 @@
 #include "matrix_display.h"
 #include "icons.h"
 
+namespace {
+const uint8_t TINY_FONT_DIGITS[10][5] = {
+    {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
+    {0b010, 0b110, 0b010, 0b010, 0b111}, // 1
+    {0b111, 0b001, 0b111, 0b100, 0b111}, // 2
+    {0b111, 0b001, 0b111, 0b001, 0b111}, // 3
+    {0b101, 0b101, 0b111, 0b001, 0b001}, // 4
+    {0b111, 0b100, 0b111, 0b001, 0b111}, // 5
+    {0b111, 0b100, 0b111, 0b101, 0b111}, // 6
+    {0b111, 0b001, 0b001, 0b001, 0b001}, // 7
+    {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
+    {0b111, 0b101, 0b111, 0b001, 0b111}, // 9
+};
+const uint8_t TINY_FONT_ALPHA[26][5] = {
+    {0b111, 0b101, 0b111, 0b101, 0b101}, // A
+    {0b110, 0b101, 0b110, 0b101, 0b110}, // B
+    {0b111, 0b100, 0b100, 0b100, 0b111}, // C
+    {0b110, 0b101, 0b101, 0b101, 0b110}, // D
+    {0b111, 0b100, 0b110, 0b100, 0b111}, // E
+    {0b111, 0b100, 0b110, 0b100, 0b100}, // F
+    {0b111, 0b100, 0b101, 0b101, 0b111}, // G
+    {0b101, 0b101, 0b111, 0b101, 0b101}, // H
+    {0b111, 0b010, 0b010, 0b010, 0b111}, // I
+    {0b001, 0b001, 0b001, 0b101, 0b111}, // J
+    {0b101, 0b110, 0b100, 0b110, 0b101}, // K
+    {0b100, 0b100, 0b100, 0b100, 0b111}, // L
+    {0b101, 0b111, 0b111, 0b101, 0b101}, // M
+    {0b101, 0b111, 0b111, 0b111, 0b101}, // N
+    {0b111, 0b101, 0b101, 0b101, 0b111}, // O
+    {0b111, 0b101, 0b111, 0b100, 0b100}, // P
+    {0b111, 0b101, 0b101, 0b111, 0b001}, // Q
+    {0b111, 0b101, 0b111, 0b110, 0b101}, // R
+    {0b111, 0b100, 0b111, 0b001, 0b111}, // S
+    {0b111, 0b010, 0b010, 0b010, 0b010}, // T
+    {0b101, 0b101, 0b101, 0b101, 0b111}, // U
+    {0b101, 0b101, 0b101, 0b101, 0b010}, // V
+    {0b101, 0b101, 0b111, 0b111, 0b101}, // W
+    {0b101, 0b101, 0b010, 0b101, 0b101}, // X
+    {0b101, 0b101, 0b010, 0b010, 0b010}, // Y
+    {0b111, 0b001, 0b010, 0b100, 0b111}, // Z
+};
+const uint8_t TINY_FONT_SLASH[5] = {0b001, 0b001, 0b010, 0b100, 0b100};
+const uint8_t TINY_FONT_COLON[5] = {0b000, 0b010, 0b000, 0b010, 0b000};
+const uint8_t TINY_FONT_SPACE[5] = {0b000, 0b000, 0b000, 0b000, 0b000};
+}
+
 MatrixDisplay::MatrixDisplay()
     : dma_display(nullptr), initialized(false), brightness(128) {
 }
@@ -20,12 +66,12 @@ MatrixDisplay::~MatrixDisplay() {
 bool MatrixDisplay::begin() {
     // Don't call Serial.begin() here - main.cpp already did it
     delay(10);
-    
+
     Serial.println("===============================================");
     Serial.println("[DISPLAY] Initialization starting...");
     Serial.flush();
     yield(); // Feed watchdog
-    
+
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(
         PANEL_RES_X,   // 64 pixels wide
@@ -69,24 +115,24 @@ bool MatrixDisplay::begin() {
     mxconfig.gpio.oe = 15;
     mxconfig.gpio.clk = 16;
 #endif
-    
+
     Serial.println("[DISPLAY] Pin configuration set");
-    
+
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
     // Reduce visible flicker: higher refresh + stable latch blanking
     mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
     mxconfig.min_refresh_rate = 120;
     mxconfig.latch_blanking = 1;
-    
+
     Serial.println("[DISPLAY] Creating DMA display object...");
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-    
+
     if (!dma_display) {
         Serial.println("[DISPLAY] ERROR: Failed to allocate display object");
         return false;
     }
-    
+
     Serial.println("[DISPLAY] Calling begin() on display...");
     if (!dma_display->begin()) {
         Serial.println("[DISPLAY] ERROR: Display begin() failed");
@@ -94,290 +140,113 @@ bool MatrixDisplay::begin() {
         dma_display = nullptr;
         return false;
     }
-    
+
     Serial.println("[DISPLAY] Setting brightness and clearing screen...");
     brightness = 255;
     dma_display->setBrightness8(brightness);
+    dma_display->setTextWrap(false);
     dma_display->clearScreen();
-    
+
     dma_display->fillScreen(dma_display->color444(0, 0, 0));
     dma_display->setTextSize(1);
     dma_display->setTextColor(dma_display->color444(0, 15, 15));
     dma_display->setCursor(8, 12);
     dma_display->print("WEBEX");
-    
+
     Serial.println("[DISPLAY] Initialization complete");
     Serial.printf("[DISPLAY] Matrix size: %dx%d pixels\n", MATRIX_WIDTH, MATRIX_HEIGHT);
     Serial.printf("[DISPLAY] Brightness: %d/255\n", brightness);
     Serial.println("===============================================");
     Serial.flush();
-    
+
     initialized = true;
     return true;
 }
 
-void MatrixDisplay::update(const DisplayData& data) {
-    if (!initialized) return;
-
-    dma_display->clearScreen();
-
-    uint16_t status_color = getStatusColor(data.webex_status);
-
-    // Check if in a meeting/call - show different layout
-    if (data.show_call_status && data.in_call) {
-        // === IN A CALL LAYOUT (32 pixel height) ===
-        // y=0: "IN A CALL" text centered
-        drawCenteredText(0, "IN A CALL", status_color);
-
-        // y=8: Separator
-        dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
-
-        // y=10-15: Camera and Mic status with labels
-        // Camera icon left side with label
-        drawCameraIcon(4, 10, data.camera_on);
-        drawSmallText(14, 10, data.camera_on ? "ON" : "OFF", data.camera_on ? COLOR_GREEN : COLOR_RED);
-
-        // Mic icon right side with label
-        drawMicIcon(36, 10, data.mic_muted);
-        drawSmallText(43, 10, data.mic_muted ? "OFF" : "ON", data.mic_muted ? COLOR_RED : COLOR_GREEN);
-
-        // y=17: Separator
-        dma_display->drawFastHLine(0, 17, MATRIX_WIDTH, COLOR_GRAY);
-
-        // y=19-25: Date/Time in status color
-        if (data.time_valid) {
-            String datetime = formatDate(data.month, data.day) + " " + formatTime(data.hour, data.minute);
-            drawCenteredText(19, datetime, status_color);
-        }
-
-        // y=26: Separator
-        dma_display->drawFastHLine(0, 26, MATRIX_WIDTH, COLOR_GRAY);
-
-        // y=27-31: Sensor data
-        if (data.show_sensors) {
-            drawSensorBar(data, 27);
-        }
-    } else {
-        // === NORMAL STATUS LAYOUT (32 pixel height) ===
-        // y=0-7: Status circle centered (8x8)
-        drawStatusIcon(MATRIX_WIDTH / 2 - 4, 0, data.webex_status);
-
-        // y=8: Status text centered
-        drawCenteredText(9, getStatusText(data.webex_status), status_color);
-
-        // y=17-24: Date and Time in status color
-        if (data.time_valid) {
-            String datetime = formatDate(data.month, data.day) + " " + formatTime(data.hour, data.minute);
-            drawCenteredText(18, datetime, status_color);
-        }
-
-        // y=26-31: Sensor data
-        if (data.show_sensors) {
-            drawSensorBar(data, 26);
-        }
-    }
-}
 
 void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
+    const int char_width = 6;
     // Temperature left
     char temp_str[8];
     int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
     snprintf(temp_str, sizeof(temp_str), "%dF", temp_f);
-    drawSmallText(2, y, temp_str, COLOR_CYAN);
+    String temp_text = String(temp_str);
+    if (temp_text.length() > 3) {
+        temp_text = String(temp_f);
+    }
 
     // Humidity center
     char humid_str[8];
     snprintf(humid_str, sizeof(humid_str), "%d%%", (int)data.humidity);
-    drawSmallText(22, y, humid_str, COLOR_CYAN);
+    String humid_text = String(humid_str);
+    if (humid_text.length() > 3) {
+        humid_text = String((int)data.humidity);
+    }
 
     // Configurable right metric
     String metric = data.right_metric;
     metric.toLowerCase();
     char right_str[8];
+    String right_text;
 
     if (metric == "iaq" || metric == "iaqindex") {
         int value = data.air_quality_index;
-        snprintf(right_str, sizeof(right_str), "AQ%d", value);
+        if (value > 999) value = 999;
+        snprintf(right_str, sizeof(right_str), "A%d", value);
     } else if (metric == "co2") {
         int value = (int)data.co2_ppm;
-        if (value > 9999) value = 9999;
-        snprintf(right_str, sizeof(right_str), "C%d", value);
+        if (value >= 1000) {
+            int value_k = (value + 500) / 1000;
+            snprintf(right_str, sizeof(right_str), "C%dk", value_k);
+        } else {
+            snprintf(right_str, sizeof(right_str), "C%d", value);
+        }
     } else if (metric == "pm2_5" || metric == "pm2.5") {
         int value = (int)data.pm2_5;
-        if (value > 9999) value = 9999;
+        if (value > 999) value = 999;
         snprintf(right_str, sizeof(right_str), "P%d", value);
     } else if (metric == "noise" || metric == "ambientnoise") {
         int value = (int)data.ambient_noise;
-        if (value > 9999) value = 9999;
+        if (value > 999) value = 999;
         snprintf(right_str, sizeof(right_str), "N%d", value);
     } else {
         if (data.tvoc >= 1000.0f) {
             int tvoc_k = (int)((data.tvoc + 500.0f) / 1000.0f);
             snprintf(right_str, sizeof(right_str), "T%dk", tvoc_k);
         } else {
-            snprintf(right_str, sizeof(right_str), "TV%d", (int)data.tvoc);
+            snprintf(right_str, sizeof(right_str), "T%d", (int)data.tvoc);
         }
     }
 
-    drawSmallText(44, y, right_str, COLOR_CYAN);
-}
+    right_text = String(right_str);
+    int temp_width = temp_text.length() * char_width;
+    int humid_width = humid_text.length() * char_width;
+    int right_width = right_text.length() * char_width;
 
-void MatrixDisplay::showStartupScreen(const char* version) {
-    if (!initialized) return;
-
-    dma_display->clearScreen();
-    drawText(8, 4, "WEBEX", COLOR_CYAN);
-    drawText(4, 14, "DISPLAY", COLOR_WHITE);
-
-    char ver_str[16];
-    snprintf(ver_str, sizeof(ver_str), "v%s", version);
-    drawSmallText(16, 25, ver_str, COLOR_GRAY);
-}
-
-void MatrixDisplay::showAPMode(const String& ip_address) {
-    if (!initialized) return;
-
-    const String ip_text = normalizeIpText(ip_address);
-    const String screen_key = "ap:" + ip_text;
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
-
-    if (screen_changed) {
-        dma_display->clearScreen();
-        drawText(2, 2, "WEBEX", COLOR_CYAN);
-        drawText(2, 11, "DISPLAY", COLOR_WHITE);
-        drawSmallText(2, 20, "Open WiFi AP", COLOR_YELLOW);
+    int left_x = 0;
+    int right_x = MATRIX_WIDTH - right_width;
+    int mid_x = (MATRIX_WIDTH - humid_width) / 2;
+    int min_mid_x = left_x + temp_width + 2;
+    int max_mid_x = right_x - humid_width - 2;
+    if (mid_x < min_mid_x) {
+        mid_x = min_mid_x;
     }
-    drawScrollingText(22, ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "ap");
-}
-
-void MatrixDisplay::showUnconfigured(const String& ip_address) {
-    if (!initialized) return;
-
-    const String ip_text = normalizeIpText(ip_address);
-    const String screen_key = "unconfig:" + ip_text;
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
-
-    if (screen_changed) {
-        dma_display->clearScreen();
-        drawText(2, 2, "WEBEX", COLOR_CYAN);
-        drawText(2, 11, "DISPLAY", COLOR_WHITE);
+    if (mid_x > max_mid_x) {
+        mid_x = max_mid_x;
     }
-    drawScrollingText(22, ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "unconfig");
-}
+    if (mid_x < 0) {
+        mid_x = 0;
+    }
 
-void MatrixDisplay::showWifiDisconnected() {
-    if (!initialized) return;
-
-    const String screen_key = "wifi_offline";
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
-
-    if (screen_changed) {
-        dma_display->clearScreen();
-
-        // Draw WiFi icon centered, disconnected (red)
-        int icon_x = (MATRIX_WIDTH - 7) / 2;
-        int icon_y = 6;
-        drawWifiIcon(icon_x, icon_y, false);
-
-        drawCenteredText(16, "WIFI OFFLINE", COLOR_YELLOW);
-        drawCenteredText(24, "NO CONNECTION", COLOR_WHITE);
+    drawSmallText(left_x, y, temp_text, COLOR_CYAN);
+    if (mid_x + humid_width <= MATRIX_WIDTH) {
+        drawSmallText(mid_x, y, humid_text, COLOR_CYAN);
+    }
+    if (right_x >= 0) {
+        drawSmallText(right_x, y, right_text, COLOR_CYAN);
     }
 }
 
-void MatrixDisplay::showConnecting(const String& ssid) {
-    if (!initialized) return;
-
-    const String screen_key = "connecting:" + ssid;
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
-
-    if (screen_changed) {
-        dma_display->clearScreen();
-        drawText(2, 2, "CONNECTING", COLOR_YELLOW);
-    }
-
-    drawScrollingText(22, ssid, COLOR_WHITE, MATRIX_WIDTH - 4, "connecting");
-}
-
-void MatrixDisplay::showConnected(const String& ip_address) {
-    if (!initialized) return;
-
-    const String ip_text = normalizeIpText(ip_address);
-    const String screen_key = "connected:" + ip_text;
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
-
-    if (screen_changed) {
-        dma_display->clearScreen();
-        drawText(2, 2, "CONNECTED", COLOR_GREEN);
-    }
-    drawScrollingText(22, ip_text, COLOR_WHITE, MATRIX_WIDTH - 4, "connected");
-}
-
-void MatrixDisplay::showUpdating(const String& version) {
-    if (!initialized) return;
-
-    dma_display->clearScreen();
-    drawText(4, 4, "UPDATING", COLOR_ORANGE);
-    drawSmallText(2, 16, "Installing:", COLOR_WHITE);
-    drawSmallText(2, 24, version, COLOR_CYAN);
-}
-
-void MatrixDisplay::showSetupHostname(const String& hostname) {
-    if (!initialized) return;
-
-    dma_display->clearScreen();
-    
-    // Title
-    drawCenteredText(0, "SETUP", COLOR_CYAN);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Instructions
-    drawCenteredText(10, "Open in Webex:", COLOR_WHITE);
-    
-    // Hostname - may need to scroll if too long
-    String displayHost = hostname;
-    if (displayHost.length() > 10) {
-        // Truncate with ".local" visible
-        displayHost = hostname.substring(0, 7) + "...";
-    }
-    drawCenteredText(18, displayHost, COLOR_GREEN);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 25, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Embedded app path hint
-    drawCenteredText(27, "/embedded", COLOR_YELLOW);
-}
-
-void MatrixDisplay::showWaitingForWebex(const String& hostname) {
-    if (!initialized) return;
-
-    dma_display->clearScreen();
-    
-    // Status indicator - pulsing effect would be nice but static for now
-    drawStatusIcon(MATRIX_WIDTH / 2 - 4, 0, "pending");
-    
-    // Message
-    drawCenteredText(10, "WAITING", COLOR_YELLOW);
-    
-    // Separator
-    dma_display->drawFastHLine(0, 17, MATRIX_WIDTH, COLOR_GRAY);
-    
-    // Hostname info
-    drawCenteredText(19, "Connect via:", COLOR_WHITE);
-    
-    String displayHost = hostname;
-    if (displayHost.length() > 10) {
-        displayHost = hostname.substring(0, 10);
-    }
-    drawCenteredText(26, displayHost, COLOR_CYAN);
-}
 
 void MatrixDisplay::clear() {
     if (!initialized) return;
@@ -398,7 +267,7 @@ void MatrixDisplay::setScrollSpeedMs(uint16_t speed_ms) {
 void MatrixDisplay::drawLargeStatusCircle(int center_x, int center_y, uint16_t color) {
     // Draw 12x12 status circle centered at (center_x, center_y)
     int start_x = center_x - 6;
-    int start_y = center_y - 4;  // Offset to fit in display
+    int start_y = center_y - 6;  // Proper centering for 12x12 icon
 
     for (int dy = 0; dy < 12; dy++) {
         for (int dx = 0; dx < 12; dx++) {
@@ -416,11 +285,15 @@ void MatrixDisplay::drawLargeStatusCircle(int center_x, int center_y, uint16_t c
 void MatrixDisplay::drawStatusIcon(int x, int y, const String& status) {
     uint16_t color = getStatusColor(status);
 
-    // Draw 8x8 status circle
+    // Draw 8x8 status circle with bounds checking
     for (int dy = 0; dy < 8; dy++) {
         for (int dx = 0; dx < 8; dx++) {
             if (STATUS_ICON[dy * 8 + dx]) {
-                dma_display->drawPixel(x + dx, y + dy, color);
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < MATRIX_WIDTH && py >= 0 && py < MATRIX_HEIGHT) {
+                    dma_display->drawPixel(px, py, color);
+                }
             }
         }
     }
@@ -429,44 +302,89 @@ void MatrixDisplay::drawStatusIcon(int x, int y, const String& status) {
 void MatrixDisplay::drawCameraIcon(int x, int y, bool on) {
     uint16_t color = on ? COLOR_GREEN : COLOR_RED;
 
+    // Draw 8x5 camera icon with bounds checking
     for (int dy = 0; dy < 5; dy++) {
         for (int dx = 0; dx < 8; dx++) {
             if (CAMERA_ICON[dy * 8 + dx]) {
-                dma_display->drawPixel(x + dx, y + dy, color);
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < MATRIX_WIDTH && py >= 0 && py < MATRIX_HEIGHT) {
+                    dma_display->drawPixel(px, py, color);
+                }
             }
         }
     }
 
-    // Draw X if off
+    // Draw X if off (with bounds checking)
     if (!on) {
-        dma_display->drawLine(x, y, x + 7, y + 4, COLOR_RED);
-        dma_display->drawLine(x, y + 4, x + 7, y, COLOR_RED);
+        // Clamp line endpoints to display bounds
+        int x1 = x;
+        int y1 = y;
+        int x2 = x + 7;
+        int y2 = y + 4;
+        if (x1 >= 0 && x1 < MATRIX_WIDTH && y1 >= 0 && y1 < MATRIX_HEIGHT &&
+            x2 >= 0 && x2 < MATRIX_WIDTH && y2 >= 0 && y2 < MATRIX_HEIGHT) {
+            dma_display->drawLine(x1, y1, x2, y2, COLOR_RED);
+        }
+        x1 = x;
+        y1 = y + 4;
+        x2 = x + 7;
+        y2 = y;
+        if (x1 >= 0 && x1 < MATRIX_WIDTH && y1 >= 0 && y1 < MATRIX_HEIGHT &&
+            x2 >= 0 && x2 < MATRIX_WIDTH && y2 >= 0 && y2 < MATRIX_HEIGHT) {
+            dma_display->drawLine(x1, y1, x2, y2, COLOR_RED);
+        }
     }
 }
 
 void MatrixDisplay::drawMicIcon(int x, int y, bool muted) {
     uint16_t color = muted ? COLOR_RED : COLOR_GREEN;
 
+    // Draw 5x5 mic icon with bounds checking
     for (int dy = 0; dy < 5; dy++) {
         for (int dx = 0; dx < 5; dx++) {
             if (MIC_ICON[dy * 5 + dx]) {
-                dma_display->drawPixel(x + dx, y + dy, color);
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < MATRIX_WIDTH && py >= 0 && py < MATRIX_HEIGHT) {
+                    dma_display->drawPixel(px, py, color);
+                }
             }
         }
     }
 
-    // Draw X if muted
+    // Draw X if muted (with bounds checking)
     if (muted) {
-        dma_display->drawLine(x, y, x + 4, y + 4, COLOR_RED);
-        dma_display->drawLine(x, y + 4, x + 4, y, COLOR_RED);
+        // Clamp line endpoints to display bounds
+        int x1 = x;
+        int y1 = y;
+        int x2 = x + 4;
+        int y2 = y + 4;
+        if (x1 >= 0 && x1 < MATRIX_WIDTH && y1 >= 0 && y1 < MATRIX_HEIGHT &&
+            x2 >= 0 && x2 < MATRIX_WIDTH && y2 >= 0 && y2 < MATRIX_HEIGHT) {
+            dma_display->drawLine(x1, y1, x2, y2, COLOR_RED);
+        }
+        x1 = x;
+        y1 = y + 4;
+        x2 = x + 4;
+        y2 = y;
+        if (x1 >= 0 && x1 < MATRIX_WIDTH && y1 >= 0 && y1 < MATRIX_HEIGHT &&
+            x2 >= 0 && x2 < MATRIX_WIDTH && y2 >= 0 && y2 < MATRIX_HEIGHT) {
+            dma_display->drawLine(x1, y1, x2, y2, COLOR_RED);
+        }
     }
 }
 
 void MatrixDisplay::drawCallIcon(int x, int y) {
+    // Draw 8x5 call icon with bounds checking
     for (int dy = 0; dy < 5; dy++) {
         for (int dx = 0; dx < 8; dx++) {
             if (CALL_ICON[dy * 8 + dx]) {
-                dma_display->drawPixel(x + dx, y + dy, COLOR_GREEN);
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < MATRIX_WIDTH && py >= 0 && py < MATRIX_HEIGHT) {
+                    dma_display->drawPixel(px, py, COLOR_GREEN);
+                }
             }
         }
     }
@@ -475,30 +393,38 @@ void MatrixDisplay::drawCallIcon(int x, int y) {
 void MatrixDisplay::drawWifiIcon(int x, int y, bool connected) {
     uint16_t color = connected ? COLOR_GREEN : COLOR_RED;
 
+    // Draw 7x5 WiFi icon with bounds checking
     for (int dy = 0; dy < 5; dy++) {
         for (int dx = 0; dx < 7; dx++) {
             if (WIFI_ICON[dy * 7 + dx]) {
-                dma_display->drawPixel(x + dx, y + dy, color);
+                int px = x + dx;
+                int py = y + dy;
+                if (px >= 0 && px < MATRIX_WIDTH && py >= 0 && py < MATRIX_HEIGHT) {
+                    dma_display->drawPixel(px, py, color);
+                }
             }
         }
     }
 }
 
 void MatrixDisplay::drawText(int x, int y, const String& text, uint16_t color) {
+    String safe_text = sanitizeSingleLine(text);
     dma_display->setTextColor(color);
     dma_display->setTextSize(1);
     dma_display->setCursor(x, y);
-    dma_display->print(text);
+    dma_display->print(safe_text);
 }
 
 void MatrixDisplay::drawSmallText(int x, int y, const String& text, uint16_t color) {
+    String safe_text = sanitizeSingleLine(text);
     dma_display->setTextColor(color);
     dma_display->setTextSize(1);
     dma_display->setCursor(x, y);
-    dma_display->print(text);
+    dma_display->print(safe_text);
 }
 
 void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key) {
+    String safe_text = sanitizeSingleLine(text);
     const int char_width = 6;
     const int max_chars = max_width / char_width;
 
@@ -514,37 +440,51 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
     }
 
     if (!state) {
-        drawSmallText(2, y, text, color);
+        drawSmallText(2, y, safe_text, color);
         return;
     }
 
-    if (state->text != text) {
-        state->text = text;
+    bool force_redraw = false;
+    if (state->text != safe_text) {
+        state->text = safe_text;
         state->offset = 0;
         state->last_ms = 0;
+        force_redraw = true;
     }
 
-    // Clear only the text line to reduce flicker
-    dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
-
-    if (text.length() <= max_chars) {
-        drawSmallText(2, y, text, color);
+    if (safe_text.length() <= max_chars) {
+        if (state->offset != 0) {
+            state->offset = 0;
+            force_redraw = true;
+        }
+        if (!force_redraw) {
+            return; // No change, skip redraw to prevent flicker
+        }
+        // Clear only the text line to reduce flicker
+        dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
+        drawSmallText(2, y, safe_text, color);
         return;
     }
 
     const unsigned long now = millis();
-    if (now - state->last_ms > scroll_speed_ms) {
+    if (!force_redraw) {
+        if (now - state->last_ms <= scroll_speed_ms) {
+            return;
+        }
         state->offset++;
-        state->last_ms = now;
     }
+    state->last_ms = now;
 
     // Add spacer so text doesn't appear squished at the wrap point
-    const String scroll_text = text + "   ";
+    const String scroll_text = safe_text + "   ";
     const int text_width = scroll_text.length() * char_width;
     const int wrap_width = text_width + max_width;
     if (state->offset > wrap_width) {
         state->offset = 0;
     }
+
+    // Clear only the text line to reduce flicker
+    dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
 
     // Start just off the right edge and scroll left
     const int x = 2 + max_width - state->offset;
@@ -565,12 +505,39 @@ String MatrixDisplay::normalizeIpText(const String& input) {
     }
     return out;
 }
+
+String MatrixDisplay::sanitizeSingleLine(const String& input) {
+    String out = input;
+    out.replace('\r', ' ');
+    out.replace('\n', ' ');
+    return out;
+}
 void MatrixDisplay::drawCenteredText(int y, const String& text, uint16_t color) {
     // Each character is 6 pixels wide in default font
-    int text_width = text.length() * 6;
+    String safe_text = sanitizeSingleLine(text);
+    int text_width = safe_text.length() * 6;
     int x = (MATRIX_WIDTH - text_width) / 2;
     if (x < 0) x = 0;
-    drawSmallText(x, y, text, color);
+    drawSmallText(x, y, safe_text, color);
+}
+
+int MatrixDisplay::getTextLineY(uint8_t line_index, uint8_t line_height) const {
+    return getTextLineY(line_index, line_height, 0);
+}
+
+int MatrixDisplay::getTextLineY(uint8_t line_index, uint8_t line_height, int top_offset) const {
+    if (line_height == 0) {
+        line_height = 8;
+    }
+    int y = top_offset + line_height * line_index;
+    const int max_y = MATRIX_HEIGHT - line_height;
+    if (y > max_y) {
+        y = max_y;
+    }
+    if (y < 0) {
+        y = 0;
+    }
+    return y;
 }
 
 void MatrixDisplay::drawRect(int x, int y, int w, int h, uint16_t color) {
@@ -583,6 +550,107 @@ void MatrixDisplay::fillRect(int x, int y, int w, int h, uint16_t color) {
 
 void MatrixDisplay::drawPixel(int x, int y, uint16_t color) {
     dma_display->drawPixel(x, y, color);
+}
+
+void MatrixDisplay::drawDateTimeLine(int y, const DisplayData& data, uint16_t color) {
+    String date_text = formatDate(data.month, data.day, data.date_format);
+    if (!isTinyRenderable(date_text)) {
+        date_text = String(data.month) + "/" + String(data.day);
+    }
+
+    String time_text = data.use_24h
+        ? formatTime24(data.hour, data.minute)
+        : formatTime(data.hour, data.minute);
+    if (!isTinyRenderable(time_text)) {
+        time_text = formatTime24(data.hour, data.minute);
+    }
+
+    int time_width = tinyTextWidth(time_text);
+    int date_width = tinyTextWidth(date_text);
+    const int min_gap = 4; // Minimum gap between date and time
+
+    // Check if both fit with minimum gap
+    if (date_width + min_gap + time_width <= MATRIX_WIDTH) {
+        // Both fit - draw date on left, time on right
+        drawTinyText(0, y, date_text, color);
+        int time_x = MATRIX_WIDTH - time_width;
+        drawTinyText(time_x, y, time_text, color);
+    } else {
+        // Not enough space - use shorter date format and check again
+        date_text = String(data.month) + "/" + String(data.day);
+        date_width = tinyTextWidth(date_text);
+
+        if (date_width + min_gap + time_width <= MATRIX_WIDTH) {
+            // Fits with short date format
+            drawTinyText(0, y, date_text, color);
+            int time_x = MATRIX_WIDTH - time_width;
+            drawTinyText(time_x, y, time_text, color);
+        } else {
+            // Still doesn't fit - show only time, centered or right-aligned
+            int time_x = MATRIX_WIDTH - time_width;
+            if (time_x < 0) time_x = 0;
+            drawTinyText(time_x, y, time_text, color);
+        }
+    }
+}
+
+void MatrixDisplay::drawTinyText(int x, int y, const String& text, uint16_t color) {
+    int cursor_x = x;
+    for (size_t i = 0; i < text.length(); i++) {
+        drawTinyChar(cursor_x, y, text[i], color);
+        cursor_x += 4; // 3px glyph + 1px spacing
+    }
+}
+
+void MatrixDisplay::drawTinyChar(int x, int y, char c, uint16_t color) {
+    const uint8_t* glyph = nullptr;
+    if (c >= '0' && c <= '9') {
+        glyph = TINY_FONT_DIGITS[c - '0'];
+    } else if (c >= 'a' && c <= 'z') {
+        glyph = TINY_FONT_ALPHA[c - 'a'];
+    } else if (c >= 'A' && c <= 'Z') {
+        glyph = TINY_FONT_ALPHA[c - 'A'];
+    } else if (c == '/') {
+        glyph = TINY_FONT_SLASH;
+    } else if (c == ':') {
+        glyph = TINY_FONT_COLON;
+    } else if (c == ' ') {
+        glyph = TINY_FONT_SPACE;
+    }
+
+    if (!glyph) {
+        return;
+    }
+
+    for (int row = 0; row < 5; row++) {
+        uint8_t row_bits = glyph[row];
+        for (int col = 0; col < 3; col++) {
+            if (row_bits & (1 << (2 - col))) {
+                drawPixel(x + col, y + row, color);
+            }
+        }
+    }
+}
+
+int MatrixDisplay::tinyTextWidth(const String& text) const {
+    if (text.isEmpty()) {
+        return 0;
+    }
+    return (int)(text.length() * 4 - 1);
+}
+
+bool MatrixDisplay::isTinyRenderable(const String& text) const {
+    for (size_t i = 0; i < text.length(); i++) {
+        char c = text[i];
+        if ((c >= '0' && c <= '9')
+            || (c >= 'a' && c <= 'z')
+            || (c >= 'A' && c <= 'Z')
+            || c == '/' || c == ':' || c == ' ') {
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 
 uint16_t MatrixDisplay::getStatusColor(const String& status) {
@@ -616,8 +684,22 @@ String MatrixDisplay::formatTime(int hour, int minute) {
     return String(time_str);
 }
 
-String MatrixDisplay::formatDate(int month, int day) {
+String MatrixDisplay::formatTime24(int hour, int minute) {
+    char time_str[8];
+    snprintf(time_str, sizeof(time_str), "%02d:%02d", hour, minute);
+    return String(time_str);
+}
+
+String MatrixDisplay::formatDate(int month, int day, uint8_t format) {
     char date_str[8];
+    if (format == 1) {
+        snprintf(date_str, sizeof(date_str), "%d%s", day, getMonthAbbrev(month).c_str());
+        return String(date_str);
+    }
+    if (format == 2) {
+        snprintf(date_str, sizeof(date_str), "%02d/%02d", month, day);
+        return String(date_str);
+    }
     snprintf(date_str, sizeof(date_str), "%s%d", getMonthAbbrev(month).c_str(), day);
     return String(date_str);
 }

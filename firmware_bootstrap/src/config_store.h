@@ -19,6 +19,7 @@
 #define KEY_WIFI_SSID "wifi_ssid"
 #define KEY_WIFI_PASS "wifi_pass"
 #define KEY_OTA_URL "ota_url"
+#define KEY_BOOTSTRAP_OTA_PENDING "bootstrap_ota_pending"
 
 /**
  * @brief Configuration Store Class
@@ -78,6 +79,24 @@ public:
      * @return true if custom URL is set
      */
     bool hasCustomOTAUrl() const;
+
+    /**
+     * @brief Check if a bootstrap OTA is pending
+     * @return true if pending
+     */
+    bool isBootstrapOtaPending() const;
+
+    /**
+     * @brief Set or clear bootstrap OTA pending flag
+     * @param pending true to set, false to clear
+     */
+    void setBootstrapOtaPending(bool pending);
+
+    /**
+     * @brief Consume bootstrap OTA pending flag (read + clear)
+     * @return true if flag was set
+     */
+    bool consumeBootstrapOtaPending();
 
     /**
      * @brief Clear all stored configuration

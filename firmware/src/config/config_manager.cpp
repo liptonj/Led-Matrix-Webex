@@ -114,6 +114,10 @@ void ConfigManager::loadCache() const {
     cached_sensor_macs = preferences.getString("sensor_macs", "");
     cached_display_sensor_mac = preferences.getString("display_sensor_mac", "");
     cached_display_metric = preferences.getString("display_metric", "tvoc");
+    cached_time_zone = preferences.getString("time_zone", "UTC");
+    cached_ntp_server = preferences.getString("ntp_server", "pool.ntp.org");
+    cached_time_format = preferences.getString("time_format", "24h");
+    cached_date_format = preferences.getString("date_format", "mdy");
     preferences.end();
     
     cache_loaded = true;
@@ -374,7 +378,6 @@ String ConfigManager::getSensorSerial() const {
 
 void ConfigManager::setSensorSerial(const String& serial) {
     saveString("sensor_serial", serial);
-    cached_sensor_macs = serial;
     Serial.printf("[CONFIG] Sensor serial saved: %s\n", serial.c_str());
 }
 
@@ -386,6 +389,13 @@ String ConfigManager::getSensorMacs() const {
         return cached_sensor_macs;
     }
     return getSensorSerial();
+}
+
+String ConfigManager::getSensorMacsRaw() const {
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_sensor_macs;
 }
 
 String ConfigManager::getDisplaySensorMac() const {
@@ -448,6 +458,79 @@ bool ConfigManager::getAutoUpdate() const {
 
 void ConfigManager::setAutoUpdate(bool enabled) {
     saveBool("auto_update", enabled);
+}
+
+// Time Configuration
+
+String ConfigManager::getTimeZone() const {
+    if (!cache_loaded) {
+        return loadString("time_zone", "UTC");
+    }
+    return cached_time_zone;
+}
+
+void ConfigManager::setTimeZone(const String& time_zone) {
+    saveString("time_zone", time_zone);
+    cached_time_zone = time_zone;
+}
+
+String ConfigManager::getNtpServer() const {
+    if (!cache_loaded) {
+        return loadString("ntp_server", "pool.ntp.org");
+    }
+    return cached_ntp_server;
+}
+
+void ConfigManager::setNtpServer(const String& server) {
+    saveString("ntp_server", server);
+    cached_ntp_server = server;
+}
+
+String ConfigManager::getTimeFormat() const {
+    if (!cache_loaded) {
+        return loadString("time_format", "24h");
+    }
+    return cached_time_format;
+}
+
+void ConfigManager::setTimeFormat(const String& format) {
+    saveString("time_format", format);
+    cached_time_format = format;
+}
+
+bool ConfigManager::use24HourTime() const {
+    String format = getTimeFormat();
+    format.toLowerCase();
+    format.trim();
+    if (format == "12h" || format == "12" || format == "am/pm" || format == "ampm") {
+        return false;
+    }
+    return true;
+}
+
+String ConfigManager::getDateFormat() const {
+    if (!cache_loaded) {
+        return loadString("date_format", "mdy");
+    }
+    return cached_date_format;
+}
+
+void ConfigManager::setDateFormat(const String& format) {
+    saveString("date_format", format);
+    cached_date_format = format;
+}
+
+uint8_t ConfigManager::getDateFormatCode() const {
+    String format = getDateFormat();
+    format.toLowerCase();
+    format.trim();
+    if (format == "dmy" || format == "dd/mm" || format == "dd-mm") {
+        return 1;
+    }
+    if (format == "numeric" || format == "num" || format == "mm/dd" || format == "mm-dd") {
+        return 2;
+    }
+    return 0;
 }
 
 // Factory Reset
@@ -558,11 +641,15 @@ String ConfigManager::exportConfig() const {
     doc["mqtt_port"] = getMQTTPort();
     doc["mqtt_topic"] = getMQTTTopic();
     doc["sensor_serial"] = getSensorSerial();
-    doc["sensor_macs"] = getSensorMacs();
+    doc["sensor_macs"] = getSensorMacsRaw();
     doc["display_sensor_mac"] = getDisplaySensorMac();
     doc["display_metric"] = getDisplayMetric();
     doc["ota_url"] = getOTAUrl();
     doc["auto_update"] = getAutoUpdate();
+    doc["time_zone"] = getTimeZone();
+    doc["ntp_server"] = getNtpServer();
+    doc["time_format"] = getTimeFormat();
+    doc["date_format"] = getDateFormat();
 
     String output;
     serializeJson(doc, output);
@@ -621,6 +708,18 @@ bool ConfigManager::importConfig(const String& json) {
     }
     if (doc["auto_update"].is<bool>()) {
         setAutoUpdate(doc["auto_update"].as<bool>());
+    }
+    if (doc["time_zone"].is<const char*>()) {
+        setTimeZone(doc["time_zone"].as<const char*>());
+    }
+    if (doc["ntp_server"].is<const char*>()) {
+        setNtpServer(doc["ntp_server"].as<const char*>());
+    }
+    if (doc["time_format"].is<const char*>()) {
+        setTimeFormat(doc["time_format"].as<const char*>());
+    }
+    if (doc["date_format"].is<const char*>()) {
+        setDateFormat(doc["date_format"].as<const char*>());
     }
 
     Serial.println("[CONFIG] Configuration imported successfully");

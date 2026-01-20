@@ -7,15 +7,9 @@
 #define MATRIX_DISPLAY_H
 
 #include <Arduino.h>
+#include "display_config.h"
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include "../config/config_manager.h"
-
-// Matrix configuration
-#define MATRIX_WIDTH 64
-#define MATRIX_HEIGHT 32
-#define PANEL_RES_X 64
-#define PANEL_RES_Y 32
-#define PANEL_CHAIN 1
 
 // Colors (RGB565 format)
 #define COLOR_BLACK     0x0000
@@ -65,6 +59,8 @@ struct DisplayData {
     int day = 0;                    // 1-31
     int month = 0;                  // 1-12
     bool time_valid = false;        // True if time has been synced
+    bool use_24h = true;
+    uint8_t date_format = 0;        // 0=mdy, 1=dmy, 2=numeric
 };
 
 /**
@@ -169,16 +165,25 @@ private:
     void drawSmallText(int x, int y, const String& text, uint16_t color);
     void drawCenteredText(int y, const String& text, uint16_t color);
     void drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key);
+    int getTextLineY(uint8_t line_index, uint8_t line_height) const;
+    int getTextLineY(uint8_t line_index, uint8_t line_height, int top_offset) const;
     String normalizeIpText(const String& input);
+    String sanitizeSingleLine(const String& input);
     void drawSensorBar(const DisplayData& data, int y);
     void drawRect(int x, int y, int w, int h, uint16_t color);
     void fillRect(int x, int y, int w, int h, uint16_t color);
     void drawPixel(int x, int y, uint16_t color);
+    void drawDateTimeLine(int y, const DisplayData& data, uint16_t color);
+    void drawTinyText(int x, int y, const String& text, uint16_t color);
+    void drawTinyChar(int x, int y, char c, uint16_t color);
+    int tinyTextWidth(const String& text) const;
+    bool isTinyRenderable(const String& text) const;
 
     uint16_t getStatusColor(const String& status);
     String getStatusText(const String& status);
     String formatTime(int hour, int minute);
-    String formatDate(int month, int day);
+    String formatTime24(int hour, int minute);
+    String formatDate(int month, int day, uint8_t format);
     String getMonthAbbrev(int month);
 
     struct ScrollState {
@@ -193,6 +198,10 @@ private:
     ScrollState connected_scroll;
     String last_static_key;
     unsigned long last_static_ms = 0;
+    String last_line_keys[4];
+    String last_render_key;
+    unsigned long last_render_ms = 0;
+    bool last_in_call_layout = false;
 };
 
 #endif // MATRIX_DISPLAY_H

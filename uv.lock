@@ -229,7 +229,7 @@ wheels = [
 
 [[package]]
 name = "led-matrix-webex"
-version = "1.0.0"
+version = "1.0.3"
 source = { virtual = "." }
 dependencies = [
     { name = "platformio" },

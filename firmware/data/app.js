@@ -11,10 +11,38 @@ const API = {
     webexAuth: '/api/webex/auth',
     otaCheck: '/api/ota/check',
     otaUpdate: '/api/ota/update',
+    otaBootloader: '/api/ota/bootloader',
     otaUpload: '/api/ota/upload',
     reboot: '/api/reboot',
     factoryReset: '/api/factory-reset'
 };
+
+const TIME_ZONES = [
+    { value: 'UTC', label: 'UTC' },
+    { value: 'America/New_York', label: 'America/New_York (ET)' },
+    { value: 'America/Chicago', label: 'America/Chicago (CT)' },
+    { value: 'America/Denver', label: 'America/Denver (MT)' },
+    { value: 'America/Los_Angeles', label: 'America/Los_Angeles (PT)' },
+    { value: 'America/Phoenix', label: 'America/Phoenix (AZ)' },
+    { value: 'America/Anchorage', label: 'America/Anchorage (AK)' },
+    { value: 'America/Honolulu', label: 'America/Honolulu (HI)' },
+    { value: 'Europe/London', label: 'Europe/London' },
+    { value: 'Europe/Berlin', label: 'Europe/Berlin' },
+    { value: 'Europe/Paris', label: 'Europe/Paris' },
+    { value: 'Europe/Madrid', label: 'Europe/Madrid' },
+    { value: 'Europe/Rome', label: 'Europe/Rome' },
+    { value: 'Europe/Amsterdam', label: 'Europe/Amsterdam' },
+    { value: 'Europe/Zurich', label: 'Europe/Zurich' },
+    { value: 'Europe/Moscow', label: 'Europe/Moscow' },
+    { value: 'Asia/Tokyo', label: 'Asia/Tokyo' },
+    { value: 'Asia/Shanghai', label: 'Asia/Shanghai' },
+    { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong' },
+    { value: 'Asia/Singapore', label: 'Asia/Singapore' },
+    { value: 'Asia/Kolkata', label: 'Asia/Kolkata' },
+    { value: 'Australia/Sydney', label: 'Australia/Sydney' },
+    { value: 'Australia/Perth', label: 'Australia/Perth' },
+    { value: 'Pacific/Auckland', label: 'Pacific/Auckland' }
+];
 
 // State
 let config = {};
@@ -23,6 +51,7 @@ let statusInterval = null;
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initTabs();
+    populateTimeZones();
 
     const params = new URLSearchParams(window.location.search);
     const isPortal = params.get('portal') === '1';
@@ -99,6 +128,33 @@ function hideNonWifiTabs() {
     });
 }
 
+function populateTimeZones() {
+    const select = document.getElementById('time-zone');
+    if (!select) {
+        return;
+    }
+    select.innerHTML = '';
+    TIME_ZONES.forEach(zone => {
+        const option = document.createElement('option');
+        option.value = zone.value;
+        option.textContent = zone.label;
+        select.appendChild(option);
+    });
+}
+
+function ensureSelectOption(selectEl, value) {
+    if (!selectEl || !value) {
+        return;
+    }
+    const hasOption = Array.from(selectEl.options).some(option => option.value === value);
+    if (!hasOption) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        selectEl.appendChild(option);
+    }
+}
+
 // Load Status
 async function loadStatus() {
     try {
@@ -128,16 +184,25 @@ function updateStatusDisplay(data) {
     document.getElementById('call-status').textContent = data.in_call ? 'Yes' : 'No';
 
     // Sensors
-    if (data.temperature) {
+    if (data.temperature != null && data.temperature !== undefined) {
         const tempF = (data.temperature * 9/5) + 32;
         document.getElementById('temperature').textContent = tempF.toFixed(1) + '°F';
+    } else {
+        document.getElementById('temperature').textContent = '--';
     }
-    if (data.humidity) {
+    if (data.humidity != null && data.humidity !== undefined) {
         document.getElementById('humidity').textContent = data.humidity.toFixed(1) + '%';
+    } else {
+        document.getElementById('humidity').textContent = '--';
     }
     document.getElementById('door-status').textContent = data.door_status || '--';
-    document.getElementById('air-quality').textContent = data.air_quality || '--';
-    if (data.tvoc) {
+    // Handle air_quality - 0 is a valid value, so check for null/undefined explicitly
+    if (data.air_quality != null && data.air_quality !== undefined) {
+        document.getElementById('air-quality').textContent = data.air_quality.toString();
+    } else {
+        document.getElementById('air-quality').textContent = '--';
+    }
+    if (data.tvoc != null && data.tvoc !== undefined) {
         document.getElementById('tvoc').textContent = data.tvoc.toFixed(1);
     } else {
         document.getElementById('tvoc').textContent = '--';
@@ -146,7 +211,11 @@ function updateStatusDisplay(data) {
 
     // System info
     document.getElementById('firmware-version').textContent = data.firmware_version || '--';
+    document.getElementById('firmware-build-id').textContent = data.firmware_build_id || '--';
+    document.getElementById('running-partition').textContent = data.running_partition || '--';
+    document.getElementById('boot-partition').textContent = data.boot_partition || '--';
     document.getElementById('current-version').textContent = data.firmware_version || '--';
+    document.getElementById('current-build-id').textContent = data.firmware_build_id || '--';
     document.getElementById('ip-address').textContent = data.ip_address || '--';
     document.getElementById('mac-address').textContent = data.mac_address || '--';
     document.getElementById('free-heap').textContent = formatBytes(data.free_heap);
@@ -199,11 +268,23 @@ async function loadConfig() {
         }
         mqttPasswordInput.value = ''; // Never populate password fields
         
-        document.getElementById('sensor-macs').value = config.sensor_macs || config.sensor_serial || '';
+        const sensorMacsInput = document.getElementById('sensor-macs');
+        const sensorMacsValue = config.sensor_macs || '';
+        sensorMacsInput.value = sensorMacsValue;
+        if (!sensorMacsValue && config.sensor_serial) {
+            sensorMacsInput.placeholder = `Legacy serial: ${config.sensor_serial}`;
+        }
         document.getElementById('display-sensor-mac').value = config.display_sensor_mac || '';
         document.getElementById('display-metric').value = config.display_metric || 'tvoc';
         document.getElementById('ota-url').value = config.ota_url || '';
         document.getElementById('auto-update').checked = config.auto_update || false;
+        document.getElementById('time-format').value = config.time_format || '24h';
+        document.getElementById('date-format').value = config.date_format || 'mdy';
+        document.getElementById('ntp-server').value = config.ntp_server || 'pool.ntp.org';
+        const timeZoneSelect = document.getElementById('time-zone');
+        const timeZoneValue = config.time_zone || 'UTC';
+        ensureSelectOption(timeZoneSelect, timeZoneValue);
+        timeZoneSelect.value = timeZoneValue;
 
         // Webex credentials - show placeholders if they exist
         const clientIdInput = document.getElementById('webex-client-id');
@@ -268,6 +349,9 @@ function initEventListeners() {
     // Display form
     document.getElementById('display-form').addEventListener('submit', saveDisplaySettings);
 
+    // Time form
+    document.getElementById('time-form').addEventListener('submit', saveTimeSettings);
+
     // OTA buttons
     document.getElementById('check-update').addEventListener('click', checkForUpdate);
     document.getElementById('perform-update').addEventListener('click', performUpdate);
@@ -275,6 +359,7 @@ function initEventListeners() {
 
     // System buttons
     document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
+    document.getElementById('boot-bootstrap-btn').addEventListener('click', bootToBootstrap);
     document.getElementById('factory-reset-btn').addEventListener('click', factoryReset);
 }
 
@@ -481,18 +566,52 @@ async function saveDisplaySettings(e) {
         display_name: document.getElementById('display-name').value,
         brightness: parseInt(document.getElementById('brightness').value),
         poll_interval: parseInt(document.getElementById('poll-interval').value),
-        scroll_speed_ms: parseInt(document.getElementById('scroll-speed').value)
+        scroll_speed_ms: parseInt(document.getElementById('scroll-speed').value),
+        time_format: document.getElementById('time-format').value,
+        date_format: document.getElementById('date-format').value,
+        time_zone: document.getElementById('time-zone').value,
+        ntp_server: document.getElementById('ntp-server').value.trim() || 'pool.ntp.org'
     };
 
     try {
-        await fetch(API.config, {
+        const response = await fetch(API.config, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
+        if (!response.ok) {
+            throw new Error('Save failed');
+        }
         alert('Display settings saved!');
+        await loadConfig();
     } catch (error) {
         alert('Failed to save display settings');
+    }
+}
+
+async function saveTimeSettings(e) {
+    e.preventDefault();
+
+    const data = {
+        time_format: document.getElementById('time-format').value,
+        date_format: document.getElementById('date-format').value,
+        time_zone: document.getElementById('time-zone').value,
+        ntp_server: document.getElementById('ntp-server').value.trim() || 'pool.ntp.org'
+    };
+
+    try {
+        const response = await fetch(API.config, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) {
+            throw new Error('Save failed');
+        }
+        alert('Time settings saved!');
+        await loadConfig();
+    } catch (error) {
+        alert('Failed to save time settings');
     }
 }
 
@@ -566,14 +685,13 @@ function uploadFirmware({ fileInput, uploadBtn, statusEl }) {
     }
 
     const file = fileInput.files[0];
-    const formData = new FormData();
-    formData.append('firmware', file, file.name);
 
     uploadBtn.disabled = true;
     statusEl.textContent = 'Uploading...';
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', API.otaUpload);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
 
     xhr.upload.onprogress = (event) => {
         if (!event.lengthComputable) {
@@ -610,7 +728,7 @@ function uploadFirmware({ fileInput, uploadBtn, statusEl }) {
         uploadBtn.disabled = false;
     };
 
-    xhr.send(formData);
+    xhr.send(file);
 }
 
 // System Functions
@@ -624,6 +742,22 @@ async function rebootDevice() {
         alert('Device is rebooting...');
     } catch (error) {
         alert('Failed to reboot');
+    }
+}
+
+async function bootToBootstrap() {
+    if (!confirm('Reboot into bootstrap firmware?')) {
+        return;
+    }
+    if (!confirm('This will reboot into the bootstrap UI for OTA install. Continue?')) {
+        return;
+    }
+
+    try {
+        await fetch(API.otaBootloader, { method: 'POST' });
+        alert('Device is rebooting to bootstrap firmware...');
+    } catch (error) {
+        alert('Failed to reboot to bootstrap');
     }
 }
 
