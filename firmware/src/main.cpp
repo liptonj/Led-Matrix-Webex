@@ -247,14 +247,41 @@ void loop() {
         app_state.mqtt_connected = mqtt_client.isConnected();
 
         // Check for sensor updates
-        if (mqtt_client.hasUpdate()) {
-            MerakiSensorData data = mqtt_client.getLatestData();
-            app_state.temperature = data.temperature;
-            app_state.humidity = data.humidity;
-            app_state.door_status = data.door_status;
-            app_state.air_quality_index = data.air_quality_index;
-            app_state.tvoc = data.tvoc;
-            app_state.mqtt_connected = true;
+        static String last_display_sensor;
+        const String configured_display_sensor = config_manager.getDisplaySensorMac();
+        const bool update_available = mqtt_client.hasUpdate();
+
+        if (update_available) {
+            MerakiSensorData latest = mqtt_client.getLatestData();
+            if (configured_display_sensor.isEmpty()) {
+                app_state.temperature = latest.temperature;
+                app_state.humidity = latest.humidity;
+                app_state.door_status = latest.door_status;
+                app_state.air_quality_index = latest.air_quality_index;
+                app_state.tvoc = latest.tvoc;
+                app_state.co2_ppm = latest.co2_ppm;
+                app_state.pm2_5 = latest.pm2_5;
+                app_state.ambient_noise = latest.ambient_noise;
+                app_state.sensor_mac = latest.sensor_mac;
+                last_display_sensor = latest.sensor_mac;
+            }
+        }
+
+        if (!configured_display_sensor.isEmpty() &&
+            (update_available || configured_display_sensor != last_display_sensor)) {
+            MerakiSensorData selected;
+            if (mqtt_client.getSensorData(configured_display_sensor, selected)) {
+                app_state.temperature = selected.temperature;
+                app_state.humidity = selected.humidity;
+                app_state.door_status = selected.door_status;
+                app_state.air_quality_index = selected.air_quality_index;
+                app_state.tvoc = selected.tvoc;
+                app_state.co2_ppm = selected.co2_ppm;
+                app_state.pm2_5 = selected.pm2_5;
+                app_state.ambient_noise = selected.ambient_noise;
+                app_state.sensor_mac = configured_display_sensor;
+                last_display_sensor = configured_display_sensor;
+            }
         }
     } else {
         app_state.mqtt_connected = false;
@@ -385,6 +412,10 @@ void handle_wifi_connection() {
         Serial.println("[WIFI] Connection lost, reconnecting...");
         app_state.wifi_connected = false;
         WiFi.reconnect();
+        if (mdns_manager.isInitialized()) {
+            Serial.println("[MDNS] Stopping mDNS due to WiFi disconnect...");
+            mdns_manager.end();
+        }
     } else if (WiFi.status() == WL_CONNECTED) {
         if (!app_state.wifi_connected) {
             Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
@@ -446,6 +477,10 @@ void update_display() {
     data.door_status = app_state.door_status;
     data.air_quality_index = app_state.air_quality_index;
     data.tvoc = app_state.tvoc;
+    data.co2_ppm = app_state.co2_ppm;
+    data.pm2_5 = app_state.pm2_5;
+    data.ambient_noise = app_state.ambient_noise;
+    data.right_metric = config_manager.getDisplayMetric();
     data.show_sensors = app_state.mqtt_connected;
 
     // Connection indicators

@@ -137,6 +137,12 @@ function updateStatusDisplay(data) {
     }
     document.getElementById('door-status').textContent = data.door_status || '--';
     document.getElementById('air-quality').textContent = data.air_quality || '--';
+    if (data.tvoc) {
+        document.getElementById('tvoc').textContent = data.tvoc.toFixed(1);
+    } else {
+        document.getElementById('tvoc').textContent = '--';
+    }
+    document.getElementById('sensor-mac').textContent = data.sensor_mac || '--';
 
     // System info
     document.getElementById('firmware-version').textContent = data.firmware_version || '--';
@@ -193,7 +199,9 @@ async function loadConfig() {
         }
         mqttPasswordInput.value = ''; // Never populate password fields
         
-        document.getElementById('sensor-serial').value = config.sensor_serial || '';
+        document.getElementById('sensor-macs').value = config.sensor_macs || config.sensor_serial || '';
+        document.getElementById('display-sensor-mac').value = config.display_sensor_mac || '';
+        document.getElementById('display-metric').value = config.display_metric || 'tvoc';
         document.getElementById('ota-url').value = config.ota_url || '';
         document.getElementById('auto-update').checked = config.auto_update || false;
 
@@ -435,7 +443,9 @@ async function saveMQTTConfig(e) {
         mqtt_port: parseInt(document.getElementById('mqtt-port').value) || 1883,
         mqtt_username: document.getElementById('mqtt-username').value.trim(),
         mqtt_topic: document.getElementById('mqtt-topic').value.trim() || 'meraki/v1/mt/#',
-        sensor_serial: document.getElementById('sensor-serial').value.trim()
+        sensor_macs: document.getElementById('sensor-macs').value.trim(),
+        display_sensor_mac: document.getElementById('display-sensor-mac').value.trim(),
+        display_metric: document.getElementById('display-metric').value
     };
     
     // Only include password if user entered a new one

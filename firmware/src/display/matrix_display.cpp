@@ -190,15 +190,36 @@ void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
     snprintf(humid_str, sizeof(humid_str), "%d%%", (int)data.humidity);
     drawSmallText(22, y, humid_str, COLOR_CYAN);
 
-    // TVOC right
-    char tvoc_str[8];
-    if (data.tvoc >= 1000.0f) {
-        int tvoc_k = (int)((data.tvoc + 500.0f) / 1000.0f);
-        snprintf(tvoc_str, sizeof(tvoc_str), "T%dk", tvoc_k);
+    // Configurable right metric
+    String metric = data.right_metric;
+    metric.toLowerCase();
+    char right_str[8];
+
+    if (metric == "iaq" || metric == "iaqindex") {
+        int value = data.air_quality_index;
+        snprintf(right_str, sizeof(right_str), "AQ%d", value);
+    } else if (metric == "co2") {
+        int value = (int)data.co2_ppm;
+        if (value > 9999) value = 9999;
+        snprintf(right_str, sizeof(right_str), "C%d", value);
+    } else if (metric == "pm2_5" || metric == "pm2.5") {
+        int value = (int)data.pm2_5;
+        if (value > 9999) value = 9999;
+        snprintf(right_str, sizeof(right_str), "P%d", value);
+    } else if (metric == "noise" || metric == "ambientnoise") {
+        int value = (int)data.ambient_noise;
+        if (value > 9999) value = 9999;
+        snprintf(right_str, sizeof(right_str), "N%d", value);
     } else {
-        snprintf(tvoc_str, sizeof(tvoc_str), "TV%d", (int)data.tvoc);
+        if (data.tvoc >= 1000.0f) {
+            int tvoc_k = (int)((data.tvoc + 500.0f) / 1000.0f);
+            snprintf(right_str, sizeof(right_str), "T%dk", tvoc_k);
+        } else {
+            snprintf(right_str, sizeof(right_str), "TV%d", (int)data.tvoc);
+        }
     }
-    drawSmallText(44, y, tvoc_str, COLOR_CYAN);
+
+    drawSmallText(44, y, right_str, COLOR_CYAN);
 }
 
 void MatrixDisplay::showStartupScreen(const char* version) {

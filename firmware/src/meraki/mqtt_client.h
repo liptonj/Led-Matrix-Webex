@@ -15,6 +15,7 @@
  * @brief Meraki Sensor Data structure
  */
 struct MerakiSensorData {
+    String sensor_mac;
     float temperature;       // Celsius
     float humidity;          // Percentage
     String door_status;      // "open" or "closed"
@@ -22,6 +23,9 @@ struct MerakiSensorData {
     float tvoc;              // TVOC in ppb
     int iaq;                 // Indoor Air Quality index (legacy)
     int air_quality_index;   // Air quality as numeric index (0-500)
+    float co2_ppm;
+    float pm2_5;
+    float ambient_noise;
     unsigned long timestamp;
     bool valid;
 };
@@ -68,6 +72,8 @@ public:
      * @return MerakiSensorData structure
      */
     MerakiSensorData getLatestData();
+    String getLatestSensorId() const { return latest_sensor_id; }
+    bool getSensorData(const String& sensor_id, MerakiSensorData& out) const;
 
     /**
      * @brief Reconnect to broker
@@ -86,10 +92,21 @@ private:
     MerakiSensorData sensor_data;
     bool update_pending;
     unsigned long last_reconnect;
+    String latest_sensor_id;
+
+    static constexpr uint8_t MAX_SENSORS = 8;
+    struct SensorEntry {
+        String id;
+        MerakiSensorData data;
+    };
+    SensorEntry sensors[MAX_SENSORS];
+    uint8_t sensor_count = 0;
 
     void onMessage(char* topic, byte* payload, unsigned int length);
     void parseMessage(const String& topic, const String& payload);
     static void messageCallback(char* topic, byte* payload, unsigned int length);
+
+    SensorEntry* getOrCreateSensor(const String& sensor_id);
 };
 
 // Global instance for callback

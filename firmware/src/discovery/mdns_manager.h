@@ -30,6 +30,11 @@ public:
      * @return true on success
      */
     bool begin(const String& hostname);
+
+    /**
+     * @brief Stop mDNS and clear state
+     */
+    void end();
     
     /**
      * @brief Advertise HTTP service

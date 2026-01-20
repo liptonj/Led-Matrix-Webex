@@ -529,6 +529,11 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["humidity"] = app_state->humidity;
     doc["door_status"] = app_state->door_status;
     doc["air_quality"] = app_state->air_quality_index;
+    doc["tvoc"] = app_state->tvoc;
+    doc["co2_ppm"] = app_state->co2_ppm;
+    doc["pm2_5"] = app_state->pm2_5;
+    doc["ambient_noise"] = app_state->ambient_noise;
+    doc["sensor_mac"] = app_state->sensor_mac;
 
     // System info
     doc["ip_address"] = WiFi.localIP().toString();
@@ -597,6 +602,9 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     }
     
     doc["sensor_serial"] = config_manager->getSensorSerial();
+    doc["sensor_macs"] = config_manager->getSensorMacs();
+    doc["display_sensor_mac"] = config_manager->getDisplaySensorMac();
+    doc["display_metric"] = config_manager->getDisplayMetric();
     doc["ota_url"] = config_manager->getOTAUrl();
     doc["auto_update"] = config_manager->getAutoUpdate();
 
@@ -679,13 +687,27 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
                      broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
     }
     
-    // Sensor serial number
-    if (doc["sensor_serial"].is<const char*>()) {
+    // Sensor MAC filter list (comma/semicolon separated)
+    if (doc["sensor_macs"].is<const char*>()) {
+        String macs = doc["sensor_macs"].as<String>();
+        config_manager->setSensorMacs(macs);
+        if (!macs.isEmpty()) {
+            Serial.printf("[WEB] Sensor MACs saved: %s\n", macs.c_str());
+        }
+    } else if (doc["sensor_serial"].is<const char*>()) {
         String serial = doc["sensor_serial"].as<String>();
         config_manager->setSensorSerial(serial);
         if (!serial.isEmpty()) {
             Serial.printf("[WEB] Sensor serial saved: %s\n", serial.c_str());
         }
+    }
+    if (doc["display_sensor_mac"].is<const char*>()) {
+        String display_mac = doc["display_sensor_mac"].as<String>();
+        config_manager->setDisplaySensorMac(display_mac);
+    }
+    if (doc["display_metric"].is<const char*>()) {
+        String display_metric = doc["display_metric"].as<String>();
+        config_manager->setDisplayMetric(display_metric);
     }
     if (doc["ota_url"].is<const char*>()) {
         config_manager->setOTAUrl(doc["ota_url"].as<const char*>());

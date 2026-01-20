@@ -59,15 +59,34 @@ bool MDNSManager::begin(const String& hostname) {
                       hostname.c_str(), sanitized.c_str());
     }
 
-    if (!MDNS.begin(sanitized.c_str())) {
-        Serial.println("[MDNS] Failed to start mDNS!");
-        return false;
+    if (initialized) {
+        end();
     }
-    
-    initialized = true;
-    current_hostname = sanitized;
-    Serial.printf("[MDNS] Started with hostname: %s.local\n", sanitized.c_str());
-    return true;
+
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        if (MDNS.begin(sanitized.c_str())) {
+            initialized = true;
+            current_hostname = sanitized;
+            Serial.printf("[MDNS] Started with hostname: %s.local\n", sanitized.c_str());
+            return true;
+        }
+        Serial.printf("[MDNS] Start failed (attempt %d/3)\n", attempt);
+        delay(300);
+    }
+
+    Serial.println("[MDNS] Failed to start mDNS!");
+    return false;
+}
+
+void MDNSManager::end() {
+    if (initialized) {
+        MDNS.end();
+    }
+    initialized = false;
+    bridge_found = false;
+    bridge_host = "";
+    bridge_port = 0;
+    current_hostname = "";
 }
 
 void MDNSManager::advertiseHTTP(uint16_t port) {

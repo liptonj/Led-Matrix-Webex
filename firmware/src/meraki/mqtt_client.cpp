@@ -33,6 +33,35 @@ String extractSensorFromTopic(const String& topic) {
     return topic.substring(start, end);
 }
 
+bool isAllowedSensor(const String& sensor_id, const String& allowed_list) {
+    if (allowed_list.isEmpty()) {
+        return true;
+    }
+    const String target = normalizeSensorId(sensor_id);
+    if (target.isEmpty()) {
+        return false;
+    }
+
+    String token;
+    for (size_t i = 0; i <= allowed_list.length(); i++) {
+        char c = (i < allowed_list.length()) ? allowed_list[i] : ',';
+        if (c == ',' || c == ';' || c == '\n') {
+            if (!token.isEmpty()) {
+                if (normalizeSensorId(token) == target) {
+                    return true;
+                }
+                token = "";
+            }
+            continue;
+        }
+        if (c == ' ' || c == '\t' || c == '\r') {
+            continue;
+        }
+        token += c;
+    }
+    return false;
+}
+
 } // namespace
 
 // Global instance for callback
@@ -46,6 +75,9 @@ MerakiMQTTClient::MerakiMQTTClient()
     sensor_data.tvoc = 0;
     sensor_data.iaq = 0;
     sensor_data.air_quality_index = 0;
+    sensor_data.co2_ppm = 0;
+    sensor_data.pm2_5 = 0;
+    sensor_data.ambient_noise = 0;
 }
 
 MerakiMQTTClient::~MerakiMQTTClient() {
@@ -99,6 +131,17 @@ bool MerakiMQTTClient::isConnected() {
 MerakiSensorData MerakiMQTTClient::getLatestData() {
     update_pending = false;
     return sensor_data;
+}
+
+bool MerakiMQTTClient::getSensorData(const String& sensor_id, MerakiSensorData& out) const {
+    const String target = normalizeSensorId(sensor_id);
+    for (uint8_t i = 0; i < sensor_count; i++) {
+        if (normalizeSensorId(sensors[i].id) == target) {
+            out = sensors[i].data;
+            return out.valid;
+        }
+    }
+    return false;
 }
 
 void MerakiMQTTClient::reconnect() {
@@ -157,15 +200,20 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         return;
     }
 
-    const String configured_mac = config_manager ? config_manager->getSensorSerial() : "";
-    if (!configured_mac.isEmpty()) {
-        const String target_mac = normalizeSensorId(configured_mac);
-        const String topic_sensor = extractSensorFromTopic(topic);
-        if (topic_sensor.isEmpty() || normalizeSensorId(topic_sensor) != target_mac) {
-            Serial.printf("[MQTT] Ignored message for sensor %s\n", topic_sensor.c_str());
-            return;
-        }
+    const String topic_sensor = extractSensorFromTopic(topic);
+    const String configured_macs = config_manager ? config_manager->getSensorMacs() : "";
+    if (!isAllowedSensor(topic_sensor, configured_macs)) {
+        Serial.printf("[MQTT] Ignored message for sensor %s\n", topic_sensor.c_str());
+        return;
     }
+
+    SensorEntry* entry = getOrCreateSensor(topic_sensor);
+    if (!entry) {
+        Serial.println("[MQTT] Sensor list full - ignoring update");
+        return;
+    }
+    MerakiSensorData& sensor = entry->data;
+    sensor.sensor_mac = topic_sensor;
 
     // Extract metric type from topic
     int lastSlash = topic.lastIndexOf('/');
@@ -213,59 +261,97 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
 
         // Store internally as Celsius (display converts to F)
         if (is_fahrenheit) {
-            sensor_data.temperature = (temp_value - 32.0f) * 5.0f / 9.0f;
-            Serial.printf("[MQTT] Temperature: %.1f°F (stored as %.1f°C)\n", temp_value, sensor_data.temperature);
+            sensor.temperature = (temp_value - 32.0f) * 5.0f / 9.0f;
+            Serial.printf("[MQTT] Temperature: %.1f°F (stored as %.1f°C)\n", temp_value, sensor.temperature);
         } else {
-            sensor_data.temperature = temp_value;
-            Serial.printf("[MQTT] Temperature: %.1f°C\n", sensor_data.temperature);
+            sensor.temperature = temp_value;
+            Serial.printf("[MQTT] Temperature: %.1f°C\n", sensor.temperature);
         }
         update_pending = true;
 
     } else if (metric == "humidity") {
         if (doc["humidity"].is<float>()) {
-            sensor_data.humidity = doc["humidity"] | 0.0f;
+            sensor.humidity = doc["humidity"] | 0.0f;
         } else {
-            sensor_data.humidity = doc["value"] | 0.0f;
+            sensor.humidity = doc["value"] | 0.0f;
         }
         update_pending = true;
-        Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor_data.humidity);
+        Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor.humidity);
 
     } else if (metric == "door") {
         bool open = doc["value"] | false;
-        sensor_data.door_status = open ? "open" : "closed";
+        sensor.door_status = open ? "open" : "closed";
         update_pending = true;
-        Serial.printf("[MQTT] Door: %s\n", sensor_data.door_status.c_str());
+        Serial.printf("[MQTT] Door: %s\n", sensor.door_status.c_str());
 
     } else if (metric == "water") {
         bool wet = doc["value"] | false;
-        sensor_data.water_status = wet ? "wet" : "dry";
+        sensor.water_status = wet ? "wet" : "dry";
         update_pending = true;
-        Serial.printf("[MQTT] Water: %s\n", sensor_data.water_status.c_str());
+        Serial.printf("[MQTT] Water: %s\n", sensor.water_status.c_str());
 
     } else if (metric == "tvoc") {
         if (doc["tvoc"].is<float>()) {
-            sensor_data.tvoc = doc["tvoc"] | 0.0f;
+            sensor.tvoc = doc["tvoc"] | 0.0f;
         } else {
-            sensor_data.tvoc = doc["value"] | 0.0f;
+            sensor.tvoc = doc["value"] | 0.0f;
         }
         update_pending = true;
-        Serial.printf("[MQTT] TVOC: %.1f\n", sensor_data.tvoc);
+        Serial.printf("[MQTT] TVOC: %.1f\n", sensor.tvoc);
 
     } else if (metric == "iaqIndex") {
-        sensor_data.air_quality_index = doc["iaqIndex"] | doc["value"] | 0;
+        sensor.air_quality_index = doc["iaqIndex"] | doc["value"] | 0;
         update_pending = true;
-        Serial.printf("[MQTT] IAQ Index: %d\n", sensor_data.air_quality_index);
+        Serial.printf("[MQTT] IAQ Index: %d\n", sensor.air_quality_index);
 
     } else if (metric == "iaq") {
-        sensor_data.iaq = doc["value"] | 0;
-        sensor_data.air_quality_index = sensor_data.iaq;
+        sensor.iaq = doc["value"] | 0;
+        sensor.air_quality_index = sensor.iaq;
         update_pending = true;
-        Serial.printf("[MQTT] IAQ: %d\n", sensor_data.iaq);
+        Serial.printf("[MQTT] IAQ: %d\n", sensor.iaq);
+    } else if (metric == "CO2") {
+        sensor.co2_ppm = doc["CO2"] | doc["value"] | 0.0f;
+        update_pending = true;
+        Serial.printf("[MQTT] CO2: %.1f ppm\n", sensor.co2_ppm);
+    } else if (metric == "PM2_5MassConcentration") {
+        sensor.pm2_5 = doc["PM2_5MassConcentration"] | doc["value"] | 0.0f;
+        update_pending = true;
+        Serial.printf("[MQTT] PM2.5: %.1f\n", sensor.pm2_5);
+    } else if (metric == "ambientNoise") {
+        sensor.ambient_noise = doc["ambientNoise"] | doc["value"] | 0.0f;
+        update_pending = true;
+        Serial.printf("[MQTT] Noise: %.1f\n", sensor.ambient_noise);
     }
 
     if (update_pending) {
-        sensor_data.timestamp = millis();
-        sensor_data.valid = true;
+        sensor.timestamp = millis();
+        sensor.valid = true;
+        sensor_data = sensor;
+        latest_sensor_id = topic_sensor;
     }
+}
+
+MerakiMQTTClient::SensorEntry* MerakiMQTTClient::getOrCreateSensor(const String& sensor_id) {
+    for (uint8_t i = 0; i < sensor_count; i++) {
+        if (sensors[i].id == sensor_id) {
+            return &sensors[i];
+        }
+    }
+    if (sensor_count >= MAX_SENSORS) {
+        return nullptr;
+    }
+    sensors[sensor_count].id = sensor_id;
+    sensors[sensor_count].data.valid = false;
+    sensors[sensor_count].data.temperature = 0.0f;
+    sensors[sensor_count].data.humidity = 0.0f;
+    sensors[sensor_count].data.tvoc = 0.0f;
+    sensors[sensor_count].data.iaq = 0;
+    sensors[sensor_count].data.air_quality_index = 0;
+    sensors[sensor_count].data.co2_ppm = 0.0f;
+    sensors[sensor_count].data.pm2_5 = 0.0f;
+    sensors[sensor_count].data.ambient_noise = 0.0f;
+    sensors[sensor_count].data.sensor_mac = sensor_id;
+    sensor_count++;
+    return &sensors[sensor_count - 1];
 }
 

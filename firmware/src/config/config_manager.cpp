@@ -374,6 +374,7 @@ String ConfigManager::getSensorSerial() const {
 
 void ConfigManager::setSensorSerial(const String& serial) {
     saveString("sensor_serial", serial);
+    cached_sensor_macs = serial;
     Serial.printf("[CONFIG] Sensor serial saved: %s\n", serial.c_str());
 }
 
