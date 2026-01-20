@@ -90,7 +90,7 @@ void ConfigManager::migrateLegacyOtaUrl() {
 #endif
 }
 
-void ConfigManager::loadCache() {
+void ConfigManager::loadCache() const {
     cached_ssid = loadString("wifi_ssid");
     cached_password = loadString("wifi_pass");
     cached_device_name = loadString("device_name", DEFAULT_DEVICE_NAME);
@@ -105,12 +105,15 @@ void ConfigManager::loadCache() {
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
     
     // Silently check MQTT config without noisy errors
-    preferences.begin(NAMESPACE, true);  // Read-only mode
+    preferences.begin(CONFIG_NAMESPACE, true);  // Read-only mode
     cached_mqtt_broker = preferences.getString("mqtt_broker", "");
     cached_mqtt_port = preferences.getUShort("mqtt_port", 1883);
     cached_mqtt_username = preferences.getString("mqtt_user", "");
     cached_mqtt_password = preferences.getString("mqtt_pass", "");
     cached_mqtt_topic = preferences.getString("mqtt_topic", "");
+    cached_sensor_macs = preferences.getString("sensor_macs", "");
+    cached_display_sensor_mac = preferences.getString("display_sensor_mac", "");
+    cached_display_metric = preferences.getString("display_metric", "tvoc");
     preferences.end();
     
     cache_loaded = true;
@@ -374,6 +377,54 @@ void ConfigManager::setSensorSerial(const String& serial) {
     Serial.printf("[CONFIG] Sensor serial saved: %s\n", serial.c_str());
 }
 
+String ConfigManager::getSensorMacs() const {
+    if (!cache_loaded) {
+        loadCache();
+    }
+    if (!cached_sensor_macs.isEmpty()) {
+        return cached_sensor_macs;
+    }
+    return getSensorSerial();
+}
+
+String ConfigManager::getDisplaySensorMac() const {
+    if (!cache_loaded) {
+        loadCache();
+    }
+    return cached_display_sensor_mac;
+}
+
+String ConfigManager::getDisplayMetric() const {
+    if (!cache_loaded) {
+        loadCache();
+    }
+    if (!cached_display_metric.isEmpty()) {
+        return cached_display_metric;
+    }
+    return "tvoc";
+}
+
+void ConfigManager::setSensorMacs(const String& macs) {
+    saveString("sensor_macs", macs);
+    cached_sensor_macs = macs;
+    if (!macs.isEmpty()) {
+        saveString("sensor_serial", "");
+    }
+    Serial.printf("[CONFIG] Sensor MACs saved: %s\n", macs.c_str());
+}
+
+void ConfigManager::setDisplaySensorMac(const String& mac) {
+    saveString("display_sensor_mac", mac);
+    cached_display_sensor_mac = mac;
+    Serial.printf("[CONFIG] Display sensor MAC saved: %s\n", mac.c_str());
+}
+
+void ConfigManager::setDisplayMetric(const String& metric) {
+    saveString("display_metric", metric);
+    cached_display_metric = metric;
+    Serial.printf("[CONFIG] Display metric saved: %s\n", metric.c_str());
+}
+
 // OTA Configuration
 
 String ConfigManager::getOTAUrl() const {
@@ -506,6 +557,9 @@ String ConfigManager::exportConfig() const {
     doc["mqtt_port"] = getMQTTPort();
     doc["mqtt_topic"] = getMQTTTopic();
     doc["sensor_serial"] = getSensorSerial();
+    doc["sensor_macs"] = getSensorMacs();
+    doc["display_sensor_mac"] = getDisplaySensorMac();
+    doc["display_metric"] = getDisplayMetric();
     doc["ota_url"] = getOTAUrl();
     doc["auto_update"] = getAutoUpdate();
 
@@ -550,8 +604,16 @@ bool ConfigManager::importConfig(const String& json) {
             doc["mqtt_topic"] | "meraki/v1/mt/#"
         );
     }
-    if (doc["sensor_serial"].is<const char*>()) {
+    if (doc["sensor_macs"].is<const char*>()) {
+        setSensorMacs(doc["sensor_macs"].as<const char*>());
+    } else if (doc["sensor_serial"].is<const char*>()) {
         setSensorSerial(doc["sensor_serial"].as<const char*>());
+    }
+    if (doc["display_sensor_mac"].is<const char*>()) {
+        setDisplaySensorMac(doc["display_sensor_mac"].as<const char*>());
+    }
+    if (doc["display_metric"].is<const char*>()) {
+        setDisplayMetric(doc["display_metric"].as<const char*>());
     }
     if (doc["ota_url"].is<const char*>()) {
         setOTAUrl(doc["ota_url"].as<const char*>());

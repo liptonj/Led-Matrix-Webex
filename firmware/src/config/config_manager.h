@@ -82,10 +82,16 @@ public:
     String getMQTTPassword() const;
     String getMQTTTopic() const;
     String getSensorSerial() const;
+    String getSensorMacs() const;
+    String getDisplaySensorMac() const;
+    String getDisplayMetric() const;
     void setMQTTConfig(const String& broker, uint16_t port,
                        const String& username, const String& password,
                        const String& topic);
     void setSensorSerial(const String& serial);
+    void setSensorMacs(const String& macs);
+    void setDisplaySensorMac(const String& mac);
+    void setDisplayMetric(const String& metric);
     bool hasMQTTConfig() const;
 
     // OTA Configuration
@@ -123,9 +129,12 @@ private:
     mutable String cached_mqtt_username;
     mutable String cached_mqtt_password;
     mutable String cached_mqtt_topic;
+    mutable String cached_sensor_macs;
+    mutable String cached_display_sensor_mac;
+    mutable String cached_display_metric;
     mutable bool cache_loaded;
 
-    void loadCache();
+    void loadCache() const;
     void saveString(const char* key, const String& value);
     String loadString(const char* key, const String& default_value = "") const;
     void saveUInt(const char* key, uint32_t value);
