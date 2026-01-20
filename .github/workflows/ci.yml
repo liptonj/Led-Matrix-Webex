@@ -549,7 +549,7 @@ jobs:
 
       - name: Validate manifest
         run: |
-          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('public/js/manifest.json','utf8'));if(!m.latest||!Array.isArray(m.versions)){console.error('Manifest missing expected fields');process.exit(1)};console.log('✓ Manifest ok:', m.latest)"
+          node -e "const fs=require('fs');const m=JSON.parse(fs.readFileSync('public/updates/manifest.json','utf8'));if(!m.latest||!Array.isArray(m.versions)){console.error('Manifest missing expected fields');process.exit(1)};console.log('✓ Manifest ok:', m.latest)"
 
       - name: Upload website artifacts
         uses: actions/upload-artifact@v4

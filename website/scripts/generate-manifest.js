@@ -11,7 +11,7 @@ const path = require('path');
 
 const GITHUB_API = 'https://api.github.com/repos/liptonj/Led-Matrix-Webex/releases';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GITHUB_API_TOKEN;
-const OUTPUT_FILE = path.join(__dirname, '../public/js/manifest.json');
+const OUTPUT_FILE = path.join(__dirname, '../public/updates/manifest.json');
 
 function fetchReleases() {
     return new Promise((resolve, reject) => {

@@ -301,321 +301,14 @@ void WebSetup::setupRoutes() {
             }
         },
         [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
-            if (index == 0) {
-                ota_upload_error = "";
-                ota_upload_size = request->contentLength();
-                ota_upload_written = 0;
-                ota_upload_next_log = 64 * 1024;
-                ota_upload_received = 0;
-                ota_upload_in_progress = true;
-                ota_bundle_mode = false;
-                ota_bundle_header_flushed = false;
-                ota_bundle_header_filled = 0;
-                ota_bundle_app_size = 0;
-                ota_bundle_fs_size = 0;
-                ota_bundle_app_written = 0;
-                ota_bundle_fs_written = 0;
-                ota_bundle_fs_started = false;
-                ota_upload_last_progress = -1;
-                ota_upload_expected_size = ota_upload_size;
-
-                LOG_INFO(WEB_TAG, "OTA upload start: %s (%u bytes)",
-                         filename.c_str(), static_cast<unsigned>(ota_upload_size));
-                Serial.printf("[WEB] OTA upload start (index=0) file=%s size=%u\n",
-                              filename.c_str(),
-                              static_cast<unsigned>(ota_upload_size));
-                log_ota_partition_info("OTA upload start");
-                log_fs_partition_info("OTA upload start");
-                reportOTAUploadProgress(0, "Uploading...");
-                WiFi.setSleep(false);
-                if (request->client()) {
-                    request->client()->setNoDelay(true);
-                    request->client()->setRxTimeout(120);
-                    request->client()->setAckTimeout(120000);
-                }
-                request->onDisconnect([this]() {
-                    Serial.printf("[WEB] OTA upload disconnect: received=%u expected=%u written=%u\n",
-                                  static_cast<unsigned>(ota_upload_received),
-                                  static_cast<unsigned>(ota_upload_size),
-                                  static_cast<unsigned>(ota_upload_written));
-                    if (ota_upload_received < ota_upload_size) {
-                        ota_upload_error = "OTA upload disconnected";
-                        Update.abort();
-                        reportOTAUploadProgress(0, ota_upload_error.c_str());
-                    }
-                    WiFi.setSleep(true);
-                    ota_upload_in_progress = false;
-                });
-            }
-
-            ota_upload_received += len;
-
-            if (!ota_upload_error.isEmpty()) {
-                if (final) {
-                    Update.abort();
-                }
-                if (final) {
-                    ota_upload_in_progress = false;
-                }
+            handleOTAUploadChunk(request, filename, index, data, len, final, 0);
+        },
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            if (request->contentType().startsWith("multipart/")) {
                 return;
             }
-
-            size_t offset = 0;
-            if (ota_bundle_header_filled < OTA_BUNDLE_HEADER_SIZE) {
-                size_t to_copy = min(OTA_BUNDLE_HEADER_SIZE - ota_bundle_header_filled, len);
-                memcpy(ota_bundle_header + ota_bundle_header_filled, data, to_copy);
-                ota_bundle_header_filled += to_copy;
-                offset += to_copy;
-
-                if (ota_bundle_header_filled == OTA_BUNDLE_HEADER_SIZE) {
-                    if (memcmp(ota_bundle_header, OTA_BUNDLE_MAGIC, sizeof(OTA_BUNDLE_MAGIC)) == 0) {
-                        ota_bundle_mode = true;
-                        ota_bundle_app_size = read_le_u32(ota_bundle_header + 4);
-                        ota_bundle_fs_size = read_le_u32(ota_bundle_header + 8);
-                        size_t expected_size = OTA_BUNDLE_HEADER_SIZE + ota_bundle_app_size + ota_bundle_fs_size;
-                        ota_upload_expected_size = expected_size;
-                        Serial.printf("[WEB] OTA bundle sizes app=%u fs=%u expected=%u content=%u\n",
-                                      static_cast<unsigned>(ota_bundle_app_size),
-                                      static_cast<unsigned>(ota_bundle_fs_size),
-                                      static_cast<unsigned>(expected_size),
-                                      static_cast<unsigned>(ota_upload_size));
-
-                        if (ota_bundle_app_size == 0 || ota_bundle_fs_size == 0) {
-                            ota_upload_error = "Invalid OTA bundle sizes";
-                        } else if (ota_upload_size > 0 && ota_upload_size < expected_size) {
-                            ota_upload_error = "OTA bundle size mismatch";
-                        } else if (get_ota_partition_size() > 0 &&
-                                   ota_bundle_app_size > get_ota_partition_size()) {
-                            ota_upload_error = "App image too large for OTA partition";
-                        } else if (get_fs_partition_size() > 0 &&
-                                   ota_bundle_fs_size > get_fs_partition_size()) {
-                            ota_upload_error = "LittleFS image too large for partition";
-                        } else {
-                            const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
-                            const char* ota_label = ota_partition ? ota_partition->label : nullptr;
-                            if (!ota_partition) {
-                                ota_upload_error = "OTA partition not found";
-                                reportOTAUploadProgress(0, ota_upload_error.c_str());
-                            } else if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
-                                String err = Update.errorString();
-                                ota_upload_error = (err.isEmpty() || err == "No Error")
-                                    ? "Failed to start OTA update"
-                                    : err;
-                                reportOTAUploadProgress(0, ota_upload_error.c_str());
-                                Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
-                                              static_cast<unsigned>(Update.getError()),
-                                              ota_upload_error.c_str());
-                                log_ota_partition_info("Update.begin app failed");
-                            } else {
-                                LOG_INFO(WEB_TAG, "OTA bundle detected: app=%u fs=%u",
-                                         static_cast<unsigned>(ota_bundle_app_size),
-                                         static_cast<unsigned>(ota_bundle_fs_size));
-                                Serial.printf("[WEB] OTA bundle detected app=%u fs=%u\n",
-                                              static_cast<unsigned>(ota_bundle_app_size),
-                                              static_cast<unsigned>(ota_bundle_fs_size));
-                            }
-                        }
-                        if (!ota_upload_error.isEmpty()) {
-                            Serial.printf("[WEB] OTA bundle error: %s\n", ota_upload_error.c_str());
-                            reportOTAUploadProgress(0, ota_upload_error.c_str());
-                        }
-                    } else {
-                        size_t total = ota_upload_size;
-                        size_t ota_partition = get_ota_partition_size();
-                        if (total > 0 && ota_partition > 0 && total > ota_partition) {
-                            ota_upload_error = "App image too large for OTA partition";
-                            reportOTAUploadProgress(0, ota_upload_error.c_str());
-                        } else {
-                            const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
-                            const char* ota_label = ota_partition ? ota_partition->label : nullptr;
-                            if (!ota_partition) {
-                                ota_upload_error = "OTA partition not found";
-                                reportOTAUploadProgress(0, ota_upload_error.c_str());
-                            } else if (total == 0) {
-                                if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH, -1, LOW, ota_label)) {
-                                    String err = Update.errorString();
-                                    ota_upload_error = (err.isEmpty() || err == "No Error")
-                                        ? "Failed to start OTA update"
-                                        : err;
-                                    reportOTAUploadProgress(0, ota_upload_error.c_str());
-                                    Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
-                                                  static_cast<unsigned>(Update.getError()),
-                                                  ota_upload_error.c_str());
-                                    log_ota_partition_info("Update.begin app failed");
-                                }
-                            } else if (!Update.begin(total, U_FLASH, -1, LOW, ota_label)) {
-                                String err = Update.errorString();
-                                ota_upload_error = (err.isEmpty() || err == "No Error")
-                                    ? "Failed to start OTA update"
-                                    : err;
-                                reportOTAUploadProgress(0, ota_upload_error.c_str());
-                                Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
-                                              static_cast<unsigned>(Update.getError()),
-                                              ota_upload_error.c_str());
-                                log_ota_partition_info("Update.begin app failed");
-                            }
-                        }
-                        if (!ota_upload_error.isEmpty()) {
-                            Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
-                            reportOTAUploadProgress(0, ota_upload_error.c_str());
-                        }
-                    }
-                } else {
-                    if (final) {
-                        ota_upload_error = "Incomplete OTA upload";
-                        reportOTAUploadProgress(0, ota_upload_error.c_str());
-                    }
-                    return;
-                }
-            }
-
-            auto write_chunk = [this](const uint8_t* buffer, size_t size) -> size_t {
-                if (size == 0 || !ota_upload_error.isEmpty()) {
-                    return 0;
-                }
-                size_t written = Update.write(const_cast<uint8_t*>(buffer), size);
-                if (written != size) {
-                    ota_upload_error = Update.errorString();
-                    Serial.printf("[WEB] OTA write error: wrote=%u expected=%u err=%s\n",
-                                  static_cast<unsigned>(written),
-                                  static_cast<unsigned>(size),
-                                  ota_upload_error.c_str());
-                    reportOTAUploadProgress(0, ota_upload_error.c_str());
-                }
-                return written;
-            };
-
-            if (ota_bundle_mode) {
-                const uint8_t* ptr = data + offset;
-                size_t remaining = len - offset;
-                while (remaining > 0 && ota_upload_error.isEmpty()) {
-                    delay(0);
-                    if (ota_bundle_app_written < ota_bundle_app_size) {
-                        size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
-                        size_t written = write_chunk(ptr, to_write);
-                        ota_bundle_app_written += written;
-                        ota_upload_written += written;
-                        ptr += to_write;
-                        remaining -= to_write;
-
-                        if (ota_bundle_app_written == ota_bundle_app_size && ota_upload_error.isEmpty()) {
-                            if (!Update.end(true)) {
-                                ota_upload_error = Update.errorString();
-                                break;
-                            }
-                            LOG_INFO(WEB_TAG, "OTA bundle app complete, starting LittleFS write");
-                            if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
-                                String err = Update.errorString();
-                                ota_upload_error = (err.isEmpty() || err == "No Error")
-                                    ? "Failed to start LittleFS update"
-                                    : err;
-                                reportOTAUploadProgress(0, ota_upload_error.c_str());
-                                Serial.printf("[WEB] Update.begin LittleFS failed: code=%u err=%s\n",
-                                              static_cast<unsigned>(Update.getError()),
-                                              ota_upload_error.c_str());
-                                log_fs_partition_info("Update.begin LittleFS failed");
-                                break;
-                            }
-                            ota_bundle_fs_started = true;
-                        }
-                    } else {
-                        if (ota_bundle_fs_written >= ota_bundle_fs_size) {
-                            ota_upload_error = "OTA bundle has extra data";
-                            reportOTAUploadProgress(0, ota_upload_error.c_str());
-                            break;
-                        }
-                        size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
-                        size_t written = write_chunk(ptr, to_write);
-                        ota_bundle_fs_written += written;
-                        ota_upload_written += written;
-                        ptr += to_write;
-                        remaining -= to_write;
-                    }
-                    if (ota_upload_written >= ota_upload_next_log) {
-                        size_t total = ota_upload_size > 0
-                            ? ota_upload_size
-                            : (ota_bundle_app_size + ota_bundle_fs_size + OTA_BUNDLE_HEADER_SIZE);
-                        Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
-                                      static_cast<unsigned>(ota_upload_written),
-                                      static_cast<unsigned>(total),
-                                      static_cast<unsigned>(ESP.getFreeHeap()));
-                        ota_upload_next_log += 64 * 1024;
-                    }
-
-                    size_t total = ota_upload_expected_size > 0
-                        ? ota_upload_expected_size
-                        : ota_upload_size;
-                    if (total > 0) {
-                        int progress = static_cast<int>((ota_upload_written * 100) / total);
-                        if (progress > 99) {
-                            progress = 99;
-                        }
-                        if (progress != ota_upload_last_progress) {
-                            ota_upload_last_progress = progress;
-                            reportOTAUploadProgress(progress, "Uploading...");
-                        }
-                    }
-                }
-            } else {
-                if (!ota_bundle_header_flushed) {
-                    ota_upload_written += write_chunk(ota_bundle_header, ota_bundle_header_filled);
-                    ota_bundle_header_flushed = true;
-                }
-                ota_upload_written += write_chunk(data + offset, len - offset);
-                delay(0);
-                if (ota_upload_written >= ota_upload_next_log) {
-                    size_t total = ota_upload_size > 0 ? ota_upload_size : 0;
-                    Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
-                                  static_cast<unsigned>(ota_upload_written),
-                                  static_cast<unsigned>(total),
-                                  static_cast<unsigned>(ESP.getFreeHeap()));
-                    ota_upload_next_log += 64 * 1024;
-                }
-
-                size_t total = ota_upload_expected_size > 0 ? ota_upload_expected_size : ota_upload_size;
-                if (total > 0) {
-                    int progress = static_cast<int>((ota_upload_written * 100) / total);
-                    if (progress > 99) {
-                        progress = 99;
-                    }
-                    if (progress != ota_upload_last_progress) {
-                        ota_upload_last_progress = progress;
-                        reportOTAUploadProgress(progress, "Uploading...");
-                    }
-                }
-            }
-
-            if (final) {
-                if (ota_upload_error.isEmpty()) {
-                    if (ota_bundle_mode) {
-                        if (ota_bundle_app_written != ota_bundle_app_size ||
-                            ota_bundle_fs_written != ota_bundle_fs_size) {
-                            ota_upload_error = "OTA bundle incomplete";
-                        } else if (ota_bundle_fs_started && !Update.end(true)) {
-                            ota_upload_error = Update.errorString();
-                        }
-                    } else if (!Update.end(true)) {
-                        ota_upload_error = Update.errorString();
-                    }
-                } else {
-                    Update.abort();
-                }
-                LOG_INFO(WEB_TAG, "OTA upload %s (%u bytes)",
-                         ota_upload_error.isEmpty() ? "complete" : "failed",
-                         static_cast<unsigned>(ota_upload_size));
-                Serial.printf("[WEB] OTA upload %s size=%u app_written=%u fs_written=%u app_or_bin_written=%u\n",
-                              ota_upload_error.isEmpty() ? "complete" : "failed",
-                              static_cast<unsigned>(ota_upload_size),
-                              static_cast<unsigned>(ota_bundle_app_written),
-                              static_cast<unsigned>(ota_bundle_fs_written),
-                              static_cast<unsigned>(ota_upload_written));
-                if (!ota_upload_error.isEmpty()) {
-                    Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
-                    reportOTAUploadProgress(0, "OTA Failed");
-                }
-                WiFi.setSleep(true);
-                ota_upload_in_progress = false;
-            }
+            bool final = total > 0 && (index + len) >= total;
+            handleOTAUploadChunk(request, "raw.bin", index, data, len, final, total);
         }
     );
 
@@ -754,6 +447,333 @@ void WebSetup::setupRoutes() {
         }
         request->send(404, "text/plain", "Not found");
     });
+}
+
+void WebSetup::handleOTAUploadChunk(
+    AsyncWebServerRequest* request,
+    const String& filename,
+    size_t index,
+    uint8_t* data,
+    size_t len,
+    bool final,
+    size_t total
+) {
+    if (index == 0) {
+        ota_upload_error = "";
+        size_t upload_total = total > 0 ? total : request->contentLength();
+        ota_upload_size = upload_total;
+        ota_upload_written = 0;
+        ota_upload_next_log = 64 * 1024;
+        ota_upload_received = 0;
+        ota_upload_in_progress = true;
+        ota_bundle_mode = false;
+        ota_bundle_header_flushed = false;
+        ota_bundle_header_filled = 0;
+        ota_bundle_app_size = 0;
+        ota_bundle_fs_size = 0;
+        ota_bundle_app_written = 0;
+        ota_bundle_fs_written = 0;
+        ota_bundle_fs_started = false;
+        ota_upload_last_progress = -1;
+        ota_upload_expected_size = ota_upload_size;
+
+        LOG_INFO(WEB_TAG, "OTA upload start: %s (%u bytes)",
+                 filename.c_str(), static_cast<unsigned>(ota_upload_size));
+        Serial.printf("[WEB] OTA upload start (index=0) file=%s size=%u\n",
+                      filename.c_str(),
+                      static_cast<unsigned>(ota_upload_size));
+        log_ota_partition_info("OTA upload start");
+        log_fs_partition_info("OTA upload start");
+        reportOTAUploadProgress(0, "Uploading...");
+        WiFi.setSleep(false);
+        if (request->client()) {
+            request->client()->setNoDelay(true);
+            request->client()->setRxTimeout(120);
+            request->client()->setAckTimeout(120000);
+        }
+        request->onDisconnect([this]() {
+            Serial.printf("[WEB] OTA upload disconnect: received=%u expected=%u written=%u\n",
+                          static_cast<unsigned>(ota_upload_received),
+                          static_cast<unsigned>(ota_upload_size),
+                          static_cast<unsigned>(ota_upload_written));
+            if (ota_upload_size > 0 && ota_upload_received < ota_upload_size) {
+                ota_upload_error = "OTA upload disconnected";
+                Update.abort();
+                reportOTAUploadProgress(0, ota_upload_error.c_str());
+            }
+            WiFi.setSleep(true);
+            ota_upload_in_progress = false;
+        });
+    }
+
+    ota_upload_received += len;
+
+    if (!ota_upload_error.isEmpty()) {
+        if (final) {
+            Update.abort();
+        }
+        if (final) {
+            ota_upload_in_progress = false;
+        }
+        return;
+    }
+
+    size_t offset = 0;
+    if (ota_bundle_header_filled < OTA_BUNDLE_HEADER_SIZE) {
+        size_t to_copy = min(OTA_BUNDLE_HEADER_SIZE - ota_bundle_header_filled, len);
+        memcpy(ota_bundle_header + ota_bundle_header_filled, data, to_copy);
+        ota_bundle_header_filled += to_copy;
+        offset += to_copy;
+
+        if (ota_bundle_header_filled == OTA_BUNDLE_HEADER_SIZE) {
+            if (memcmp(ota_bundle_header, OTA_BUNDLE_MAGIC, sizeof(OTA_BUNDLE_MAGIC)) == 0) {
+                ota_bundle_mode = true;
+                ota_bundle_app_size = read_le_u32(ota_bundle_header + 4);
+                ota_bundle_fs_size = read_le_u32(ota_bundle_header + 8);
+                size_t expected_size = OTA_BUNDLE_HEADER_SIZE + ota_bundle_app_size + ota_bundle_fs_size;
+                ota_upload_expected_size = expected_size;
+                Serial.printf("[WEB] OTA bundle sizes app=%u fs=%u expected=%u content=%u\n",
+                              static_cast<unsigned>(ota_bundle_app_size),
+                              static_cast<unsigned>(ota_bundle_fs_size),
+                              static_cast<unsigned>(expected_size),
+                              static_cast<unsigned>(ota_upload_size));
+
+                if (ota_bundle_app_size == 0 || ota_bundle_fs_size == 0) {
+                    ota_upload_error = "Invalid OTA bundle sizes";
+                } else if (ota_upload_size > 0 && ota_upload_size < expected_size) {
+                    ota_upload_error = "OTA bundle size mismatch";
+                } else if (get_ota_partition_size() > 0 &&
+                           ota_bundle_app_size > get_ota_partition_size()) {
+                    ota_upload_error = "App image too large for OTA partition";
+                } else if (get_fs_partition_size() > 0 &&
+                           ota_bundle_fs_size > get_fs_partition_size()) {
+                    ota_upload_error = "LittleFS image too large for partition";
+                } else {
+                    const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
+                    const char* ota_label = ota_partition ? ota_partition->label : nullptr;
+                    if (!ota_partition) {
+                        ota_upload_error = "OTA partition not found";
+                        reportOTAUploadProgress(0, ota_upload_error.c_str());
+                    } else if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
+                        String err = Update.errorString();
+                        ota_upload_error = (err.isEmpty() || err == "No Error")
+                            ? "Failed to start OTA update"
+                            : err;
+                        reportOTAUploadProgress(0, ota_upload_error.c_str());
+                        Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                      static_cast<unsigned>(Update.getError()),
+                                      ota_upload_error.c_str());
+                        log_ota_partition_info("Update.begin app failed");
+                    } else {
+                        LOG_INFO(WEB_TAG, "OTA bundle detected: app=%u fs=%u",
+                                 static_cast<unsigned>(ota_bundle_app_size),
+                                 static_cast<unsigned>(ota_bundle_fs_size));
+                        Serial.printf("[WEB] OTA bundle detected app=%u fs=%u\n",
+                                      static_cast<unsigned>(ota_bundle_app_size),
+                                      static_cast<unsigned>(ota_bundle_fs_size));
+                    }
+                }
+                if (!ota_upload_error.isEmpty()) {
+                    Serial.printf("[WEB] OTA bundle error: %s\n", ota_upload_error.c_str());
+                    reportOTAUploadProgress(0, ota_upload_error.c_str());
+                }
+            } else {
+                size_t app_total = ota_upload_size;
+                size_t ota_partition = get_ota_partition_size();
+                if (app_total > 0 && ota_partition > 0 && app_total > ota_partition) {
+                    ota_upload_error = "App image too large for OTA partition";
+                    reportOTAUploadProgress(0, ota_upload_error.c_str());
+                } else {
+                    const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
+                    const char* ota_label = ota_partition ? ota_partition->label : nullptr;
+                    if (!ota_partition) {
+                        ota_upload_error = "OTA partition not found";
+                        reportOTAUploadProgress(0, ota_upload_error.c_str());
+                    } else if (app_total == 0) {
+                        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH, -1, LOW, ota_label)) {
+                            String err = Update.errorString();
+                            ota_upload_error = (err.isEmpty() || err == "No Error")
+                                ? "Failed to start OTA update"
+                                : err;
+                            reportOTAUploadProgress(0, ota_upload_error.c_str());
+                            Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                          static_cast<unsigned>(Update.getError()),
+                                          ota_upload_error.c_str());
+                            log_ota_partition_info("Update.begin app failed");
+                        }
+                    } else if (!Update.begin(app_total, U_FLASH, -1, LOW, ota_label)) {
+                        String err = Update.errorString();
+                        ota_upload_error = (err.isEmpty() || err == "No Error")
+                            ? "Failed to start OTA update"
+                            : err;
+                        reportOTAUploadProgress(0, ota_upload_error.c_str());
+                        Serial.printf("[WEB] Update.begin app failed: code=%u err=%s\n",
+                                      static_cast<unsigned>(Update.getError()),
+                                      ota_upload_error.c_str());
+                        log_ota_partition_info("Update.begin app failed");
+                    }
+                }
+                if (!ota_upload_error.isEmpty()) {
+                    Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
+                    reportOTAUploadProgress(0, ota_upload_error.c_str());
+                }
+            }
+        } else {
+            if (final) {
+                ota_upload_error = "Incomplete OTA upload";
+                reportOTAUploadProgress(0, ota_upload_error.c_str());
+            }
+            return;
+        }
+    }
+
+    auto write_chunk = [this](const uint8_t* buffer, size_t size) -> size_t {
+        if (size == 0 || !ota_upload_error.isEmpty()) {
+            return 0;
+        }
+        size_t written = Update.write(const_cast<uint8_t*>(buffer), size);
+        if (written != size) {
+            ota_upload_error = Update.errorString();
+            Serial.printf("[WEB] OTA write error: wrote=%u expected=%u err=%s\n",
+                          static_cast<unsigned>(written),
+                          static_cast<unsigned>(size),
+                          ota_upload_error.c_str());
+            reportOTAUploadProgress(0, ota_upload_error.c_str());
+        }
+        return written;
+    };
+
+    if (ota_bundle_mode) {
+        const uint8_t* ptr = data + offset;
+        size_t remaining = len - offset;
+        while (remaining > 0 && ota_upload_error.isEmpty()) {
+            delay(0);
+            if (ota_bundle_app_written < ota_bundle_app_size) {
+                size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
+                size_t written = write_chunk(ptr, to_write);
+                ota_bundle_app_written += written;
+                ota_upload_written += written;
+                ptr += to_write;
+                remaining -= to_write;
+
+                if (ota_bundle_app_written == ota_bundle_app_size && ota_upload_error.isEmpty()) {
+                    if (!Update.end(true)) {
+                        ota_upload_error = Update.errorString();
+                        break;
+                    }
+                    LOG_INFO(WEB_TAG, "OTA bundle app complete, starting LittleFS write");
+                    if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
+                        String err = Update.errorString();
+                        ota_upload_error = (err.isEmpty() || err == "No Error")
+                            ? "Failed to start LittleFS update"
+                            : err;
+                        reportOTAUploadProgress(0, ota_upload_error.c_str());
+                        Serial.printf("[WEB] Update.begin LittleFS failed: code=%u err=%s\n",
+                                      static_cast<unsigned>(Update.getError()),
+                                      ota_upload_error.c_str());
+                        log_fs_partition_info("Update.begin LittleFS failed");
+                        break;
+                    }
+                    ota_bundle_fs_started = true;
+                }
+            } else {
+                if (ota_bundle_fs_written >= ota_bundle_fs_size) {
+                    ota_upload_error = "OTA bundle has extra data";
+                    reportOTAUploadProgress(0, ota_upload_error.c_str());
+                    break;
+                }
+                size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
+                size_t written = write_chunk(ptr, to_write);
+                ota_bundle_fs_written += written;
+                ota_upload_written += written;
+                ptr += to_write;
+                remaining -= to_write;
+            }
+            if (ota_upload_written >= ota_upload_next_log) {
+                size_t progress_total = ota_upload_size > 0
+                    ? ota_upload_size
+                    : (ota_bundle_app_size + ota_bundle_fs_size + OTA_BUNDLE_HEADER_SIZE);
+                Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
+                              static_cast<unsigned>(ota_upload_written),
+                              static_cast<unsigned>(progress_total),
+                              static_cast<unsigned>(ESP.getFreeHeap()));
+                ota_upload_next_log += 64 * 1024;
+            }
+
+            size_t percent_total = ota_upload_expected_size > 0
+                ? ota_upload_expected_size
+                : ota_upload_size;
+            if (percent_total > 0) {
+                int progress = static_cast<int>((ota_upload_written * 100) / percent_total);
+                if (progress > 99) {
+                    progress = 99;
+                }
+                if (progress != ota_upload_last_progress) {
+                    ota_upload_last_progress = progress;
+                    reportOTAUploadProgress(progress, "Uploading...");
+                }
+            }
+        }
+    } else {
+        if (!ota_bundle_header_flushed) {
+            ota_upload_written += write_chunk(ota_bundle_header, ota_bundle_header_filled);
+            ota_bundle_header_flushed = true;
+        }
+        ota_upload_written += write_chunk(data + offset, len - offset);
+        delay(0);
+        if (ota_upload_written >= ota_upload_next_log) {
+            size_t progress_total = ota_upload_size > 0 ? ota_upload_size : 0;
+            Serial.printf("[WEB] OTA upload progress: %u/%u bytes (heap=%u)\n",
+                          static_cast<unsigned>(ota_upload_written),
+                          static_cast<unsigned>(progress_total),
+                          static_cast<unsigned>(ESP.getFreeHeap()));
+            ota_upload_next_log += 64 * 1024;
+        }
+
+        size_t percent_total = ota_upload_expected_size > 0 ? ota_upload_expected_size : ota_upload_size;
+        if (percent_total > 0) {
+            int progress = static_cast<int>((ota_upload_written * 100) / percent_total);
+            if (progress > 99) {
+                progress = 99;
+            }
+            if (progress != ota_upload_last_progress) {
+                ota_upload_last_progress = progress;
+                reportOTAUploadProgress(progress, "Uploading...");
+            }
+        }
+    }
+
+    if (final) {
+        if (ota_upload_error.isEmpty()) {
+            if (ota_bundle_mode) {
+                if (ota_bundle_app_written != ota_bundle_app_size ||
+                    ota_bundle_fs_written != ota_bundle_fs_size) {
+                    ota_upload_error = "OTA bundle incomplete";
+                } else if (ota_bundle_fs_started && !Update.end(true)) {
+                    ota_upload_error = Update.errorString();
+                }
+            } else if (!Update.end(true)) {
+                ota_upload_error = Update.errorString();
+            }
+        } else {
+            Update.abort();
+        }
+        LOG_INFO(WEB_TAG, "OTA upload %s (%u bytes)",
+                 ota_upload_error.isEmpty() ? "complete" : "failed",
+                 static_cast<unsigned>(ota_upload_size));
+        Serial.printf("[WEB] OTA upload %s size=%u app_written=%u fs_written=%u app_or_bin_written=%u\n",
+                      ota_upload_error.isEmpty() ? "complete" : "failed",
+                      static_cast<unsigned>(ota_upload_size),
+                      static_cast<unsigned>(ota_bundle_app_written),
+                      static_cast<unsigned>(ota_bundle_fs_written),
+                      static_cast<unsigned>(ota_upload_written));
+        if (!ota_upload_error.isEmpty()) {
+            Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
+            reportOTAUploadProgress(0, "OTA Failed");
+        }
+        WiFi.setSleep(true);
+        ota_upload_in_progress = false;
+    }
 }
 
 void WebSetup::handleRoot(AsyncWebServerRequest* request) {

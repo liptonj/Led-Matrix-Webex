@@ -124,6 +124,15 @@ private:
     void handleScan(AsyncWebServerRequest* request);
     void handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleOTAUrl(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleOTAUploadChunk(
+        AsyncWebServerRequest* request,
+        const String& filename,
+        size_t index,
+        uint8_t* data,
+        size_t len,
+        bool final,
+        size_t total
+    );
     void handleStartOTA(AsyncWebServerRequest* request);
     void handleOTAProgress(AsyncWebServerRequest* request);
     void handleGetReleases(AsyncWebServerRequest* request);

@@ -28,7 +28,7 @@ public:
     
     /**
      * @brief Set manifest URL for streamlined updates
-     * @param url Manifest endpoint URL (e.g., https://5ls.us/updates/manifest.json)
+     * @param url Manifest endpoint URL (e.g., https://display.5ls.us/updates/manifest.json)
      */
     void setManifestUrl(const String& url);
     

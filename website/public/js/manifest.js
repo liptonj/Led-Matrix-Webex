@@ -2,7 +2,7 @@
 
 async function loadVersions() {
     try {
-        const response = await fetch('js/manifest.json');
+        const response = await fetch('updates/manifest.json');
         const data = await response.json();
         
         const container = document.getElementById('versions-container');
