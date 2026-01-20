@@ -26,54 +26,34 @@ bool MatrixDisplay::begin() {
     yield(); // Feed watchdog
     
 #if defined(ESP32_S3_BOARD)
-    // ESP32-S3 pin configuration
+    // Seengreat adapter pin configuration for ESP32-S3
     HUB75_I2S_CFG::i2s_pins _pins = {
-        42, // R1
-        41, // G1
-        40, // B1
-        38, // R2
-        39, // G2
-        37, // B2
-        45, // A
-        36, // B
-        48, // C
-        35, // D
-        21, // E
-        2,  // CLK
-        47, // LAT
-        14  // OE
+        37, 6, 36,    // R1, G1, B1
+        35, 5, 0,     // R2, G2, B2
+        45, 1, 48, 2, 4,  // A, B, C, D, E
+        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
     };
 #else
-    // ESP32 (standard) pin configuration
+    // Default ESP32 pins
     HUB75_I2S_CFG::i2s_pins _pins = {
-        25, // R1
-        26, // G1
-        27, // B1
-        14, // R2
-        12, // G2
-        13, // B2
-        23, // A
-        19, // B
-        5,  // C
-        17, // D
-        32, // E (active for 1/32 scan, directly active for 1/16 scan panels)
-        16, // CLK
-        4,  // LAT
-        15  // OE
+        25, 26, 27, 14, 12, 13,
+        23, 19, 5, 17, 32,
+        16, 4, 15
     };
 #endif
 
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(
-        PANEL_RES_X,   // width
-        PANEL_RES_Y,   // height
-        PANEL_CHAIN,   // chain length
-        _pins
+        PANEL_RES_X,   // 64 pixels wide
+        PANEL_RES_Y,   // 32 pixels tall
+        PANEL_CHAIN,   // 1 panel
+        _pins          // Pin configuration
     );
     
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
+    // Reduce visible flicker: higher refresh + stable latch blanking
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
     mxconfig.min_refresh_rate = 120;
     mxconfig.latch_blanking = 1;
     
@@ -89,7 +69,7 @@ bool MatrixDisplay::begin() {
         return false;
     }
     
-    brightness = 128;
+    brightness = 255;
     dma_display->setBrightness8(brightness);
     dma_display->clearScreen();
     
