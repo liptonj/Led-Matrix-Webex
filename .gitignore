@@ -1,5 +1,6 @@
 # PlatformIO Build Artifacts (all firmware projects)
 **/.pio/
+**/.pio-home/
 **/.pioenvs/
 **/.piolibdeps/
 
