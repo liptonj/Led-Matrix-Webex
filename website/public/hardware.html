@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hardware Guide - LED Matrix Webex Display</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>📦 Hardware Guide</h1>
+            <p class="tagline">Build your LED Matrix Webex Display</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <section>
+            <h2>Required Components</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Component</th>
+                        <th>Description</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ESP32 or ESP32-S3</td>
+                        <td>Microcontroller board</td>
+                        <td>ESP32-S3 recommended for better performance</td>
+                    </tr>
+                    <tr>
+                        <td>HUB75 LED Matrix Panel</td>
+                        <td>64x32 or 64x64 pixels</td>
+                        <td>RGB LED matrix display</td>
+                    </tr>
+                    <tr>
+                        <td>5V Power Supply</td>
+                        <td>3-5A recommended</td>
+                        <td>Depends on matrix size and brightness</td>
+                    </tr>
+                    <tr>
+                        <td>Jumper Wires</td>
+                        <td>Female-to-female</td>
+                        <td>For connecting ESP32 to LED matrix</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Wiring Diagram</h2>
+            <h3>ESP32-S3 to HUB75 Matrix</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>HUB75 Pin</th>
+                        <th>ESP32-S3 GPIO</th>
+                        <th>Function</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>R1</td><td>GPIO 42</td><td>Red data (upper half)</td></tr>
+                    <tr><td>G1</td><td>GPIO 41</td><td>Green data (upper half)</td></tr>
+                    <tr><td>B1</td><td>GPIO 40</td><td>Blue data (upper half)</td></tr>
+                    <tr><td>R2</td><td>GPIO 38</td><td>Red data (lower half)</td></tr>
+                    <tr><td>G2</td><td>GPIO 39</td><td>Green data (lower half)</td></tr>
+                    <tr><td>B2</td><td>GPIO 37</td><td>Blue data (lower half)</td></tr>
+                    <tr><td>A</td><td>GPIO 45</td><td>Row select A</td></tr>
+                    <tr><td>B</td><td>GPIO 48</td><td>Row select B</td></tr>
+                    <tr><td>C</td><td>GPIO 47</td><td>Row select C</td></tr>
+                    <tr><td>D</td><td>GPIO 21</td><td>Row select D</td></tr>
+                    <tr><td>E</td><td>GPIO 14</td><td>Row select E (64px height)</td></tr>
+                    <tr><td>CLK</td><td>GPIO 2</td><td>Clock signal</td></tr>
+                    <tr><td>LAT</td><td>GPIO 1</td><td>Latch signal</td></tr>
+                    <tr><td>OE</td><td>GPIO 46</td><td>Output enable</td></tr>
+                </tbody>
+            </table>
+            <p><strong>Note:</strong> ESP32 (non-S3) uses different GPIO pins. See the full documentation in the GitHub repository.</p>
+        </section>
+
+        <section>
+            <h2>Assembly Steps</h2>
+            <ol>
+                <li>Connect the ESP32 to the HUB75 matrix according to the wiring diagram above</li>
+                <li>Connect the 5V power supply to the matrix power input</li>
+                <li>Flash the bootstrap firmware to the ESP32 using esptool or PlatformIO</li>
+                <li>Power on the device and connect to the WiFi AP "LED-Matrix-Setup"</li>
+                <li>Follow the web-based setup wizard to configure WiFi and Webex</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>Flashing Firmware</h2>
+            <h3>Option 1: Using esptool (Recommended for beginners)</h3>
+            <div class="code-block">
+                <code>
+# Install esptool<br>
+pip install esptool<br>
+<br>
+# Flash ESP32-S3 bootstrap firmware<br>
+esptool.py --chip esp32s3 --port /dev/ttyUSB0 write_flash 0x0 bootstrap-esp32s3.bin<br>
+<br>
+# Flash ESP32 bootstrap firmware<br>
+esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 bootstrap-esp32.bin
+                </code>
+            </div>
+
+            <h3>Option 2: Using PlatformIO</h3>
+            <div class="code-block">
+                <code>
+# Clone the repository<br>
+git clone https://github.com/liptonj/Led-Matrix-Webex.git<br>
+cd Led-Matrix-Webex/firmware_bootstrap<br>
+<br>
+# Upload to ESP32-S3<br>
+pio run -e esp32s3 -t upload<br>
+<br>
+# Upload to ESP32<br>
+pio run -e esp32 -t upload
+                </code>
+            </div>
+        </section>
+
+        <section>
+            <h2>Troubleshooting</h2>
+            <h3>Display not working?</h3>
+            <ul>
+                <li>Check all wiring connections match the pinout table</li>
+                <li>Verify power supply provides sufficient current (3-5A)</li>
+                <li>Try reducing brightness in the web configuration</li>
+            </ul>
+
+            <h3>Can't connect to WiFi AP?</h3>
+            <ul>
+                <li>Reset the device by holding the reset button for 10 seconds</li>
+                <li>Check that "LED-Matrix-Setup" network appears in your WiFi list</li>
+                <li>Some devices require manual connection to captive portal at 192.168.4.1</li>
+            </ul>
+
+            <h3>Webex connection failing?</h3>
+            <ul>
+                <li>Verify your Webex integration client ID and secret are correct</li>
+                <li>Check that the device has internet access</li>
+                <li>Review logs in the web interface for specific error messages</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Need More Help?</h2>
+            <p>Check out the detailed documentation in the <a href="https://github.com/liptonj/Led-Matrix-Webex/tree/main/docs" target="_blank">GitHub repository</a> or open an issue for support.</p>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p><a href="index.html">← Back to Home</a></p>
+            <p>Open source project - MIT License</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

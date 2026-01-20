@@ -1,0 +1,18 @@
+{
+  "name": "led-matrix-webex-website",
+  "version": "1.0.5",
+  "description": "Website for LED Matrix Webex Display project",
+  "scripts": {
+    "build": "node scripts/generate-manifest.js",
+    "deploy": "npm run build && wrangler pages deploy public",
+    "dev": "python -m http.server 8000 --directory public"
+  },
+  "keywords": [
+    "webex",
+    "led-matrix",
+    "esp32",
+    "presence"
+  ],
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LED Matrix Webex Display</title>
+    <link rel="stylesheet" href="css/style.css">
+    <meta name="description" content="Open-source LED matrix display showing your Webex presence status - Available, In Meeting, Do Not Disturb, Away">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🚦 LED Matrix Webex Display</h1>
+            <p class="tagline">Show your Webex presence status on a physical LED matrix display</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <section class="hero">
+            <div class="status-examples">
+                <div class="status-card">
+                    <div class="status-icon status-active">●</div>
+                    <p>Active</p>
+                </div>
+                <div class="status-card">
+                    <div class="status-icon status-meeting">●</div>
+                    <p>In Meeting</p>
+                </div>
+                <div class="status-card">
+                    <div class="status-icon status-dnd">●</div>
+                    <p>Do Not Disturb</p>
+                </div>
+                <div class="status-card">
+                    <div class="status-icon status-away">●</div>
+                    <p>Away</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="features">
+            <h2>Features</h2>
+            <div class="feature-grid">
+                <div class="feature">
+                    <h3>🌐 Real-time Status</h3>
+                    <p>Displays your Webex presence status in real-time on a colorful LED matrix</p>
+                </div>
+                <div class="feature">
+                    <h3>🔧 Easy Setup</h3>
+                    <p>Web-based configuration with WiFi provisioning and OAuth authentication</p>
+                </div>
+                <div class="feature">
+                    <h3>🔄 OTA Updates</h3>
+                    <p>Over-the-air firmware updates with automatic version checking</p>
+                </div>
+                <div class="feature">
+                    <h3>🏠 Home Assistant</h3>
+                    <p>Optional Home Assistant add-on for centralized presence management</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="quick-links">
+            <h2>Getting Started</h2>
+            <div class="link-grid">
+                <a href="hardware.html" class="link-card">
+                    <h3>📦 Hardware Guide</h3>
+                    <p>Build your own LED matrix display</p>
+                </a>
+                <a href="versions.html" class="link-card">
+                    <h3>⬇️ Download Firmware</h3>
+                    <p>Get the latest firmware releases</p>
+                </a>
+                <a href="api-docs.html" class="link-card">
+                    <h3>📚 API Documentation</h3>
+                    <p>Integrate with your own apps</p>
+                </a>
+                <a href="https://github.com/liptonj/Led-Matrix-Webex" class="link-card" target="_blank">
+                    <h3>💻 GitHub Repository</h3>
+                    <p>View source code and contribute</p>
+                </a>
+            </div>
+        </section>
+
+        <section class="architecture">
+            <h2>Architecture</h2>
+            <p>Three deployment modes to fit your needs:</p>
+            <ul>
+                <li><strong>Direct Mode:</strong> ESP32 connects directly to Webex API</li>
+                <li><strong>Bridge Mode:</strong> Node.js bridge server handles multiple displays</li>
+                <li><strong>Home Assistant:</strong> Integrated with Home Assistant ecosystem</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>Open source project - MIT License</p>
+            <p><a href="https://github.com/liptonj/Led-Matrix-Webex" target="_blank">GitHub</a></p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

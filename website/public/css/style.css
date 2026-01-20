@@ -1,0 +1,252 @@
+:root {
+    --color-active: #28a745;
+    --color-meeting: #dc3545;
+    --color-dnd: #ffc107;
+    --color-away: #6c757d;
+    --color-primary: #007bff;
+    --color-dark: #212529;
+    --color-light: #f8f9fa;
+    --color-border: #dee2e6;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    color: var(--color-dark);
+    background-color: var(--color-light);
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 3rem 0;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.tagline {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+main {
+    padding: 2rem 0;
+}
+
+section {
+    margin: 3rem 0;
+    padding: 2rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+h2 {
+    color: var(--color-primary);
+    margin-bottom: 1.5rem;
+    font-size: 2rem;
+}
+
+h3 {
+    margin-bottom: 0.5rem;
+}
+
+.status-examples {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+}
+
+.status-card {
+    text-align: center;
+    padding: 1.5rem;
+    background: var(--color-light);
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+
+.status-card:hover {
+    transform: translateY(-5px);
+}
+
+.status-icon {
+    font-size: 4rem;
+    margin-bottom: 0.5rem;
+}
+
+.status-active { color: var(--color-active); }
+.status-meeting { color: var(--color-meeting); }
+.status-dnd { color: var(--color-dnd); }
+.status-away { color: var(--color-away); }
+
+.feature-grid, .link-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.feature {
+    padding: 1.5rem;
+    background: var(--color-light);
+    border-radius: 8px;
+    border-left: 4px solid var(--color-primary);
+}
+
+.link-card {
+    padding: 1.5rem;
+    background: white;
+    border: 2px solid var(--color-border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+}
+
+.link-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.architecture ul {
+    list-style-position: inside;
+    margin-top: 1rem;
+}
+
+.architecture li {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background: var(--color-light);
+    border-radius: 4px;
+}
+
+.version-list {
+    margin-top: 1.5rem;
+}
+
+.version-item {
+    padding: 1.5rem;
+    margin: 1rem 0;
+    background: var(--color-light);
+    border-radius: 8px;
+    border-left: 4px solid var(--color-primary);
+}
+
+.version-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.version-tag {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--color-primary);
+}
+
+.version-date {
+    color: var(--color-away);
+}
+
+.download-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.download-btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background: var(--color-primary);
+    color: white;
+    text-decoration: none;
+    border-radius: 4px;
+    text-align: center;
+    transition: background 0.2s;
+}
+
+.download-btn:hover {
+    background: #0056b3;
+}
+
+.code-block {
+    background: var(--color-dark);
+    color: #f8f9fa;
+    padding: 1.5rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 1rem 0;
+}
+
+.code-block code {
+    font-family: 'Courier New', monospace;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+}
+
+th, td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+}
+
+th {
+    background: var(--color-light);
+    font-weight: bold;
+}
+
+footer {
+    background: var(--color-dark);
+    color: white;
+    text-align: center;
+    padding: 2rem 0;
+    margin-top: 3rem;
+}
+
+footer a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 2rem;
+    }
+    
+    .tagline {
+        font-size: 1rem;
+    }
+    
+    section {
+        padding: 1rem;
+    }
+}
