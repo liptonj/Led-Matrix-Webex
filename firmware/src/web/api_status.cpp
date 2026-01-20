@@ -56,9 +56,12 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["firmware_build_id"] = "unknown";
     #endif
 
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
+    String responseStr;
+    serializeJson(doc, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
+    addCorsHeaders(response);
+    request->send(response);
 }
 
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
@@ -125,9 +128,12 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
     doc["date_format"] = config_manager->getDateFormat().isEmpty() ? "mdy" : config_manager->getDateFormat();
 
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
+    String responseStr;
+    serializeJson(doc, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
+    addCorsHeaders(response);
+    request->send(response);
 }
 
 void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len,
@@ -159,7 +165,9 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
 
     if (error) {
         Serial.printf("[WEB] Failed to parse JSON: %s\n", error.c_str());
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        AsyncWebServerResponse* errResponse = request->beginResponse(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        addCorsHeaders(errResponse);
+        request->send(errResponse);
         return;
     }
 
@@ -208,12 +216,20 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : "";
         String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : "meraki/v1/mt/#";
         
-        // Handle password - if not provided, keep existing
+        // Handle password - only overwrite if non-empty password provided
         String password;
         if (doc["mqtt_password"].is<const char*>()) {
-            password = doc["mqtt_password"].as<String>();
+            String newPassword = doc["mqtt_password"].as<String>();
+            if (!newPassword.isEmpty()) {
+                password = newPassword;
+                Serial.println("[WEB] MQTT password updated");
+            } else {
+                // Empty string provided - keep existing password
+                password = config_manager->getMQTTPassword();
+                Serial.println("[WEB] Empty MQTT password provided - keeping existing");
+            }
         } else {
-            // Keep existing password
+            // Field not provided - keep existing password
             password = config_manager->getMQTTPassword();
             Serial.println("[WEB] MQTT password not provided - keeping existing");
         }
@@ -290,11 +306,16 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
 
     Serial.println("[WEB] Configuration save complete");
-    request->send(200, "application/json", "{\"success\":true}");
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true}");
+    addCorsHeaders(response);
+    request->send(response);
 }
 
 void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
+    addCorsHeaders(response);
+    request->send(response);
     // Schedule reboot for 500ms from now to allow response to be sent
     pending_reboot = true;
     pending_reboot_time = millis() + 500;
@@ -304,10 +325,20 @@ void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
 
 void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
     config_manager->factoryReset();
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete. Rebooting...\"}");
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete. Rebooting...\"}");
+    addCorsHeaders(response);
+    request->send(response);
     // Schedule reboot
     pending_reboot = true;
     pending_reboot_time = millis() + 500;
     pending_boot_partition = nullptr;
     Serial.println("[WEB] Factory reset reboot scheduled");
+}
+
+void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
+    config_manager->setMQTTConfig("", 1883, "", "", "");
+    Serial.println("[WEB] MQTT configuration cleared");
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"MQTT configuration cleared\"}");
+    addCorsHeaders(response);
+    request->send(response);
 }

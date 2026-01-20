@@ -117,6 +117,12 @@ void WebServerManager::setupRoutes() {
     // IMPORTANT: Register API endpoints FIRST, before static file handlers
     // This prevents VFS errors when checking for non-existent static files
     
+    // CORS preflight handler for all API endpoints
+    // This allows the cloud-hosted embedded app to make cross-origin requests
+    server->on("/api/*", HTTP_OPTIONS, [this](AsyncWebServerRequest* request) {
+        handleCorsPreflightRequest(request);
+    });
+    
     // API endpoints - Status and Config
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
@@ -272,6 +278,10 @@ void WebServerManager::setupRoutes() {
         handleFactoryReset(request);
     });
 
+    server->on("/api/clear-mqtt", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleClearMQTT(request);
+    });
+
     // Embedded App API endpoints
     server->on("/api/embedded/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleEmbeddedStatusGet(request);
@@ -393,4 +403,22 @@ String WebServerManager::getContentType(const String& filename) {
     if (filename.endsWith(".png")) return "image/png";
     if (filename.endsWith(".svg")) return "image/svg+xml";
     return "text/plain";
+}
+
+// ============================================================
+// CORS Support for Cloud-Hosted Embedded App
+// ============================================================
+
+void WebServerManager::addCorsHeaders(AsyncWebServerResponse* response) {
+    // Allow requests from any origin (cloud-hosted embedded app)
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+    response->addHeader("Access-Control-Max-Age", "86400");  // Cache preflight for 24 hours
+}
+
+void WebServerManager::handleCorsPreflightRequest(AsyncWebServerRequest* request) {
+    AsyncWebServerResponse* response = request->beginResponse(204);
+    addCorsHeaders(response);
+    request->send(response);
 }

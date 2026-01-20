@@ -1,12 +1,12 @@
 /**
  * @file matrix_display.cpp
  * @brief LED Matrix Display Driver Core Implementation
- * 
+ *
  * This file contains the core display functionality:
  * - Hardware initialization
  * - Display lifecycle management
  * - Brightness and scroll speed settings
- * 
+ *
  * Drawing primitives are in: display_primitives.cpp
  * Formatting utilities are in: display_utils.cpp
  * Font data is in: display_fonts.h

@@ -18,9 +18,12 @@ void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
     doc["hostname"] = config_manager->getDeviceName() + ".local";
     doc["embedded_app_enabled"] = true;
     
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
+    String responseStr;
+    serializeJson(doc, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
+    addCorsHeaders(response);
+    request->send(response);
 }
 
 void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len,
@@ -49,7 +52,9 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        AsyncWebServerResponse* errResponse = request->beginResponse(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        addCorsHeaders(errResponse);
+        request->send(errResponse);
         return;
     }
     
@@ -101,12 +106,15 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     // Mark as connected via embedded app
     app_state->embedded_app_connected = true;
     
-    JsonDocument response;
-    response["success"] = true;
-    response["status"] = app_state->webex_status;
-    response["message"] = "Status updated from embedded app";
+    JsonDocument responseDoc;
+    responseDoc["success"] = true;
+    responseDoc["status"] = app_state->webex_status;
+    responseDoc["message"] = "Status updated from embedded app";
     
     String responseStr;
-    serializeJson(response, responseStr);
-    request->send(200, "application/json", responseStr);
+    serializeJson(responseDoc, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
+    addCorsHeaders(response);
+    request->send(response);
 }

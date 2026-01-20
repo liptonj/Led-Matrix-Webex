@@ -2,6 +2,53 @@
 
 This document describes how to use the Webex Embedded App to control your LED Matrix Display directly from within Webex.
 
+## Cloud-Hosted Embedded App
+
+The Webex Embedded App is hosted on Cloudflare Pages and connects to your local LED Matrix Display over your network.
+
+**Live App URL**: `https://display.5ls.us/embedded/`
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Webex Client                             │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │              Embedded App (iframe)                         │  │
+│  │              Hosted on Cloudflare Pages                    │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │  • Webex SDK v2.x detects meeting/call state        │  │  │
+│  │  │  • User can manually set status + camera/mic        │  │  │
+│  │  │  • Sends HTTP POST to local display                 │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP POST /api/embedded/status
+                              │ (Cross-origin request to local network)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    LED Matrix Display                            │
+│                    (ESP32 + HUB75 Panel)                        │
+│                    Your Local Network                            │
+│                                                                  │
+│  • Receives status updates via REST API with CORS support       │
+│  • Updates LED matrix with status icon and text                 │
+│  • Full configuration available via embedded app                │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Features
+
+The embedded app allows you to:
+
+- **Auto-detect meetings**: When you join a Webex meeting, the display automatically shows "In a Call"
+- **Sidebar call detection**: Detects incoming/outgoing calls via Webex Sidebar API
+- **Manual status selection**: Choose your status (Available, Away, In a Call, DND) with a single tap
+- **Camera/Mic toggles**: Manually indicate your camera and microphone state
+- **Full display configuration**: Set brightness, display name, WiFi, and more
+- **Firmware updates**: Check for and install firmware updates directly from the app
+
 ## Modular Firmware Architecture
 
 The LED Matrix Display uses a modular firmware architecture. You can install only the features you need:
@@ -15,14 +62,6 @@ The LED Matrix Display uses a modular firmware architecture. You can install onl
 | `bridge` | Core + Embedded App + Bridge Client | ~245 KB | Node.js bridge integration |
 | `full` | All modules | ~350 KB | Complete functionality |
 
-### Installing a Different Firmware Variant
-
-1. Open the embedded app in Webex
-2. Go to the **Modules** tab
-3. View currently installed modules and available variants
-4. Click **Install** on your desired variant
-5. The device will download and install the new firmware via OTA
-
 ### Available Modules
 
 | Module | Description |
@@ -34,42 +73,6 @@ The LED Matrix Display uses a modular firmware architecture. You can install onl
 | `bridge_client` | WebSocket client for Node.js bridge server |
 | `xapi_client` | RoomOS xAPI WebSocket for device control |
 
-## Overview
-
-The LED Matrix Display includes a built-in Webex Embedded App that allows you to:
-
-- **Auto-detect meetings**: When you join a Webex meeting, the display automatically shows "In a Call"
-- **Manually set status**: Choose your status (Available, Away, In a Call, DND) with a single tap
-- **Sync to multiple displays**: Configure additional displays on your network to all show the same status
-- **No bridge server required**: The app runs directly on the display hardware
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Webex Client                             │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │              Embedded App (iframe)                         │  │
-│  │  ┌─────────────────────────────────────────────────────┐  │  │
-│  │  │  • Webex SDK detects meeting state                  │  │  │
-│  │  │  • User can manually select status                  │  │  │
-│  │  │  • Sends HTTP POST to display(s)                    │  │  │
-│  │  └─────────────────────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP POST /api/embedded/status
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    LED Matrix Display                            │
-│                    (ESP32 + HUB75 Panel)                        │
-│                                                                  │
-│  • Receives status updates via REST API                         │
-│  • Updates LED matrix with status icon and text                 │
-│  • Serves embedded app from LittleFS                            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
 ## Setup Instructions
 
 ### Step 1: Register the Embedded App in Webex Developer Portal
@@ -80,47 +83,60 @@ The LED Matrix Display includes a built-in Webex Embedded App that allows you to
 4. Fill in the app details:
    - **App Name**: LED Matrix Status Display
    - **Description**: Control your LED matrix busy light from Webex
-   - **App Hub URL**: `http://webex-display.local/embedded/` (replace with your display's hostname)
-   - **Valid Domains**: `webex-display.local` (or your display's IP address)
+   - **Start Page URL**: `https://display.5ls.us/embedded/`
+   - **Valid Domains**: `display.5ls.us`
+   - **App Type**: Sidebar (recommended for call detection events)
 
 5. Click **Create**
 
-### Step 2: Find Your Display's Address
+### Step 2: Find Your Display's IP Address
 
-When your display first boots or is waiting for configuration, it will show:
+Your LED Matrix Display needs to be on the same network as your computer running Webex.
 
-```
-    SETUP
-Open in Webex:
-webex-di...
-/embedded
-```
+To find your display's IP address:
+1. Power on your LED Matrix Display
+2. Connect it to your WiFi network
+3. The display will show its IP address during startup (e.g., `192.168.1.100`)
+4. Or check your router's device list for a device named "webex-display"
 
-The full address is typically:
-- **mDNS**: `http://webex-display.local/embedded/`
-- **IP**: `http://192.168.x.x/embedded/` (check your router or the display's config page)
+You can also use the mDNS hostname: `webex-display.local` (if your network supports mDNS)
 
 ### Step 3: Add the App to Webex
 
 1. Open Webex desktop or web client
 2. Go to **Apps** → **Browse**
-3. Search for your app name or navigate to the App Hub URL directly
+3. Search for "LED Matrix Status Display" or your app name
 4. Click **Add** to install the app
 
-### Step 4: Use the App
+### Step 4: Connect to Your Display
 
 1. Open the embedded app from the Webex Apps panel
-2. Grant any required permissions when prompted
-3. The app will:
-   - Display your Webex user name
-   - Show your current status
-   - Auto-detect when you're in a meeting
+2. On first launch, you'll see the **Connect to Your Display** screen
+3. Enter your display's IP address (e.g., `192.168.1.100`) or hostname (`webex-display.local`)
+4. Click **Connect to Display**
+5. The app will test the connection and save the address
 
-4. To manually set your status, tap one of the status buttons:
-   - **Available** (green) - You're ready to communicate
-   - **Away** (yellow) - You're temporarily away
-   - **In a Call** (red) - You're in a meeting/call
-   - **DND** (red) - Do not disturb
+**Note**: The app saves your display address in your browser's localStorage, so you only need to enter it once.
+
+### Step 5: Use the App
+
+Once connected, the app will:
+- Display your Webex user name
+- Show your current status
+- Auto-detect when you're in a meeting or call
+
+**Manual Status Selection:**
+- **Available** (green) - You're ready to communicate
+- **Away** (yellow) - You're temporarily away
+- **In a Call** (red) - You're in a meeting/call
+- **DND** (red) - Do not disturb
+
+**Camera & Microphone Toggles:**
+Since the Webex SDK doesn't expose camera/mic hardware state, you can manually toggle:
+- **Camera On/Off** - Indicates if your camera is active
+- **Mic On/Muted** - Indicates if your microphone is muted
+
+These states are synced to your LED display in real-time.
 
 ## API Reference
 
@@ -199,23 +215,48 @@ You can sync your status to multiple LED displays on your network:
 
 The app will now sync your status to all configured displays simultaneously.
 
-## Webex Embedded Apps SDK Limitations
+## Webex Embedded Apps SDK Features
 
-The Webex Embedded Apps SDK provides limited access to user data:
+The embedded app uses SDK v2.x with the following capabilities:
 
 | Feature | Available | Notes |
 |---------|-----------|-------|
-| User Name | ✅ Yes | Via `context.getUser()` |
-| User Email | ✅ Yes | Via `context.getUser()` |
+| User Name | ✅ Yes | Via `app.user` property |
+| User Email | ✅ Yes | Via `app.user` property |
 | Meeting Detection | ✅ Yes | Via `context.getMeeting()` |
+| Call State Events | ✅ Yes | Via `sidebar:callStateChanged` event |
 | Presence Status | ❌ No | Not available in SDK |
-| Camera State | ❌ No | Not available in SDK |
-| Microphone State | ❌ No | Not available in SDK |
+| Camera State | ❌ No | Not available - use manual toggle |
+| Microphone State | ❌ No | Not available - use manual toggle |
 
-**Because of these limitations:**
-- Meeting detection works automatically (joins → "In a Call")
-- Other statuses (Available, Away, DND) must be set manually
-- For full automatic presence sync, use the display's built-in OAuth integration
+**SDK v2.x Changes:**
+- User info is now a static property (`app.user`) instead of async method
+- Sidebar API provides call state change events
+- Rate limits: 20 requests/minute
+
+**Workarounds for Limitations:**
+- Meeting/call detection works automatically via SDK events
+- Camera and microphone state: Use manual toggle buttons in the app
+- Full presence status: Use the display's built-in OAuth integration for background polling
+
+## Known Issues & Workarounds
+
+### Mixed Content Warning (HTTPS to HTTP)
+
+The embedded app is served over HTTPS from Cloudflare Pages, but your LED display serves HTTP on your local network. Some browsers may block these "mixed content" requests.
+
+**Workarounds:**
+1. **Most browsers allow this** - Local network requests are often exempted
+2. **Chrome**: If blocked, navigate to `chrome://flags/#block-insecure-private-network-requests` and disable
+3. **Firefox**: Usually works without issues for local network requests
+4. **Edge**: Similar to Chrome, may require flag change
+
+### mDNS (.local hostnames)
+
+mDNS resolution (e.g., `webex-display.local`) depends on your network configuration:
+- Works on most home networks
+- May not work on corporate networks
+- If it doesn't work, use the IP address instead
 
 ## Troubleshooting
 

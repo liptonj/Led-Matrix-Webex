@@ -1,5 +1,4 @@
 /*
-  X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   X-XSS-Protection: 1; mode=block
   Referrer-Policy: strict-origin-when-cross-origin
@@ -7,3 +6,10 @@
 /updates/manifest.json
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=300
+
+# Embedded App - Allow Webex to iframe and enable CORS for local display access
+/embedded/*
+  Content-Security-Policy: frame-ancestors 'self' https://*.webex.com https://*.wbx2.com https://*.ciscospark.com
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, POST, OPTIONS
+  Access-Control-Allow-Headers: Content-Type

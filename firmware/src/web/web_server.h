@@ -103,6 +103,7 @@ private:
     void handleBootToFactory(AsyncWebServerRequest* request);
     void handleReboot(AsyncWebServerRequest* request);
     void handleFactoryReset(AsyncWebServerRequest* request);
+    void handleClearMQTT(AsyncWebServerRequest* request);
     
     // Embedded app API handlers
     void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
@@ -116,6 +117,10 @@ private:
     
     // Utility
     String getContentType(const String& filename);
+    
+    // CORS support for cloud-hosted embedded app
+    void addCorsHeaders(AsyncWebServerResponse* response);
+    void handleCorsPreflightRequest(AsyncWebServerRequest* request);
     void handleOTAUploadChunk(AsyncWebServerRequest* request,
                               const String& filename,
                               size_t index,
