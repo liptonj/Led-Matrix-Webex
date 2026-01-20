@@ -78,6 +78,7 @@ public:
         , _textSize(1)
         , _cursorX(0)
         , _cursorY(0)
+        , _textWrap(false)
         , _initialized(false) {
         
         _framebuffer.resize(_width * _height, 0);
@@ -250,6 +251,10 @@ public:
         _cursorY = y;
     }
     
+    void setTextWrap(bool wrap) {
+        _textWrap = wrap;
+    }
+    
     size_t print(const char* str) {
         printf("[Matrix] Text at (%d,%d): \"%s\" [color=0x%04X]\n", 
                _cursorX, _cursorY, str, _textColor);
@@ -342,6 +347,7 @@ private:
     uint8_t _textSize;
     int16_t _cursorX;
     int16_t _cursorY;
+    bool _textWrap;
     bool _initialized;
     std::vector<uint16_t> _framebuffer;
 };

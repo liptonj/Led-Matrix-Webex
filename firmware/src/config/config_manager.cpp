@@ -104,21 +104,21 @@ void ConfigManager::loadCache() const {
     cached_brightness = loadUInt("brightness", DEFAULT_BRIGHTNESS);
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
     
-    // Silently check MQTT config without noisy errors
-    preferences.begin(CONFIG_NAMESPACE, true);  // Read-only mode
-    cached_mqtt_broker = preferences.getString("mqtt_broker", "");
-    cached_mqtt_port = preferences.getUShort("mqtt_port", 1883);
-    cached_mqtt_username = preferences.getString("mqtt_user", "");
-    cached_mqtt_password = preferences.getString("mqtt_pass", "");
-    cached_mqtt_topic = preferences.getString("mqtt_topic", "");
-    cached_sensor_macs = preferences.getString("sensor_macs", "");
-    cached_display_sensor_mac = preferences.getString("display_sensor_mac", "");
-    cached_display_metric = preferences.getString("display_metric", "tvoc");
-    cached_time_zone = preferences.getString("time_zone", "UTC");
-    cached_ntp_server = preferences.getString("ntp_server", "pool.ntp.org");
-    cached_time_format = preferences.getString("time_format", "24h");
-    cached_date_format = preferences.getString("date_format", "mdy");
-    preferences.end();
+    // Load MQTT config using existing preferences handle
+    cached_mqtt_broker = loadString("mqtt_broker");
+    cached_mqtt_port = loadUInt("mqtt_port", 1883);
+    cached_mqtt_username = loadString("mqtt_user");
+    cached_mqtt_password = loadString("mqtt_pass");
+    cached_mqtt_topic = loadString("mqtt_topic");
+    cached_sensor_macs = loadString("sensor_macs");
+    cached_display_sensor_mac = loadString("display_sensor_mac");
+    cached_display_metric = loadString("display_metric", "tvoc");
+    
+    // Load time config
+    cached_time_zone = loadString("time_zone", "UTC");
+    cached_ntp_server = loadString("ntp_server", "pool.ntp.org");
+    cached_time_format = loadString("time_format", "24h");
+    cached_date_format = loadString("date_format", "mdy");
     
     cache_loaded = true;
 }
@@ -365,6 +365,11 @@ void ConfigManager::setMQTTConfig(const String& broker, uint16_t port,
     saveString("mqtt_user", username);
     saveString("mqtt_pass", password);
     saveString("mqtt_topic", topic);
+    cached_mqtt_broker = broker;
+    cached_mqtt_port = port;
+    cached_mqtt_username = username;
+    cached_mqtt_password = password;
+    cached_mqtt_topic = topic;
     Serial.printf("[CONFIG] MQTT config saved: %s:%d\n", broker.c_str(), port);
 }
 

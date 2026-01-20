@@ -1,60 +1,32 @@
 /**
  * @file web_server.cpp
- * @brief Async Web Server Implementation
+ * @brief Async Web Server Core Implementation
+ * 
+ * This file contains the core web server functionality:
+ * - Server initialization and lifecycle
+ * - Route setup
+ * - Captive portal
+ * - Reboot handling
+ * 
+ * API handlers are split into separate files:
+ * - api_status.cpp: Status and configuration handlers
+ * - api_wifi.cpp: WiFi scan and save handlers
+ * - api_webex.cpp: Webex OAuth handlers
+ * - api_ota.cpp: OTA check and update handlers
+ * - api_ota_upload.cpp: OTA firmware upload handler
+ * - api_embedded.cpp: Embedded app status handlers
+ * - api_modules.cpp: Module management handlers
  */
 
 #include "web_server.h"
 #include "ota_bundle.h"
-#include "../ota/ota_manager.h"
-#include "../webex/oauth_handler.h"
-#include "../time/time_manager.h"
 #include <ArduinoJson.h>
-#include <ctype.h>
-#include <string.h>
 #include <WiFi.h>
 #include <Update.h>
 #include <esp_ota_ops.h>
-#include <esp_partition.h>
-
-// External reference to OTA manager for update functionality
-extern OTAManager ota_manager;
 
 // DNS port for captive portal
 #define DNS_PORT 53
-
-namespace {
-String urlEncode(const String& str) {
-    String encoded = "";
-    char c;
-    char code0;
-    char code1;
-
-    for (unsigned int i = 0; i < str.length(); i++) {
-        c = str.charAt(i);
-
-        if (c == ' ') {
-            encoded += "%20";
-        } else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            encoded += c;
-        } else {
-            code1 = (c & 0xf) + '0';
-            if ((c & 0xf) > 9) {
-                code1 = (c & 0xf) - 10 + 'A';
-            }
-            c = (c >> 4) & 0xf;
-            code0 = c + '0';
-            if (c > 9) {
-                code0 = c - 10 + 'A';
-            }
-            encoded += '%';
-            encoded += code0;
-            encoded += code1;
-        }
-    }
-
-    return encoded;
-}
-}  // namespace
 
 WebServerManager::WebServerManager()
     : server(nullptr), dns_server(nullptr), config_manager(nullptr), app_state(nullptr),
@@ -65,7 +37,8 @@ WebServerManager::WebServerManager()
       ota_bundle_app_written(0), ota_bundle_fs_written(0), ota_bundle_fs_started(false),
       config_body_buffer(""), config_body_expected(0),
       embedded_body_buffer(""), embedded_body_expected(0),
-      ota_upload_target(nullptr) {
+      ota_upload_target(nullptr),
+      pending_reboot(false), pending_reboot_time(0), pending_boot_partition(nullptr) {
     memset(ota_bundle_header, 0, sizeof(ota_bundle_header));
 }
 
@@ -144,7 +117,7 @@ void WebServerManager::setupRoutes() {
     // IMPORTANT: Register API endpoints FIRST, before static file handlers
     // This prevents VFS errors when checking for non-existent static files
     
-    // API endpoints
+    // API endpoints - Status and Config
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
     });
@@ -161,6 +134,7 @@ void WebServerManager::setupRoutes() {
         }
     );
 
+    // API endpoints - WiFi
     server->on("/api/wifi/scan", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleWifiScan(request);
     });
@@ -173,6 +147,7 @@ void WebServerManager::setupRoutes() {
         }
     );
 
+    // API endpoints - Webex OAuth
     server->on("/api/webex/auth", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleWebexAuth(request);
     });
@@ -181,6 +156,7 @@ void WebServerManager::setupRoutes() {
         handleOAuthCallback(request);
     });
 
+    // API endpoints - OTA
     server->on("/api/ota/check", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleCheckUpdate(request);
     });
@@ -208,8 +184,9 @@ void WebServerManager::setupRoutes() {
             request->send(success ? 200 : 400, "application/json", response);
 
             if (success) {
-                delay(1000);
-                ESP.restart();
+                pending_reboot = true;
+                pending_reboot_time = millis() + 500;
+                pending_boot_partition = nullptr;
             }
         },
         [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
@@ -239,8 +216,9 @@ void WebServerManager::setupRoutes() {
             request->send(success ? 200 : 400, "application/json", response);
 
             if (success) {
-                delay(1000);
-                ESP.restart();
+                pending_reboot = true;
+                pending_reboot_time = millis() + 500;
+                pending_boot_partition = nullptr;
             }
         },
         [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
@@ -285,6 +263,7 @@ void WebServerManager::setupRoutes() {
         }
     );
 
+    // API endpoints - System
     server->on("/api/reboot", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleReboot(request);
     });
@@ -379,1096 +358,30 @@ void WebServerManager::setupRoutes() {
     });
 }
 
-void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
-                                            const String& filename,
-                                            size_t index,
-                                            uint8_t* data,
-                                            size_t len,
-                                            bool final,
-                                            size_t total) {
-    if (index == 0) {
-        ota_upload_in_progress = true;
-        ota_upload_error = "";
-        ota_upload_size = total > 0 ? total : request->contentLength();
-        ota_bundle_header_filled = 0;
-        ota_bundle_mode = false;
-        ota_bundle_header_flushed = false;
-        ota_bundle_app_size = 0;
-        ota_bundle_fs_size = 0;
-        ota_bundle_app_written = 0;
-        ota_bundle_fs_written = 0;
-        ota_bundle_fs_started = false;
-
-        Serial.printf("[WEB] OTA upload start: %s (%u bytes)\n",
-                      filename.c_str(), static_cast<unsigned>(ota_upload_size));
-    }
-
-    if (ota_upload_error.isEmpty()) {
-        size_t offset = 0;
-
-        // Read and parse bundle header if needed
-        if (ota_bundle_header_filled < OTABundle::HEADER_SIZE) {
-            size_t to_copy = min(OTABundle::HEADER_SIZE - ota_bundle_header_filled, len);
-            memcpy(ota_bundle_header + ota_bundle_header_filled, data, to_copy);
-            ota_bundle_header_filled += to_copy;
-            offset += to_copy;
-
-            // Header complete - check if bundle
-            if (ota_bundle_header_filled == OTABundle::HEADER_SIZE) {
-                if (OTABundle::is_bundle(ota_bundle_header)) {
-                    ota_bundle_mode = true;
-                    OTABundle::parse_header(ota_bundle_header, ota_bundle_app_size, ota_bundle_fs_size);
-
-                    Serial.printf("[WEB] OTA bundle detected: app=%u fs=%u\n",
-                                  static_cast<unsigned>(ota_bundle_app_size),
-                                  static_cast<unsigned>(ota_bundle_fs_size));
-
-                    // Get current running partition for logging
-                    const esp_partition_t* running = esp_ota_get_running_partition();
-                    if (running) {
-                        Serial.printf("[WEB] Currently running from: %s\n", running->label);
-                    }
-                    
-                    ota_upload_target = esp_ota_get_next_update_partition(nullptr);
-                    if (!ota_upload_target) {
-                        ota_upload_error = "No OTA partition available";
-                    } else {
-                        Serial.printf("[WEB] OTA target partition: %s (addr=0x%06x, size=%u bytes)\n",
-                                      ota_upload_target->label,
-                                      static_cast<unsigned>(ota_upload_target->address),
-                                      static_cast<unsigned>(ota_upload_target->size));
-                    }
-
-                    // Start app update - MUST specify partition label to write to correct partition
-                    if (ota_upload_error.isEmpty() && ota_upload_target) {
-                        const char* ota_label = ota_upload_target->label;
-                        if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
-                            ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin app failed: %s\n", ota_upload_error.c_str());
-                        }
-                    }
-                } else {
-                    // Not a bundle - regular firmware
-                    size_t firmware_total = ota_upload_size;
-                    if (firmware_total == 0) {
-                        ota_upload_error = "Missing content length";
-                    } else {
-                        // Get current running partition for logging
-                        const esp_partition_t* running = esp_ota_get_running_partition();
-                        if (running) {
-                            Serial.printf("[WEB] Currently running from: %s\n", running->label);
-                        }
-                        
-                        ota_upload_target = esp_ota_get_next_update_partition(nullptr);
-                        if (!ota_upload_target) {
-                            ota_upload_error = "No OTA partition available";
-                        } else {
-                            Serial.printf("[WEB] OTA target partition: %s (addr=0x%06x, size=%u bytes)\n",
-                                          ota_upload_target->label,
-                                          static_cast<unsigned>(ota_upload_target->address),
-                                          static_cast<unsigned>(ota_upload_target->size));
-                        }
-                    }
-                    // Start firmware update - MUST specify partition label to write to correct partition
-                    if (ota_upload_error.isEmpty() && ota_upload_target) {
-                        const char* ota_label = ota_upload_target->label;
-                        if (!Update.begin(firmware_total, U_FLASH, -1, LOW, ota_label)) {
-                            ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin firmware failed: %s\n", ota_upload_error.c_str());
-                        }
-                    }
-                }
-            } else {
-                // Header not complete yet
-                if (final) {
-                    ota_upload_error = "Incomplete OTA upload";
-                }
-                return;
-            }
-        }
-
-        // Process payload
-        if (ota_bundle_mode) {
-            // Bundle mode - write app then FS
-            const uint8_t* ptr = data + offset;
-            size_t remaining = len - offset;
-
-            while (remaining > 0 && ota_upload_error.isEmpty()) {
-                if (ota_bundle_app_written < ota_bundle_app_size) {
-                    // Writing app
-                    size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
-                    if (Update.write(const_cast<uint8_t*>(ptr), to_write) != to_write) {
-                        ota_upload_error = Update.errorString();
-                        break;
-                    }
-                    ota_bundle_app_written += to_write;
-                    ptr += to_write;
-                    remaining -= to_write;
-
-                    // App complete - start FS
-                    if (ota_bundle_app_written == ota_bundle_app_size) {
-                        if (!Update.end(true)) {
-                            ota_upload_error = Update.errorString();
-                            break;
-                        }
-                        if (ota_upload_target) {
-                            Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
-                            esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
-                            if (err != ESP_OK) {
-                                Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
-                                ota_upload_error = "Failed to set boot partition";
-                                break;
-                            } else {
-                                // Verify boot partition was set correctly
-                                const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
-                                if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                                    Serial.printf("[WEB] Boot partition verified: %s\n", boot_partition->label);
-                                } else {
-                                    Serial.printf("[WEB] WARNING: Boot partition verification failed!\n");
-                                }
-                            }
-                        }
-                        Serial.println("[WEB] OTA bundle app complete, starting FS");
-
-                        LittleFS.end();
-                        if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
-                            ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin FS failed: %s\n", ota_upload_error.c_str());
-                            break;
-                        }
-                        ota_bundle_fs_started = true;
-                    }
-                } else {
-                    // Writing FS
-                    size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
-                    if (Update.write(const_cast<uint8_t*>(ptr), to_write) != to_write) {
-                        ota_upload_error = Update.errorString();
-                        break;
-                    }
-                    ota_bundle_fs_written += to_write;
-                    ptr += to_write;
-                    remaining -= to_write;
-                }
-            }
-        } else {
-            // Regular firmware mode
-            if (!ota_bundle_header_flushed) {
-                // Write buffered header
-                if (Update.write(ota_bundle_header, ota_bundle_header_filled) != ota_bundle_header_filled) {
-                    ota_upload_error = Update.errorString();
-                }
-                ota_bundle_header_flushed = true;
-            }
-
-            if (ota_upload_error.isEmpty() && offset < len) {
-                if (Update.write(data + offset, len - offset) != (len - offset)) {
-                    ota_upload_error = Update.errorString();
-                }
-            }
-        }
-    }
-
-    if (final) {
-        if (ota_upload_error.isEmpty()) {
-            if (ota_bundle_mode) {
-                // Verify bundle completion
-                if (ota_bundle_app_written != ota_bundle_app_size ||
-                    ota_bundle_fs_written != ota_bundle_fs_size) {
-                    ota_upload_error = "OTA bundle incomplete";
-                } else if (ota_bundle_fs_started && !Update.end(true)) {
-                    ota_upload_error = Update.errorString();
-                }
-                // Verify boot partition is set correctly (it should have been set when app completed)
-                if (ota_upload_error.isEmpty() && ota_upload_target) {
-                    const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
-                    if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                        Serial.printf("[WEB] Boot partition verified for bundle: %s\n", boot_partition->label);
-                    } else {
-                        Serial.printf("[WEB] WARNING: Boot partition not set correctly! Expected: %s, Got: %s\n",
-                                      ota_upload_target ? ota_upload_target->label : "NULL",
-                                      boot_partition ? boot_partition->label : "NULL");
-                        // Try to set it again
-                        esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
-                        if (err != ESP_OK) {
-                            Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
-                            ota_upload_error = "Failed to set boot partition";
-                        } else {
-                            Serial.printf("[WEB] Boot partition set successfully: %s\n", ota_upload_target->label);
-                        }
-                    }
-                }
-            } else {
-                // Regular firmware
-                if (!Update.end(true)) {
-                    ota_upload_error = Update.errorString();
-                }
-                if (ota_upload_error.isEmpty() && ota_upload_target) {
-                    Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
-                    esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
-                    if (err != ESP_OK) {
-                        Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
-                        ota_upload_error = "Failed to set boot partition";
-                    } else {
-                        // Verify boot partition was set correctly
-                        const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
-                        if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                            Serial.printf("[WEB] Boot partition verified: %s\n", boot_partition->label);
-                        } else {
-                            Serial.printf("[WEB] WARNING: Boot partition verification failed!\n");
-                        }
-                    }
-                }
-            }
-        } else {
-            Update.abort();
-        }
-
-        ota_upload_in_progress = false;
-        Serial.printf("[WEB] OTA upload %s (%u bytes)\n",
-                      ota_upload_error.isEmpty() ? "complete" : "failed",
-                      static_cast<unsigned>(ota_upload_size));
-        if (!ota_upload_error.isEmpty()) {
-            Serial.printf("[WEB] OTA error: %s\n", ota_upload_error.c_str());
-        } else {
-            // OTA successful - reboot to boot from new partition
-            Serial.println("[WEB] OTA successful! Rebooting in 2 seconds...");
-            delay(2000);
-            ESP.restart();
-        }
-    }
-}
-
-void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-
-    doc["wifi_connected"] = app_state->wifi_connected;
-    doc["webex_authenticated"] = app_state->webex_authenticated;
-    doc["bridge_connected"] = app_state->bridge_connected;
-    doc["embedded_app_connected"] = app_state->embedded_app_connected;
-    doc["xapi_connected"] = app_state->xapi_connected;
-    doc["mqtt_connected"] = app_state->mqtt_connected;
-    doc["webex_status"] = app_state->webex_status;
-    doc["camera_on"] = app_state->camera_on;
-    doc["mic_muted"] = app_state->mic_muted;
-    doc["in_call"] = app_state->in_call;
-    // Sensor data - always include fields even if 0/null
-    doc["temperature"] = app_state->temperature;
-    doc["humidity"] = app_state->humidity;
-    doc["door_status"] = app_state->door_status.isEmpty() ? "" : app_state->door_status;
-    doc["air_quality"] = app_state->air_quality_index;  // 0 is a valid value
-    doc["tvoc"] = app_state->tvoc;
-    doc["co2_ppm"] = app_state->co2_ppm;
-    doc["pm2_5"] = app_state->pm2_5;
-    doc["ambient_noise"] = app_state->ambient_noise;
-    doc["sensor_mac"] = app_state->sensor_mac;
-
-    // System info
-    doc["ip_address"] = WiFi.localIP().toString();
-    doc["mac_address"] = WiFi.macAddress();
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["uptime"] = millis() / 1000;
-
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    const esp_partition_t* boot = esp_ota_get_boot_partition();
-    doc["running_partition"] = running ? String(running->label) : "unknown";
-    doc["boot_partition"] = boot ? String(boot->label) : "unknown";
-
-    #ifdef FIRMWARE_VERSION
-    doc["firmware_version"] = FIRMWARE_VERSION;
-    #else
-    doc["firmware_version"] = "unknown";
-    #endif
-
-    #ifdef BUILD_ID
-    doc["firmware_build_id"] = BUILD_ID;
-    #else
-    doc["firmware_build_id"] = "unknown";
-    #endif
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-
-    // Device configuration - always include all fields
-    doc["device_name"] = config_manager->getDeviceName();
-    doc["display_name"] = config_manager->getDisplayName();
-    doc["brightness"] = config_manager->getBrightness();
-    doc["scroll_speed_ms"] = config_manager->getScrollSpeedMs();
-    doc["poll_interval"] = config_manager->getWebexPollInterval();
-    doc["xapi_poll_interval"] = config_manager->getXAPIPollInterval();
-    // Boolean flags - always include as explicit booleans
-    doc["has_webex_credentials"] = config_manager->hasWebexCredentials();
-    doc["has_webex_tokens"] = config_manager->hasWebexTokens();
-    doc["has_xapi_device"] = config_manager->hasXAPIDevice();
-    doc["xapi_device_id"] = config_manager->getXAPIDeviceId().isEmpty() ? "" : config_manager->getXAPIDeviceId();
-    
-    // Webex credentials - show masked versions if present
-    String clientId = config_manager->getWebexClientId();
-    String clientSecret = config_manager->getWebexClientSecret();
-    if (!clientId.isEmpty()) {
-        // Show first 8 chars + masked rest
-        if (clientId.length() > 8) {
-            doc["webex_client_id_masked"] = clientId.substring(0, 8) + "..." + String(clientId.length() - 8) + " more";
-        } else {
-            doc["webex_client_id_masked"] = clientId;
-        }
-    } else {
-        doc["webex_client_id_masked"] = "";
-    }
-    if (!clientSecret.isEmpty()) {
-        doc["webex_client_secret_masked"] = "••••••••" + String(clientSecret.length()) + " characters";
-    } else {
-        doc["webex_client_secret_masked"] = "";
+bool WebServerManager::checkPendingReboot() {
+    if (!pending_reboot) {
+        return false;
     }
     
-    // MQTT configuration
-    doc["mqtt_broker"] = config_manager->getMQTTBroker();
-    doc["mqtt_port"] = config_manager->getMQTTPort();
-    doc["mqtt_topic"] = config_manager->getMQTTTopic();
-    doc["mqtt_username"] = config_manager->getMQTTUsername();
-    
-    // MQTT password - show indicator if present
-    String mqttPassword = config_manager->getMQTTPassword();
-    if (!mqttPassword.isEmpty()) {
-        doc["mqtt_password_masked"] = "••••••••" + String(mqttPassword.length()) + " characters";
-        doc["has_mqtt_password"] = true;
-    } else {
-        doc["mqtt_password_masked"] = "";
-        doc["has_mqtt_password"] = false;
+    if (millis() < pending_reboot_time) {
+        return false;
     }
     
-    // Sensor and display configuration - ensure empty strings are sent as empty, not null
-    doc["sensor_serial"] = config_manager->getSensorSerial().isEmpty() ? "" : config_manager->getSensorSerial();
-    doc["sensor_macs"] = config_manager->getSensorMacsRaw().isEmpty() ? "" : config_manager->getSensorMacsRaw();
-    doc["display_sensor_mac"] = config_manager->getDisplaySensorMac().isEmpty() ? "" : config_manager->getDisplaySensorMac();
-    doc["display_metric"] = config_manager->getDisplayMetric().isEmpty() ? "tvoc" : config_manager->getDisplayMetric();
-    doc["ota_url"] = config_manager->getOTAUrl().isEmpty() ? "" : config_manager->getOTAUrl();
-    // Boolean flag - always include as explicit boolean
-    doc["auto_update"] = config_manager->getAutoUpdate();
-    doc["time_zone"] = config_manager->getTimeZone().isEmpty() ? "UTC" : config_manager->getTimeZone();
-    doc["ntp_server"] = config_manager->getNtpServer().isEmpty() ? "pool.ntp.org" : config_manager->getNtpServer();
-    doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
-    doc["date_format"] = config_manager->getDateFormat().isEmpty() ? "mdy" : config_manager->getDateFormat();
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len,
-                                        size_t index, size_t total) {
-    if (index == 0) {
-        config_body_buffer = "";
-        config_body_expected = total;
-        if (total > 0) {
-            config_body_buffer.reserve(total);
-        }
-    }
-
-    if (len > 0) {
-        String chunk(reinterpret_cast<char*>(data), len);
-        config_body_buffer += chunk;
-    }
-
-    if (total > 0 && (index + len) < total) {
-        return;
-    }
-
-    const String body = config_body_buffer;
-
-    Serial.printf("[WEB] Received config save request (length: %d bytes)\n", body.length());
-    Serial.printf("[WEB] Body: %s\n", body.c_str());
-
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-
-    if (error) {
-        Serial.printf("[WEB] Failed to parse JSON: %s\n", error.c_str());
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        return;
-    }
-
-    // Update configuration
-    bool time_config_updated = false;
-    if (doc["device_name"].is<const char*>()) {
-        config_manager->setDeviceName(doc["device_name"].as<const char*>());
-    }
-    if (doc["display_name"].is<const char*>()) {
-        config_manager->setDisplayName(doc["display_name"].as<const char*>());
-    }
-    if (doc["brightness"].is<int>()) {
-        config_manager->setBrightness(doc["brightness"].as<uint8_t>());
-    }
-    if (doc["scroll_speed_ms"].is<int>()) {
-        config_manager->setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
-    }
-    if (doc["poll_interval"].is<int>()) {
-        config_manager->setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
-    }
-    if (doc["xapi_poll_interval"].is<int>()) {
-        config_manager->setXAPIPollInterval(doc["xapi_poll_interval"].as<uint16_t>());
-    }
-    if (doc["xapi_device_id"].is<const char*>()) {
-        config_manager->setXAPIDeviceId(doc["xapi_device_id"].as<const char*>());
-    }
-    // Webex credentials - only save if both fields provided
-    if (doc["webex_client_id"].is<const char*>() && doc["webex_client_secret"].is<const char*>()) {
-        String client_id = doc["webex_client_id"].as<String>();
-        String client_secret = doc["webex_client_secret"].as<String>();
-        
-        if (!client_id.isEmpty() && !client_secret.isEmpty()) {
-            config_manager->setWebexCredentials(client_id, client_secret);
-            Serial.printf("[WEB] Webex credentials saved - Client ID: %s***\n", client_id.substring(0, 8).c_str());
-        } else if (client_id.isEmpty() && client_secret.isEmpty()) {
-            Serial.println("[WEB] Empty Webex credentials provided - skipping save");
+    Serial.println("[WEB] Executing pending reboot...");
+    
+    // Set boot partition if specified
+    if (pending_boot_partition) {
+        esp_err_t err = esp_ota_set_boot_partition(pending_boot_partition);
+        if (err != ESP_OK) {
+            Serial.printf("[WEB] Failed to set boot partition: %s\n", esp_err_to_name(err));
         } else {
-            Serial.println("[WEB] Warning: Only one Webex credential field provided");
+            Serial.printf("[WEB] Boot partition set to: %s\n", pending_boot_partition->label);
         }
     }
     
-    // MQTT configuration
-    if (doc["mqtt_broker"].is<const char*>()) {
-        String broker = doc["mqtt_broker"].as<String>();
-        uint16_t port = doc["mqtt_port"].is<int>() ? doc["mqtt_port"].as<uint16_t>() : 1883;
-        String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : "";
-        String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : "meraki/v1/mt/#";
-        
-        // Handle password - if not provided, keep existing
-        String password;
-        if (doc["mqtt_password"].is<const char*>()) {
-            password = doc["mqtt_password"].as<String>();
-        } else {
-            // Keep existing password
-            password = config_manager->getMQTTPassword();
-            Serial.println("[WEB] MQTT password not provided - keeping existing");
-        }
-        
-        config_manager->setMQTTConfig(broker, port, username, password, topic);
-        Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n", 
-                     broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
-    }
-    
-    // Sensor MAC filter list (comma/semicolon separated)
-    if (doc["sensor_macs"].is<const char*>()) {
-        String macs = doc["sensor_macs"].as<String>();
-        config_manager->setSensorMacs(macs);
-        if (!macs.isEmpty()) {
-            Serial.printf("[WEB] Sensor MACs saved: %s\n", macs.c_str());
-        }
-    } else if (doc["sensor_serial"].is<const char*>()) {
-        String serial = doc["sensor_serial"].as<String>();
-        config_manager->setSensorSerial(serial);
-        if (!serial.isEmpty()) {
-            Serial.printf("[WEB] Sensor serial saved: %s\n", serial.c_str());
-        }
-    }
-    if (doc["display_sensor_mac"].is<const char*>()) {
-        String display_mac = doc["display_sensor_mac"].as<String>();
-        config_manager->setDisplaySensorMac(display_mac);
-    }
-    if (doc["display_metric"].is<const char*>()) {
-        String display_metric = doc["display_metric"].as<String>();
-        config_manager->setDisplayMetric(display_metric);
-    }
-    if (doc["ota_url"].is<const char*>()) {
-        config_manager->setOTAUrl(doc["ota_url"].as<const char*>());
-    }
-    if (doc["auto_update"].is<bool>()) {
-        config_manager->setAutoUpdate(doc["auto_update"].as<bool>());
-    }
-    if (!doc["time_zone"].isNull()) {
-        String time_zone = doc["time_zone"].as<String>();
-        time_zone.trim();
-        if (!time_zone.isEmpty()) {
-            config_manager->setTimeZone(time_zone);
-            time_config_updated = true;
-        }
-    }
-    if (!doc["ntp_server"].isNull()) {
-        String ntp_server = doc["ntp_server"].as<String>();
-        ntp_server.trim();
-        if (ntp_server.isEmpty()) {
-            ntp_server = "pool.ntp.org";
-        }
-        config_manager->setNtpServer(ntp_server);
-        time_config_updated = true;
-    }
-    if (!doc["time_format"].isNull()) {
-        String time_format = doc["time_format"].as<String>();
-        time_format.trim();
-        if (!time_format.isEmpty()) {
-            config_manager->setTimeFormat(time_format);
-            time_config_updated = true;
-        }
-    }
-    if (!doc["date_format"].isNull()) {
-        String date_format = doc["date_format"].as<String>();
-        date_format.trim();
-        if (!date_format.isEmpty()) {
-            config_manager->setDateFormat(date_format);
-            time_config_updated = true;
-        }
-    }
-
-    if (time_config_updated) {
-        applyTimeConfig(*config_manager, app_state);
-    }
-
-    Serial.println("[WEB] Configuration save complete");
-    request->send(200, "application/json", "{\"success\":true}");
-}
-
-void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
-    int n = WiFi.scanNetworks();
-
-    JsonDocument doc;
-    JsonArray networks = doc["networks"].to<JsonArray>();
-
-    for (int i = 0; i < n; i++) {
-        JsonObject network = networks.add<JsonObject>();
-        network["ssid"] = WiFi.SSID(i);
-        network["rssi"] = WiFi.RSSI(i);
-        network["encrypted"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
-    }
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
-    String ssid;
-    String password;
-
-    // Helper to URL-decode form values
-    auto urlDecode = [](const String& input) -> String {
-        String out;
-        out.reserve(input.length());
-        for (size_t i = 0; i < input.length(); i++) {
-            char c = input[i];
-            if (c == '+') {
-                out += ' ';
-                continue;
-            }
-            if (c == '%' && i + 2 < input.length()) {
-                char hex[3] = { input[i + 1], input[i + 2], 0 };
-                out += static_cast<char>(strtol(hex, nullptr, 16));
-                i += 2;
-                continue;
-            }
-            out += c;
-        }
-        return out;
-    };
-
-    // Prefer JSON body if provided
-    if (len > 0) {
-        String body;
-        body.reserve(len);
-        for (size_t i = 0; i < len; i++) {
-            body += static_cast<char>(data[i]);
-        }
-
-        JsonDocument doc;
-        if (deserializeJson(doc, body) == DeserializationError::Ok) {
-            ssid = doc["ssid"] | "";
-            password = doc["password"] | "";
-        } else {
-            // Fallback for x-www-form-urlencoded / multipart body
-            int ssid_pos = body.indexOf("ssid=");
-            if (ssid_pos >= 0) {
-                int amp = body.indexOf('&', ssid_pos);
-                String raw = (amp >= 0) ? body.substring(ssid_pos + 5, amp) : body.substring(ssid_pos + 5);
-                ssid = urlDecode(raw);
-            }
-            int pass_pos = body.indexOf("password=");
-            if (pass_pos >= 0) {
-                int amp = body.indexOf('&', pass_pos);
-                String raw = (amp >= 0) ? body.substring(pass_pos + 9, amp) : body.substring(pass_pos + 9);
-                password = urlDecode(raw);
-            }
-        }
-    }
-
-    // Fallback to form params (some clients send multipart params)
-    if (ssid.isEmpty() && request->hasParam("ssid", true)) {
-        ssid = request->getParam("ssid", true)->value();
-    }
-    if (password.isEmpty() && request->hasParam("password", true)) {
-        password = request->getParam("password", true)->value();
-    }
-
-    if (ssid.isEmpty()) {
-        request->send(400, "application/json", "{\"error\":\"Missing ssid\"}");
-        return;
-    }
-
-    config_manager->setWiFiCredentials(ssid, password);
-
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"WiFi saved. Rebooting...\"}");
-
-    // Reboot after short delay
-    delay(1000);
+    delay(100);  // Brief delay for serial output
     ESP.restart();
-}
-
-void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
-    String client_id = config_manager->getWebexClientId();
-
-    if (client_id.isEmpty()) {
-        request->send(400, "application/json", "{\"error\":\"Webex client ID not configured\"}");
-        return;
-    }
-
-    // Build OAuth authorization URL
-    String redirect_uri = buildRedirectUri();
-    String state = String(random(100000, 999999));
-
-    String auth_url = WEBEX_AUTH_URL;
-    auth_url += "?client_id=" + urlEncode(client_id);
-    auth_url += "&response_type=code";
-    auth_url += "&redirect_uri=" + urlEncode(redirect_uri);
-    auth_url += "&scope=" + urlEncode(String(WEBEX_SCOPE_PEOPLE) + " " + String(WEBEX_SCOPE_XAPI));
-    auth_url += "&state=" + state;
-
-    // Store state for verification
-    last_oauth_state = state;
-    last_oauth_redirect_uri = redirect_uri;
-
-    JsonDocument doc;
-    doc["auth_url"] = auth_url;
-    doc["state"] = state;
-    doc["redirect_uri"] = redirect_uri;
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleOAuthCallback(AsyncWebServerRequest* request) {
-    if (!request->hasParam("code") || !request->hasParam("state")) {
-        request->send(400, "text/html", "<html><body><h1>Error</h1><p>Missing authorization code or state.</p></body></html>");
-        return;
-    }
-
-    String code = request->getParam("code")->value();
-    String state = request->getParam("state")->value();
-
-    if (last_oauth_state.isEmpty() || state != last_oauth_state) {
-        request->send(400, "text/html", "<html><body><h1>Error</h1><p>Invalid OAuth state.</p></body></html>");
-        return;
-    }
-
-    pending_oauth_code = code;
-    pending_oauth_redirect_uri = last_oauth_redirect_uri.isEmpty()
-        ? buildRedirectUri()
-        : last_oauth_redirect_uri;
-
-    String html = "<html><head>";
-    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-    html += "<style>body{font-family:sans-serif;text-align:center;padding:50px;}</style>";
-    html += "</head><body>";
-    html += "<h1>Authorization Successful!</h1>";
-    html += "<p>You can close this window.</p>";
-    html += "<p>The display will update shortly.</p>";
-    html += "</body></html>";
-
-    request->send(200, "text/html", html);
-
-    Serial.printf("[WEB] OAuth callback received, code: %s\n", code.substring(0, 10).c_str());
-}
-
-void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    doc["current_version"] = FIRMWARE_VERSION;
-    
-    // Check for updates using OTA manager
-    Serial.println("[WEB] Checking for OTA updates...");
-    bool update_checked = ota_manager.checkForUpdate();
-    
-    if (update_checked) {
-        String latest = ota_manager.getLatestVersion();
-        bool available = ota_manager.isUpdateAvailable();
-        
-        // Ensure we have a valid version string
-        if (latest.isEmpty()) {
-            doc["latest_version"] = "Unknown";
-            doc["update_available"] = false;
-            doc["error"] = "No version information available";
-        } else {
-            doc["latest_version"] = latest;
-            doc["update_available"] = available;
-            
-            if (available) {
-                String download_url = ota_manager.getDownloadUrl();
-                if (!download_url.isEmpty()) {
-                    doc["download_url"] = download_url;
-                }
-                Serial.printf("[WEB] Update available: %s -> %s\n", 
-                             FIRMWARE_VERSION, latest.c_str());
-            } else {
-                Serial.println("[WEB] Already on latest version");
-            }
-        }
-    } else {
-        // Check failed
-        doc["latest_version"] = "Check failed";
-        doc["update_available"] = false;
-        doc["error"] = "Failed to check for updates. Check OTA URL configuration and network connection.";
-        Serial.println("[WEB] OTA check failed");
-    }
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
-    // Check if an update is available first
-    if (!ota_manager.isUpdateAvailable()) {
-        request->send(400, "application/json", 
-                     "{\"success\":false,\"message\":\"No update available. Check for updates first.\"}");
-        return;
-    }
-    
-    Serial.println("[WEB] Starting OTA update...");
-    request->send(200, "application/json", 
-                 "{\"success\":true,\"message\":\"Update started. Device will restart...\"}");
-    
-    // Give the response time to be sent
-    delay(100);
-    
-    // Trigger OTA update (this will reboot on success)
-    if (!ota_manager.performUpdate()) {
-        Serial.println("[WEB] OTA update failed");
-        // Note: If we get here, the update failed and didn't reboot
-    }
-}
-
-void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
-    delay(1000);
-    ESP.restart();
-}
-
-void WebServerManager::handleBootToFactory(AsyncWebServerRequest* request) {
-    const esp_partition_t* factory = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
-
-    if (!factory) {
-        request->send(500, "application/json",
-                      "{\"success\":false,\"message\":\"Factory partition not found\"}");
-        return;
-    }
-
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    if (running && running->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY) {
-        request->send(200, "application/json",
-                      "{\"success\":true,\"message\":\"Already running bootstrap firmware\"}");
-        return;
-    }
-
-    esp_err_t err = esp_ota_set_boot_partition(factory);
-    if (err != ESP_OK) {
-        request->send(500, "application/json",
-                      "{\"success\":false,\"message\":\"Failed to set bootstrap boot partition\"}");
-        return;
-    }
-
-    request->send(200, "application/json",
-                  "{\"success\":true,\"message\":\"Rebooting to bootstrap firmware...\"}");
-    delay(1000);
-    ESP.restart();
-}
-
-void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
-    config_manager->factoryReset();
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete. Rebooting...\"}");
-    delay(1000);
-    ESP.restart();
-}
-
-void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
-    // Return current status for embedded app to read
-    JsonDocument doc;
-    
-    doc["status"] = app_state->webex_status;
-    doc["camera_on"] = app_state->camera_on;
-    doc["mic_muted"] = app_state->mic_muted;
-    doc["in_call"] = app_state->in_call;
-    doc["display_name"] = config_manager->getDisplayName();
-    doc["hostname"] = config_manager->getDeviceName() + ".local";
-    doc["embedded_app_enabled"] = true;
-    
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len,
-                                            size_t index, size_t total) {
-    // Receive status update from Webex Embedded App
-    if (index == 0) {
-        embedded_body_buffer = "";
-        embedded_body_expected = total;
-        if (total > 0) {
-            embedded_body_buffer.reserve(total);
-        }
-    }
-
-    if (len > 0) {
-        String chunk(reinterpret_cast<char*>(data), len);
-        embedded_body_buffer += chunk;
-    }
-
-    if (total > 0 && (index + len) < total) {
-        return;
-    }
-
-    const String body = embedded_body_buffer;
-    
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-    
-    if (error) {
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        return;
-    }
-    
-    // Update app state from embedded app
-    if (doc["status"].is<const char*>()) {
-        String newStatus = doc["status"].as<String>();
-        
-        // Map embedded app status to internal status
-        if (newStatus == "active" || newStatus == "available") {
-            app_state->webex_status = "active";
-        } else if (newStatus == "away" || newStatus == "inactive") {
-            app_state->webex_status = "away";
-        } else if (newStatus == "dnd" || newStatus == "donotdisturb") {
-            app_state->webex_status = "dnd";
-        } else if (newStatus == "meeting" || newStatus == "call" || newStatus == "busy") {
-            app_state->webex_status = "meeting";
-            app_state->in_call = true;
-        } else if (newStatus == "ooo" || newStatus == "outofoffice") {
-            app_state->webex_status = "ooo";
-        } else if (newStatus == "offline") {
-            app_state->webex_status = "offline";
-        } else {
-            app_state->webex_status = newStatus;
-        }
-        
-        Serial.printf("[WEB] Embedded app status update: %s\n", app_state->webex_status.c_str());
-    }
-    
-    // Handle call state
-    if (doc["in_call"].is<bool>()) {
-        app_state->in_call = doc["in_call"].as<bool>();
-    }
-    
-    // Handle camera state
-    if (doc["camera_on"].is<bool>()) {
-        app_state->camera_on = doc["camera_on"].as<bool>();
-    }
-    
-    // Handle mic state
-    if (doc["mic_muted"].is<bool>()) {
-        app_state->mic_muted = doc["mic_muted"].as<bool>();
-    }
-    
-    // Handle display name update
-    if (doc["displayName"].is<const char*>()) {
-        config_manager->setDisplayName(doc["displayName"].as<const char*>());
-    }
-    
-    // Mark as connected via embedded app
-    app_state->embedded_app_connected = true;
-    
-    JsonDocument response;
-    response["success"] = true;
-    response["status"] = app_state->webex_status;
-    response["message"] = "Status updated from embedded app";
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    request->send(200, "application/json", responseStr);
-}
-
-void WebServerManager::handleGetModules(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    
-    // Current firmware info
-    doc["current_variant"] = module_manager ? module_manager->getCurrentVariant() : "unknown";
-    doc["installed_modules"] = module_manager ? module_manager->getInstalledModules() : INSTALLED_MODULES;
-    doc["enabled_modules"] = module_manager ? module_manager->getEnabledModules() : INSTALLED_MODULES;
-    
-    // List all available modules
-    JsonArray modules = doc["modules"].to<JsonArray>();
-    
-    if (module_manager) {
-        auto allModules = module_manager->getAllModules();
-        for (const auto* mod : allModules) {
-            JsonObject m = modules.add<JsonObject>();
-            m["id"] = mod->id;
-            m["name"] = mod->name;
-            m["description"] = mod->description;
-            m["version"] = mod->version;
-            m["size_kb"] = mod->size_kb;
-            m["installed"] = module_manager->isInstalled(mod->id);
-            m["enabled"] = module_manager->isEnabled(mod->id);
-            m["ota_filename"] = mod->ota_filename;
-        }
-    }
-    
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleGetVariants(AsyncWebServerRequest* request) {
-    JsonDocument doc;
-    
-    doc["current_variant"] = module_manager ? module_manager->getCurrentVariant() : "unknown";
-    
-    // Recommended variant based on enabled modules
-    if (module_manager) {
-        const FirmwareVariant* recommended = module_manager->getRecommendedVariant();
-        if (recommended) {
-            doc["recommended"] = recommended->name;
-        }
-    }
-    
-    // List all firmware variants
-    JsonArray variants = doc["variants"].to<JsonArray>();
-    
-    if (module_manager) {
-        auto allVariants = module_manager->getAllVariants();
-        for (const auto* var : allVariants) {
-            JsonObject v = variants.add<JsonObject>();
-            v["name"] = var->name;
-            v["description"] = var->description;
-            v["modules"] = var->modules;
-            v["filename"] = var->filename;
-            v["size_kb"] = var->size_kb;
-            v["is_current"] = (var->modules == module_manager->getInstalledModules());
-        }
-    }
-    
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-}
-
-void WebServerManager::handleSetModuleEnabled(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
-    if (!module_manager) {
-        request->send(503, "application/json", "{\"error\":\"Module manager not available\"}");
-        return;
-    }
-    
-    String body = String((char*)data).substring(0, len);
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-    
-    if (error) {
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        return;
-    }
-    
-    if (!doc["module_id"].is<int>() || !doc["enabled"].is<bool>()) {
-        request->send(400, "application/json", "{\"error\":\"module_id and enabled required\"}");
-        return;
-    }
-    
-    uint8_t moduleId = doc["module_id"].as<uint8_t>();
-    bool enabled = doc["enabled"].as<bool>();
-    
-    // Check if module is installed
-    if (!module_manager->isInstalled(moduleId)) {
-        request->send(400, "application/json", "{\"error\":\"Module not installed\"}");
-        return;
-    }
-    
-    module_manager->setEnabled(moduleId, enabled);
-    
-    JsonDocument response;
-    response["success"] = true;
-    response["module_id"] = moduleId;
-    response["enabled"] = module_manager->isEnabled(moduleId);
-    response["message"] = enabled ? "Module enabled" : "Module disabled";
-    
-    // Check if firmware variant change is recommended
-    const FirmwareVariant* recommended = module_manager->getRecommendedVariant();
-    if (recommended && recommended->modules != module_manager->getInstalledModules()) {
-        response["recommended_variant"] = recommended->name;
-        response["variant_change_suggested"] = true;
-    }
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    request->send(200, "application/json", responseStr);
-}
-
-void WebServerManager::handleInstallVariant(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
-    if (!module_manager) {
-        request->send(503, "application/json", "{\"error\":\"Module manager not available\"}");
-        return;
-    }
-    
-    String body = String((char*)data).substring(0, len);
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, body);
-    
-    if (error) {
-        request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        return;
-    }
-    
-    if (!doc["variant"].is<const char*>()) {
-        request->send(400, "application/json", "{\"error\":\"variant name required\"}");
-        return;
-    }
-    
-    const char* variantName = doc["variant"].as<const char*>();
-    const FirmwareVariant* variant = module_manager->getVariant(variantName);
-    
-    if (!variant) {
-        request->send(404, "application/json", "{\"error\":\"Variant not found\"}");
-        return;
-    }
-    
-    // Build the OTA URL for this variant
-    String otaBaseUrl = config_manager->getOTAUrl();
-    if (otaBaseUrl.isEmpty()) {
-        otaBaseUrl = "https://github.com/liptonj/Led-Matrix-Webex/releases/latest/download";
-    }
-    
-    String firmwareUrl = otaBaseUrl + "/" + String(variant->filename);
-    
-    JsonDocument response;
-    response["success"] = true;
-    response["variant"] = variantName;
-    response["filename"] = variant->filename;
-    response["url"] = firmwareUrl;
-    response["size_kb"] = variant->size_kb;
-    response["modules"] = variant->modules;
-    response["message"] = "Starting OTA update...";
-    
-    String responseStr;
-    serializeJson(response, responseStr);
-    request->send(200, "application/json", responseStr);
-    
-    // Trigger OTA update (handled by OTA manager)
-    // The OTA manager will be called after this response
-    Serial.printf("[WEB] Installing variant: %s from %s\n", variantName, firmwareUrl.c_str());
-    
-    // Store the URL for OTA manager to pick up
-    config_manager->setOTAUrl(firmwareUrl);
-    
-    // Note: Actual OTA installation would be triggered here
-    // This would call ota_manager.installFromUrl(firmwareUrl)
+    return true;  // Won't reach here
 }
 
 String WebServerManager::getContentType(const String& filename) {

@@ -42,6 +42,12 @@ public:
      */
     bool isRunning() const { return running; }
 
+    /**
+     * @brief Check if OTA upload is in progress
+     * @return true if OTA upload is active
+     */
+    bool isOTAUploadInProgress() const { return ota_upload_in_progress; }
+
 private:
     AsyncWebServer* server;
     DNSServer* dns_server;
@@ -73,6 +79,11 @@ private:
     String embedded_body_buffer;
     size_t embedded_body_expected;
     const esp_partition_t* ota_upload_target;
+    
+    // Pending reboot handling
+    bool pending_reboot;
+    unsigned long pending_reboot_time;
+    const esp_partition_t* pending_boot_partition;
 
     void setupCaptivePortal();
     String buildRedirectUri() const;
@@ -122,6 +133,12 @@ public:
     }
     String getPendingOAuthRedirectUri() const { return pending_oauth_redirect_uri; }
     void clearPendingOAuth() { pending_oauth_code = ""; pending_oauth_redirect_uri = ""; }
+    
+    /**
+     * @brief Check if a reboot is pending and perform it if delay has elapsed
+     * @return true if reboot was triggered
+     */
+    bool checkPendingReboot();
 };
 
 #endif // WEB_SERVER_H

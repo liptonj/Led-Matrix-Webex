@@ -203,7 +203,6 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
     const String topic_sensor = extractSensorFromTopic(topic);
     const String configured_macs = config_manager ? config_manager->getSensorMacs() : "";
     if (!isAllowedSensor(topic_sensor, configured_macs)) {
-        Serial.printf("[MQTT] Ignored message for sensor %s\n", topic_sensor.c_str());
         return;
     }
 

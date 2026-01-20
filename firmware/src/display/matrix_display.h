@@ -31,6 +31,18 @@
 #define COLOR_OFFLINE   0x8410  // Gray
 #define COLOR_OOO       0x8010  // Purple
 
+// Page rotation
+#define DEFAULT_PAGE_INTERVAL_MS 5000  // 5 seconds between pages
+
+/**
+ * @brief Display page types
+ */
+enum class DisplayPage : uint8_t {
+    STATUS = 0,    // Status with date/time
+    SENSORS = 1,   // Sensor data page
+    IN_CALL = 2    // In-call with camera/mic status
+};
+
 /**
  * @brief Display data structure
  */
@@ -147,8 +159,16 @@ public:
      */
     void setBrightness(uint8_t brightness);
     void setScrollSpeedMs(uint16_t speed_ms);
+    void setPageIntervalMs(uint16_t interval_ms);
 
 private:
+    // Page rendering
+    void drawStatusPage(const DisplayData& data);
+    void drawSensorPage(const DisplayData& data);
+    void drawInCallPage(const DisplayData& data);
+    void drawStatusIndicator(int x, int y, const String& status);
+    void drawSmallStatusIndicator(int x, int y, const String& status);
+    void drawScrollingStatusText(int y, const String& text, uint16_t color, int start_x);
     MatrixPanel_I2S_DMA* dma_display;
     bool initialized;
     uint8_t brightness;
@@ -196,12 +216,19 @@ private:
     ScrollState unconfig_scroll;
     ScrollState connecting_scroll;
     ScrollState connected_scroll;
+    ScrollState status_scroll;  // For scrolling status text
     String last_static_key;
     unsigned long last_static_ms = 0;
     String last_line_keys[4];
     String last_render_key;
     unsigned long last_render_ms = 0;
     bool last_in_call_layout = false;
+    
+    // Page rotation state
+    DisplayPage current_page = DisplayPage::STATUS;
+    unsigned long last_page_change_ms = 0;
+    uint16_t page_interval_ms = DEFAULT_PAGE_INTERVAL_MS;
+    DisplayPage last_page = DisplayPage::STATUS;
 };
 
 #endif // MATRIX_DISPLAY_H

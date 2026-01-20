@@ -22,6 +22,7 @@
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
 #include "time/time_manager.h"
+#include "wifi/wifi_manager.h"
 
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
@@ -38,15 +39,14 @@ XAPIWebSocket xapi_websocket;
 BridgeClient bridge_client;
 MerakiMQTTClient mqtt_client;
 OTAManager ota_manager;
+WiFiManager wifi_manager;
 
 // Application state (defined in app_state.h)
 #include "app_state.h"
 AppState app_state;
 
 // Forward declarations
-void setup_wifi();
 void setup_time();
-void handle_wifi_connection();
 void update_display();
 void check_for_updates();
 
@@ -102,7 +102,8 @@ void setup() {
 
     // Setup WiFi (includes AP mode fallback if connection fails)
     Serial.println("[INIT] Setting up WiFi...");
-    setup_wifi();
+    wifi_manager.begin(&config_manager, &app_state, &matrix_display);
+    wifi_manager.setupWiFi();
 
     // Initialize mDNS
     if (app_state.wifi_connected) {
@@ -181,10 +182,20 @@ void loop() {
     unsigned long current_time = millis();
 
     // Handle WiFi connection
-    handle_wifi_connection();
+    wifi_manager.handleConnection(&mdns_manager);
+    
+    // Handle NTP time sync after reconnect
+    if (app_state.wifi_connected && !app_state.time_synced) {
+        setup_time();
+    }
 
     // Process web server requests
     web_server.loop();
+    
+    // Check for pending reboot from web server
+    if (web_server.checkPendingReboot()) {
+        return;  // Won't actually return, device will restart
+    }
 
     // Complete OAuth flow if callback was received
     if (web_server.hasPendingOAuthCode()) {
@@ -205,6 +216,10 @@ void loop() {
             BridgeUpdate update = bridge_client.getUpdate();
             app_state.webex_status = update.status;
             app_state.bridge_connected = true;
+            // Derive in_call from status if not connected to xAPI
+            if (!app_state.xapi_connected) {
+                app_state.in_call = (update.status == "meeting" || update.status == "busy");
+            }
         }
     } else if (app_state.wifi_connected && mdns_manager.hasBridge()) {
         // Try to reconnect to bridge
@@ -235,6 +250,10 @@ void loop() {
             WebexPresence presence;
             if (webex_client.getPresence(presence)) {
                 app_state.webex_status = presence.status;
+                // Derive in_call from status if not connected to xAPI
+                if (!app_state.xapi_connected) {
+                    app_state.in_call = (presence.status == "meeting" || presence.status == "busy");
+                }
             }
         }
     }
@@ -321,123 +340,6 @@ void loop() {
 }
 
 /**
- * @brief Setup WiFi connection
- */
-void setup_wifi() {
-    String ssid = config_manager.getWiFiSSID();
-    String password = config_manager.getWiFiPassword();
-    matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
-
-    // Always scan for networks first so they're available in the web interface
-    Serial.println("[WIFI] Scanning for networks...");
-    WiFi.mode(WIFI_STA);
-    delay(100);
-    int network_count = WiFi.scanNetworks();
-    Serial.printf("[WIFI] Found %d networks\n", network_count);
-
-    // List networks found
-    for (int i = 0; i < min(network_count, 10); i++) {
-        Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
-    }
-
-    if (ssid.isEmpty()) {
-        // Start AP mode for configuration
-        Serial.println("[WIFI] No WiFi configured, starting AP mode...");
-        WiFi.mode(WIFI_AP);
-        WiFi.softAP("Webex-Display-Setup");
-        Serial.printf("[WIFI] AP started (open): SSID='Webex-Display-Setup', IP=%s\n",
-                      WiFi.softAPIP().toString().c_str());
-        matrix_display.showAPMode(WiFi.softAPIP().toString());
-        return;
-    }
-
-    // Check if configured network was found in scan
-    bool network_found = false;
-    for (int i = 0; i < network_count; i++) {
-        if (WiFi.SSID(i) == ssid) {
-            network_found = true;
-            Serial.printf("[WIFI] Configured network '%s' found (signal: %d dBm)\n",
-                          ssid.c_str(), WiFi.RSSI(i));
-            break;
-        }
-    }
-
-    if (!network_found) {
-        Serial.printf("[WIFI] Configured network '%s' NOT found! Starting AP mode...\n", ssid.c_str());
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup");
-        Serial.printf("[WIFI] AP started (open) for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
-        matrix_display.showAPMode(WiFi.softAPIP().toString());
-        return;
-    }
-
-    // Connect to WiFi
-    Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), password.c_str());
-
-    matrix_display.showConnecting(ssid);
-
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
-        Serial.print(".");
-        attempts++;
-    }
-    Serial.println();
-
-    if (WiFi.status() == WL_CONNECTED) {
-        app_state.wifi_connected = true;
-        Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-        matrix_display.showConnected(WiFi.localIP().toString());
-    } else {
-        Serial.println("[WIFI] Connection failed, starting AP mode for reconfiguration...");
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup");
-        Serial.printf("[WIFI] AP started (open): IP=%s\n", WiFi.softAPIP().toString().c_str());
-        matrix_display.showAPMode(WiFi.softAPIP().toString());
-    }
-}
-
-/**
- * @brief Handle WiFi reconnection
- */
-void handle_wifi_connection() {
-    static unsigned long last_check = 0;
-
-    if (millis() - last_check < 10000) {
-        return;
-    }
-    last_check = millis();
-
-    if (WiFi.status() != WL_CONNECTED && !config_manager.getWiFiSSID().isEmpty()) {
-        Serial.println("[WIFI] Connection lost, reconnecting...");
-        app_state.wifi_connected = false;
-        WiFi.reconnect();
-        if (mdns_manager.isInitialized()) {
-            Serial.println("[MDNS] Stopping mDNS due to WiFi disconnect...");
-            mdns_manager.end();
-        }
-    } else if (WiFi.status() == WL_CONNECTED) {
-        if (!app_state.wifi_connected) {
-            Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
-        }
-        app_state.wifi_connected = true;
-
-        if (!mdns_manager.isInitialized()) {
-            Serial.println("[MDNS] Starting mDNS after reconnect...");
-            if (mdns_manager.begin(config_manager.getDeviceName())) {
-                mdns_manager.advertiseHTTP(80);
-            }
-        }
-
-        if (!app_state.time_synced) {
-            setup_time();
-        }
-    }
-}
-
-/**
  * @brief Update the LED matrix display
  */
 void update_display() {
@@ -450,6 +352,12 @@ void update_display() {
     last_update = millis();
     matrix_display.setBrightness(config_manager.getBrightness());
     matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
+
+    // Show updating screen during OTA file upload
+    if (web_server.isOTAUploadInProgress()) {
+        matrix_display.showUpdating("Uploading...");
+        return;
+    }
 
     // If Webex is unavailable, keep showing a generic screen with IP
     if (!app_state.wifi_connected) {
@@ -474,7 +382,8 @@ void update_display() {
     data.camera_on = app_state.camera_on;
     data.mic_muted = app_state.mic_muted;
     data.in_call = app_state.in_call;
-    data.show_call_status = app_state.xapi_connected;
+    // Show call status when we have camera/mic info (xAPI) OR when in a call from any source
+    data.show_call_status = app_state.xapi_connected || app_state.embedded_app_connected || app_state.in_call;
     data.temperature = app_state.temperature;
     data.humidity = app_state.humidity;
     data.door_status = app_state.door_status;
