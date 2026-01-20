@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <esp_system.h>
+#include <cstring>
 
 #include "debug.h"
 #include "config_store.h"
@@ -54,6 +55,8 @@ int releases_fetch_retry_count = 0;
 const int MAX_FETCH_RETRIES = 3;
 unsigned long wifi_connected_time = 0;
 bool releases_cached_message_shown = false;  // Only show message once
+const bool RELEASE_FETCH_ENABLED = false;
+bool ota_upload_failed = false;
 
 // Forward declarations
 void print_startup_banner();
@@ -144,6 +147,12 @@ void setup() {
     if (display.begin()) {
         display.showBootstrap(BOOTSTRAP_VERSION);
     }
+    web_setup.setOTAUploadProgressCallback([](int progress, const char* message) {
+        display.showOTAProgress(progress, String(message));
+        if (message && std::strcmp(message, "OTA Failed") == 0) {
+            ota_upload_failed = true;
+        }
+    });
 
     // Initialize configuration store
     Serial.println("[BOOT] Initializing configuration...");
@@ -282,45 +291,16 @@ void attempt_stored_wifi_connection() {
         display.showConnected(WiFi.localIP().toString(), mdns_hostname);
         delay(3000);  // Show connection info for 3 seconds
 
-        // Check if we should auto-install firmware
-        String ota_url = config_store.getOTAUrl();
-        if (!ota_url.isEmpty()) {
-            Serial.println("[BOOT] OTA URL configured, checking for firmware...");
+        // Start web server for configuration and manual installs
+        web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
 
-            // Start web server for status monitoring (STA mode, no captive portal)
-            web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
+        // Auto-install from GitHub is intentionally disabled while troubleshooting
+        Serial.println("[BOOT] Auto-install disabled - use web interface");
+        Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n",
+                      WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
 
-            // Short delay to allow web server to start
-            delay(2000);
-
-            // Attempt OTA install
-            ota_in_progress = true;
-            if (ota_downloader.checkAndInstall()) {
-                // This won't return if successful (device reboots)
-                Serial.println("[BOOT] OTA started...");
-            } else {
-                Serial.println("[BOOT] OTA check failed, will use web interface");
-                ota_in_progress = false;
-                // Show connection info again since OTA failed
-                display.showConnected(WiFi.localIP().toString(), mdns_hostname);
-                Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n", 
-                              WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
-                Serial.println("[BOOT] Use web interface to retry OTA or reconfigure");
-                
-                // Start background task to fetch releases for web UI
-                ensure_releases_fetch_started();
-            }
-        } else {
-            // Start web server for configuration
-            web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
-            Serial.println("[BOOT] No OTA URL configured");
-            Serial.println("[BOOT] Use web interface to configure and install firmware");
-            Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n", 
-                          WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
-            
-            // Start background task to fetch releases
-            ensure_releases_fetch_started();
-        }
+        // Start background task to fetch releases for web UI
+        ensure_releases_fetch_started();
     } else {
         Serial.println("[BOOT] WiFi connection failed");
         display.showError("WiFi Failed");
@@ -445,7 +425,17 @@ void handle_pending_actions() {
         } else {
             Serial.println("[BOOT] OTA failed");
             ota_in_progress = false;
+            display.showError("OTA Failed");
+            delay(2000);
+            start_provisioning_mode();
         }
+    }
+
+    if (ota_upload_failed) {
+        ota_upload_failed = false;
+        display.showError("OTA Failed");
+        delay(2000);
+        start_provisioning_mode();
     }
 }
 
@@ -453,6 +443,9 @@ void handle_pending_actions() {
  * @brief Ensure releases fetch runs with backoff and retry limits
  */
 void ensure_releases_fetch_started() {
+    if (!RELEASE_FETCH_ENABLED) {
+        return;
+    }
     if (!wifi_provisioner.isConnected()) {
         Serial.println("[TASK] Cannot start release fetch - WiFi not connected");
         return;

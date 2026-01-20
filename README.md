@@ -139,7 +139,8 @@ Led-Matrix-Webex/
 | Component | Specification |
 |-----------|---------------|
 | Microcontroller | ESP32-S3-DevKitC-1-N8R2 (recommended) or ESP32-DevKitC |
-| Display | 64x32 RGB LED Matrix Panel (2048 LEDs, 3mm pitch, HUB75 interface) |
+| Display | P3-64x32-212-165-16s-D1.0 (64x32 RGB LED Matrix Panel, 3mm pitch, HUB75, 1/16 scan) |
+| Breakout/Adapter Board | Seengreat RGB Matrix Adapter Board (E) for ESP32-S3-DevKitC-1 |
 | Display Dimensions | 192mm x 96mm |
 | Power Supply | 5V 2.5A minimum (matrix consumes up to 12W) |
 
@@ -154,24 +155,24 @@ The OTA system automatically detects your board type and downloads the correct f
 
 ### Hardware Wiring (ESP32-S3)
 
-Connect the HUB75 matrix to the ESP32-S3 as follows:
+Connect the HUB75 matrix to the ESP32-S3 as follows (Seengreat Adapter Board E pinout):
 
 | Matrix Pin | ESP32-S3 GPIO | Function |
 |------------|---------------|----------|
-| R1 | GPIO42 | Red data (upper) |
-| G1 | GPIO41 | Green data (upper) |
-| B1 | GPIO40 | Blue data (upper) |
-| R2 | GPIO38 | Red data (lower) |
-| G2 | GPIO39 | Green data (lower) |
-| B2 | GPIO37 | Blue data (lower) |
+| R1 | GPIO37 | Red data (upper) |
+| G1 | GPIO6 | Green data (upper) |
+| B1 | GPIO36 | Blue data (upper) |
+| R2 | GPIO35 | Red data (lower) |
+| G2 | GPIO5 | Green data (lower) |
+| B2 | GPIO0 | Blue data (lower) |
 | A | GPIO45 | Row address bit 0 |
-| B | GPIO36 | Row address bit 1 |
+| B | GPIO1 | Row address bit 1 |
 | C | GPIO48 | Row address bit 2 |
-| D | GPIO35 | Row address bit 3 |
-| E | GPIO21 | Row address bit 4 |
-| CLK | GPIO2 | Clock |
-| LAT | GPIO47 | Latch |
-| OE | GPIO14 | Output enable |
+| D | GPIO2 | Row address bit 3 |
+| E | GPIO4 | Row address bit 4 |
+| CLK | GPIO47 | Clock |
+| LAT | GPIO38 | Latch |
+| OE | GPIO21 | Output enable |
 
 ### Hardware Wiring (ESP32 Standard)
 
@@ -293,6 +294,13 @@ If the configured WiFi network is not found or connection fails, the device auto
 ### Boot Failure Recovery
 If the main firmware fails to boot properly (crashes repeatedly), it automatically rolls back to the bootstrap (factory) partition. You can then use the web interface to reinstall the firmware.
 
+### OTA Slot Limits
+The device uses a single OTA slot in addition to the factory slot. OTA uploads must fit within that OTA partition:
+- ESP32-S3: `ota_0` size is 0x4A0000 (~4.6 MB)
+- ESP32: `ota_0` size is 0x280000 (~2.5 MB)
+
+Use OTA bundle files for web installs; full-flash images (bootloader + partitions + app + filesystem) must be flashed over USB.
+
 ### Manual Recovery
 If the device becomes unresponsive:
 1. Connect USB and open serial monitor
@@ -318,6 +326,14 @@ After flashing the bootstrap firmware:
 2. Select a firmware version from the dropdown
 3. Click **"Install"** - the device downloads the correct firmware for your board
 4. The device reboots into the full application
+
+#### Manual Web UI Upload (Single Bundle)
+If you want to upload a single bundle through the web UI, build it locally:
+```bash
+cd firmware
+pio run -e esp32s3 -t build_ota_bin
+```
+Upload `.pio/build/esp32s3/firmware-ota-esp32s3.bin` using the web UI OTA upload.
 
 ### 3. Webex Integration Setup
 

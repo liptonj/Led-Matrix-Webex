@@ -31,15 +31,15 @@ The CI/CD pipeline produces two types of binaries for each hardware variant:
 
 Used for: Initial factory programming via USB/UART with esptool.py
 
-### 2. Merged OTA Binaries (for OTA updates)
-- `firmware-ota-esp32s3.bin` - Application + Filesystem combined
-- `firmware-ota-esp32.bin` - Application + Filesystem combined
-- `bootstrap-ota-esp32s3.bin` - Bootstrap app + filesystem combined
-- `bootstrap-ota-esp32.bin` - Bootstrap app + filesystem combined
+### 2. OTA Bundle Binaries (for OTA updates and web UI upload)
+- `firmware-ota-esp32s3.bin` - Application + Filesystem bundle
+- `firmware-ota-esp32.bin` - Application + Filesystem bundle
+- `bootstrap-ota-esp32s3.bin` - Bootstrap app + filesystem bundle
+- `bootstrap-ota-esp32.bin` - Bootstrap app + filesystem bundle
 
-Used for: Over-the-air updates via GitHub Releases
+Used for: Over-the-air updates via GitHub Releases or manual web UI upload
 
-## Partition Layout
+## Partition Layout (Single OTA Slot)
 
 ### ESP32-S3 (8MB Flash)
 ```
@@ -48,9 +48,8 @@ Partition      Offset      Size        Contents
 nvs            0x9000      20KB        Non-volatile storage
 otadata        0xe000      8KB         OTA data
 factory        0x10000     2MB         Factory firmware
-ota_0          0x210000    2MB         OTA partition 0
-ota_1          0x410000    2MB         OTA partition 1
-spiffs         0x610000    ~2MB        LittleFS filesystem (shared)
+ota_0          0x260000    ~4.6MB      OTA partition (single slot)
+spiffs         0x700000    1MB         LittleFS filesystem
 ```
 
 ### ESP32 (4MB Flash)
@@ -60,32 +59,25 @@ Partition      Offset      Size        Contents
 nvs            0x9000      20KB        Non-volatile storage
 otadata        0xe000      8KB         OTA data
 factory        0x10000     1.25MB      Factory firmware
-ota_0          0x150000    1.25MB      OTA partition 0
-ota_1          0x290000    1.25MB      OTA partition 1
-spiffs         0x3D0000    192KB       LittleFS filesystem (shared)
+ota_0          0x150000    2.5MB       OTA partition (single slot)
+spiffs         0x3D0000    192KB       LittleFS filesystem
 ```
 
-## How Merged Binaries Work
+## How OTA Bundle Files Work
 
-The merged binary contains both the application and filesystem at specific offsets:
+OTA updates use a single **bundle file** with a small header followed by the
+application and LittleFS images. The bootstrap firmware parses the header,
+writes the app image to `ota_0`, then writes the filesystem to `spiffs`.
 
-### ESP32-S3 Merged Binary Structure
+Bundle format:
 ```
-Offset 0x0:       Application firmware (goes to ota_0 @ 0x210000)
-Offset 0x400000:  LittleFS filesystem (goes to spiffs @ 0x610000)
+Offset 0x0:   "LMWB" magic
+Offset 0x4:   app_size (uint32 LE)
+Offset 0x8:   fs_size (uint32 LE)
+Offset 0xC:   reserved (uint32 LE, 0)
+Offset 0x10:  app image bytes
+...           LittleFS image bytes
 ```
-
-### ESP32 Merged Binary Structure
-```
-Offset 0x0:       Application firmware (goes to ota_0 @ 0x150000)
-Offset 0x280000:  LittleFS filesystem (goes to spiffs @ 0x3D0000)
-```
-
-When the ESP32's OTA system writes the merged binary, it:
-1. Writes the app section to the next available OTA partition (ota_0 or ota_1)
-2. Writes the filesystem section to the spiffs partition
-3. Updates the OTA data partition to boot from the new app
-4. Reboots
 
 ## CI/CD Build Process
 
@@ -93,30 +85,14 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) performs these steps:
 
 ### For Each Hardware Variant (ESP32-S3 and ESP32)
 
-1. **Build Application**
+1. **Build Application + LittleFS + OTA Bundle**
    ```bash
-   pio run -e esp32s3
+   pio run -e esp32s3 -t build_ota_bin
    ```
 
-2. **Build Filesystem Image**
-   ```bash
-   pio run -t buildfs -e esp32s3
-   ```
-
-3. **Create Merged Binary**
-   ```bash
-   python -m esptool merge_bin \
-     -o firmware-ota-esp32s3.bin \
-     --flash_mode dio \
-     --flash_freq 80m \
-     --flash_size 8MB \
-     0x0 firmware.bin \
-     0x400000 littlefs.bin
-   ```
-
-4. **Package for Release**
+2. **Package for Release**
    - Standalone binaries → For factory programming
-   - Merged OTA binary → For OTA updates
+   - OTA bundle binary → For OTA updates and web UI uploads
    - ZIP archives → Complete packages
 
 ## OTA Update Priority Logic
@@ -144,7 +120,7 @@ The OTA downloader searches for binaries in this priority order:
 ### For End Users
 No action required! The OTA system automatically:
 1. Checks for updates from GitHub Releases
-2. Downloads the appropriate merged binary
+2. Downloads the appropriate OTA bundle
 3. Flashes both firmware and filesystem
 4. Reboots with everything in sync
 
@@ -152,19 +128,9 @@ No action required! The OTA system automatically:
 
 #### Testing OTA Updates Locally
 ```bash
-# Build merged binary
+# Build OTA bundle
 cd firmware
-pio run -e esp32s3
-pio run -t buildfs -e esp32s3
-
-# Create merged binary manually
-python -m esptool merge_bin \
-  -o .pio/build/esp32s3/firmware-ota.bin \
-  --flash_mode dio \
-  --flash_freq 80m \
-  --flash_size 8MB \
-  0x0 .pio/build/esp32s3/firmware.bin \
-  0x400000 .pio/build/esp32s3/littlefs.bin
+pio run -e esp32s3 -t build_ota_bin
 
 # Upload to test server and point OTA URL to it
 ```
@@ -183,7 +149,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 \
 ## Troubleshooting
 
 ### OTA Update Fails
-1. Check GitHub release has the merged binary (e.g., `firmware-ota-esp32s3.bin`)
+1. Check GitHub release has the OTA bundle (e.g., `firmware-ota-esp32s3.bin`)
 2. Verify file size is larger than standalone firmware (includes filesystem)
 3. Check serial logs for download errors
 

@@ -93,7 +93,10 @@ WebSetup::WebSetup()
     , ota_bundle_fs_size(0)
     , ota_bundle_app_written(0)
     , ota_bundle_fs_written(0)
-    , ota_bundle_fs_started(false) {
+    , ota_bundle_fs_started(false)
+    , ota_upload_progress_callback(nullptr)
+    , ota_upload_last_progress(-1)
+    , ota_upload_expected_size(0) {
 }
 
 WebSetup::~WebSetup() {
@@ -163,6 +166,17 @@ void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* 
     LOG_INFO(WEB_TAG, "Web server started on port 80");
 
     Serial.println("[WEB] Bootstrap web server started on port 80");
+}
+
+void WebSetup::setOTAUploadProgressCallback(OTAUploadProgressCallback callback) {
+    ota_upload_progress_callback = callback;
+}
+
+void WebSetup::reportOTAUploadProgress(int progress, const char* status) {
+    if (!ota_upload_progress_callback) {
+        return;
+    }
+    ota_upload_progress_callback(progress, status);
 }
 
 void WebSetup::loop() {
@@ -277,8 +291,11 @@ void WebSetup::setupRoutes() {
             request->send(success ? 200 : 400, "application/json", response);
 
             if (success) {
+                reportOTAUploadProgress(100, "Rebooting...");
                 delay(1000);
                 ESP.restart();
+            } else {
+                reportOTAUploadProgress(0, "OTA Failed");
             }
         },
         [this](AsyncWebServerRequest* request, String filename, size_t index, uint8_t* data, size_t len, bool final) {
@@ -295,12 +312,15 @@ void WebSetup::setupRoutes() {
                 ota_bundle_app_written = 0;
                 ota_bundle_fs_written = 0;
                 ota_bundle_fs_started = false;
+                ota_upload_last_progress = -1;
+                ota_upload_expected_size = ota_upload_size;
 
                 LOG_INFO(WEB_TAG, "OTA upload start: %s (%u bytes)",
                          filename.c_str(), static_cast<unsigned>(ota_upload_size));
                 Serial.printf("[WEB] OTA upload start (index=0) file=%s size=%u\n",
                               filename.c_str(),
                               static_cast<unsigned>(ota_upload_size));
+                reportOTAUploadProgress(0, "Uploading...");
             }
 
             if (!ota_upload_error.isEmpty()) {
@@ -323,6 +343,7 @@ void WebSetup::setupRoutes() {
                         ota_bundle_app_size = read_le_u32(ota_bundle_header + 4);
                         ota_bundle_fs_size = read_le_u32(ota_bundle_header + 8);
                         size_t expected_size = OTA_BUNDLE_HEADER_SIZE + ota_bundle_app_size + ota_bundle_fs_size;
+                        ota_upload_expected_size = expected_size;
 
                         if (ota_bundle_app_size == 0 || ota_bundle_fs_size == 0) {
                             ota_upload_error = "Invalid OTA bundle sizes";
@@ -463,6 +484,20 @@ void WebSetup::setupRoutes() {
                                       static_cast<unsigned>(ESP.getFreeHeap()));
                         ota_upload_next_log += 64 * 1024;
                     }
+
+                    size_t total = ota_upload_expected_size > 0
+                        ? ota_upload_expected_size
+                        : ota_upload_size;
+                    if (total > 0) {
+                        int progress = static_cast<int>((ota_upload_written * 100) / total);
+                        if (progress > 99) {
+                            progress = 99;
+                        }
+                        if (progress != ota_upload_last_progress) {
+                            ota_upload_last_progress = progress;
+                            reportOTAUploadProgress(progress, "Uploading...");
+                        }
+                    }
                 }
             } else {
                 if (!ota_bundle_header_flushed) {
@@ -478,6 +513,18 @@ void WebSetup::setupRoutes() {
                                   static_cast<unsigned>(total),
                                   static_cast<unsigned>(ESP.getFreeHeap()));
                     ota_upload_next_log += 64 * 1024;
+                }
+
+                size_t total = ota_upload_expected_size > 0 ? ota_upload_expected_size : ota_upload_size;
+                if (total > 0) {
+                    int progress = static_cast<int>((ota_upload_written * 100) / total);
+                    if (progress > 99) {
+                        progress = 99;
+                    }
+                    if (progress != ota_upload_last_progress) {
+                        ota_upload_last_progress = progress;
+                        reportOTAUploadProgress(progress, "Uploading...");
+                    }
                 }
             }
 
@@ -507,6 +554,7 @@ void WebSetup::setupRoutes() {
                               static_cast<unsigned>(ota_upload_written));
                 if (!ota_upload_error.isEmpty()) {
                     Serial.printf("[WEB] OTA upload error: %s\n", ota_upload_error.c_str());
+                    reportOTAUploadProgress(0, "OTA Failed");
                 }
             }
         }

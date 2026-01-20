@@ -29,31 +29,47 @@ BootstrapDisplay::~BootstrapDisplay() {
 bool BootstrapDisplay::begin() {
     Serial.println("[DISPLAY] Initializing LED matrix...");
 
-    // Configure HUB75 pins based on board type
-#if defined(ESP32_S3_BOARD)
-    // Seengreat adapter pin configuration for ESP32-S3
-    HUB75_I2S_CFG::i2s_pins _pins = {
-        37, 6, 36,    // R1, G1, B1
-        35, 5, 0,     // R2, G2, B2
-        45, 1, 48, 2, 4,  // A, B, C, D, E
-        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
-    };
-#else
-    // ESP32 (standard) pin configuration
-    HUB75_I2S_CFG::i2s_pins _pins = {
-        25, 26, 27, 14, 12, 13,
-        23, 19, 5, 17, 32,
-        16, 4, 15
-    };
-#endif
-
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(
         PANEL_RES_X,
         PANEL_RES_Y,
-        PANEL_CHAIN,
-        _pins
+        PANEL_CHAIN
     );
+
+    // Configure HUB75 pins based on board type
+#if defined(ESP32_S3_BOARD)
+    // Seengreat adapter pin configuration for ESP32-S3 (working pins)
+    mxconfig.gpio.r1 = 37;
+    mxconfig.gpio.g1 = 6;
+    mxconfig.gpio.b1 = 36;
+    mxconfig.gpio.r2 = 35;
+    mxconfig.gpio.g2 = 5;
+    mxconfig.gpio.b2 = 0;
+    mxconfig.gpio.a = 45;
+    mxconfig.gpio.b = 1;
+    mxconfig.gpio.c = 48;
+    mxconfig.gpio.d = 2;
+    mxconfig.gpio.e = 4;
+    mxconfig.gpio.lat = 38;
+    mxconfig.gpio.oe = 21;
+    mxconfig.gpio.clk = 47;
+#else
+    // ESP32 (standard) pin configuration
+    mxconfig.gpio.r1 = 25;
+    mxconfig.gpio.g1 = 26;
+    mxconfig.gpio.b1 = 27;
+    mxconfig.gpio.r2 = 14;
+    mxconfig.gpio.g2 = 12;
+    mxconfig.gpio.b2 = 13;
+    mxconfig.gpio.a = 23;
+    mxconfig.gpio.b = 19;
+    mxconfig.gpio.c = 5;
+    mxconfig.gpio.d = 17;
+    mxconfig.gpio.e = 32;
+    mxconfig.gpio.lat = 4;
+    mxconfig.gpio.oe = 15;
+    mxconfig.gpio.clk = 16;
+#endif
 
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
@@ -251,17 +267,17 @@ void BootstrapDisplay::render(unsigned long now) {
 
 void BootstrapDisplay::renderBootstrap() {
     drawCenteredText(0, "5LS", COLOR_CYAN);
-    drawCenteredText(10, "STATUS", COLOR_WHITE);
+    drawCenteredText(10, "DISPLAY", COLOR_WHITE);
     drawCenteredText(20, "v" + bootstrap_version, COLOR_GRAY);
 }
 
 void BootstrapDisplay::renderAPMode(unsigned long now) {
     (void)now;
     drawWifiOffIcon(1, 1, COLOR_GRAY);
-    drawText(8, 0, "SETUP MODE", COLOR_YELLOW);
+    drawText(8, 0, "SETUP", COLOR_YELLOW);
     dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
 
-    drawLineText(10, "WiFi: " + current_ssid, COLOR_CYAN, true);
+    drawLineText(10, "SSID: " + current_ssid, COLOR_CYAN, true);
     drawLineText(20, "IP: " + current_ip, COLOR_GREEN, true);
 }
 
@@ -277,11 +293,11 @@ void BootstrapDisplay::renderConnecting(unsigned long now) {
 void BootstrapDisplay::renderConnected(unsigned long now) {
     (void)now;
     drawWifiIcon(1, 1, COLOR_GREEN);
-    drawText(8, 0, "BOOTSTRAP", COLOR_GREEN);
+    drawText(8, 0, "SETUP", COLOR_GREEN);
     dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
 
     String ip_line = "IP: " + current_ip;
-    String mdns_line = "HOST: " + current_hostname + ".local";
+    String mdns_line = "MDNS: " + current_hostname + ".local";
     int ip_offset = scrollOffsetForText(ip_line, millis(), 0);
     int mdns_offset = scrollOffsetForText(mdns_line, millis(), 0);
     int synced_offset = max(ip_offset, mdns_offset);

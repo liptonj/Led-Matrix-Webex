@@ -42,30 +42,45 @@ def _load_dotenv() -> None:
                 os.environ.setdefault(key, value)
 
 
-def _ensure_secrets_header() -> None:
+def _apply_env_defines() -> None:
+    if getattr(_apply_env_defines, "_applied", False):
+        return
+    _apply_env_defines._applied = True
     _load_dotenv()
-    include_dir = os.path.join(env.subst("$PROJECT_DIR"), "include")
-    secrets_path = os.path.join(include_dir, "secrets.h")
-    if os.path.exists(secrets_path):
-        return
 
-    client_id = os.environ.get("WEBEX_CLIENT_ID")
-    client_secret = os.environ.get("WEBEX_CLIENT_SECRET")
-    if not client_id and not client_secret:
-        return
+    client_id = os.environ.get("WEBEX_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("WEBEX_CLIENT_SECRET", "").strip()
+    mqtt_broker = os.environ.get("MQTT_BROKER", "").strip()
+    mqtt_port = os.environ.get("MQTT_PORT", "").strip()
+    mqtt_username = os.environ.get("MQTT_USERNAME", "").strip()
+    mqtt_password = os.environ.get("MQTT_PASSWORD", "").strip()
 
-    os.makedirs(include_dir, exist_ok=True)
-    with open(secrets_path, "w", encoding="utf-8") as handle:
-        handle.write("#ifndef SECRETS_H\n#define SECRETS_H\n")
-        if client_id:
-            handle.write(f'\n#define WEBEX_CLIENT_ID "{client_id}"\n')
-        if client_secret:
-            handle.write(f'\n#define WEBEX_CLIENT_SECRET "{client_secret}"\n')
-        handle.write("\n#endif\n")
+    defines = []
+    if client_id and client_secret:
+        defines.append(("WEBEX_CLIENT_ID", f'\\"{client_id}\\"'))
+        defines.append(("WEBEX_CLIENT_SECRET", f'\\"{client_secret}\\"'))
+
+    if mqtt_broker:
+        defines.append(("MQTT_BROKER", f'\\"{mqtt_broker}\\"'))
+        if mqtt_port.isdigit():
+            defines.append(("MQTT_PORT", mqtt_port))
+        if mqtt_username:
+            defines.append(("MQTT_USERNAME", f'\\"{mqtt_username}\\"'))
+        if mqtt_password:
+            defines.append(("MQTT_PASSWORD", f'\\"{mqtt_password}\\"'))
+
+    if defines:
+        env.Append(CPPDEFINES=defines)
+        print("[ENV] Build defines injected from .env")
 
 
-def _merge_ota_bin(source, target, env):
-    _ensure_secrets_header()
+def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
+    _apply_env_defines()
+    if env is None:
+        env = _kwargs.get("env")
+    if env is None:
+        print("Skipping OTA bundle: build environment not available.")
+        return 1
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
     firmware_bin = os.path.join(build_dir, "firmware.bin")
@@ -90,8 +105,8 @@ def _merge_ota_bin(source, target, env):
     return 0
 
 
-def _upload_ota_bin(source, target, env):
-    _ensure_secrets_header()
+def _upload_ota_bin(_source, _target, env):
+    _apply_env_defines()
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
     firmware_bin = os.path.join(build_dir, "firmware.bin")
@@ -140,5 +155,6 @@ env.AddCustomTarget(
 )
 
 
-env.AddPreAction("buildprog", lambda source, target, env: _ensure_secrets_header())
-env.AddPreAction("buildfs", lambda source, target, env: _ensure_secrets_header())
+_apply_env_defines()
+env.AddPreAction("buildprog", lambda source, target, env: _apply_env_defines())
+env.AddPreAction("buildfs", lambda source, target, env: _apply_env_defines())

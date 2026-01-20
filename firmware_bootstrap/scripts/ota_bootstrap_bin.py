@@ -96,7 +96,7 @@ def _upload_bootstrap_bin(source, target, env):
         return 1
     cmd = (
         f'"{python_exe}" "{esptool_path}" --chip {params["chip"]} {port_arg} '
-        f'--baud {speed} write_flash '
+        f'--baud {speed} --before default_reset --after hard_reset write_flash '
         f'0x0 "{bootloader_bin}" '
         f'0x8000 "{partitions_bin}" '
         f'0xE000 "{boot_app0}" '

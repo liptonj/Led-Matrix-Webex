@@ -46,8 +46,11 @@ bool WiFiProvisioner::connectWithStoredCredentials() {
 bool WiFiProvisioner::connect(const String& ssid, const String& password, bool save_credentials) {
     Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
 
+    // Avoid writing WiFi credentials to flash; preserve stored settings
+    WiFi.persistent(false);
+
     // Disconnect from any current network
-    WiFi.disconnect(true);
+    WiFi.disconnect(false);
     delay(100);
 
     // Set station mode
@@ -88,6 +91,9 @@ bool WiFiProvisioner::connect(const String& ssid, const String& password, bool s
 void WiFiProvisioner::startAPWithSmartConfig() {
     Serial.println("[WIFI] Starting AP mode...");
 
+    // Avoid persisting or wiping credentials during AP setup
+    WiFi.persistent(false);
+
     // If we don't have scan results yet, do a quick scan first
     // This ensures the web interface has networks to show
     if (scanned_network_count <= 0) {
@@ -97,9 +103,9 @@ void WiFiProvisioner::startAPWithSmartConfig() {
         scanNetworks();
     }
 
-    // Fully reset WiFi
-    WiFi.disconnect(true);
-    WiFi.softAPdisconnect(true);
+    // Fully reset WiFi (without erasing stored credentials)
+    WiFi.disconnect(false);
+    WiFi.softAPdisconnect(false);
     delay(100);
 
     // Use AP-only mode for maximum compatibility

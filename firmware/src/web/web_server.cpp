@@ -5,7 +5,9 @@
 
 #include "web_server.h"
 #include "../ota/ota_manager.h"
+#include "../webex/oauth_handler.h"
 #include <ArduinoJson.h>
+#include <ctype.h>
 #include <WiFi.h>
 #include <Update.h>
 
@@ -14,6 +16,40 @@ extern OTAManager ota_manager;
 
 // DNS port for captive portal
 #define DNS_PORT 53
+
+namespace {
+String urlEncode(const String& str) {
+    String encoded = "";
+    char c;
+    char code0;
+    char code1;
+
+    for (unsigned int i = 0; i < str.length(); i++) {
+        c = str.charAt(i);
+
+        if (c == ' ') {
+            encoded += "%20";
+        } else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded += c;
+        } else {
+            code1 = (c & 0xf) + '0';
+            if ((c & 0xf) > 9) {
+                code1 = (c & 0xf) - 10 + 'A';
+            }
+            c = (c >> 4) & 0xf;
+            code0 = c + '0';
+            if (c > 9) {
+                code0 = c - 10 + 'A';
+            }
+            encoded += '%';
+            encoded += code0;
+            encoded += code1;
+        }
+    }
+
+    return encoded;
+}
+}  // namespace
 
 WebServerManager::WebServerManager()
     : server(nullptr), dns_server(nullptr), config_manager(nullptr), app_state(nullptr),
@@ -646,11 +682,11 @@ void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
     String redirect_uri = buildRedirectUri();
     String state = String(random(100000, 999999));
 
-    String auth_url = "https://webexapis.com/v1/authorize";
-    auth_url += "?client_id=" + client_id;
+    String auth_url = WEBEX_AUTH_URL;
+    auth_url += "?client_id=" + urlEncode(client_id);
     auth_url += "&response_type=code";
-    auth_url += "&redirect_uri=" + redirect_uri;
-    auth_url += "&scope=spark:people_read%20spark:xapi_statuses";
+    auth_url += "&redirect_uri=" + urlEncode(redirect_uri);
+    auth_url += "&scope=" + urlEncode(String(WEBEX_SCOPE_PEOPLE) + " " + String(WEBEX_SCOPE_XAPI));
     auth_url += "&state=" + state;
 
     // Store state for verification

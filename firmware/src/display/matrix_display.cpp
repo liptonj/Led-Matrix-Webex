@@ -25,30 +25,47 @@ bool MatrixDisplay::begin() {
     Serial.flush();
     yield(); // Feed watchdog
     
-#if defined(ESP32_S3_BOARD)
-    // Seengreat adapter pin configuration for ESP32-S3
-    HUB75_I2S_CFG::i2s_pins _pins = {
-        37, 6, 36,    // R1, G1, B1
-        35, 5, 0,     // R2, G2, B2
-        45, 1, 48, 2, 4,  // A, B, C, D, E
-        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
-    };
-#else
-    // Default ESP32 pins
-    HUB75_I2S_CFG::i2s_pins _pins = {
-        25, 26, 27, 14, 12, 13,
-        23, 19, 5, 17, 32,
-        16, 4, 15
-    };
-#endif
-
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(
         PANEL_RES_X,   // 64 pixels wide
         PANEL_RES_Y,   // 32 pixels tall
-        PANEL_CHAIN,   // 1 panel
-        _pins          // Pin configuration
+        PANEL_CHAIN    // 1 panel
     );
+
+    // Configure HUB75 pins based on board type
+#if defined(ESP32_S3_BOARD)
+    // Seengreat adapter pin configuration for ESP32-S3 (working pins)
+    mxconfig.gpio.r1 = 37;
+    mxconfig.gpio.g1 = 6;
+    mxconfig.gpio.b1 = 36;
+    mxconfig.gpio.r2 = 35;
+    mxconfig.gpio.g2 = 5;
+    mxconfig.gpio.b2 = 0;
+    mxconfig.gpio.a = 45;
+    mxconfig.gpio.b = 1;
+    mxconfig.gpio.c = 48;
+    mxconfig.gpio.d = 2;
+    mxconfig.gpio.e = 4;
+    mxconfig.gpio.lat = 38;
+    mxconfig.gpio.oe = 21;
+    mxconfig.gpio.clk = 47;
+#else
+    // Default ESP32 pins
+    mxconfig.gpio.r1 = 25;
+    mxconfig.gpio.g1 = 26;
+    mxconfig.gpio.b1 = 27;
+    mxconfig.gpio.r2 = 14;
+    mxconfig.gpio.g2 = 12;
+    mxconfig.gpio.b2 = 13;
+    mxconfig.gpio.a = 23;
+    mxconfig.gpio.b = 19;
+    mxconfig.gpio.c = 5;
+    mxconfig.gpio.d = 17;
+    mxconfig.gpio.e = 32;
+    mxconfig.gpio.lat = 4;
+    mxconfig.gpio.oe = 15;
+    mxconfig.gpio.clk = 16;
+#endif
     
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;

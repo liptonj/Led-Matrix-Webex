@@ -5,6 +5,7 @@
 
 #include "config_manager.h"
 #include <ArduinoJson.h>
+#include <cstring>
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -38,8 +39,26 @@ bool ConfigManager::begin() {
 
 #if defined(WEBEX_CLIENT_ID) && defined(WEBEX_CLIENT_SECRET)
     if (cached_client_id.isEmpty() || cached_client_secret.isEmpty()) {
-        setWebexCredentials(String(WEBEX_CLIENT_ID), String(WEBEX_CLIENT_SECRET));
-        Serial.println("[CONFIG] Loaded Webex credentials from secrets.h");
+        if (std::strlen(WEBEX_CLIENT_ID) > 0 && std::strlen(WEBEX_CLIENT_SECRET) > 0) {
+            setWebexCredentials(String(WEBEX_CLIENT_ID), String(WEBEX_CLIENT_SECRET));
+            Serial.println("[CONFIG] Loaded Webex credentials from build environment");
+        }
+    }
+#endif
+
+#if defined(MQTT_BROKER)
+    if (!hasMQTTConfig()) {
+        if (std::strlen(MQTT_BROKER) > 0) {
+            String topic = getMQTTTopic();
+            setMQTTConfig(
+                String(MQTT_BROKER),
+                MQTT_PORT,
+                String(MQTT_USERNAME),
+                String(MQTT_PASSWORD),
+                topic
+            );
+            Serial.println("[CONFIG] Loaded MQTT config from build environment");
+        }
     }
 #endif
 

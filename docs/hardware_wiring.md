@@ -3,7 +3,8 @@
 ## Components Required
 
 - ESP32-S3-DevKitC-1-N8R2 development board
-- RGB LED Matrix Panel 64×32 pixels (P3, HUB75 interface)
+- P3-64x32-212-165-16s-D1.0 RGB LED Matrix Panel (64x32, HUB75, 1/16 scan)
+- Seengreat RGB Matrix Adapter Board (E) for ESP32-S3-DevKitC-1
 - 5V power supply (2.5A minimum, 4A recommended)
 - HUB75 ribbon cable (16-pin, 2.54mm pitch)
 - Jumper wires or custom PCB
@@ -21,20 +22,20 @@ The matrix uses a standard HUB75 interface with the following pin mapping for ES
 
 | Matrix Pin | Function | ESP32-S3 GPIO | Notes |
 |------------|----------|---------------|-------|
-| R1 | Red data (upper half) | GPIO42 | |
-| G1 | Green data (upper half) | GPIO41 | |
-| B1 | Blue data (upper half) | GPIO40 | |
-| R2 | Red data (lower half) | GPIO38 | |
-| G2 | Green data (lower half) | GPIO39 | |
-| B2 | Blue data (lower half) | GPIO37 | |
+| R1 | Red data (upper half) | GPIO37 | |
+| G1 | Green data (upper half) | GPIO6 | |
+| B1 | Blue data (upper half) | GPIO36 | |
+| R2 | Red data (lower half) | GPIO35 | |
+| G2 | Green data (lower half) | GPIO5 | |
+| B2 | Blue data (lower half) | GPIO0 | |
 | A | Row select bit 0 | GPIO45 | |
-| B | Row select bit 1 | GPIO36 | |
+| B | Row select bit 1 | GPIO1 | |
 | C | Row select bit 2 | GPIO48 | |
-| D | Row select bit 3 | GPIO35 | |
-| E | Row select bit 4 | GPIO21 | For 1/32 scan panels |
-| CLK | Clock | GPIO2 | |
-| LAT/STB | Latch/Strobe | GPIO47 | |
-| OE | Output Enable | GPIO14 | Active low |
+| D | Row select bit 3 | GPIO2 | |
+| E | Row select bit 4 | GPIO4 | For 1/32 scan panels |
+| CLK | Clock | GPIO47 | |
+| LAT/STB | Latch/Strobe | GPIO38 | |
+| OE | Output Enable | GPIO21 | Active low |
 | GND | Ground | GND | Multiple connections |
 
 ## Wiring Diagram
@@ -43,22 +44,22 @@ The matrix uses a standard HUB75 interface with the following pin mapping for ES
 ESP32-S3-DevKitC-1                    HUB75 Connector
 ┌─────────────────┐                   ┌─────────────┐
 │                 │                   │ R1  G1      │
-│           GPIO42├───────────────────┤ 1   2       │
-│           GPIO41├───────────────────┤ 3   4       │
-│           GPIO40├───────────────────┤ B1  GND     │
+│           GPIO37├───────────────────┤ 1   2       │
+│            GPIO6├───────────────────┤ 3   4       │
+│           GPIO36├───────────────────┤ B1  GND     │
 │                 │                   │ 5   6       │
-│           GPIO38├───────────────────┤ R2  G2      │
-│           GPIO39├───────────────────┤ 7   8       │
-│           GPIO37├───────────────────┤ B2  GND     │
+│           GPIO35├───────────────────┤ R2  G2      │
+│            GPIO5├───────────────────┤ 7   8       │
+│            GPIO0├───────────────────┤ B2  GND     │
 │                 │                   │ 9   10      │
 │           GPIO45├───────────────────┤ A   B       │
-│           GPIO36├───────────────────┤ 11  12      │
+│            GPIO1├───────────────────┤ 11  12      │
 │           GPIO48├───────────────────┤ C   D       │
-│           GPIO35├───────────────────┤ 13  14      │
-│            GPIO2├───────────────────┤ CLK LAT     │
-│           GPIO47├───────────────────┤ 15  16      │
-│           GPIO14├───────────────────┤ OE  E       │
-│           GPIO21├───────────────────┤             │
+│            GPIO2├───────────────────┤ 13  14      │
+│           GPIO47├───────────────────┤ CLK         │
+│           GPIO38├───────────────────┤ LAT         │
+│           GPIO21├───────────────────┤ OE          │
+│            GPIO4├───────────────────┤ E           │
 │              GND├───────────────────┤ GND         │
 └─────────────────┘                   └─────────────┘
 ```
@@ -100,6 +101,6 @@ ESP32-S3-DevKitC-1                    HUB75 Connector
 
 ## ESP32-S3 GPIO Notes
 
-- GPIO0 is used for boot mode selection - avoid using it
+- GPIO0 is used for boot mode selection; avoid holding it low during boot
 - GPIO45/46 are strapping pins - use with caution
 - The chosen pins avoid conflicts with USB, JTAG, and flash

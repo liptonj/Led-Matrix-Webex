@@ -27,6 +27,8 @@
  */
 class WebSetup {
 public:
+    typedef void (*OTAUploadProgressCallback)(int progress, const char* status);
+
     WebSetup();
     ~WebSetup();
 
@@ -76,6 +78,12 @@ public:
      */
     int getSelectedReleaseIndex() const { return selected_release_index; }
 
+    /**
+     * @brief Set callback for OTA upload progress updates
+     * @param callback Progress callback
+     */
+    void setOTAUploadProgressCallback(OTAUploadProgressCallback callback);
+
 private:
     AsyncWebServer* server;
     DNSServer* dns_server;
@@ -99,9 +107,13 @@ private:
     size_t ota_bundle_fs_written;
     bool ota_bundle_fs_started;
     uint8_t ota_bundle_header[16];
+    OTAUploadProgressCallback ota_upload_progress_callback;
+    int ota_upload_last_progress;
+    size_t ota_upload_expected_size;
 
     void setupRoutes();
     void setupCaptivePortal();
+    void reportOTAUploadProgress(int progress, const char* status);
 
     // Request handlers
     void handleRoot(AsyncWebServerRequest* request);

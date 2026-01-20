@@ -6,7 +6,7 @@
 #define PANEL_RES_Y 32
 #define PANEL_CHAIN 1
 
-// Pin definitions for ESP32-S3 with Seengreat adapter
+// Pin definitions for ESP32-S3 with Seengreat adapter (working pins)
 #define R1_PIN 37
 #define G1_PIN 6
 #define B1_PIN 36
