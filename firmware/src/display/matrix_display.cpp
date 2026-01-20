@@ -26,84 +26,72 @@ bool MatrixDisplay::begin() {
     yield(); // Feed watchdog
     
 #if defined(ESP32_S3_BOARD)
-    // Seengreat adapter pin configuration for ESP32-S3
+    // ESP32-S3 pin configuration
     HUB75_I2S_CFG::i2s_pins _pins = {
-        37, 6, 36,    // R1, G1, B1
-        35, 5, 0,     // R2, G2, B2
-        45, 1, 48, 2, 4,  // A, B, C, D, E
-        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
+        42, // R1
+        41, // G1
+        40, // B1
+        38, // R2
+        39, // G2
+        37, // B2
+        45, // A
+        36, // B
+        48, // C
+        35, // D
+        21, // E
+        2,  // CLK
+        47, // LAT
+        14  // OE
     };
-    
-    Serial.println(">>> Using S3 pins");
 #else
-    // Default ESP32 pins
+    // ESP32 (standard) pin configuration
     HUB75_I2S_CFG::i2s_pins _pins = {
-        25, 26, 27, 14, 12, 13,
-        23, 19, 5, 17, 32,
-        16, 4, 15
+        25, // R1
+        26, // G1
+        27, // B1
+        14, // R2
+        12, // G2
+        13, // B2
+        23, // A
+        19, // B
+        5,  // C
+        17, // D
+        32, // E (active for 1/32 scan, directly active for 1/16 scan panels)
+        16, // CLK
+        4,  // LAT
+        15  // OE
     };
-    Serial.println(">>> Using default pins");
 #endif
-    Serial.flush();
-    yield(); // Feed watchdog
 
-    // Module configuration
-    Serial.println(">>> Creating config");
-    Serial.flush();
-    yield();
-    
+    // Matrix configuration
     HUB75_I2S_CFG mxconfig(
-        PANEL_RES_X,   // 64 pixels wide
-        PANEL_RES_Y,   // 32 pixels tall
-        PANEL_CHAIN,   // 1 panel
-        _pins          // Pin configuration
+        PANEL_RES_X,   // width
+        PANEL_RES_Y,   // height
+        PANEL_CHAIN,   // chain length
+        _pins
     );
     
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
-    // Reduce visible flicker: higher refresh + stable latch blanking
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
     mxconfig.min_refresh_rate = 120;
     mxconfig.latch_blanking = 1;
-    
-    Serial.println(">>> Creating display object");
-    Serial.flush();
-    yield();
     
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
     
     if (!dma_display) {
-        Serial.println(">>> FAILED to create display");
         return false;
     }
     
-    Serial.println(">>> Calling begin()");
-    Serial.flush();
-    yield();
-    
     if (!dma_display->begin()) {
-        Serial.println(">>> begin() FAILED");
         delete dma_display;
         dma_display = nullptr;
         return false;
     }
     
-    Serial.println(">>> Setting brightness");
-    Serial.flush();
-    yield();
-    
-    brightness = 255;
+    brightness = 128;
     dma_display->setBrightness8(brightness);
-    
-    Serial.println(">>> Clearing screen");
-    Serial.flush();
-    yield();
-    
     dma_display->clearScreen();
-    
-    Serial.println(">>> Drawing WEBEX text");
-    Serial.flush();
-    yield();
     
     dma_display->fillScreen(dma_display->color444(0, 0, 0));
     dma_display->setTextSize(1);
