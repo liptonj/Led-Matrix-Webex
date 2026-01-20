@@ -235,6 +235,11 @@ public:
     float toFloat() const { return std::atof(_buffer.c_str()); }
     double toDouble() const { return std::strtod(_buffer.c_str(), nullptr); }
     
+    // Reserve memory for the string buffer
+    void reserve(unsigned int size) { 
+        _buffer.reserve(size); 
+    }
+    
     // Stream-like methods for ArduinoJson compatibility
     size_t write(uint8_t c) { _buffer += static_cast<char>(c); return 1; }
     size_t write(const uint8_t* s, size_t n) { 

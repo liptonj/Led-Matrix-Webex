@@ -57,11 +57,12 @@ struct HUB75_I2S_CFG {
     bool clkphase;
     uint8_t latch_blanking;
     bool double_buff;
+    uint16_t min_refresh_rate;
     
     HUB75_I2S_CFG(uint16_t w = 64, uint16_t h = 32, uint16_t chain = 1, i2s_pins pins = i2s_pins())
         : mx_width(w), mx_height(h), chain_length(chain), gpio(pins),
           driver(SHIFTREG), i2sspeed(HZ_10M), clkphase(false), 
-          latch_blanking(1), double_buff(false) {}
+          latch_blanking(1), double_buff(false), min_refresh_rate(60) {}
 };
 
 /**
