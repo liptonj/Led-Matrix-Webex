@@ -20,22 +20,12 @@ bool BootstrapDisplay::begin() {
 
     // Configure HUB75 pins based on board type
 #if defined(ESP32_S3_BOARD)
-    // ESP32-S3 pin configuration
+    // Seengreat adapter pin configuration for ESP32-S3
     HUB75_I2S_CFG::i2s_pins _pins = {
-        42, // R1
-        41, // G1
-        40, // B1
-        38, // R2
-        39, // G2
-        37, // B2
-        45, // A
-        36, // B
-        48, // C
-        35, // D
-        21, // E
-        2,  // CLK
-        47, // LAT
-        14  // OE
+        37, 6, 36,    // R1, G1, B1
+        35, 5, 0,     // R2, G2, B2
+        45, 1, 48, 2, 4,  // A, B, C, D, E
+        38, 21, 47    // LAT, OE, CLK (struct order is lat, oe, clk)
     };
 #else
     // ESP32 (standard) pin configuration
@@ -67,7 +57,10 @@ bool BootstrapDisplay::begin() {
 
     // Configure for FM6126A driver (common in these panels)
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
+    // Reduce visible flicker: higher refresh + stable latch blanking
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+    mxconfig.min_refresh_rate = 120;
+    mxconfig.latch_blanking = 1;
     mxconfig.clkphase = false;
 
     // Create display instance
@@ -75,11 +68,12 @@ bool BootstrapDisplay::begin() {
 
     if (!dma_display->begin()) {
         Serial.println("[DISPLAY] Failed to initialize matrix!");
+        delete dma_display;
+        dma_display = nullptr;
         return false;
     }
 
-    dma_display->setBrightness8(128);
-    dma_display->clearScreen();
+    dma_display->setBrightness8(255);
 
     initialized = true;
     Serial.println("[DISPLAY] Matrix initialized successfully");
