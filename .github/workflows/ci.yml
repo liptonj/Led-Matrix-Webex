@@ -604,6 +604,11 @@ jobs:
           # Create bridge release zip
           cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
 
+      - name: Rename bootstrap littlefs files to avoid conflicts
+        run: |
+          mv release/bootstrap/littlefs-esp32s3.bin release/bootstrap/littlefs-bootstrap-esp32s3.bin
+          mv release/bootstrap/littlefs-esp32.bin release/bootstrap/littlefs-bootstrap-esp32.bin
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -625,5 +630,5 @@ jobs:
             release/bootstrap/bootstrap-esp32.bin
             release/bootstrap/bootstrap-ota-esp32s3.bin
             release/bootstrap/bootstrap-ota-esp32.bin
-            release/bootstrap/littlefs-esp32s3.bin
-            release/bootstrap/littlefs-esp32.bin
+            release/bootstrap/littlefs-bootstrap-esp32s3.bin
+            release/bootstrap/littlefs-bootstrap-esp32.bin
