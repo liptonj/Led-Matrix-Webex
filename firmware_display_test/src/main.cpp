@@ -6,21 +6,21 @@
 #define PANEL_RES_Y 32
 #define PANEL_CHAIN 1
 
-// Pin definitions for ESP32-S3
-#define R1_PIN 42
-#define G1_PIN 41
-#define B1_PIN 40
-#define R2_PIN 38
-#define G2_PIN 39
-#define B2_PIN 37
+// Pin definitions for ESP32-S3 with Seengreat adapter
+#define R1_PIN 37
+#define G1_PIN 6
+#define B1_PIN 36
+#define R2_PIN 35
+#define G2_PIN 5
+#define B2_PIN 0
 #define A_PIN 45
-#define B_PIN 36
+#define B_PIN 1
 #define C_PIN 48
-#define D_PIN 35
-#define E_PIN 21
-#define LAT_PIN 47
-#define OE_PIN 14
-#define CLK_PIN 2
+#define D_PIN 2
+#define E_PIN 4
+#define LAT_PIN 38
+#define OE_PIN 21
+#define CLK_PIN 47
 
 // Colors
 #define COLOR_RED    dma_display->color565(255, 0, 0)
@@ -70,9 +70,11 @@ void setup() {
     mxconfig.gpio.clk = CLK_PIN;
     
     // Clock phase and latch blanking for stability
-    mxconfig.driver = HUB75_I2S_CFG::FM6126A;
     mxconfig.clkphase = false;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_10M;
+    mxconfig.driver = HUB75_I2S_CFG::FM6126A;
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+    mxconfig.min_refresh_rate = 120;
+    mxconfig.latch_blanking = 1;
     
     // Create display
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
@@ -85,7 +87,7 @@ void setup() {
     }
     
     dma_display->clearScreen();
-    dma_display->setBrightness8(128);
+    dma_display->setBrightness8(255);
     
     Serial.println("Matrix initialized successfully!");
     Serial.println("Running test patterns...");

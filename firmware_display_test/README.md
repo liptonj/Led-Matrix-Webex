@@ -38,21 +38,21 @@ pio run -e esp32 -t upload
 
 This test uses the working pin configuration:
 
-**ESP32-S3 Pinout:**
-- R1: GPIO 42
-- G1: GPIO 41
-- B1: GPIO 40
-- R2: GPIO 38
-- G2: GPIO 39
-- B2: GPIO 37
+**ESP32-S3 Seengreat Adapter Pinout:**
+- R1: GPIO 37
+- G1: GPIO 6
+- B1: GPIO 36
+- R2: GPIO 35
+- G2: GPIO 5
+- B2: GPIO 0
 - A: GPIO 45
-- B: GPIO 36
+- B: GPIO 1
 - C: GPIO 48
-- D: GPIO 35
-- E: GPIO 21
-- LAT: GPIO 47
-- OE: GPIO 14
-- CLK: GPIO 2
+- D: GPIO 2
+- E: GPIO 4
+- LAT: GPIO 38
+- OE: GPIO 21
+- CLK: GPIO 47
 
 ## Troubleshooting
 
