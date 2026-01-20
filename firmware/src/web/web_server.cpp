@@ -272,7 +272,7 @@ void WebServerManager::setupRoutes() {
                         if (ota_bundle_app_written < ota_bundle_app_size) {
                             // Writing app
                             size_t to_write = min(remaining, ota_bundle_app_size - ota_bundle_app_written);
-                            if (Update.write(ptr, to_write) != to_write) {
+                            if (Update.write(const_cast<uint8_t*>(ptr), to_write) != to_write) {
                                 ota_upload_error = Update.errorString();
                                 break;
                             }
@@ -299,7 +299,7 @@ void WebServerManager::setupRoutes() {
                         } else {
                             // Writing FS
                             size_t to_write = min(remaining, ota_bundle_fs_size - ota_bundle_fs_written);
-                            if (Update.write(ptr, to_write) != to_write) {
+                            if (Update.write(const_cast<uint8_t*>(ptr), to_write) != to_write) {
                                 ota_upload_error = Update.errorString();
                                 break;
                             }
