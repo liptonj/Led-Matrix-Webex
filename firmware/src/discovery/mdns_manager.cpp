@@ -43,7 +43,7 @@ String sanitizeHostname(const String& input) {
 }  // namespace
 
 MDNSManager::MDNSManager()
-    : initialized(false), bridge_found(false), bridge_port(0), last_discovery(0) {
+    : initialized(false), bridge_found(false), bridge_port(0), last_discovery(0), last_refresh(0) {
 }
 
 MDNSManager::~MDNSManager() {
@@ -67,6 +67,7 @@ bool MDNSManager::begin(const String& hostname) {
         if (MDNS.begin(sanitized.c_str())) {
             initialized = true;
             current_hostname = sanitized;
+            last_refresh = millis();
             Serial.printf("[MDNS] Started with hostname: %s.local\n", sanitized.c_str());
             return true;
         }
@@ -131,4 +132,27 @@ void MDNSManager::refreshBridgeDiscovery() {
     String host;
     uint16_t port;
     discoverBridge(host, port);
+}
+
+void MDNSManager::refresh() {
+    if (!initialized) return;
+    
+    // Refresh periodically (TTL is typically 120s, refresh at 60s)
+    if (millis() - last_refresh < MDNS_REFRESH_INTERVAL_MS) {
+        return;
+    }
+    last_refresh = millis();
+    
+    // Re-initialize mDNS to force re-announcement
+    Serial.println("[MDNS] Refreshing mDNS announcement...");
+    MDNS.end();
+    delay(100);
+    
+    if (MDNS.begin(current_hostname.c_str())) {
+        MDNS.addService(MDNS_SERVICE_HTTP, MDNS_PROTOCOL_TCP, 80);
+        Serial.printf("[MDNS] Refreshed: %s.local\n", current_hostname.c_str());
+    } else {
+        Serial.println("[MDNS] Refresh failed!");
+        initialized = false;
+    }
 }

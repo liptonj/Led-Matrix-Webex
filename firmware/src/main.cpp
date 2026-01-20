@@ -183,7 +183,12 @@ void loop() {
 
     // Handle WiFi connection
     wifi_manager.handleConnection(&mdns_manager);
-    
+
+    // Refresh mDNS periodically to prevent TTL expiry
+    if (app_state.wifi_connected) {
+        mdns_manager.refresh();
+    }
+
     // Handle NTP time sync after reconnect
     if (app_state.wifi_connected && !app_state.time_synced) {
         setup_time();
@@ -191,7 +196,7 @@ void loop() {
 
     // Process web server requests
     web_server.loop();
-    
+
     // Check for pending reboot from web server
     if (web_server.checkPendingReboot()) {
         return;  // Won't actually return, device will restart

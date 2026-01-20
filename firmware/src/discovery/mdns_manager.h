@@ -14,6 +14,9 @@
 #define MDNS_SERVICE_BRIDGE "_webex-bridge"
 #define MDNS_PROTOCOL_TCP "_tcp"
 
+// Refresh interval (60 seconds - well before 120s TTL expiry)
+#define MDNS_REFRESH_INTERVAL_MS 60000
+
 /**
  * @brief mDNS Manager Class
  * 
@@ -74,6 +77,15 @@ public:
     void refreshBridgeDiscovery();
     
     /**
+     * @brief Refresh mDNS announcement to prevent TTL expiry
+     * 
+     * ESP32's mDNS broadcasts with a 120-second TTL. This method
+     * re-announces the hostname and services periodically to keep
+     * the device discoverable on the network.
+     */
+    void refresh();
+    
+    /**
      * @brief Get the mDNS hostname
      * @return Hostname (without .local)
      */
@@ -91,6 +103,7 @@ private:
     String bridge_host;
     uint16_t bridge_port;
     unsigned long last_discovery;
+    unsigned long last_refresh;
     String current_hostname;
 };
 
