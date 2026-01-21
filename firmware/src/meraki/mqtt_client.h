@@ -90,7 +90,20 @@ public:
      */
     void invalidateConfig();
 
+    /**
+     * @brief Enable/disable debug logging to Serial
+     * @param enabled true to enable debug output
+     */
+    void setDebugEnabled(bool enabled) { debug_enabled = enabled; }
+    
+    /**
+     * @brief Check if debug logging is enabled
+     * @return true if debug output is enabled
+     */
+    bool isDebugEnabled() const { return debug_enabled; }
+
 private:
+    bool debug_enabled = false;  // MQTT message logging disabled by default
     WiFiClient wifi_client;
     PubSubClient mqtt_client;
     ConfigManager* config_manager;

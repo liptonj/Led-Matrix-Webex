@@ -726,6 +726,11 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         }
 
         if (available == 0 && !stream->connected()) {
+            Serial.printf("[OTA] Stream disconnected during firmware at %d%% (%u/%u bytes)\n", 
+                          (app_written * 100) / app_size,
+                          static_cast<unsigned>(app_written), 
+                          static_cast<unsigned>(app_size));
+            Serial.flush();
             break;
         }
 
@@ -746,7 +751,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             int progress = (app_written * 100) / app_size;
             if (progress / 5 > lastProgress / 5) {
                 lastProgress = progress;
-                Serial.printf("[OTA] firmware: %d%%\n", progress);
+                Serial.printf("[OTA] firmware: %d%% (heap: %u)\n", progress, ESP.getFreeHeap());
                 int displayProgress = (progress * 85) / 100;
                 matrix_display.showUpdatingProgress(latest_version, displayProgress, 
                     String("Firmware ") + String(progress) + "%");
@@ -761,15 +766,27 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         http.end();
         return false;
     }
+    
+    Serial.println("[OTA] Firmware write complete, finalizing...");
+    Serial.flush();
+    vTaskDelay(pdMS_TO_TICKS(10));  // Brief yield before Update.end
 
     if (!Update.end(true)) {
         Serial.printf("[OTA] App update failed: %s\n", Update.errorString());
         http.end();
         return false;
     }
+    
+    Serial.println("[OTA] Update.end() succeeded");
+    Serial.flush();
 
 #ifndef NATIVE_BUILD
+    vTaskDelay(pdMS_TO_TICKS(10));  // Yield before partition operation
+    
     // Set boot partition
+    Serial.println("[OTA] Setting boot partition...");
+    Serial.flush();
+    
     esp_err_t err = esp_ota_set_boot_partition(target_partition);
     if (err != ESP_OK) {
         Serial.printf("[OTA] Failed to set boot partition: %s\n", esp_err_to_name(err));
@@ -778,18 +795,31 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
     Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
 #endif
+    Serial.flush();
 
     Serial.println("[OTA] Firmware complete, flashing filesystem...");
+    Serial.flush();
 
     // =========== PHASE 2: Flash filesystem ===========
     matrix_display.showUpdatingProgress(latest_version, 85, "Flashing filesystem...");
+    
+    // Check if HTTP stream is still valid before proceeding
+    if (!stream->connected()) {
+        Serial.println("[OTA] ERROR: HTTP stream disconnected before filesystem phase");
+        http.end();
+        return false;
+    }
+    Serial.printf("[OTA] Stream still connected, %d bytes remaining for FS\n", fs_size);
+    
     LittleFS.end();
+    Serial.println("[OTA] LittleFS unmounted");
 
     if (!Update.begin(fs_size, U_SPIFFS)) {
         Serial.printf("[OTA] Update.begin FS failed: %s\n", Update.errorString());
         http.end();
         return false;
     }
+    Serial.println("[OTA] Update.begin FS succeeded");
 
     size_t fs_written = 0;
     lastProgress = -1;

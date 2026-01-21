@@ -104,6 +104,7 @@ private:
     void handleReboot(AsyncWebServerRequest* request);
     void handleFactoryReset(AsyncWebServerRequest* request);
     void handleClearMQTT(AsyncWebServerRequest* request);
+    void handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleRegeneratePairingCode(AsyncWebServerRequest* request);
     
     // Embedded app API handlers

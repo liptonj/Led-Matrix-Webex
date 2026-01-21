@@ -140,25 +140,29 @@ header h1 {
 /* Status Grid */
 .status-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
 }
 
 .status-item {
     display: flex;
-    justify-content: space-between;
-    padding: 10px;
+    flex-direction: column;
+    padding: 12px;
     background: var(--bg-secondary);
     border-radius: var(--radius);
+    gap: 4px;
 }
 
 .status-item .label {
     color: var(--text-secondary);
+    font-size: 0.85rem;
 }
 
 .status-item .value {
     color: var(--text-primary);
     font-family: var(--font-mono);
+    font-size: 1rem;
+    word-break: break-word;
 }
 
 .status-item .value.active { color: var(--accent-secondary); }

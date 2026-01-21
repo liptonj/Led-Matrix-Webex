@@ -27,7 +27,7 @@ bool BridgeDiscovery::fetchConfig(bool force) {
         return false;
     }
     
-    Serial.println("[DISCOVERY] Fetching bridge configuration...");
+    Serial.printf("[DISCOVERY] Fetching bridge configuration from %s\n", BRIDGE_CONFIG_URL);
     
     HTTPClient http;
     http.begin(BRIDGE_CONFIG_URL);
@@ -36,10 +36,12 @@ bool BridgeDiscovery::fetchConfig(bool force) {
     int httpCode = http.GET();
     
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[DISCOVERY] HTTP error: %d\n", httpCode);
+        Serial.printf("[DISCOVERY] HTTP error: %d (URL: %s)\n", httpCode, BRIDGE_CONFIG_URL);
         http.end();
         return false;
     }
+    
+    Serial.printf("[DISCOVERY] HTTP %d OK\n", httpCode);
     
     String payload = http.getString();
     http.end();

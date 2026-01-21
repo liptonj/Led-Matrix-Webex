@@ -247,7 +247,14 @@ function updateStatusDisplay(data) {
             const usedPct = Math.round((fs.free / fs.total) * 100);
             document.getElementById('fs-usage').textContent = 
                 `${formatBytes(fs.free)} free / ${formatBytes(fs.total)} (${usedPct}% free)`;
+        } else {
+            document.getElementById('fs-usage').textContent = 'n/a';
         }
+    } else {
+        // Older firmware without partition info
+        document.getElementById('ota0-version').textContent = 'n/a';
+        document.getElementById('ota1-version').textContent = 'n/a';
+        document.getElementById('fs-usage').textContent = 'n/a';
     }
     
     document.getElementById('current-version').textContent = data.firmware_version || '--';
@@ -387,6 +394,35 @@ function initEventListeners() {
 
     // MQTT form
     document.getElementById('mqtt-form').addEventListener('submit', saveMQTTConfig);
+
+    // MQTT debug checkbox
+    const mqttDebugCheckbox = document.getElementById('mqtt-debug');
+    if (mqttDebugCheckbox) {
+        // Load current state
+        fetch('/api/mqtt/debug')
+            .then(r => r.json())
+            .then(data => {
+                mqttDebugCheckbox.checked = data.debug_enabled || false;
+            })
+            .catch(() => {});
+        
+        // Handle changes
+        mqttDebugCheckbox.addEventListener('change', async (e) => {
+            try {
+                const response = await fetch('/api/mqtt/debug', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: e.target.checked })
+                });
+                const data = await response.json();
+                if (!data.success) {
+                    console.error('Failed to toggle MQTT debug');
+                }
+            } catch (err) {
+                console.error('Error toggling MQTT debug:', err);
+            }
+        });
+    }
 
     // Display form
     document.getElementById('display-form').addEventListener('submit', saveDisplaySettings);

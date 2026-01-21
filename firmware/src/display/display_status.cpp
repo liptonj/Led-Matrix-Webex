@@ -242,6 +242,9 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
 void MatrixDisplay::update(const DisplayData& data) {
     if (!initialized) return;
     
+    // Don't override display during OTA updates
+    if (ota_in_progress) return;
+    
     const unsigned long now = millis();
     
     // Determine which page to show

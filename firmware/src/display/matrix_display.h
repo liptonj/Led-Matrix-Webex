@@ -244,6 +244,25 @@ private:
     unsigned long last_page_change_ms = 0;
     uint16_t page_interval_ms = DEFAULT_PAGE_INTERVAL_MS;
     DisplayPage last_page = DisplayPage::STATUS;
+    
+    // OTA update lock - prevents other display updates during OTA
+    bool ota_in_progress = false;
+    
+public:
+    /**
+     * @brief Lock display for OTA updates (prevents other updates)
+     */
+    void lockForOTA() { ota_in_progress = true; }
+    
+    /**
+     * @brief Unlock display after OTA completes
+     */
+    void unlockFromOTA() { ota_in_progress = false; }
+    
+    /**
+     * @brief Check if display is locked for OTA
+     */
+    bool isOTALocked() const { return ota_in_progress; }
 };
 
 #endif // MATRIX_DISPLAY_H

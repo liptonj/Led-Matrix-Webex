@@ -275,8 +275,24 @@ void loop() {
             }
         }
     } else if (app_state.wifi_connected) {
-        // Try to reconnect to bridge (works for both local and cloud)
-        bridge_client.reconnect();
+        // Check if bridge was never initialized (WiFi connected after startup)
+        if (!bridge_client.isInitialized()) {
+            Serial.println("[BRIDGE] WiFi connected, initializing bridge connection...");
+            
+            // Try cloud bridge via discovery endpoint
+            if (bridge_discovery.fetchConfig()) {
+                String bridge_url = bridge_discovery.getBridgeUrl();
+                Serial.printf("[BRIDGE] Using cloud bridge: %s\n", bridge_url.c_str());
+                bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
+            } else {
+                // Use hardcoded fallback
+                Serial.println("[BRIDGE] Discovery failed, using default cloud bridge");
+                bridge_client.beginWithUrl("wss://bridge.5ls.us", pairing_manager.getCode());
+            }
+        } else {
+            // Try to reconnect to bridge (works for both local and cloud)
+            bridge_client.reconnect();
+        }
         app_state.bridge_connected = false;
         app_state.embedded_app_connected = false;
     }
@@ -517,6 +533,7 @@ void check_for_updates() {
                 ESP.restart();
             } else {
                 Serial.println("[OTA] Update failed!");
+                matrix_display.unlockFromOTA();  // Unlock display on failure
                 // Record this version as failed to prevent retry loop
                 config_manager.setFailedOTAVersion(new_version);
                 Serial.printf("[OTA] Marked version %s as failed - will not auto-retry\n", 

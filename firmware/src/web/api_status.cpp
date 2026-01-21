@@ -67,7 +67,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         if (esp_ota_get_partition_description(factory, &factory_desc) == ESP_OK) {
             doc["factory_version"] = String(factory_desc.version);
         } else {
-            doc["factory_version"] = "unknown";
+            doc["factory_version"] = "empty";
         }
     } else {
         doc["factory_version"] = "n/a";
@@ -82,6 +82,8 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         esp_app_desc_t ota0_desc;
         if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
             ota0_info["version"] = String(ota0_desc.version);
+        } else {
+            ota0_info["version"] = "empty";
         }
     }
     
@@ -94,6 +96,8 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         esp_app_desc_t ota1_desc;
         if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
             ota1_info["version"] = String(ota1_desc.version);
+        } else {
+            ota1_info["version"] = "empty";
         }
     }
     
@@ -405,6 +409,35 @@ void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
     mqtt_client.invalidateConfig();  // Clear cached config
     Serial.println("[WEB] MQTT configuration cleared");
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"MQTT configuration cleared\"}");
+    addCorsHeaders(response);
+    request->send(response);
+}
+
+void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, data, len);
+    
+    if (error) {
+        AsyncWebServerResponse* response = request->beginResponse(400, "application/json", 
+            "{\"success\":false,\"message\":\"Invalid JSON\"}");
+        addCorsHeaders(response);
+        request->send(response);
+        return;
+    }
+    
+    bool enabled = doc["enabled"] | false;
+    mqtt_client.setDebugEnabled(enabled);
+    
+    Serial.printf("[WEB] MQTT debug logging %s\n", enabled ? "enabled" : "disabled");
+    
+    JsonDocument resp;
+    resp["success"] = true;
+    resp["debug_enabled"] = mqtt_client.isDebugEnabled();
+    
+    String responseStr;
+    serializeJson(resp, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);
 }

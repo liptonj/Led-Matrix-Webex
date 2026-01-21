@@ -1,11 +1,13 @@
 #include "matrix_display.h"
 
 void MatrixDisplay::showUpdating(const String& version) {
+    ota_in_progress = true;  // Lock display for OTA
     showUpdatingProgress(version, 0, "Starting...");
 }
 
 void MatrixDisplay::showUpdatingProgress(const String& version, int progress, const String& status) {
     if (!initialized) return;
+    ota_in_progress = true;  // Ensure lock is set
 
     dma_display->clearScreen();
     

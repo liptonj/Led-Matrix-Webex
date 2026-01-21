@@ -88,6 +88,7 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     // Trigger OTA update (this will reboot on success)
     if (!ota_manager.performUpdate()) {
         Serial.println("[WEB] OTA update failed");
+        matrix_display.unlockFromOTA();  // Unlock display on failure
         // Mark version as failed to prevent auto-retry loops
         config_manager->setFailedOTAVersion(new_version);
         Serial.printf("[WEB] Marked version %s as failed\n", new_version.c_str());

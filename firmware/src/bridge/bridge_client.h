@@ -144,6 +144,12 @@ public:
     bool isPairingMode() const { return !pairing_code.isEmpty(); }
     
     /**
+     * @brief Check if bridge client has been initialized (begin called)
+     * @return true if initialized with a host
+     */
+    bool isInitialized() const { return !bridge_host.isEmpty(); }
+    
+    /**
      * @brief Set command handler callback
      * @param handler Function to call when command received
      */

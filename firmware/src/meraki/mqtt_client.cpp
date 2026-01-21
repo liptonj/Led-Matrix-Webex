@@ -284,10 +284,10 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         // Store internally as Celsius (display converts to F)
         if (is_fahrenheit) {
             sensor.temperature = (temp_value - 32.0f) * 5.0f / 9.0f;
-            Serial.printf("[MQTT] Temperature: %.1f°F (stored as %.1f°C)\n", temp_value, sensor.temperature);
+            if (debug_enabled) Serial.printf("[MQTT] Temperature: %.1f°F (stored as %.1f°C)\n", temp_value, sensor.temperature);
         } else {
             sensor.temperature = temp_value;
-            Serial.printf("[MQTT] Temperature: %.1f°C\n", sensor.temperature);
+            if (debug_enabled) Serial.printf("[MQTT] Temperature: %.1f°C\n", sensor.temperature);
         }
         update_pending = true;
 
@@ -298,19 +298,19 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
             sensor.humidity = doc["value"] | 0.0f;
         }
         update_pending = true;
-        Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor.humidity);
+        if (debug_enabled) Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor.humidity);
 
     } else if (metric == "door") {
         bool open = doc["value"] | false;
         sensor.door_status = open ? "open" : "closed";
         update_pending = true;
-        Serial.printf("[MQTT] Door: %s\n", sensor.door_status.c_str());
+        if (debug_enabled) Serial.printf("[MQTT] Door: %s\n", sensor.door_status.c_str());
 
     } else if (metric == "water") {
         bool wet = doc["value"] | false;
         sensor.water_status = wet ? "wet" : "dry";
         update_pending = true;
-        Serial.printf("[MQTT] Water: %s\n", sensor.water_status.c_str());
+        if (debug_enabled) Serial.printf("[MQTT] Water: %s\n", sensor.water_status.c_str());
 
     } else if (metric == "tvoc") {
         if (doc["tvoc"].is<float>()) {
@@ -319,30 +319,30 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
             sensor.tvoc = doc["value"] | 0.0f;
         }
         update_pending = true;
-        Serial.printf("[MQTT] TVOC: %.1f\n", sensor.tvoc);
+        if (debug_enabled) Serial.printf("[MQTT] TVOC: %.1f\n", sensor.tvoc);
 
     } else if (metric == "iaqIndex") {
         sensor.air_quality_index = doc["iaqIndex"] | doc["value"] | 0;
         update_pending = true;
-        Serial.printf("[MQTT] IAQ Index: %d\n", sensor.air_quality_index);
+        if (debug_enabled) Serial.printf("[MQTT] IAQ Index: %d\n", sensor.air_quality_index);
 
     } else if (metric == "iaq") {
         sensor.iaq = doc["value"] | 0;
         sensor.air_quality_index = sensor.iaq;
         update_pending = true;
-        Serial.printf("[MQTT] IAQ: %d\n", sensor.iaq);
+        if (debug_enabled) Serial.printf("[MQTT] IAQ: %d\n", sensor.iaq);
     } else if (metric == "CO2") {
         sensor.co2_ppm = doc["CO2"] | doc["value"] | 0.0f;
         update_pending = true;
-        Serial.printf("[MQTT] CO2: %.1f ppm\n", sensor.co2_ppm);
+        if (debug_enabled) Serial.printf("[MQTT] CO2: %.1f ppm\n", sensor.co2_ppm);
     } else if (metric == "PM2_5MassConcentration") {
         sensor.pm2_5 = doc["PM2_5MassConcentration"] | doc["value"] | 0.0f;
         update_pending = true;
-        Serial.printf("[MQTT] PM2.5: %.1f\n", sensor.pm2_5);
+        if (debug_enabled) Serial.printf("[MQTT] PM2.5: %.1f\n", sensor.pm2_5);
     } else if (metric == "ambientNoise") {
         sensor.ambient_noise = doc["ambientNoise"] | doc["value"] | 0.0f;
         update_pending = true;
-        Serial.printf("[MQTT] Noise: %.1f\n", sensor.ambient_noise);
+        if (debug_enabled) Serial.printf("[MQTT] Noise: %.1f\n", sensor.ambient_noise);
     }
 
     if (update_pending) {

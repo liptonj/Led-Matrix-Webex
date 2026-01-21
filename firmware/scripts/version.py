@@ -53,21 +53,46 @@ def get_build_id() -> str:
         return "unknown"
 
 
+def get_firmware_version() -> str:
+    """Get firmware version from platformio.ini or fallback."""
+    # Try to get from platformio.ini [version] section
+    try:
+        import configparser
+        import os
+        ini_path = os.path.join(env.subst("$PROJECT_DIR"), "platformio.ini")
+        config = configparser.ConfigParser()
+        config.read(ini_path)
+        if config.has_option("version", "firmware_version"):
+            return config.get("version", "firmware_version").strip()
+    except Exception:
+        pass
+    return get_git_version()
+
+
 def main() -> None:
     """Inject version build flags into PlatformIO environment."""
     build_version = get_git_version()
     build_commit = get_git_commit()
     build_id = get_build_id()
+    firmware_version = get_firmware_version()
 
     env.Append(  # noqa: F821
         CPPDEFINES=[
             ("BUILD_VERSION", f'\\"{build_version}\\"'),
             ("BUILD_COMMIT", f'\\"{build_commit}\\"'),
             ("BUILD_ID", f'\\"{build_id}\\"'),
+            # Set ESP-IDF app descriptor version
+            ("PROJECT_VER", f'\\"{firmware_version}\\"'),
         ]
+    )
+    
+    # Also set via build flags for esp_app_desc_t
+    env.Append(
+        BUILD_FLAGS=[f'-DAPP_PROJECT_VER=\\"{firmware_version}\\"']
     )
 
     print(f"Build version: {build_version} ({build_commit}) [{build_id}]")
+    print(f"Firmware version (app descriptor): {firmware_version}")
 
 
 main()

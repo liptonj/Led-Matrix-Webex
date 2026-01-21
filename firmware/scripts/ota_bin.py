@@ -109,8 +109,10 @@ def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
     return 0
 
 
-def _upload_ota_bin(_source, _target, env):
+def _upload_ota_bin(source=None, target=None, env=None, **kwargs):
     _apply_env_defines()
+    if env is None:
+        env = kwargs.get("env")
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
     firmware_bin = os.path.join(build_dir, "firmware.bin")

@@ -101,7 +101,10 @@ void BridgeClient::beginWithUrl(const String& url, const String& code) {
     
     // Connect to bridge server (SSL or plain)
     if (use_ssl) {
+        // For SSL, we need to disable certificate verification
+        // since ESP32 doesn't have the CA bundle for Let's Encrypt etc.
         ws_client.beginSSL(bridge_host, bridge_port, "/");
+        ws_client.enableHeartbeat(15000, 3000, 2);  // Keep connection alive
     } else {
         ws_client.begin(bridge_host, bridge_port, "/");
     }
@@ -267,7 +270,14 @@ void BridgeClient::reconnect() {
     }
     
     last_reconnect = millis();
-    Serial.println("[BRIDGE] Attempting to reconnect...");
+    
+    if (bridge_host.isEmpty()) {
+        Serial.println("[BRIDGE] Cannot reconnect - no host configured");
+        return;
+    }
+    
+    Serial.printf("[BRIDGE] Attempting to reconnect to %s://%s:%d...\n",
+                  use_ssl ? "wss" : "ws", bridge_host.c_str(), bridge_port);
     
     if (use_ssl) {
         ws_client.beginSSL(bridge_host, bridge_port, "/");
@@ -326,12 +336,27 @@ void BridgeClient::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t leng
             break;
             
         case WStype_ERROR:
-            Serial.println("[BRIDGE] WebSocket error");
+            Serial.printf("[BRIDGE] WebSocket error (len=%d)\n", length);
+            if (payload && length > 0) {
+                Serial.printf("[BRIDGE] Error details: %.*s\n", length, payload);
+            }
             connected = false;
             joined_room = false;
             break;
             
+        case WStype_FRAGMENT_TEXT_START:
+        case WStype_FRAGMENT_BIN_START:
+        case WStype_FRAGMENT:
+        case WStype_FRAGMENT_FIN:
+            Serial.println("[BRIDGE] Fragment received");
+            break;
+            
+        case WStype_BIN:
+            Serial.printf("[BRIDGE] Binary data received (%d bytes)\n", length);
+            break;
+            
         default:
+            Serial.printf("[BRIDGE] Unknown event type: %d\n", type);
             break;
     }
 }

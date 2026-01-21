@@ -20,6 +20,7 @@
 
 #include "web_server.h"
 #include "ota_bundle.h"
+#include "../meraki/mqtt_client.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <Update.h>
@@ -281,6 +282,26 @@ void WebServerManager::setupRoutes() {
     server->on("/api/clear-mqtt", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleClearMQTT(request);
     });
+
+    // MQTT debug toggle
+    server->on("/api/mqtt/debug", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        extern MerakiMQTTClient mqtt_client;
+        JsonDocument doc;
+        doc["debug_enabled"] = mqtt_client.isDebugEnabled();
+        String response;
+        serializeJson(doc, response);
+        AsyncWebServerResponse* resp = request->beginResponse(200, "application/json", response);
+        addCorsHeaders(resp);
+        request->send(resp);
+    });
+    
+    server->on("/api/mqtt/debug", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleMQTTDebug(request, data, len);
+        }
+    );
 
     // Pairing code regeneration
     server->on("/api/pairing/regenerate", HTTP_POST, [this](AsyncWebServerRequest* request) {
