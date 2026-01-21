@@ -129,7 +129,7 @@ Led-Matrix-Webex/
 │   └── src/                # Minimal WiFi provisioning + OTA downloader
 ├── bridge/                 # Node.js bridge server (optional)
 │   └── src/                # TypeScript source
-├── homeassistant-addon/    # Home Assistant add-on for bridge
+├── webex-bridge/           # Home Assistant add-on for bridge
 └── docs/                   # Documentation
     └── images/             # Display state visualizations
 ```
@@ -365,7 +365,7 @@ npm start
 ```
 
 **Deployment options:**
-- **Home Assistant Add-on**: [One-click install](homeassistant-addon/README.md) - easiest if you already run HA
+- **Home Assistant Add-on**: [One-click install](webex-bridge/README.md) - easiest if you already run HA
 - **Raspberry Pi / Server**: [Bridge Deployment Guide](docs/bridge_deployment.md)
 - **Docker**: See deployment guide for Docker instructions
 
@@ -416,7 +416,7 @@ bootstrap_version = 1.0.3
 When releasing a new version:
 1. Update the version in the `[version]` section of each `platformio.ini`
 2. Update `README.md` with the new version and changelog
-3. Update `homeassistant-addon/config.yaml` version
+3. Update `webex-bridge/config.yaml` version
 4. Update `bridge/package.json` version
 5. Update `pyproject.toml` version
 6. Create a git tag matching the version (e.g., `v1.0.3`)

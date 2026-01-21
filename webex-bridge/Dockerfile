@@ -17,7 +17,7 @@ RUN npm install --omit=dev
 COPY bridge/dist ./dist
 
 # Copy run script
-COPY homeassistant-addon/run.sh /run.sh
+COPY webex-bridge/run.sh /run.sh
 RUN chmod +x /run.sh
 
 # Expose WebSocket port

@@ -11,7 +11,7 @@ on:
     branches: [main]
     paths:
       - "bridge/**"
-      - "homeassistant-addon/**"
+      - "webex-bridge/**"
       - ".github/workflows/build-addon.yml"
   workflow_dispatch:
     inputs:
@@ -125,7 +125,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: homeassistant-addon/Dockerfile
+          file: webex-bridge/Dockerfile
           platforms: ${{ env.PLATFORM }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

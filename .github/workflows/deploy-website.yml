@@ -2,7 +2,8 @@ name: Deploy Website to Cloudflare Pages
 
 on:
   release:
-    types: [published]
+    # published: new releases, edited: re-tagged/updated releases
+    types: [published, edited]
   workflow_dispatch:
 
 jobs:
