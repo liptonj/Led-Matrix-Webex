@@ -231,8 +231,25 @@ function updateStatusDisplay(data) {
     // System info
     document.getElementById('firmware-version').textContent = data.firmware_version || '--';
     document.getElementById('firmware-build-id').textContent = data.firmware_build_id || '--';
-    document.getElementById('running-partition').textContent = data.running_partition || '--';
     document.getElementById('boot-partition').textContent = data.boot_partition || '--';
+    document.getElementById('factory-version').textContent = data.factory_version || '--';
+    
+    // Partition versions
+    if (data.partitions) {
+        document.getElementById('ota0-version').textContent = 
+            data.partitions.ota_0?.version || 'empty';
+        document.getElementById('ota1-version').textContent = 
+            data.partitions.ota_1?.version || 'empty';
+        
+        // Filesystem usage
+        if (data.partitions.filesystem) {
+            const fs = data.partitions.filesystem;
+            const usedPct = Math.round((fs.free / fs.total) * 100);
+            document.getElementById('fs-usage').textContent = 
+                `${formatBytes(fs.free)} free / ${formatBytes(fs.total)} (${usedPct}% free)`;
+        }
+    }
+    
     document.getElementById('current-version').textContent = data.firmware_version || '--';
     document.getElementById('current-build-id').textContent = data.firmware_build_id || '--';
     document.getElementById('ip-address').textContent = data.ip_address || '--';
@@ -377,7 +394,8 @@ function initEventListeners() {
     // Time form
     document.getElementById('time-form').addEventListener('submit', saveTimeSettings);
 
-    // OTA buttons
+    // OTA form and buttons
+    document.getElementById('ota-form').addEventListener('submit', saveOTASettings);
     document.getElementById('check-update').addEventListener('click', checkForUpdate);
     document.getElementById('perform-update').addEventListener('click', performUpdate);
     initManualUpload();
@@ -657,6 +675,30 @@ async function saveTimeSettings(e) {
         await loadConfig();
     } catch (error) {
         alert('Failed to save time settings');
+    }
+}
+
+async function saveOTASettings(e) {
+    e.preventDefault();
+
+    const data = {
+        ota_url: document.getElementById('ota-url').value.trim(),
+        auto_update: document.getElementById('auto-update').checked
+    };
+
+    try {
+        const response = await fetch(API.config, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) {
+            throw new Error('Save failed');
+        }
+        alert('OTA settings saved!');
+        await loadConfig();
+    } catch (error) {
+        alert('Failed to save OTA settings');
     }
 }
 

@@ -460,16 +460,19 @@
                             <span id="latest-version" class="value">--</span>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label for="ota-url">Update URL:</label>
-                        <input type="text" id="ota-url" placeholder="GitHub Releases URL">
-                    </div>
-                    <div class="form-group checkbox-group">
-                        <label>
-                            <input type="checkbox" id="auto-update">
-                            <span>Enable automatic updates</span>
-                        </label>
-                    </div>
+                    <form id="ota-form">
+                        <div class="form-group">
+                            <label for="ota-url">Update URL:</label>
+                            <input type="text" id="ota-url" placeholder="GitHub Releases URL">
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <label>
+                                <input type="checkbox" id="auto-update">
+                                <span>Enable automatic updates</span>
+                            </label>
+                        </div>
+                        <button type="submit" class="btn">Save OTA Settings</button>
+                    </form>
                     <button id="check-update" class="btn">Check for Updates</button>
                     <button id="perform-update" class="btn btn-warning" disabled>Install Update</button>
                 </div>

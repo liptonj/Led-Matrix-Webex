@@ -112,6 +112,13 @@ jobs:
             echo "IS_RELEASE=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Update config.yaml version
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Setting add-on version to: ${VERSION}"
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" webex-bridge/config.yaml
+          cat webex-bridge/config.yaml | grep "^version:"
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5

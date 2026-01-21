@@ -17,7 +17,7 @@ BridgeClient* g_bridge_instance = nullptr;
 BridgeClient::BridgeClient()
     : bridge_port(8080), connected(false), joined_room(false), 
       peer_connected(false), update_pending(false), command_pending(false),
-      command_handler(nullptr), last_reconnect(0) {
+      use_ssl(false), command_handler(nullptr), last_reconnect(0) {
     last_update.valid = false;
     last_update.camera_on = false;
     last_update.mic_muted = false;
@@ -54,6 +54,7 @@ void BridgeClient::beginWithPairing(const String& host, uint16_t port, const Str
     bridge_port = port;
     pairing_code = code;
     pairing_code.toUpperCase();
+    use_ssl = false;
     g_bridge_instance = this;
     
     Serial.printf("[BRIDGE] Connecting to %s:%d with pairing code: %s\n", 
@@ -69,6 +70,81 @@ void BridgeClient::beginWithPairing(const String& host, uint16_t port, const Str
     // Connect to bridge server
     ws_client.begin(bridge_host, bridge_port, "/");
     ws_client.setReconnectInterval(5000);
+}
+
+void BridgeClient::beginWithUrl(const String& url, const String& code) {
+    String host;
+    uint16_t port;
+    bool ssl;
+    
+    if (!parseUrl(url, host, port, ssl)) {
+        Serial.printf("[BRIDGE] Failed to parse URL: %s\n", url.c_str());
+        return;
+    }
+    
+    bridge_host = host;
+    bridge_port = port;
+    pairing_code = code;
+    pairing_code.toUpperCase();
+    use_ssl = ssl;
+    g_bridge_instance = this;
+    
+    Serial.printf("[BRIDGE] Connecting to %s:%d (SSL=%d) with pairing code: %s\n", 
+                  host.c_str(), port, ssl, pairing_code.c_str());
+    
+    // Set up WebSocket event handler
+    ws_client.onEvent([](WStype_t type, uint8_t* payload, size_t length) {
+        if (g_bridge_instance) {
+            g_bridge_instance->onWebSocketEvent(type, payload, length);
+        }
+    });
+    
+    // Connect to bridge server (SSL or plain)
+    if (use_ssl) {
+        ws_client.beginSSL(bridge_host, bridge_port, "/");
+    } else {
+        ws_client.begin(bridge_host, bridge_port, "/");
+    }
+    ws_client.setReconnectInterval(5000);
+}
+
+bool BridgeClient::parseUrl(const String& url, String& host, uint16_t& port, bool& ssl) {
+    String working = url;
+    
+    // Determine protocol
+    if (working.startsWith("wss://")) {
+        ssl = true;
+        working = working.substring(6);  // Remove "wss://"
+    } else if (working.startsWith("ws://")) {
+        ssl = false;
+        working = working.substring(5);  // Remove "ws://"
+    } else {
+        // No protocol - assume non-SSL
+        ssl = false;
+    }
+    
+    // Remove trailing slash and path
+    int pathIdx = working.indexOf('/');
+    if (pathIdx > 0) {
+        working = working.substring(0, pathIdx);
+    }
+    
+    // Check for port
+    int colonIdx = working.indexOf(':');
+    if (colonIdx > 0) {
+        host = working.substring(0, colonIdx);
+        port = working.substring(colonIdx + 1).toInt();
+    } else {
+        host = working;
+        port = ssl ? 443 : 80;  // Default ports
+    }
+    
+    // Validate
+    if (host.isEmpty() || port == 0) {
+        return false;
+    }
+    
+    return true;
 }
 
 void BridgeClient::setPairingCode(const String& code) {
@@ -193,7 +269,11 @@ void BridgeClient::reconnect() {
     last_reconnect = millis();
     Serial.println("[BRIDGE] Attempting to reconnect...");
     
-    ws_client.begin(bridge_host, bridge_port, "/");
+    if (use_ssl) {
+        ws_client.beginSSL(bridge_host, bridge_port, "/");
+    } else {
+        ws_client.begin(bridge_host, bridge_port, "/");
+    }
 }
 
 void BridgeClient::setServer(const String& host, uint16_t port) {

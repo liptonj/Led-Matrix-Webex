@@ -69,6 +69,9 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     String new_version = ota_manager.getLatestVersion();
     Serial.println("[WEB] Starting OTA update...");
     
+    // Clear any previous failed version marker since user is manually retrying
+    config_manager->clearFailedOTAVersion();
+    
     // Show updating screen on display BEFORE sending response
     // This ensures the display updates before the blocking OTA starts
     matrix_display.showUpdating(new_version);
@@ -85,33 +88,55 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     // Trigger OTA update (this will reboot on success)
     if (!ota_manager.performUpdate()) {
         Serial.println("[WEB] OTA update failed");
-        // Note: If we get here, the update failed and didn't reboot
+        // Mark version as failed to prevent auto-retry loops
+        config_manager->setFailedOTAVersion(new_version);
+        Serial.printf("[WEB] Marked version %s as failed\n", new_version.c_str());
     }
 }
 
 void WebServerManager::handleBootToFactory(AsyncWebServerRequest* request) {
+    Serial.println("[WEB] Boot to factory requested");
+    
     const esp_partition_t* factory = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
 
     if (!factory) {
+        Serial.println("[WEB] ERROR: Factory partition not found in partition table");
         request->send(500, "application/json",
                       "{\"success\":false,\"message\":\"Factory partition not found\"}");
         return;
     }
+    
+    Serial.printf("[WEB] Found factory partition: %s at 0x%x, size %d\n", 
+                  factory->label, factory->address, factory->size);
 
     const esp_partition_t* running = esp_ota_get_running_partition();
     if (running && running->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY) {
+        Serial.println("[WEB] Already running from factory partition");
         request->send(200, "application/json",
                       "{\"success\":true,\"message\":\"Already running bootstrap firmware\"}");
         return;
     }
+    
+    // Try to set boot partition immediately to verify it works
+    esp_err_t err = esp_ota_set_boot_partition(factory);
+    if (err != ESP_OK) {
+        Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
+        String errorMsg = "{\"success\":false,\"message\":\"Failed to set boot partition: ";
+        errorMsg += esp_err_to_name(err);
+        errorMsg += "\"}";
+        request->send(500, "application/json", errorMsg);
+        return;
+    }
+    
+    Serial.println("[WEB] Boot partition set to factory, scheduling reboot...");
 
     request->send(200, "application/json",
                   "{\"success\":true,\"message\":\"Rebooting to bootstrap firmware...\"}");
     
-    // Schedule reboot to factory partition
+    // Schedule reboot (partition already set)
     pending_reboot = true;
     pending_reboot_time = millis() + 500;
-    pending_boot_partition = factory;
+    pending_boot_partition = nullptr;  // Already set above
     Serial.println("[WEB] Reboot to factory scheduled");
 }

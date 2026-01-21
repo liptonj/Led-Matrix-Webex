@@ -321,12 +321,24 @@
                         <span id="firmware-build-id" class="value">--</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">Running Partition:</span>
-                        <span id="running-partition" class="value">--</span>
+                        <span class="label">Active Partition:</span>
+                        <span id="boot-partition" class="value">--</span>
                     </div>
                     <div class="status-item">
-                        <span class="label">Boot Partition:</span>
-                        <span id="boot-partition" class="value">--</span>
+                        <span class="label">Bootstrap Version:</span>
+                        <span id="factory-version" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">OTA_0 Version:</span>
+                        <span id="ota0-version" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">OTA_1 Version:</span>
+                        <span id="ota1-version" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Filesystem:</span>
+                        <span id="fs-usage" class="value">--</span>
                     </div>
                     <div class="status-item">
                         <span class="label">IP Address:</span>
@@ -356,15 +368,18 @@
                     <button id="check-update" class="btn">Check for Updates</button>
                     <button id="perform-update" class="btn btn-warning" disabled>Install Update</button>
                 </div>
-                <div class="form-group">
-                    <label for="ota-url">Update URL:</label>
-                    <input type="text" id="ota-url" placeholder="GitHub Releases URL">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="auto-update"> Enable automatic updates
-                    </label>
-                </div>
+                <form id="ota-form">
+                    <div class="form-group">
+                        <label for="ota-url">Update URL:</label>
+                        <input type="text" id="ota-url" placeholder="GitHub Releases URL">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="auto-update"> Enable automatic updates
+                        </label>
+                    </div>
+                    <button type="submit" class="btn">Save OTA Settings</button>
+                </form>
                 <hr>
                 <div class="form-group">
                     <label for="ota-file">Manual Firmware Upload (.bin)</label>

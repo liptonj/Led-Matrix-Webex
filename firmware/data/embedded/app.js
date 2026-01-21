@@ -510,7 +510,8 @@ function setupEventListeners() {
         await saveWifi();
     });
     
-    // OTA buttons
+    // OTA form and buttons
+    document.getElementById('ota-form').addEventListener('submit', saveOTASettings);
     document.getElementById('check-update').addEventListener('click', checkForUpdate);
     document.getElementById('perform-update').addEventListener('click', performUpdate);
     
@@ -633,6 +634,30 @@ async function saveWifi() {
         logActivity('success', 'WiFi saved - rebooting...');
     } catch (error) {
         logActivity('error', 'Failed to save WiFi');
+    }
+}
+
+async function saveOTASettings(e) {
+    e.preventDefault();
+
+    const data = {
+        ota_url: document.getElementById('ota-url').value.trim(),
+        auto_update: document.getElementById('auto-update').checked
+    };
+
+    try {
+        const response = await fetch(CONFIG.configEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) {
+            throw new Error('Save failed');
+        }
+        logActivity('success', 'OTA settings saved');
+        await loadDisplayConfig();
+    } catch (error) {
+        logActivity('error', 'Failed to save OTA settings');
     }
 }
 

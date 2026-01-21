@@ -19,6 +19,7 @@
 #include "webex/webex_client.h"
 #include "webex/xapi_websocket.h"
 #include "bridge/bridge_client.h"
+#include "bridge/bridge_discovery.h"
 #include "bridge/pairing_manager.h"
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
@@ -38,6 +39,7 @@ WebServerManager web_server;
 WebexClient webex_client;
 XAPIWebSocket xapi_websocket;
 BridgeClient bridge_client;
+BridgeDiscovery bridge_discovery;
 PairingManager pairing_manager;
 MerakiMQTTClient mqtt_client;
 OTAManager ota_manager;
@@ -141,17 +143,41 @@ void setup() {
     pairing_manager.begin();
     Serial.printf("[INIT] Pairing code: %s\n", pairing_manager.getCode().c_str());
 
-    // Look for bridge server
+    // Set command handler before connecting
+    bridge_client.setCommandHandler(handleBridgeCommand);
+
+    // Look for bridge server - try local mDNS first, then cloud
     if (app_state.wifi_connected) {
         Serial.println("[INIT] Searching for bridge server...");
         String bridge_host;
         uint16_t bridge_port;
+        bool bridge_found = false;
+        
+        // Try 1: Local mDNS discovery
         if (mdns_manager.discoverBridge(bridge_host, bridge_port)) {
-            Serial.printf("[INIT] Found bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
-            // Set command handler before connecting
-            bridge_client.setCommandHandler(handleBridgeCommand);
-            // Connect with pairing code for embedded app mode
+            Serial.printf("[INIT] Found local bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
             bridge_client.beginWithPairing(bridge_host, bridge_port, pairing_manager.getCode());
+            bridge_found = true;
+        }
+        
+        // Try 2: Cloud bridge via discovery endpoint
+        if (!bridge_found) {
+            Serial.println("[INIT] No local bridge found, trying cloud bridge...");
+            if (bridge_discovery.fetchConfig()) {
+                String bridge_url = bridge_discovery.getBridgeUrl();
+                Serial.printf("[INIT] Using cloud bridge: %s\n", bridge_url.c_str());
+                bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
+                bridge_found = true;
+            } else {
+                // Use hardcoded fallback
+                Serial.println("[INIT] Discovery failed, using default cloud bridge");
+                bridge_client.beginWithUrl("wss://bridge.5ls.us", pairing_manager.getCode());
+                bridge_found = true;
+            }
+        }
+        
+        if (bridge_found) {
+            app_state.bridge_connected = false;  // Will be set true on successful connection
         }
     }
 
@@ -234,20 +260,25 @@ void loop() {
     // Process bridge client
     if (bridge_client.isConnected()) {
         bridge_client.loop();
+        
+        // Update connection state based on room join status
+        app_state.bridge_connected = bridge_client.isJoined();
+        app_state.embedded_app_connected = bridge_client.isPeerConnected();
 
         // Check for presence updates from bridge
         if (bridge_client.hasUpdate()) {
             BridgeUpdate update = bridge_client.getUpdate();
             app_state.webex_status = update.status;
-            app_state.bridge_connected = true;
             // Derive in_call from status if not connected to xAPI
             if (!app_state.xapi_connected) {
                 app_state.in_call = (update.status == "meeting" || update.status == "busy");
             }
         }
-    } else if (app_state.wifi_connected && mdns_manager.hasBridge()) {
-        // Try to reconnect to bridge
+    } else if (app_state.wifi_connected) {
+        // Try to reconnect to bridge (works for both local and cloud)
         bridge_client.reconnect();
+        app_state.bridge_connected = false;
+        app_state.embedded_app_connected = false;
     }
 
     // Process xAPI WebSocket
@@ -469,14 +500,27 @@ void check_for_updates() {
         Serial.printf("[OTA] Update available: %s\n", new_version.c_str());
 
         if (config_manager.getAutoUpdate()) {
+            // Check if this version previously failed - skip to avoid retry loop
+            String failed_version = config_manager.getFailedOTAVersion();
+            if (!failed_version.isEmpty() && failed_version == new_version) {
+                Serial.printf("[OTA] Skipping auto-update - version %s previously failed\n", 
+                              new_version.c_str());
+                return;
+            }
+            
             Serial.println("[OTA] Auto-update enabled, installing...");
             matrix_display.showUpdating(new_version);
 
             if (ota_manager.performUpdate()) {
                 Serial.println("[OTA] Update successful, rebooting...");
+                config_manager.clearFailedOTAVersion();
                 ESP.restart();
             } else {
                 Serial.println("[OTA] Update failed!");
+                // Record this version as failed to prevent retry loop
+                config_manager.setFailedOTAVersion(new_version);
+                Serial.printf("[OTA] Marked version %s as failed - will not auto-retry\n", 
+                              new_version.c_str());
             }
         }
     } else {

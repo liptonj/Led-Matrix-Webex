@@ -51,17 +51,27 @@ function fetchReleases() {
 }
 
 function transformRelease(release) {
-    return {
-        tag: release.tag_name,
-        name: release.name,
-        published: release.published_at,
-        notes: release.body ? release.body.split('\n')[0] : '',
-        prerelease: release.prerelease,
-        assets: release.assets.map(asset => ({
+    // Filter to only include OTA bundle files (firmware-ota-*.bin and bootstrap-ota-*.bin)
+    const otaBundles = release.assets
+        .filter(asset => {
+            const name = asset.name.toLowerCase();
+            return name.endsWith('.bin') && name.includes('ota');
+        })
+        .map(asset => ({
             name: asset.name,
             url: asset.browser_download_url,
             size: asset.size
-        }))
+        }));
+
+    return {
+        tag: release.tag_name,
+        version: extractVersion(release.tag_name),
+        name: release.name,
+        build_id: extractBuildId(release),
+        build_date: release.published_at,
+        notes: release.body ? release.body.split('\n')[0] : '',
+        prerelease: release.prerelease,
+        bundles: otaBundles
     };
 }
 
@@ -212,6 +222,23 @@ function findAssetUrl(assets, boardType, assetType) {
 }
 
 /**
+ * Extract build_id from release - uses target_commitish (git SHA) as unique identifier
+ * @param {object} release - GitHub release object
+ * @returns {string} - Build ID (commit SHA or timestamp-based fallback)
+ */
+function extractBuildId(release) {
+    // Prefer target_commitish (the commit SHA the release was created from)
+    if (release.target_commitish && release.target_commitish.length >= 7) {
+        return release.target_commitish.substring(0, 7);
+    }
+    // Fallback: use published timestamp as epoch
+    if (release.published_at) {
+        return Math.floor(new Date(release.published_at).getTime() / 1000).toString();
+    }
+    return 'unknown';
+}
+
+/**
  * Build OTA-compatible bundle structure from latest release
  */
 function buildOtaStructure(latestRelease) {
@@ -249,10 +276,16 @@ async function generateManifest() {
         // Build OTA-compatible structure from latest release
         const { bundle } = buildOtaStructure(latestRelease);
         
+        // Extract build metadata from latest release
+        const buildId = latestRelease ? extractBuildId(latestRelease) : 'unknown';
+        const buildDate = latestRelease?.published_at || new Date().toISOString();
+        
         // Create manifest with OTA fields and versions array
         const manifest = {
             // OTA-compatible fields (for firmware checkUpdateFromManifest)
             version: version,
+            build_id: buildId,
+            build_date: buildDate,
             bundle: bundle,  // LMWB bundle files (firmware + filesystem combined)
             // Metadata
             generated: new Date().toISOString(),
@@ -272,6 +305,8 @@ async function generateManifest() {
         
         console.log(`✓ Manifest generated: ${OUTPUT_FILE}`);
         console.log(`  Latest version: ${manifest.version}`);
+        console.log(`  Build ID: ${manifest.build_id}`);
+        console.log(`  Build date: ${manifest.build_date}`);
         console.log(`  Bundle URLs:`);
         for (const [board, data] of Object.entries(bundle)) {
             console.log(`    ${board}: ${data.url ? '✓' : '✗ missing'}`);

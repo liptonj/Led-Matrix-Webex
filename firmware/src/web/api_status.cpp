@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
+#include <LittleFS.h>
 
 // External MQTT client for config invalidation
 extern MerakiMQTTClient mqtt_client;
@@ -52,6 +53,60 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     const esp_partition_t* boot = esp_ota_get_boot_partition();
     doc["running_partition"] = running ? String(running->label) : "unknown";
     doc["boot_partition"] = boot ? String(boot->label) : "unknown";
+    
+    // Partition storage info
+    JsonObject partitions = doc["partitions"].to<JsonObject>();
+    
+    // Factory partition info
+    const esp_partition_t* factory = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
+    if (factory) {
+        JsonObject factory_info = partitions["factory"].to<JsonObject>();
+        factory_info["size"] = factory->size;
+        esp_app_desc_t factory_desc;
+        if (esp_ota_get_partition_description(factory, &factory_desc) == ESP_OK) {
+            doc["factory_version"] = String(factory_desc.version);
+        } else {
+            doc["factory_version"] = "unknown";
+        }
+    } else {
+        doc["factory_version"] = "n/a";
+    }
+    
+    // OTA_0 partition info
+    const esp_partition_t* ota0 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, nullptr);
+    if (ota0) {
+        JsonObject ota0_info = partitions["ota_0"].to<JsonObject>();
+        ota0_info["size"] = ota0->size;
+        esp_app_desc_t ota0_desc;
+        if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
+            ota0_info["version"] = String(ota0_desc.version);
+        }
+    }
+    
+    // OTA_1 partition info
+    const esp_partition_t* ota1 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
+    if (ota1) {
+        JsonObject ota1_info = partitions["ota_1"].to<JsonObject>();
+        ota1_info["size"] = ota1->size;
+        esp_app_desc_t ota1_desc;
+        if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
+            ota1_info["version"] = String(ota1_desc.version);
+        }
+    }
+    
+    // SPIFFS/LittleFS partition info
+    const esp_partition_t* spiffs = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
+    if (spiffs) {
+        JsonObject fs_info = partitions["filesystem"].to<JsonObject>();
+        fs_info["size"] = spiffs->size;
+        fs_info["used"] = spiffs->size - LittleFS.totalBytes() + LittleFS.usedBytes();
+        fs_info["total"] = LittleFS.totalBytes();
+        fs_info["free"] = LittleFS.totalBytes() - LittleFS.usedBytes();
+    }
 
     #ifdef FIRMWARE_VERSION
     doc["firmware_version"] = FIRMWARE_VERSION;

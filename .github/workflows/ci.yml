@@ -101,70 +101,20 @@ jobs:
           #endif
           EOF
 
-      - name: Build firmware (ESP32-S3)
-        run: pio run -e esp32s3
-
-      - name: Build filesystem image
-        run: pio run -t buildfs -e esp32s3
-
-      - name: Create OTA bundle (LMWB format for web upload)
-        run: |
-          BUILD_DIR=".pio/build/esp32s3"
-          
-          # Create LMWB bundle format (firmware + filesystem with header)
-          # This format is used for OTA uploads via the web interface
-          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
-          
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python3 << 'EOF'
-import struct
-import os
-
-build_dir = ".pio/build/esp32s3"
-firmware_bin = os.path.join(build_dir, "firmware.bin")
-littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-ota_bin = os.path.join(build_dir, "firmware-ota-esp32s3.bin")
-
-app_size = os.path.getsize(firmware_bin)
-fs_size = os.path.getsize(littlefs_bin)
-
-with open(ota_bin, "wb") as output:
-    output.write(b"LMWB")
-    output.write(struct.pack("<III", app_size, fs_size, 0))
-    with open(firmware_bin, "rb") as f:
-        output.write(f.read())
-    with open(littlefs_bin, "rb") as f:
-        output.write(f.read())
-
-print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-EOF
-          else
-            echo "⚠ Skipping OTA bundle - files not found"
-          fi
+      - name: Build firmware and LMWB OTA bundle (ESP32-S3)
+        run: pio run -t build_ota_bin -e esp32s3
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
-          
-          # Only include the LMWB bundle for OTA updates
+
+          # Only copy the OTA bundle (bundled version only)
           if [ -f "$BUILD_DIR/firmware-ota-esp32s3.bin" ]; then
             cp "$BUILD_DIR/firmware-ota-esp32s3.bin" artifacts/firmware-ota-esp32s3.bin
-            echo "✓ LMWB OTA bundle ready"
-          else
-            echo "⚠ OTA bundle not found!"
-            exit 1
+            echo "✓ Included LMWB OTA bundle in artifacts"
           fi
-          
-          # Keep bootloader and partitions for initial USB flashing only
-          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
-          fi
-          
+
           echo "ESP32-S3 artifacts:"
           ls -la artifacts/
 
@@ -221,70 +171,20 @@ EOF
           #endif
           EOF
 
-      - name: Build firmware (ESP32)
-        run: pio run -e esp32
-
-      - name: Build filesystem image
-        run: pio run -t buildfs -e esp32
-
-      - name: Create OTA bundle (LMWB format for web upload)
-        run: |
-          BUILD_DIR=".pio/build/esp32"
-          
-          # Create LMWB bundle format (firmware + filesystem with header)
-          # This format is used for OTA uploads via the web interface
-          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
-          
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python3 << 'EOF'
-import struct
-import os
-
-build_dir = ".pio/build/esp32"
-firmware_bin = os.path.join(build_dir, "firmware.bin")
-littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-ota_bin = os.path.join(build_dir, "firmware-ota-esp32.bin")
-
-app_size = os.path.getsize(firmware_bin)
-fs_size = os.path.getsize(littlefs_bin)
-
-with open(ota_bin, "wb") as output:
-    output.write(b"LMWB")
-    output.write(struct.pack("<III", app_size, fs_size, 0))
-    with open(firmware_bin, "rb") as f:
-        output.write(f.read())
-    with open(littlefs_bin, "rb") as f:
-        output.write(f.read())
-
-print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-EOF
-          else
-            echo "⚠ Skipping OTA bundle - files not found"
-          fi
+      - name: Build firmware and LMWB OTA bundle (ESP32)
+        run: pio run -t build_ota_bin -e esp32
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
-          
-          # Only include the LMWB bundle for OTA updates
+
+          # Only copy the OTA bundle (bundled version only)
           if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
             cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
-            echo "✓ LMWB OTA bundle ready"
-          else
-            echo "⚠ OTA bundle not found!"
-            exit 1
+            echo "✓ Included LMWB OTA bundle in artifacts"
           fi
-          
-          # Keep bootloader and partitions for initial USB flashing only
-          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
-          fi
-          
+
           echo "ESP32 artifacts:"
           ls -la artifacts/
 
@@ -377,70 +277,20 @@ EOF
           python -m pip install --upgrade pip
           pip install platformio esptool
 
-      - name: Build bootstrap firmware (ESP32-S3)
-        run: pio run -e esp32s3
-
-      - name: Build filesystem image
-        run: pio run -t buildfs -e esp32s3
-
-      - name: Create OTA bundle (LMWB format for web upload)
-        run: |
-          BUILD_DIR=".pio/build/esp32s3"
-          
-          # Create LMWB bundle format (firmware + filesystem with header)
-          # This format is used for OTA uploads via the web interface
-          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
-          
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python3 << 'EOF'
-import struct
-import os
-
-build_dir = ".pio/build/esp32s3"
-firmware_bin = os.path.join(build_dir, "firmware.bin")
-littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-ota_bin = os.path.join(build_dir, "bootstrap-ota-esp32s3.bin")
-
-app_size = os.path.getsize(firmware_bin)
-fs_size = os.path.getsize(littlefs_bin)
-
-with open(ota_bin, "wb") as output:
-    output.write(b"LMWB")
-    output.write(struct.pack("<III", app_size, fs_size, 0))
-    with open(firmware_bin, "rb") as f:
-        output.write(f.read())
-    with open(littlefs_bin, "rb") as f:
-        output.write(f.read())
-
-print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-EOF
-          else
-            echo "⚠ Skipping OTA bundle - files not found"
-          fi
+      - name: Build bootstrap firmware and LMWB OTA bundle (ESP32-S3)
+        run: pio run -t build_bootstrap_ota_bin -e esp32s3
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
-          
-          # Only include the LMWB bundle for OTA updates
+
+          # Only copy the OTA bundle (bundled version only)
           if [ -f "$BUILD_DIR/bootstrap-ota-esp32s3.bin" ]; then
             cp "$BUILD_DIR/bootstrap-ota-esp32s3.bin" artifacts/bootstrap-ota-esp32s3.bin
-            echo "✓ LMWB OTA bundle ready"
-          else
-            echo "⚠ OTA bundle not found!"
-            exit 1
+            echo "✓ Included LMWB OTA bundle in artifacts"
           fi
-          
-          # Keep bootloader and partitions for initial USB flashing only
-          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
-          fi
-          
+
           echo "Bootstrap ESP32-S3 artifacts:"
           ls -la artifacts/
 
@@ -486,70 +336,20 @@ EOF
           python -m pip install --upgrade pip
           pip install platformio esptool
 
-      - name: Build bootstrap firmware (ESP32)
-        run: pio run -e esp32
-
-      - name: Build filesystem image
-        run: pio run -t buildfs -e esp32
-
-      - name: Create OTA bundle (LMWB format for web upload)
-        run: |
-          BUILD_DIR=".pio/build/esp32"
-          
-          # Create LMWB bundle format (firmware + filesystem with header)
-          # This format is used for OTA uploads via the web interface
-          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
-          
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python3 << 'EOF'
-import struct
-import os
-
-build_dir = ".pio/build/esp32"
-firmware_bin = os.path.join(build_dir, "firmware.bin")
-littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-ota_bin = os.path.join(build_dir, "bootstrap-ota-esp32.bin")
-
-app_size = os.path.getsize(firmware_bin)
-fs_size = os.path.getsize(littlefs_bin)
-
-with open(ota_bin, "wb") as output:
-    output.write(b"LMWB")
-    output.write(struct.pack("<III", app_size, fs_size, 0))
-    with open(firmware_bin, "rb") as f:
-        output.write(f.read())
-    with open(littlefs_bin, "rb") as f:
-        output.write(f.read())
-
-print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-EOF
-          else
-            echo "⚠ Skipping OTA bundle - files not found"
-          fi
+      - name: Build bootstrap firmware and LMWB OTA bundle (ESP32)
+        run: pio run -t build_bootstrap_ota_bin -e esp32
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
-          
-          # Only include the LMWB bundle for OTA updates
+
+          # Only copy the OTA bundle (bundled version only)
           if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
             cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
-            echo "✓ LMWB OTA bundle ready"
-          else
-            echo "⚠ OTA bundle not found!"
-            exit 1
+            echo "✓ Included LMWB OTA bundle in artifacts"
           fi
-          
-          # Keep bootloader and partitions for initial USB flashing only
-          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
-            cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/partitions.bin" ]; then
-            cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
-          fi
-          
+
           echo "Bootstrap ESP32 artifacts:"
           ls -la artifacts/
 
@@ -664,7 +464,7 @@ EOF
           TAG_VERSION="${{ steps.version.outputs.VERSION }}"
           # Strip 'v' prefix if present
           TAG_VERSION="${TAG_VERSION#v}"
-          
+
           # Check firmware version
           FIRMWARE_VERSION=$(grep "firmware_version" firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
           if [ "$TAG_VERSION" != "$FIRMWARE_VERSION" ]; then
@@ -672,7 +472,7 @@ EOF
           else
             echo "✓ Firmware version matches: $FIRMWARE_VERSION"
           fi
-          
+
           # Check bootstrap version
           BOOTSTRAP_VERSION=$(grep "bootstrap_version" firmware_bootstrap/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
           if [ "$TAG_VERSION" != "$BOOTSTRAP_VERSION" ]; then
@@ -684,9 +484,9 @@ EOF
       - name: Create release archives
         run: |
           cd release
-          # Create firmware release zip (includes main firmware + filesystem)
+          # Create firmware release zip (LMWB OTA bundles only)
           cd firmware && zip -r ../firmware-${{ steps.version.outputs.VERSION }}.zip . && cd ..
-          # Create bootstrap release zip
+          # Create bootstrap release zip (LMWB OTA bundles only)
           cd bootstrap && zip -r ../bootstrap-${{ steps.version.outputs.VERSION }}.zip . && cd ..
           # Create bridge release zip
           cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
@@ -706,3 +506,41 @@ EOF
             release/firmware/firmware-ota-esp32.bin
             release/bootstrap/bootstrap-ota-esp32s3.bin
             release/bootstrap/bootstrap-ota-esp32.bin
+
+  # ============================================================================
+  # Deploy Website (only on version tags, after release)
+  # ============================================================================
+  deploy-website:
+    name: Deploy Website
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate manifest from GitHub releases
+        working-directory: website
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/generate-manifest.js
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: led-matrix-webex
+          directory: website/public
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          wranglerVersion: '3'

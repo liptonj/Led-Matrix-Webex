@@ -390,11 +390,14 @@ void WebSetup::setupRoutes() {
         }
     );
 
-    // AFTER API routes: Serve static files from LittleFS or embedded HTML
-    if (LittleFS.exists("/index.html")) {
+    // Serve static files from LittleFS only if bootstrap marker file exists
+    // This protects the bootstrap from main firmware's LittleFS which shares the same partition.
+    // If marker doesn't exist, the embedded HTML is used instead.
+    if (LittleFS.exists("/.bootstrap_ui") && LittleFS.exists("/index.html")) {
+        LOG_INFO(WEB_TAG, "Bootstrap marker found, using LittleFS UI");
         server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
     } else {
-        // Serve embedded HTML if LittleFS not available
+        LOG_INFO(WEB_TAG, "No bootstrap marker, using embedded HTML");
         server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
             handleRoot(request);
         });

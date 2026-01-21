@@ -79,7 +79,8 @@ void ConfigManager::migrateLegacyOtaUrl() {
     }
 
     bool is_legacy = stored_url == "https://api.github.com/repos/liptonj/Led-Matrix-Webex/releases/latest"
-        || stored_url == "https://display.5ls.us/manifest.json";
+        || stored_url == "https://display.5ls.us/updates/manifest.json"
+        || stored_url == "https://display.5ls.us/manifest.json";  // Legacy URL
 
     if (!is_legacy) {
         return;
@@ -463,6 +464,18 @@ bool ConfigManager::getAutoUpdate() const {
 
 void ConfigManager::setAutoUpdate(bool enabled) {
     saveBool("auto_update", enabled);
+}
+
+String ConfigManager::getFailedOTAVersion() const {
+    return loadString("failed_ota_version", "");
+}
+
+void ConfigManager::setFailedOTAVersion(const String& version) {
+    saveString("failed_ota_version", version);
+}
+
+void ConfigManager::clearFailedOTAVersion() {
+    saveString("failed_ota_version", "");
 }
 
 // Time Configuration

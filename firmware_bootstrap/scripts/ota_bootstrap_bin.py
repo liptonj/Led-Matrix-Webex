@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 import os
+import struct
 
 Import("env")
 
@@ -129,4 +130,49 @@ env.AddCustomTarget(
     ],
     title="Upload bootstrap full-flash bin",
     description="Builds and uploads a single full-flash bootstrap bin",
+)
+
+
+def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
+    """Create LMWB OTA bundle (app + filesystem with header)."""
+    if env is None:
+        env = _kwargs.get("env")
+    if env is None:
+        print("Skipping OTA bundle: build environment not available.")
+        return 1
+    pioenv = env["PIOENV"]
+    build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
+    firmware_bin = os.path.join(build_dir, "firmware.bin")
+    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
+    ota_bin = os.path.join(build_dir, f"bootstrap-ota-{pioenv}.bin")
+
+    if not os.path.exists(firmware_bin) or not os.path.exists(littlefs_bin):
+        print("Skipping OTA bundle: firmware or LittleFS bin missing.")
+        return 1
+
+    app_size = os.path.getsize(firmware_bin)
+    fs_size = os.path.getsize(littlefs_bin)
+
+    with open(ota_bin, "wb") as output:
+        output.write(b"LMWB")
+        output.write(struct.pack("<III", app_size, fs_size, 0))
+        with open(firmware_bin, "rb") as firmware:
+            output.write(firmware.read())
+        with open(littlefs_bin, "rb") as littlefs:
+            output.write(littlefs.read())
+
+    print(f"Created OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
+    return 0
+
+
+env.AddCustomTarget(
+    name="build_bootstrap_ota_bin",
+    dependencies=None,
+    actions=[
+        "pio run -e $PIOENV",
+        "pio run -e $PIOENV -t buildfs",
+        _merge_ota_bin,
+    ],
+    title="Build bootstrap OTA bin",
+    description="Builds bootstrap LMWB bundle with app + LittleFS (no bootloader)",
 )

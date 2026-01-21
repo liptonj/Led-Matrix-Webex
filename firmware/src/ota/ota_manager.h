@@ -79,12 +79,26 @@ public:
      * @param url GitHub releases API URL
      */
     void setUpdateUrl(const String& url) { update_url = url; }
+    
+    /**
+     * @brief Get the latest build ID from manifest
+     * @return Build ID string (commit SHA or timestamp)
+     */
+    String getLatestBuildId() const { return latest_build_id; }
+    
+    /**
+     * @brief Get the latest build date from manifest
+     * @return Build date ISO string
+     */
+    String getLatestBuildDate() const { return latest_build_date; }
 
 private:
     String update_url;
     String manifest_url;
     String current_version;
     String latest_version;
+    String latest_build_id;
+    String latest_build_date;
     String firmware_url;
     String littlefs_url;
     String bundle_url;  // LMWB bundle URL (preferred)

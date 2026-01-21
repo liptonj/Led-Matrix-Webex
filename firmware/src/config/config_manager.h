@@ -100,6 +100,9 @@ public:
     void setOTAUrl(const String& url);
     bool getAutoUpdate() const;
     void setAutoUpdate(bool enabled);
+    String getFailedOTAVersion() const;
+    void setFailedOTAVersion(const String& version);
+    void clearFailedOTAVersion();
 
     // Time Configuration
     String getTimeZone() const;

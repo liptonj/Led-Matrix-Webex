@@ -100,13 +100,20 @@ bool OTAManager::checkUpdateFromManifest() {
         return false;
     }
     
-    // Extract version
+    // Extract version and build info
     latest_version = doc["version"].as<String>();
+    latest_build_id = doc["build_id"].as<String>();
+    latest_build_date = doc["build_date"].as<String>();
     
     if (latest_version.isEmpty()) {
         Serial.println("[OTA] No version in manifest");
         return false;
     }
+    
+    Serial.printf("[OTA] Manifest: version=%s, build_id=%s, build_date=%s\n",
+                  latest_version.c_str(),
+                  latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
+                  latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
     
     // Extract URLs for this board - prefer bundle if available
     #if defined(ESP32_S3_BOARD)

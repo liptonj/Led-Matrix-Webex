@@ -66,6 +66,14 @@ public:
     void beginWithPairing(const String& host, uint16_t port, const String& pairing_code);
     
     /**
+     * @brief Initialize and connect to bridge using a URL
+     * Supports ws:// and wss:// URLs
+     * @param url Full WebSocket URL (e.g., wss://bridge.example.com)
+     * @param pairing_code 6-character pairing code
+     */
+    void beginWithUrl(const String& url, const String& pairing_code);
+    
+    /**
      * @brief Process WebSocket events
      */
     void loop();
@@ -185,10 +193,21 @@ private:
     bool peer_connected;
     bool update_pending;
     bool command_pending;
+    bool use_ssl;
     BridgeUpdate last_update;
     BridgeCommand last_command;
     BridgeCommandHandler command_handler;
     unsigned long last_reconnect;
+    
+    /**
+     * @brief Parse a WebSocket URL into host, port, and SSL flag
+     * @param url Full URL (ws:// or wss://)
+     * @param host Output: hostname
+     * @param port Output: port number
+     * @param ssl Output: whether to use SSL
+     * @return true if parsing succeeded
+     */
+    bool parseUrl(const String& url, String& host, uint16_t& port, bool& ssl);
     
     void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);
     void parseMessage(const String& message);
