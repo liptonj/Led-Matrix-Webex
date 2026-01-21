@@ -1,20 +1,14 @@
 name: Deploy Website to Cloudflare Pages
 
 on:
-  workflow_run:
-    workflows: ["CI/CD"]
-    types: [completed]
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages
     runs-on: ubuntu-latest
-    # Only run if CI succeeded and was triggered by a version tag
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       startsWith(github.event.workflow_run.head_branch, 'v'))
     permissions:
       contents: read
       deployments: write

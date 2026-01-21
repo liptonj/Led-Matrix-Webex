@@ -85,6 +85,11 @@ public:
      */
     void disconnect();
 
+    /**
+     * @brief Invalidate cached config (call when MQTT settings change via web UI)
+     */
+    void invalidateConfig();
+
 private:
     WiFiClient wifi_client;
     PubSubClient mqtt_client;
@@ -93,6 +98,11 @@ private:
     bool update_pending;
     unsigned long last_reconnect;
     String latest_sensor_id;
+    
+    // Persistent storage for broker/topic - PubSubClient stores pointers, not copies
+    String cached_broker;
+    String cached_topic;
+    uint16_t cached_port = 1883;
 
     static constexpr uint8_t MAX_SENSORS = 8;
     struct SensorEntry {

@@ -88,17 +88,19 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
     config_manager = config;
     g_mqtt_instance = this;
 
-    String broker = config_manager->getMQTTBroker();
+    // Cache broker and topic as member variables - PubSubClient stores pointers, not copies
+    cached_broker = config_manager->getMQTTBroker();
+    cached_topic = config_manager->getMQTTTopic();
     uint16_t port = config_manager->getMQTTPort();
 
-    if (broker.isEmpty()) {
+    if (cached_broker.isEmpty()) {
         Serial.println("[MQTT] No broker configured - MQTT module disabled");
         return;
     }
 
-    Serial.printf("[MQTT] Connecting to %s:%d\n", broker.c_str(), port);
+    Serial.printf("[MQTT] Connecting to %s:%d\n", cached_broker.c_str(), port);
 
-    mqtt_client.setServer(broker.c_str(), port);
+    mqtt_client.setServer(cached_broker.c_str(), port);
     mqtt_client.setCallback([](char* topic, byte* payload, unsigned int length) {
         if (g_mqtt_instance) {
             g_mqtt_instance->onMessage(topic, payload, length);
@@ -149,11 +151,25 @@ void MerakiMQTTClient::reconnect() {
         return;
     }
 
+    // Only refresh from config if our cache is empty (first call or config was cleared)
+    if (cached_broker.isEmpty()) {
+        cached_broker = config_manager->getMQTTBroker();
+        cached_topic = config_manager->getMQTTTopic();
+        cached_port = config_manager->getMQTTPort();
+        
+        if (cached_broker.isEmpty()) {
+            return;  // Still no broker configured
+        }
+        
+        // Set server once when we get a valid broker
+        mqtt_client.setServer(cached_broker.c_str(), cached_port);
+    }
+
     String client_id = "webex-display-" + String((uint32_t)ESP.getEfuseMac(), HEX);
     String username = config_manager->getMQTTUsername();
     String password = config_manager->getMQTTPassword();
 
-    Serial.println("[MQTT] Attempting connection...");
+    Serial.printf("[MQTT] Attempting connection to %s:%d...\n", cached_broker.c_str(), cached_port);
 
     bool connected = false;
     if (username.isEmpty()) {
@@ -165,10 +181,9 @@ void MerakiMQTTClient::reconnect() {
     if (connected) {
         Serial.println("[MQTT] Connected!");
 
-        // Subscribe to Meraki MT topics
-        String topic = config_manager->getMQTTTopic();
-        mqtt_client.subscribe(topic.c_str());
-        Serial.printf("[MQTT] Subscribed to: %s\n", topic.c_str());
+        // Subscribe to Meraki MT topics using cached topic
+        mqtt_client.subscribe(cached_topic.c_str());
+        Serial.printf("[MQTT] Subscribed to: %s\n", cached_topic.c_str());
     } else {
         Serial.printf("[MQTT] Connection failed, rc=%d\n", mqtt_client.state());
     }
@@ -176,6 +191,14 @@ void MerakiMQTTClient::reconnect() {
 
 void MerakiMQTTClient::disconnect() {
     mqtt_client.disconnect();
+}
+
+void MerakiMQTTClient::invalidateConfig() {
+    disconnect();
+    cached_broker = "";
+    cached_topic = "";
+    cached_port = 1883;
+    Serial.println("[MQTT] Config invalidated - will reload on next reconnect");
 }
 
 void MerakiMQTTClient::onMessage(char* topic, byte* payload, unsigned int length) {

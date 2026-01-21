@@ -36,7 +36,8 @@ jobs:
           cache-dependency-path: "bridge/package-lock.json"
 
       - name: Install dependencies
-        run: npm install
+        # --ignore-engines needed because @webex/* packages have invalid engine: "npm": "please-use-yarn"
+        run: npm install --ignore-engines
 
       - name: Run linter
         run: npm run lint

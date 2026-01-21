@@ -5,9 +5,13 @@
 
 #include "web_server.h"
 #include "../time/time_manager.h"
+#include "../meraki/mqtt_client.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
+
+// External MQTT client for config invalidation
+extern MerakiMQTTClient mqtt_client;
 
 void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     JsonDocument doc;
@@ -235,6 +239,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         }
         
         config_manager->setMQTTConfig(broker, port, username, password, topic);
+        mqtt_client.invalidateConfig();  // Force reconnect with new settings
         Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n", 
                      broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
     }
@@ -337,6 +342,7 @@ void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
 
 void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
     config_manager->setMQTTConfig("", 1883, "", "", "");
+    mqtt_client.invalidateConfig();  // Clear cached config
     Serial.println("[WEB] MQTT configuration cleared");
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"MQTT configuration cleared\"}");
     addCorsHeaders(response);
