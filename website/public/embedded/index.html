@@ -28,26 +28,55 @@
         <section id="setup-screen" class="screen">
             <div class="card setup-card">
                 <h2>Connect to Your Display</h2>
-                <p class="help-text">Enter the IP address or hostname of your LED Matrix Display to get started.</p>
+                <p class="help-text">Connect via WebSocket bridge for real-time status sync.</p>
                 
-                <div class="form-group">
-                    <label for="display-address">Display Address:</label>
-                    <input type="text" id="display-address" placeholder="e.g., 192.168.1.100 or webex-display.local">
-                    <p class="help-text">Find this on your display's screen or in your router's device list.</p>
+                <!-- Connection Mode Selector -->
+                <div class="connection-mode-tabs">
+                    <button class="mode-btn active" data-mode="bridge" id="mode-bridge-btn">Bridge (Recommended)</button>
+                    <button class="mode-btn" data-mode="direct" id="mode-direct-btn">Direct HTTP</button>
+                </div>
+                
+                <!-- Bridge Connection Mode -->
+                <div id="bridge-mode" class="connection-mode active">
+                    <div class="form-group">
+                        <label for="bridge-url">Bridge URL: <span id="bridge-url-status" class="auto-discovered"></span></label>
+                        <input type="text" id="bridge-url" placeholder="Loading...">
+                        <p class="help-text">Auto-discovered from server. Override with local URL if needed (e.g., ws://homeassistant.local:8080)</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pairing-code">Pairing Code:</label>
+                        <input type="text" id="pairing-code" placeholder="e.g., ABC123" maxlength="6" style="text-transform: uppercase;">
+                        <p class="help-text">6-character code shown on your LED display</p>
+                    </div>
+                    
+                    <button id="connect-bridge-btn" class="btn btn-primary btn-large">Connect via Bridge</button>
+                </div>
+                
+                <!-- Direct Connection Mode -->
+                <div id="direct-mode" class="connection-mode" style="display: none;">
+                    <div class="form-group">
+                        <label for="display-address">Display Address:</label>
+                        <input type="text" id="display-address" placeholder="e.g., 192.168.1.100 or webex-display.local">
+                        <p class="help-text">Direct HTTP connection (may not work in Webex iframe)</p>
+                    </div>
+                    
+                    <button id="connect-btn" class="btn btn-primary btn-large">Connect Directly</button>
                 </div>
                 
                 <div id="connection-error" class="error-message" style="display: none;"></div>
                 
-                <button id="connect-btn" class="btn btn-primary btn-large">Connect to Display</button>
-                
                 <div class="setup-help">
-                    <h3>How to find your display address:</h3>
+                    <h3>Bridge Connection (Recommended):</h3>
                     <ol>
-                        <li>Power on your LED Matrix Display</li>
-                        <li>Connect it to your WiFi network</li>
-                        <li>The display will show its IP address during startup</li>
-                        <li>Or check your router for a device named "webex-display"</li>
+                        <li>Install the Webex Bridge add-on in Home Assistant</li>
+                        <li>Expose via Cloudflare Tunnel (e.g., <code>wss://bridge.yourdomain.com</code>)</li>
+                        <li>Your LED display will show a 6-character pairing code</li>
+                        <li>Enter the bridge URL and pairing code above</li>
                     </ol>
+                    <p class="help-text" style="margin-top: 8px;">
+                        <strong>Tip:</strong> Use <code>wss://</code> for Cloudflare tunnel, <code>ws://</code> for local network.
+                    </p>
                 </div>
             </div>
         </section>

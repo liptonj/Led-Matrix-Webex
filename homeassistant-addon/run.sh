@@ -12,25 +12,20 @@ export WS_PORT=$(bashio::config 'ws_port')
 export LOG_LEVEL=$(bashio::config 'log_level')
 export MDNS_SERVICE_NAME="webex-bridge"
 
-# Validate required configuration
-if [ -z "$WEBEX_CLIENT_ID" ]; then
-    bashio::log.fatal "Webex Client ID is required"
-    exit 1
-fi
-
-if [ -z "$WEBEX_CLIENT_SECRET" ]; then
-    bashio::log.fatal "Webex Client Secret is required"
-    exit 1
-fi
-
-if [ -z "$WEBEX_REFRESH_TOKEN" ]; then
-    bashio::log.fatal "Webex Refresh Token is required"
-    exit 1
-fi
+# Data directory for persistent storage (device registration, etc.)
+export DATA_DIR="/data"
 
 bashio::log.info "Starting Webex Bridge..."
 bashio::log.info "WebSocket port: ${WS_PORT}"
 bashio::log.info "Log level: ${LOG_LEVEL}"
+bashio::log.info "Data directory: ${DATA_DIR}"
+
+# Check if Webex credentials are configured
+if [ -n "$WEBEX_CLIENT_ID" ] && [ -n "$WEBEX_CLIENT_SECRET" ] && [ -n "$WEBEX_REFRESH_TOKEN" ]; then
+    bashio::log.info "Webex credentials configured - OAuth mode enabled"
+else
+    bashio::log.info "No Webex credentials - running in pairing-only mode"
+fi
 
 # Start the bridge
 cd /app

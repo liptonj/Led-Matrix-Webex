@@ -9,9 +9,7 @@ url: "https://github.com/liptonj/Led-Matrix-Webex"
 
 # Build configuration
 arch:
-  - aarch64
   - amd64
-  - armv7
 
 # Container configuration
 init: false
@@ -26,18 +24,18 @@ ports_description:
 
 # Configuration options shown in HA UI
 options:
+  ws_port: 8080
+  log_level: "info"
   webex_client_id: ""
   webex_client_secret: ""
   webex_refresh_token: ""
-  ws_port: 8080
-  log_level: "info"
 
 schema:
-  webex_client_id: str
-  webex_client_secret: password
-  webex_refresh_token: password
   ws_port: port
   log_level: list(error|warn|info|debug)
+  webex_client_id: str?
+  webex_client_secret: password?
+  webex_refresh_token: password?
 
 # Startup configuration
 startup: application
@@ -47,4 +45,4 @@ boot: auto
 # memory: 256
 
 # Labels
-image: "ghcr.io/liptonj/webex-bridge-addon-{arch}"
+image: "ghcr.io/liptonj/webex-bridge-addon-amd64"

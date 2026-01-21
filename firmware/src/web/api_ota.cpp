@@ -5,11 +5,13 @@
 
 #include "web_server.h"
 #include "../ota/ota_manager.h"
+#include "../display/matrix_display.h"
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 
-// External reference to OTA manager for update functionality
+// External references for update functionality
 extern OTAManager ota_manager;
+extern MatrixDisplay matrix_display;
 
 void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
     JsonDocument doc;
@@ -64,12 +66,21 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
         return;
     }
     
+    String new_version = ota_manager.getLatestVersion();
     Serial.println("[WEB] Starting OTA update...");
+    
+    // Show updating screen on display BEFORE sending response
+    // This ensures the display updates before the blocking OTA starts
+    matrix_display.showUpdating(new_version);
+    
+    // Give display time to render
+    delay(50);
+    
     request->send(200, "application/json", 
                  "{\"success\":true,\"message\":\"Update started. Device will restart...\"}");
     
     // Give the response time to be sent
-    delay(100);
+    delay(200);
     
     // Trigger OTA update (this will reboot on success)
     if (!ota_manager.performUpdate()) {

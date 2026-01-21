@@ -17,13 +17,22 @@
 // ============================================================
 const CONFIG = {
     storageKey: 'led_matrix_display_address',
+    bridgeUrlKey: 'led_matrix_bridge_url',
+    pairingCodeKey: 'led_matrix_pairing_code',
+    connectionModeKey: 'led_matrix_connection_mode',
     settingsKey: 'led_matrix_settings',
+    bridgeConfigUrl: '/api/bridge-config.json',
     maxLogEntries: 30,
     maxRetries: 3,
     retryDelayMs: 2000,
     meetingCheckInterval: 10000,
     statusPollInterval: 5000,
-    connectionTimeout: 5000
+    connectionTimeout: 5000,
+    wsReconnectDelay: 3000,
+    wsPingInterval: 30000,
+    // Bridge config from discovery endpoint (populated at runtime)
+    discoveredBridgeUrl: null,
+    discoveredFallbackUrl: null
 };
 
 // ============================================================
@@ -33,6 +42,14 @@ const state = {
     webexApp: null,
     user: null,
     displayAddress: null,
+    bridgeUrl: null,
+    pairingCode: null,
+    connectionMode: 'bridge', // 'bridge' or 'direct'
+    ws: null,
+    wsConnected: false,
+    wsPeerConnected: false,
+    wsReconnectTimer: null,
+    wsPingTimer: null,
     isConnected: false,
     currentStatus: null,
     previousStatus: null,
@@ -49,6 +66,46 @@ const state = {
 };
 
 // ============================================================
+// Bridge Discovery
+// ============================================================
+
+/**
+ * Fetch bridge configuration from discovery endpoint
+ * This allows the bridge URL to be updated without app changes
+ */
+async function fetchBridgeConfig() {
+    try {
+        logActivity('info', 'Fetching bridge configuration...');
+        
+        const response = await fetch(CONFIG.bridgeConfigUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const config = await response.json();
+        
+        if (config.bridge && config.bridge.url) {
+            CONFIG.discoveredBridgeUrl = config.bridge.url;
+            CONFIG.discoveredFallbackUrl = config.bridge.fallback_url || null;
+            
+            logActivity('success', `Bridge URL discovered: ${CONFIG.discoveredBridgeUrl}`);
+            
+            // Pre-populate the bridge URL input if it's empty
+            const bridgeUrlInput = document.getElementById('bridge-url');
+            if (bridgeUrlInput && !bridgeUrlInput.value && !localStorage.getItem(CONFIG.bridgeUrlKey)) {
+                bridgeUrlInput.value = CONFIG.discoveredBridgeUrl;
+                bridgeUrlInput.placeholder = CONFIG.discoveredBridgeUrl;
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to fetch bridge config:', error);
+        logActivity('info', 'Using default bridge configuration');
+        // Use hardcoded default if discovery fails
+        CONFIG.discoveredBridgeUrl = 'wss://bridge.5ls.us';
+    }
+}
+
+// ============================================================
 // Initialization
 // ============================================================
 document.addEventListener('DOMContentLoaded', initializeApp);
@@ -62,13 +119,32 @@ async function initializeApp() {
     // Setup event listeners
     setupEventListeners();
     
-    // Check for saved display address
-    const savedAddress = localStorage.getItem(CONFIG.storageKey);
-    if (savedAddress) {
-        logActivity('info', `Found saved display: ${savedAddress}`);
-        await connectToDisplay(savedAddress);
+    // Fetch bridge configuration from discovery endpoint
+    await fetchBridgeConfig();
+    
+    // Load saved connection mode
+    state.connectionMode = localStorage.getItem(CONFIG.connectionModeKey) || 'bridge';
+    
+    // Check for saved connection based on mode
+    if (state.connectionMode === 'bridge') {
+        const savedBridgeUrl = localStorage.getItem(CONFIG.bridgeUrlKey);
+        const savedPairingCode = localStorage.getItem(CONFIG.pairingCodeKey);
+        
+        if (savedBridgeUrl && savedPairingCode) {
+            logActivity('info', `Found saved bridge: ${savedBridgeUrl}, code: ${savedPairingCode}`);
+            await connectToBridge(savedBridgeUrl, savedPairingCode);
+        } else {
+            showSetupScreen();
+        }
     } else {
-        showSetupScreen();
+        // Direct mode
+        const savedAddress = localStorage.getItem(CONFIG.storageKey);
+        if (savedAddress) {
+            logActivity('info', `Found saved display: ${savedAddress}`);
+            await connectToDisplay(savedAddress);
+        } else {
+            showSetupScreen();
+        }
     }
     
     // Initialize Webex SDK
@@ -131,6 +207,242 @@ function showMainScreen() {
     document.getElementById('main-screen').style.display = 'block';
 }
 
+// ============================================================
+// WebSocket Bridge Connection
+// ============================================================
+async function connectToBridge(bridgeUrl, pairingCode) {
+    const errorEl = document.getElementById('connection-error');
+    const connectBtn = document.getElementById('connect-bridge-btn');
+    
+    if (connectBtn) {
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting...';
+    }
+    
+    if (errorEl) {
+        errorEl.style.display = 'none';
+    }
+    
+    // Normalize inputs
+    bridgeUrl = bridgeUrl.trim();
+    pairingCode = pairingCode.trim().toUpperCase();
+    
+    // Ensure ws:// or wss:// prefix
+    if (!bridgeUrl.startsWith('ws://') && !bridgeUrl.startsWith('wss://')) {
+        // Default to wss:// for domain names (likely tunnel), ws:// for IP/local
+        if (bridgeUrl.includes('.local') || /^\d+\.\d+\.\d+\.\d+/.test(bridgeUrl)) {
+            bridgeUrl = 'ws://' + bridgeUrl;
+        } else {
+            bridgeUrl = 'wss://' + bridgeUrl;
+        }
+    }
+    
+    logActivity('info', `Connecting to bridge: ${bridgeUrl} with code: ${pairingCode}`);
+    
+    try {
+        // Close existing connection if any
+        if (state.ws) {
+            state.ws.close();
+            state.ws = null;
+        }
+        
+        // Create WebSocket connection
+        state.ws = new WebSocket(bridgeUrl);
+        state.bridgeUrl = bridgeUrl;
+        state.pairingCode = pairingCode;
+        
+        // Setup WebSocket event handlers
+        state.ws.onopen = () => {
+            logActivity('success', 'WebSocket connected');
+            state.wsConnected = true;
+            
+            // Send join message
+            state.ws.send(JSON.stringify({
+                type: 'join',
+                code: pairingCode,
+                clientType: 'app'
+            }));
+            
+            // Start ping interval
+            state.wsPingTimer = setInterval(() => {
+                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                    state.ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, CONFIG.wsPingInterval);
+        };
+        
+        state.ws.onmessage = (event) => {
+            handleBridgeMessage(event.data);
+        };
+        
+        state.ws.onclose = () => {
+            logActivity('info', 'WebSocket disconnected');
+            state.wsConnected = false;
+            state.wsPeerConnected = false;
+            updateConnectionStatus('display', false);
+            
+            // Clear ping timer
+            if (state.wsPingTimer) {
+                clearInterval(state.wsPingTimer);
+                state.wsPingTimer = null;
+            }
+            
+            // Auto-reconnect if we were connected
+            if (state.isConnected && !state.wsReconnectTimer) {
+                logActivity('info', 'Attempting to reconnect...');
+                state.wsReconnectTimer = setTimeout(() => {
+                    state.wsReconnectTimer = null;
+                    connectToBridge(state.bridgeUrl, state.pairingCode);
+                }, CONFIG.wsReconnectDelay);
+            }
+        };
+        
+        state.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            logActivity('error', 'WebSocket connection error');
+        };
+        
+        // Wait for connection and join confirmation
+        await waitForJoinConfirmation();
+        
+        // Save connection settings
+        localStorage.setItem(CONFIG.bridgeUrlKey, bridgeUrl);
+        localStorage.setItem(CONFIG.pairingCodeKey, pairingCode);
+        localStorage.setItem(CONFIG.connectionModeKey, 'bridge');
+        
+        state.isConnected = true;
+        state.connectionMode = 'bridge';
+        updateConnectionStatus('display', true);
+        
+        // Show main screen
+        showMainScreen();
+        
+        logActivity('success', `Connected to bridge with code: ${pairingCode}`);
+        
+    } catch (error) {
+        console.error('Bridge connection failed:', error);
+        logActivity('error', `Failed to connect: ${error.message}`);
+        
+        state.isConnected = false;
+        state.wsConnected = false;
+        updateConnectionStatus('display', false);
+        
+        if (errorEl) {
+            errorEl.textContent = `Cannot connect to bridge. ${error.message}`;
+            errorEl.style.display = 'block';
+        }
+        
+        showSetupScreen();
+    }
+    
+    if (connectBtn) {
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect via Bridge';
+    }
+}
+
+function waitForJoinConfirmation() {
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Connection timeout'));
+        }, CONFIG.connectionTimeout);
+        
+        const originalHandler = state.ws.onmessage;
+        state.ws.onmessage = (event) => {
+            try {
+                const message = JSON.parse(event.data);
+                if (message.type === 'joined') {
+                    clearTimeout(timeout);
+                    state.ws.onmessage = originalHandler;
+                    resolve(message);
+                } else if (message.type === 'error') {
+                    clearTimeout(timeout);
+                    state.ws.onmessage = originalHandler;
+                    reject(new Error(message.message || 'Join failed'));
+                }
+            } catch (e) {
+                // Ignore parse errors during handshake
+            }
+        };
+    });
+}
+
+function handleBridgeMessage(data) {
+    try {
+        const message = JSON.parse(data);
+        
+        switch (message.type) {
+            case 'joined':
+                logActivity('success', `Joined room ${message.data?.code}`);
+                state.wsPeerConnected = message.data?.displayConnected || false;
+                if (state.wsPeerConnected) {
+                    logActivity('info', 'Display is connected');
+                }
+                break;
+                
+            case 'peer_connected':
+                logActivity('success', `${message.data?.peerType} connected`);
+                state.wsPeerConnected = true;
+                break;
+                
+            case 'peer_disconnected':
+                logActivity('info', `${message.data?.peerType} disconnected`);
+                state.wsPeerConnected = false;
+                break;
+                
+            case 'status':
+                // Status update from display (if needed)
+                logActivity('info', `Status from display: ${message.status}`);
+                break;
+                
+            case 'pong':
+                // Ping response, connection is alive
+                break;
+                
+            case 'error':
+                logActivity('error', message.message || 'Bridge error');
+                break;
+                
+            default:
+                logActivity('info', `Bridge message: ${message.type}`);
+        }
+    } catch (error) {
+        console.error('Failed to parse bridge message:', error);
+    }
+}
+
+function disconnectBridge() {
+    if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+    }
+    
+    if (state.wsReconnectTimer) {
+        clearTimeout(state.wsReconnectTimer);
+        state.wsReconnectTimer = null;
+    }
+    
+    if (state.wsPingTimer) {
+        clearInterval(state.wsPingTimer);
+        state.wsPingTimer = null;
+    }
+    
+    localStorage.removeItem(CONFIG.bridgeUrlKey);
+    localStorage.removeItem(CONFIG.pairingCodeKey);
+    
+    state.bridgeUrl = null;
+    state.pairingCode = null;
+    state.wsConnected = false;
+    state.wsPeerConnected = false;
+    state.isConnected = false;
+    
+    logActivity('info', 'Disconnected from bridge');
+    showSetupScreen();
+}
+
+// ============================================================
+// Direct Display Connection (Legacy/Fallback)
+// ============================================================
 async function connectToDisplay(address) {
     const errorEl = document.getElementById('connection-error');
     const connectBtn = document.getElementById('connect-btn');
@@ -495,8 +807,8 @@ function updateUserDisplay() {
 // Status Sync
 // ============================================================
 async function syncStatusToDisplay() {
-    if (!state.isConnected || !state.displayAddress) {
-        logActivity('error', 'Not connected to display');
+    if (!state.isConnected) {
+        logActivity('error', 'Not connected');
         return false;
     }
     
@@ -505,19 +817,48 @@ async function syncStatusToDisplay() {
     }
     
     const displayStatus = mapToDisplayStatus(state.currentStatus);
+    const statusData = {
+        status: displayStatus,
+        display_name: state.user?.displayName || 'Unknown',
+        in_call: state.isInMeeting || state.isInCall,
+        camera_on: state.cameraOn,
+        mic_muted: state.micMuted,
+        timestamp: new Date().toISOString()
+    };
+    
+    // Use WebSocket if in bridge mode
+    if (state.connectionMode === 'bridge' && state.ws && state.ws.readyState === WebSocket.OPEN) {
+        try {
+            state.ws.send(JSON.stringify({
+                type: 'status',
+                ...statusData
+            }));
+            
+            logActivity('success', 'Status sent via WebSocket');
+            updateSyncStatus(true);
+            state.lastSyncTime = new Date();
+            return true;
+        } catch (error) {
+            logActivity('error', `WebSocket send failed: ${error.message}`);
+            updateSyncStatus(false);
+            return false;
+        }
+    }
+    
+    // Fall back to HTTP for direct mode
+    if (!state.displayAddress) {
+        logActivity('error', 'No display address configured');
+        return false;
+    }
     
     try {
         const response = await fetchWithTimeout(`http://${state.displayAddress}/api/embedded/status`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                status: displayStatus,
-                displayName: state.user?.displayName || 'Unknown',
-                in_call: state.isInMeeting || state.isInCall,
-                camera_on: state.cameraOn,
-                mic_muted: state.micMuted,
-                source: 'embedded-app',
-                timestamp: new Date().toISOString()
+                ...statusData,
+                displayName: statusData.display_name,
+                source: 'embedded-app'
             })
         });
         
@@ -613,16 +954,60 @@ async function loadDisplayConfig() {
 // Event Listeners
 // ============================================================
 function setupEventListeners() {
-    // Setup screen - connect button
-    document.getElementById('connect-btn').addEventListener('click', () => {
+    // Connection mode tabs
+    document.getElementById('mode-bridge-btn')?.addEventListener('click', () => {
+        document.getElementById('mode-bridge-btn').classList.add('active');
+        document.getElementById('mode-direct-btn').classList.remove('active');
+        document.getElementById('bridge-mode').style.display = 'block';
+        document.getElementById('direct-mode').style.display = 'none';
+    });
+    
+    document.getElementById('mode-direct-btn')?.addEventListener('click', () => {
+        document.getElementById('mode-direct-btn').classList.add('active');
+        document.getElementById('mode-bridge-btn').classList.remove('active');
+        document.getElementById('direct-mode').style.display = 'block';
+        document.getElementById('bridge-mode').style.display = 'none';
+    });
+    
+    // Bridge connection button
+    document.getElementById('connect-bridge-btn')?.addEventListener('click', () => {
+        const bridgeUrl = document.getElementById('bridge-url').value;
+        const pairingCode = document.getElementById('pairing-code').value;
+        if (bridgeUrl && pairingCode) {
+            connectToBridge(bridgeUrl, pairingCode);
+        } else {
+            const errorEl = document.getElementById('connection-error');
+            errorEl.textContent = 'Please enter both bridge URL and pairing code';
+            errorEl.style.display = 'block';
+        }
+    });
+    
+    // Bridge URL enter key
+    document.getElementById('bridge-url')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('pairing-code').focus();
+        }
+    });
+    
+    // Pairing code enter key
+    document.getElementById('pairing-code')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('connect-bridge-btn').click();
+        }
+    });
+    
+    // Setup screen - direct connect button
+    document.getElementById('connect-btn')?.addEventListener('click', () => {
         const address = document.getElementById('display-address').value;
         if (address) {
             connectToDisplay(address);
         }
     });
     
-    // Setup screen - enter key
-    document.getElementById('display-address').addEventListener('keypress', (e) => {
+    // Setup screen - enter key for direct mode
+    document.getElementById('display-address')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             document.getElementById('connect-btn').click();
@@ -630,9 +1015,13 @@ function setupEventListeners() {
     });
     
     // Disconnect button
-    document.getElementById('disconnect-display').addEventListener('click', () => {
+    document.getElementById('disconnect-display')?.addEventListener('click', () => {
         if (confirm('Disconnect from this display?')) {
-            disconnectDisplay();
+            if (state.connectionMode === 'bridge') {
+                disconnectBridge();
+            } else {
+                disconnectDisplay();
+            }
         }
     });
     

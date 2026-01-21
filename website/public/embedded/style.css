@@ -178,6 +178,60 @@ body {
     margin-bottom: 8px;
 }
 
+/* Connection Mode Tabs */
+.connection-mode-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background-color: var(--color-bg);
+    border-radius: var(--radius);
+    padding: 4px;
+}
+
+.mode-btn {
+    flex: 1;
+    padding: 10px 12px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mode-btn:hover {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text);
+}
+
+.mode-btn.active {
+    background-color: var(--color-primary);
+    color: white;
+}
+
+.connection-mode {
+    display: none;
+    text-align: left;
+}
+
+.connection-mode.active {
+    display: block;
+}
+
+/* Auto-discovered indicator */
+.auto-discovered {
+    font-size: 11px;
+    font-weight: normal;
+    color: var(--color-success);
+    margin-left: 4px;
+}
+
+.auto-discovered::before {
+    content: "(auto-discovered)";
+}
+
 .error-message {
     background-color: rgba(255, 92, 92, 0.15);
     border: 1px solid var(--color-danger);

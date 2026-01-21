@@ -135,6 +135,14 @@ public:
      * @param version New version being installed
      */
     void showUpdating(const String& version);
+    
+    /**
+     * @brief Show updating screen with progress bar
+     * @param version New version being installed
+     * @param progress Progress percentage (0-100)
+     * @param status Status message (e.g., "Downloading firmware...")
+     */
+    void showUpdatingProgress(const String& version, int progress, const String& status);
 
     /**
      * @brief Show setup screen with hostname for embedded app access
@@ -147,6 +155,13 @@ public:
      * @param hostname Device hostname for embedded app
      */
     void showWaitingForWebex(const String& hostname);
+
+    /**
+     * @brief Show pairing code for bridge connection
+     * @param code 6-character pairing code
+     * @param bridge_url Optional bridge URL to display
+     */
+    void showPairingCode(const String& code, const String& bridge_url = "");
 
     /**
      * @brief Clear the display

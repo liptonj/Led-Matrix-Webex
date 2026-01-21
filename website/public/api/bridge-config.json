@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "bridge": {
+    "url": "wss://bridge.5ls.us",
+    "fallback_url": "ws://webex-bridge.local:8080"
+  },
+  "features": {
+    "pairing_enabled": true
+  },
+  "updated_at": "2026-01-21T00:00:00Z"
+}

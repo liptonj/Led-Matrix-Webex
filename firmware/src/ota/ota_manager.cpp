@@ -4,6 +4,7 @@
  */
 
 #include "ota_manager.h"
+#include "../display/matrix_display.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
@@ -12,16 +13,20 @@
 #ifndef NATIVE_BUILD
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <esp_task_wdt.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #endif
+
+// External reference to display for progress updates
+extern MatrixDisplay matrix_display;
 
 namespace {
 void configureHttpClient(HTTPClient& http) {
-#if defined(HTTPC_STRICT_FOLLOW_REDIRECTS)
+    // Enable following redirects - required for GitHub release downloads
+    // GitHub redirects asset URLs to CDN (returns 302)
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-#elif defined(HTTPC_FORCE_FOLLOW_REDIRECTS)
-    http.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
-#endif
-    http.setTimeout(15000);
+    http.setTimeout(30000);  // 30 second timeout for large downloads
 }
 }  // namespace
 
@@ -214,6 +219,9 @@ bool OTAManager::performUpdate() {
     Serial.println("[OTA] Firmware + LittleFS update successful!");
     Serial.println("[OTA] Rebooting...");
     
+    // Show complete status
+    matrix_display.showUpdatingProgress(latest_version, 100, "Rebooting...");
+    
     delay(1000);
     ESP.restart();
     
@@ -322,6 +330,13 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
 bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
     Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
 
+#ifndef NATIVE_BUILD
+    // Disable task watchdog during OTA - it's a legitimate long-running operation
+    // that will starve other tasks
+    esp_task_wdt_deinit();
+    Serial.println("[OTA] Task watchdog disabled for update");
+#endif
+
     WiFiClientSecure client;
     client.setInsecure(); // TODO: Add proper certificate validation
 
@@ -378,9 +393,79 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     }
 
     Serial.printf("[OTA] Flashing %s...\n", label);
+    
+    // Show initial progress on display
+    // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
+    int initialProgress = (update_type == U_FLASH) ? 0 : 85;
+    String statusText = String("Downloading ") + label;
+    matrix_display.showUpdatingProgress(latest_version, initialProgress, statusText);
 
+    // Use chunked download with watchdog feeding to prevent timeout
     WiFiClient* stream = http.getStreamPtr();
-    size_t written = Update.writeStream(*stream);
+    size_t written = 0;
+    uint8_t buffer[4096];
+    int lastProgress = -1;
+    
+    while (written < static_cast<size_t>(contentLength)) {
+        // Yield to other FreeRTOS tasks
+#ifndef NATIVE_BUILD
+        vTaskDelay(1);  // Give other tasks a chance to run
+#else
+        yield();
+#endif
+        
+        size_t available = stream->available();
+        if (available == 0) {
+            // Wait for more data with timeout
+            unsigned long waitStart = millis();
+            while (stream->available() == 0 && stream->connected()) {
+                if (millis() - waitStart > 10000) {  // 10 second timeout
+                    Serial.printf("[OTA] Stream timeout waiting for data\n");
+                    Update.abort();
+                    http.end();
+                    return false;
+                }
+#ifndef NATIVE_BUILD
+                vTaskDelay(pdMS_TO_TICKS(10));  // Wait 10ms, yield to other tasks
+#else
+                delay(10);
+#endif
+            }
+            available = stream->available();
+        }
+        
+        if (available == 0 && !stream->connected()) {
+            break;  // Connection closed
+        }
+        
+        size_t toRead = min(available, sizeof(buffer));
+        int bytesRead = stream->readBytes(buffer, toRead);
+        
+        if (bytesRead > 0) {
+            size_t bytesWritten = Update.write(buffer, bytesRead);
+            if (bytesWritten != static_cast<size_t>(bytesRead)) {
+                Serial.printf("[OTA] Write failed: wrote %d of %d bytes\n", bytesWritten, bytesRead);
+                Update.abort();
+                http.end();
+                return false;
+            }
+            written += bytesWritten;
+            
+            // Update progress every 5%
+            int progress = (written * 100) / contentLength;
+            if (progress / 5 > lastProgress / 5) {
+                lastProgress = progress;
+                Serial.printf("[OTA] %s: %d%%\n", label, progress);
+                
+                // Update display with progress
+                // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
+                int displayProgress = (update_type == U_FLASH) ? 
+                    (progress * 85) / 100 : 85 + ((progress * 15) / 100);
+                String statusText = String(label) + " " + String(progress) + "%";
+                matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
+            }
+        }
+    }
 
     if (written != static_cast<size_t>(contentLength)) {
         Serial.printf("[OTA] Written only %d of %d bytes for %s\n", written, contentLength, label);

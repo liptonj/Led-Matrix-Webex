@@ -158,7 +158,7 @@ void setup() {
     Serial.println("[INIT] Initializing OTA manager...");
     String ota_url = config_manager.getOTAUrl();
     ota_manager.begin(ota_url, FIRMWARE_VERSION);
-    
+
     // Enable manifest mode for non-GitHub API URLs (e.g., display.5ls.us)
     if (!ota_url.isEmpty() && ota_url.indexOf("api.github.com") < 0) {
         ota_manager.setManifestUrl(ota_url);
