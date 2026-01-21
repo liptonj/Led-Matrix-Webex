@@ -62,7 +62,9 @@ const state = {
     lastSyncTime: null,
     meetingCheckTimer: null,
     statusPollTimer: null,
-    displayConfig: {}
+    displayConfig: {},
+    pendingCommands: new Map(),  // requestId -> { resolve, reject, timeout }
+    commandTimeout: 10000  // 10 second timeout for commands
 };
 
 // ============================================================
@@ -377,12 +379,18 @@ function handleBridgeMessage(data) {
                 state.wsPeerConnected = message.data?.displayConnected || false;
                 if (state.wsPeerConnected) {
                     logActivity('info', 'Display is connected');
+                    // Request initial status and config from display
+                    sendBridgeCommand('get_status').catch(() => {});
+                    sendBridgeCommand('get_config').catch(() => {});
                 }
                 break;
                 
             case 'peer_connected':
                 logActivity('success', `${message.data?.peerType} connected`);
                 state.wsPeerConnected = true;
+                // Request status and config when display connects
+                sendBridgeCommand('get_status').catch(() => {});
+                sendBridgeCommand('get_config').catch(() => {});
                 break;
                 
             case 'peer_disconnected':
@@ -391,8 +399,24 @@ function handleBridgeMessage(data) {
                 break;
                 
             case 'status':
-                // Status update from display (if needed)
-                logActivity('info', `Status from display: ${message.status}`);
+                // Status update from display
+                if (message.data) {
+                    updateDisplayStatusFromBridge(message.data);
+                } else {
+                    logActivity('info', `Status from display: ${message.status}`);
+                }
+                break;
+                
+            case 'config':
+                // Config from display
+                if (message.data) {
+                    updateDisplayConfigFromBridge(message.data);
+                }
+                break;
+                
+            case 'command_response':
+                // Response to a command we sent
+                handleCommandResponse(message);
                 break;
                 
             case 'pong':
@@ -409,6 +433,151 @@ function handleBridgeMessage(data) {
     } catch (error) {
         console.error('Failed to parse bridge message:', error);
     }
+}
+
+/**
+ * Send a command to the display via WebSocket bridge
+ * @param {string} command - Command name
+ * @param {object} payload - Command payload
+ * @returns {Promise} Resolves with response data
+ */
+function sendBridgeCommand(command, payload = {}) {
+    return new Promise((resolve, reject) => {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+            reject(new Error('WebSocket not connected'));
+            return;
+        }
+        
+        if (!state.wsPeerConnected) {
+            reject(new Error('Display not connected'));
+            return;
+        }
+        
+        const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Set up timeout
+        const timeout = setTimeout(() => {
+            state.pendingCommands.delete(requestId);
+            reject(new Error('Command timeout'));
+        }, state.commandTimeout);
+        
+        // Store pending command
+        state.pendingCommands.set(requestId, { resolve, reject, timeout });
+        
+        // Send command
+        state.ws.send(JSON.stringify({
+            type: 'command',
+            command,
+            requestId,
+            payload
+        }));
+        
+        logActivity('info', `Sent command: ${command}`);
+    });
+}
+
+/**
+ * Handle command response from display
+ */
+function handleCommandResponse(message) {
+    const pending = state.pendingCommands.get(message.requestId);
+    if (!pending) {
+        return; // No pending command for this response
+    }
+    
+    clearTimeout(pending.timeout);
+    state.pendingCommands.delete(message.requestId);
+    
+    if (message.success) {
+        pending.resolve(message.data || {});
+    } else {
+        pending.reject(new Error(message.error || 'Command failed'));
+    }
+}
+
+/**
+ * Update display status from bridge message
+ */
+function updateDisplayStatusFromBridge(data) {
+    // Update status tab
+    if (document.getElementById('display-status')) {
+        document.getElementById('display-status').textContent = data.webex_status || '--';
+    }
+    if (document.getElementById('camera-status')) {
+        document.getElementById('camera-status').textContent = data.camera_on ? 'On' : 'Off';
+    }
+    if (document.getElementById('mic-status')) {
+        document.getElementById('mic-status').textContent = data.mic_muted ? 'Muted' : 'On';
+    }
+    if (document.getElementById('call-status')) {
+        document.getElementById('call-status').textContent = data.in_call ? 'Yes' : 'No';
+    }
+    
+    // System info
+    if (document.getElementById('firmware-version')) {
+        document.getElementById('firmware-version').textContent = data.firmware_version || '--';
+    }
+    if (document.getElementById('sys-firmware-version')) {
+        document.getElementById('sys-firmware-version').textContent = data.firmware_version || '--';
+    }
+    if (document.getElementById('ip-address')) {
+        document.getElementById('ip-address').textContent = data.ip_address || '--';
+    }
+    if (document.getElementById('free-heap')) {
+        document.getElementById('free-heap').textContent = formatBytes(data.free_heap);
+    }
+    if (document.getElementById('uptime')) {
+        document.getElementById('uptime').textContent = formatUptime(data.uptime);
+    }
+    if (document.getElementById('wifi-signal')) {
+        document.getElementById('wifi-signal').textContent = data.rssi ? `${data.rssi} dBm` : '--';
+    }
+    
+    logActivity('info', 'Status updated from display');
+}
+
+/**
+ * Update display config from bridge message
+ */
+function updateDisplayConfigFromBridge(data) {
+    state.displayConfig = data;
+    
+    // Populate form fields
+    if (document.getElementById('device-name')) {
+        document.getElementById('device-name').value = data.device_name || '';
+    }
+    if (document.getElementById('display-name')) {
+        document.getElementById('display-name').value = data.display_name || '';
+    }
+    if (document.getElementById('brightness')) {
+        document.getElementById('brightness').value = data.brightness || 128;
+        document.getElementById('brightness-value').textContent = data.brightness || 128;
+    }
+    if (document.getElementById('poll-interval')) {
+        document.getElementById('poll-interval').value = data.poll_interval || 30;
+    }
+    
+    // Show pairing code if available
+    if (data.pairing_code && document.getElementById('display-pairing-code')) {
+        document.getElementById('display-pairing-code').textContent = data.pairing_code;
+    }
+    
+    // Auth status
+    const authStatus = document.getElementById('webex-auth-status');
+    if (authStatus) {
+        if (data.has_webex_tokens) {
+            authStatus.textContent = 'Connected';
+            authStatus.style.color = '#6cc04a';
+        } else if (data.has_webex_credentials) {
+            authStatus.textContent = 'Not authorized';
+            authStatus.style.color = '#ffcc00';
+        } else {
+            authStatus.textContent = 'Not configured';
+            authStatus.style.color = '#ff5c5c';
+        }
+    }
+    
+    logActivity('info', 'Config updated from display');
 }
 
 function disconnectBridge() {
@@ -891,9 +1060,19 @@ function updateSyncStatus(success) {
 // Display Status & Config Loading
 // ============================================================
 async function loadDisplayStatus() {
-    if (!state.isConnected || !state.displayAddress) return;
+    if (!state.isConnected) return;
     
     try {
+        // Use WebSocket command if in bridge mode
+        if (state.connectionMode === 'bridge' && state.wsPeerConnected) {
+            const data = await sendBridgeCommand('get_status');
+            updateDisplayStatusFromBridge(data);
+            return;
+        }
+        
+        // Fall back to HTTP for direct mode
+        if (!state.displayAddress) return;
+        
         const response = await fetch(`http://${state.displayAddress}/api/status`);
         const data = await response.json();
         
@@ -919,9 +1098,19 @@ async function loadDisplayStatus() {
 }
 
 async function loadDisplayConfig() {
-    if (!state.isConnected || !state.displayAddress) return;
+    if (!state.isConnected) return;
     
     try {
+        // Use WebSocket command if in bridge mode
+        if (state.connectionMode === 'bridge' && state.wsPeerConnected) {
+            const data = await sendBridgeCommand('get_config');
+            updateDisplayConfigFromBridge(data);
+            return;
+        }
+        
+        // Fall back to HTTP for direct mode
+        if (!state.displayAddress) return;
+        
         const response = await fetch(`http://${state.displayAddress}/api/config`);
         state.displayConfig = await response.json();
         
@@ -1078,12 +1267,29 @@ function setupEventListeners() {
 }
 
 async function saveConfig(data) {
-    if (!state.isConnected || !state.displayAddress) {
+    if (!state.isConnected) {
         logActivity('error', 'Not connected to display');
         return;
     }
     
     try {
+        // Use WebSocket command if in bridge mode
+        if (state.connectionMode === 'bridge' && state.wsPeerConnected) {
+            const result = await sendBridgeCommand('set_config', data);
+            logActivity('success', 'Configuration saved via bridge');
+            // Update local state with returned config
+            if (result) {
+                updateDisplayConfigFromBridge(result);
+            }
+            return;
+        }
+        
+        // Fall back to HTTP for direct mode
+        if (!state.displayAddress) {
+            logActivity('error', 'No display address configured');
+            return;
+        }
+        
         const response = await fetch(`http://${state.displayAddress}/api/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1096,7 +1302,7 @@ async function saveConfig(data) {
             throw new Error('Save failed');
         }
     } catch (error) {
-        logActivity('error', 'Failed to save config');
+        logActivity('error', `Failed to save config: ${error.message}`);
     }
 }
 
@@ -1212,10 +1418,18 @@ async function performUpdate() {
 }
 
 async function rebootDevice() {
-    if (!state.isConnected || !state.displayAddress) return;
+    if (!state.isConnected) return;
     if (!confirm('Reboot the display?')) return;
     
     try {
+        // Use WebSocket command if in bridge mode
+        if (state.connectionMode === 'bridge' && state.wsPeerConnected) {
+            await sendBridgeCommand('reboot');
+            logActivity('info', 'Rebooting via bridge...');
+            return;
+        }
+        
+        if (!state.displayAddress) return;
         await fetch(`http://${state.displayAddress}/api/reboot`, { method: 'POST' });
         logActivity('info', 'Rebooting...');
     } catch (error) {
@@ -1224,11 +1438,19 @@ async function rebootDevice() {
 }
 
 async function factoryReset() {
-    if (!state.isConnected || !state.displayAddress) return;
+    if (!state.isConnected) return;
     if (!confirm('Factory reset? All settings will be erased!')) return;
     if (!confirm('This cannot be undone. Continue?')) return;
     
     try {
+        // Use WebSocket command if in bridge mode
+        if (state.connectionMode === 'bridge' && state.wsPeerConnected) {
+            await sendBridgeCommand('factory_reset');
+            logActivity('info', 'Factory reset via bridge...');
+            return;
+        }
+        
+        if (!state.displayAddress) return;
         await fetch(`http://${state.displayAddress}/api/factory-reset`, { method: 'POST' });
         logActivity('info', 'Factory reset...');
     } catch (error) {

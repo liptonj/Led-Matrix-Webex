@@ -25,6 +25,12 @@ interface Message {
     // Device registration fields
     firmware_version?: string;
     ip_address?: string;
+    // Command relay fields
+    command?: string;
+    requestId?: string;
+    payload?: Record<string, unknown>;
+    success?: boolean;
+    error?: string;
 }
 
 interface Client {
@@ -241,6 +247,31 @@ export class WebSocketServer {
                     this.relayStatus(ws, message);
                     break;
 
+                case 'command':
+                    // Relay command from app to display
+                    this.relayCommand(ws, message);
+                    break;
+
+                case 'command_response':
+                    // Relay command response from display to app
+                    this.relayCommandResponse(ws, message);
+                    break;
+
+                case 'get_config':
+                    // Request config from display
+                    this.relayToDisplay(ws, message);
+                    break;
+
+                case 'config':
+                    // Config response from display to app
+                    this.relayToApp(ws, message);
+                    break;
+
+                case 'get_status':
+                    // Request status from display
+                    this.relayToDisplay(ws, message);
+                    break;
+
                 case 'ping':
                     this.sendMessage(ws, { type: 'pong' });
                     break;
@@ -396,6 +427,120 @@ export class WebSocketServer {
         } else {
             this.logger.debug(`No peer connected in room ${client.pairingCode} to receive status`);
         }
+    }
+
+    /**
+     * Relay a command from app to display
+     */
+    private relayCommand(ws: WebSocket, message: Message): void {
+        const client = this.clients.get(ws);
+        if (!client || client.clientType !== 'app') {
+            this.sendMessage(ws, { 
+                type: 'command_response', 
+                requestId: message.requestId,
+                success: false,
+                error: 'Only apps can send commands' 
+            });
+            return;
+        }
+
+        if (!client.pairingCode) {
+            this.sendMessage(ws, { 
+                type: 'command_response',
+                requestId: message.requestId,
+                success: false,
+                error: 'Not in a pairing room' 
+            });
+            return;
+        }
+
+        const room = this.rooms.get(client.pairingCode);
+        if (!room || !room.display || room.display.readyState !== WebSocket.OPEN) {
+            this.sendMessage(ws, { 
+                type: 'command_response',
+                requestId: message.requestId,
+                success: false,
+                error: 'Display not connected' 
+            });
+            return;
+        }
+
+        // Forward command to display
+        this.sendMessage(room.display, {
+            type: 'command',
+            command: message.command,
+            requestId: message.requestId,
+            payload: message.payload,
+            timestamp: new Date().toISOString()
+        });
+
+        this.logger.debug(`Relayed command '${message.command}' to display in room ${client.pairingCode}`);
+    }
+
+    /**
+     * Relay a command response from display to app
+     */
+    private relayCommandResponse(ws: WebSocket, message: Message): void {
+        const client = this.clients.get(ws);
+        if (!client || client.clientType !== 'display' || !client.pairingCode) {
+            return;
+        }
+
+        const room = this.rooms.get(client.pairingCode);
+        if (!room || !room.app || room.app.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        // Forward response to app
+        this.sendMessage(room.app, {
+            type: 'command_response',
+            command: message.command,
+            requestId: message.requestId,
+            success: message.success,
+            data: message.data,
+            error: message.error,
+            timestamp: new Date().toISOString()
+        });
+
+        this.logger.debug(`Relayed command response to app in room ${client.pairingCode}`);
+    }
+
+    /**
+     * Relay a message from app to display
+     */
+    private relayToDisplay(ws: WebSocket, message: Message): void {
+        const client = this.clients.get(ws);
+        if (!client || !client.pairingCode) {
+            return;
+        }
+
+        const room = this.rooms.get(client.pairingCode);
+        if (!room || !room.display || room.display.readyState !== WebSocket.OPEN) {
+            this.sendMessage(ws, { 
+                type: 'error',
+                message: 'Display not connected' 
+            });
+            return;
+        }
+
+        this.sendMessage(room.display, message);
+    }
+
+    /**
+     * Relay a message from display to app
+     */
+    private relayToApp(ws: WebSocket, message: Message): void {
+        const client = this.clients.get(ws);
+        if (!client || !client.pairingCode) {
+            return;
+        }
+
+        const room = this.rooms.get(client.pairingCode);
+        if (!room || !room.app || room.app.readyState !== WebSocket.OPEN) {
+            return;
+        }
+
+        this.sendMessage(room.app, message);
     }
 
     private cleanupRoom(code: string): void {

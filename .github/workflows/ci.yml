@@ -107,28 +107,39 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32s3
 
-      - name: Create merged OTA binary (firmware + filesystem)
+      - name: Create OTA bundle (LMWB format for web upload)
         run: |
           BUILD_DIR=".pio/build/esp32s3"
           
-          # ESP32-S3 uses 8MB flash with partitions at:
-          # ota_0:    0x210000 (2MB app)
-          # spiffs:   0x610000 (filesystem)
-          # For OTA updates, we create a binary that includes both
+          # Create LMWB bundle format (firmware + filesystem with header)
+          # This format is used for OTA uploads via the web interface
+          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool \
-              --chip esp32s3 \
-              merge-bin \
-              -o "$BUILD_DIR/firmware-ota-esp32s3.bin" \
-              --flash-mode dio \
-              --flash-freq 80m \
-              --flash-size 8MB \
-              0x0 "$BUILD_DIR/firmware.bin" \
-              0x400000 "$BUILD_DIR/littlefs.bin"
-            echo "✓ Created merged OTA binary for ESP32-S3"
+            python3 << 'EOF'
+import struct
+import os
+
+build_dir = ".pio/build/esp32s3"
+firmware_bin = os.path.join(build_dir, "firmware.bin")
+littlefs_bin = os.path.join(build_dir, "littlefs.bin")
+ota_bin = os.path.join(build_dir, "firmware-ota-esp32s3.bin")
+
+app_size = os.path.getsize(firmware_bin)
+fs_size = os.path.getsize(littlefs_bin)
+
+with open(ota_bin, "wb") as output:
+    output.write(b"LMWB")
+    output.write(struct.pack("<III", app_size, fs_size, 0))
+    with open(firmware_bin, "rb") as f:
+        output.write(f.read())
+    with open(littlefs_bin, "rb") as f:
+        output.write(f.read())
+
+print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
+EOF
           else
-            echo "⚠ Skipping merged binary - files not found"
+            echo "⚠ Skipping OTA bundle - files not found"
           fi
 
       - name: Collect artifacts
@@ -136,24 +147,22 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
           
-          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
+          # Only include the LMWB bundle for OTA updates
+          if [ -f "$BUILD_DIR/firmware-ota-esp32s3.bin" ]; then
+            cp "$BUILD_DIR/firmware-ota-esp32s3.bin" artifacts/firmware-ota-esp32s3.bin
+            echo "✓ LMWB OTA bundle ready"
+          else
+            echo "⚠ OTA bundle not found!"
+            exit 1
+          fi
           
+          # Keep bootloader and partitions for initial USB flashing only
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32s3.bin
-          fi
-          
-          # Copy merged OTA binary (firmware + filesystem combined)
-          if [ -f "$BUILD_DIR/firmware-ota-esp32s3.bin" ]; then
-            cp "$BUILD_DIR/firmware-ota-esp32s3.bin" artifacts/firmware-ota-esp32s3.bin
-            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "ESP32-S3 artifacts:"
@@ -218,28 +227,39 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32
 
-      - name: Create merged OTA binary (firmware + filesystem)
+      - name: Create OTA bundle (LMWB format for web upload)
         run: |
           BUILD_DIR=".pio/build/esp32"
           
-          # ESP32 uses 4MB flash with partitions at:
-          # ota_0:    0x150000 (1.25MB app)
-          # spiffs:   0x3D0000 (filesystem)
-          # For OTA updates, we create a binary that includes both
+          # Create LMWB bundle format (firmware + filesystem with header)
+          # This format is used for OTA uploads via the web interface
+          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool \
-              --chip esp32 \
-              merge-bin \
-              -o "$BUILD_DIR/firmware-ota-esp32.bin" \
-              --flash-mode dio \
-              --flash-freq 40m \
-              --flash-size 4MB \
-              0x0 "$BUILD_DIR/firmware.bin" \
-              0x280000 "$BUILD_DIR/littlefs.bin"
-            echo "✓ Created merged OTA binary for ESP32"
+            python3 << 'EOF'
+import struct
+import os
+
+build_dir = ".pio/build/esp32"
+firmware_bin = os.path.join(build_dir, "firmware.bin")
+littlefs_bin = os.path.join(build_dir, "littlefs.bin")
+ota_bin = os.path.join(build_dir, "firmware-ota-esp32.bin")
+
+app_size = os.path.getsize(firmware_bin)
+fs_size = os.path.getsize(littlefs_bin)
+
+with open(ota_bin, "wb") as output:
+    output.write(b"LMWB")
+    output.write(struct.pack("<III", app_size, fs_size, 0))
+    with open(firmware_bin, "rb") as f:
+        output.write(f.read())
+    with open(littlefs_bin, "rb") as f:
+        output.write(f.read())
+
+print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
+EOF
           else
-            echo "⚠ Skipping merged binary - files not found"
+            echo "⚠ Skipping OTA bundle - files not found"
           fi
 
       - name: Collect artifacts
@@ -247,24 +267,22 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
           
-          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
+          # Only include the LMWB bundle for OTA updates
+          if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
+            cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
+            echo "✓ LMWB OTA bundle ready"
+          else
+            echo "⚠ OTA bundle not found!"
+            exit 1
+          fi
           
+          # Keep bootloader and partitions for initial USB flashing only
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
           fi
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
-          fi
-          
-          # Copy merged OTA binary (firmware + filesystem combined)
-          if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
-            cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
-            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "ESP32 artifacts:"
@@ -365,28 +383,39 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32s3
 
-      - name: Create merged OTA binary (firmware + filesystem)
+      - name: Create OTA bundle (LMWB format for web upload)
         run: |
           BUILD_DIR=".pio/build/esp32s3"
           
-          # ESP32-S3 uses 8MB flash with partitions at:
-          # ota_0:    0x210000 (2MB app)
-          # spiffs:   0x610000 (filesystem)
-          # For OTA updates, we create a binary that includes both
+          # Create LMWB bundle format (firmware + filesystem with header)
+          # This format is used for OTA uploads via the web interface
+          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool \
-              --chip esp32s3 \
-              merge-bin \
-              -o "$BUILD_DIR/bootstrap-ota-esp32s3.bin" \
-              --flash-mode dio \
-              --flash-freq 80m \
-              --flash-size 8MB \
-              0x0 "$BUILD_DIR/firmware.bin" \
-              0x400000 "$BUILD_DIR/littlefs.bin"
-            echo "✓ Created merged OTA binary for Bootstrap ESP32-S3"
+            python3 << 'EOF'
+import struct
+import os
+
+build_dir = ".pio/build/esp32s3"
+firmware_bin = os.path.join(build_dir, "firmware.bin")
+littlefs_bin = os.path.join(build_dir, "littlefs.bin")
+ota_bin = os.path.join(build_dir, "bootstrap-ota-esp32s3.bin")
+
+app_size = os.path.getsize(firmware_bin)
+fs_size = os.path.getsize(littlefs_bin)
+
+with open(ota_bin, "wb") as output:
+    output.write(b"LMWB")
+    output.write(struct.pack("<III", app_size, fs_size, 0))
+    with open(firmware_bin, "rb") as f:
+        output.write(f.read())
+    with open(littlefs_bin, "rb") as f:
+        output.write(f.read())
+
+print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
+EOF
           else
-            echo "⚠ Skipping merged binary - files not found"
+            echo "⚠ Skipping OTA bundle - files not found"
           fi
 
       - name: Collect artifacts
@@ -394,24 +423,22 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
           
-          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32s3.bin
+          # Only include the LMWB bundle for OTA updates
+          if [ -f "$BUILD_DIR/bootstrap-ota-esp32s3.bin" ]; then
+            cp "$BUILD_DIR/bootstrap-ota-esp32s3.bin" artifacts/bootstrap-ota-esp32s3.bin
+            echo "✓ LMWB OTA bundle ready"
+          else
+            echo "⚠ OTA bundle not found!"
+            exit 1
+          fi
           
+          # Keep bootloader and partitions for initial USB flashing only
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32s3.bin
           fi
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32s3.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32s3.bin
-          fi
-          
-          # Copy merged OTA binary (firmware + filesystem combined)
-          if [ -f "$BUILD_DIR/bootstrap-ota-esp32s3.bin" ]; then
-            cp "$BUILD_DIR/bootstrap-ota-esp32s3.bin" artifacts/bootstrap-ota-esp32s3.bin
-            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "Bootstrap ESP32-S3 artifacts:"
@@ -465,28 +492,39 @@ jobs:
       - name: Build filesystem image
         run: pio run -t buildfs -e esp32
 
-      - name: Create merged OTA binary (firmware + filesystem)
+      - name: Create OTA bundle (LMWB format for web upload)
         run: |
           BUILD_DIR=".pio/build/esp32"
           
-          # ESP32 uses 4MB flash with partitions at:
-          # ota_0:    0x150000 (1.25MB app)
-          # spiffs:   0x3D0000 (filesystem)
-          # For OTA updates, we create a binary that includes both
+          # Create LMWB bundle format (firmware + filesystem with header)
+          # This format is used for OTA uploads via the web interface
+          # Header: 4 bytes magic "LMWB" + 4 bytes app_size + 4 bytes fs_size + 4 bytes reserved
           
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            python -m esptool \
-              --chip esp32 \
-              merge-bin \
-              -o "$BUILD_DIR/bootstrap-ota-esp32.bin" \
-              --flash-mode dio \
-              --flash-freq 40m \
-              --flash-size 4MB \
-              0x0 "$BUILD_DIR/firmware.bin" \
-              0x280000 "$BUILD_DIR/littlefs.bin"
-            echo "✓ Created merged OTA binary for Bootstrap ESP32"
+            python3 << 'EOF'
+import struct
+import os
+
+build_dir = ".pio/build/esp32"
+firmware_bin = os.path.join(build_dir, "firmware.bin")
+littlefs_bin = os.path.join(build_dir, "littlefs.bin")
+ota_bin = os.path.join(build_dir, "bootstrap-ota-esp32.bin")
+
+app_size = os.path.getsize(firmware_bin)
+fs_size = os.path.getsize(littlefs_bin)
+
+with open(ota_bin, "wb") as output:
+    output.write(b"LMWB")
+    output.write(struct.pack("<III", app_size, fs_size, 0))
+    with open(firmware_bin, "rb") as f:
+        output.write(f.read())
+    with open(littlefs_bin, "rb") as f:
+        output.write(f.read())
+
+print(f"✓ Created LMWB OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
+EOF
           else
-            echo "⚠ Skipping merged binary - files not found"
+            echo "⚠ Skipping OTA bundle - files not found"
           fi
 
       - name: Collect artifacts
@@ -494,24 +532,22 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
           
-          cp "$BUILD_DIR/firmware.bin" artifacts/bootstrap-esp32.bin
+          # Only include the LMWB bundle for OTA updates
+          if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
+            cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
+            echo "✓ LMWB OTA bundle ready"
+          else
+            echo "⚠ OTA bundle not found!"
+            exit 1
+          fi
           
+          # Keep bootloader and partitions for initial USB flashing only
           if [ -f "$BUILD_DIR/bootloader.bin" ]; then
             cp "$BUILD_DIR/bootloader.bin" artifacts/bootloader-esp32.bin
           fi
           
           if [ -f "$BUILD_DIR/partitions.bin" ]; then
             cp "$BUILD_DIR/partitions.bin" artifacts/partitions-esp32.bin
-          fi
-          
-          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
-          fi
-          
-          # Copy merged OTA binary (firmware + filesystem combined)
-          if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
-            cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
-            echo "✓ Included merged OTA binary in artifacts"
           fi
           
           echo "Bootstrap ESP32 artifacts:"
@@ -559,11 +595,6 @@ jobs:
         with:
           name: bootstrap-esp32
           path: bundle/bootstrap/
-
-      - name: Rename bootstrap littlefs files to avoid conflicts
-        run: |
-          mv bundle/bootstrap/littlefs-esp32s3.bin bundle/bootstrap/littlefs-bootstrap-esp32s3.bin
-          mv bundle/bootstrap/littlefs-esp32.bin bundle/bootstrap/littlefs-bootstrap-esp32.bin
 
       - name: Create bundle archives
         run: |
@@ -660,11 +691,6 @@ jobs:
           # Create bridge release zip
           cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
 
-      - name: Rename bootstrap littlefs files to avoid conflicts
-        run: |
-          mv release/bootstrap/littlefs-esp32s3.bin release/bootstrap/littlefs-bootstrap-esp32s3.bin
-          mv release/bootstrap/littlefs-esp32.bin release/bootstrap/littlefs-bootstrap-esp32.bin
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -676,15 +702,7 @@ jobs:
             release/firmware-${{ steps.version.outputs.VERSION }}.zip
             release/bootstrap-${{ steps.version.outputs.VERSION }}.zip
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
-            release/firmware/firmware-esp32s3.bin
-            release/firmware/firmware-esp32.bin
             release/firmware/firmware-ota-esp32s3.bin
             release/firmware/firmware-ota-esp32.bin
-            release/firmware/littlefs-esp32s3.bin
-            release/firmware/littlefs-esp32.bin
-            release/bootstrap/bootstrap-esp32s3.bin
-            release/bootstrap/bootstrap-esp32.bin
             release/bootstrap/bootstrap-ota-esp32s3.bin
             release/bootstrap/bootstrap-ota-esp32.bin
-            release/bootstrap/littlefs-bootstrap-esp32s3.bin
-            release/bootstrap/littlefs-bootstrap-esp32.bin

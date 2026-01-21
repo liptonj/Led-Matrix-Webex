@@ -282,6 +282,11 @@ void WebServerManager::setupRoutes() {
         handleClearMQTT(request);
     });
 
+    // Pairing code regeneration
+    server->on("/api/pairing/regenerate", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleRegeneratePairingCode(request);
+    });
+
     // Embedded App API endpoints
     server->on("/api/embedded/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleEmbeddedStatusGet(request);

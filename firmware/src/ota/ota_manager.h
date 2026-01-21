@@ -87,6 +87,7 @@ private:
     String latest_version;
     String firmware_url;
     String littlefs_url;
+    String bundle_url;  // LMWB bundle URL (preferred)
     bool update_available;
     bool use_manifest_mode;
     
@@ -94,6 +95,7 @@ private:
     String extractVersion(const String& tag);
     bool selectReleaseAssets(const JsonArray& assets);
     bool downloadAndInstallBinary(const String& url, int update_type, const char* label);
+    bool downloadAndInstallBundle(const String& url);  // LMWB bundle download
     
     // Manifest mode methods
     bool checkUpdateFromManifest();

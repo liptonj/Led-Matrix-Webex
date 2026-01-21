@@ -13,12 +13,17 @@
 // External MQTT client for config invalidation
 extern MerakiMQTTClient mqtt_client;
 
+// External pairing manager for bridge pairing code
+#include "../bridge/pairing_manager.h"
+extern PairingManager pairing_manager;
+
 void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     JsonDocument doc;
 
     doc["wifi_connected"] = app_state->wifi_connected;
     doc["webex_authenticated"] = app_state->webex_authenticated;
     doc["bridge_connected"] = app_state->bridge_connected;
+    doc["pairing_code"] = pairing_manager.getCode();
     doc["embedded_app_connected"] = app_state->embedded_app_connected;
     doc["xapi_connected"] = app_state->xapi_connected;
     doc["mqtt_connected"] = app_state->mqtt_connected;
@@ -345,6 +350,22 @@ void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
     mqtt_client.invalidateConfig();  // Clear cached config
     Serial.println("[WEB] MQTT configuration cleared");
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"MQTT configuration cleared\"}");
+    addCorsHeaders(response);
+    request->send(response);
+}
+
+void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* request) {
+    String newCode = pairing_manager.generateCode(true);
+    Serial.printf("[WEB] New pairing code generated: %s\n", newCode.c_str());
+    
+    JsonDocument doc;
+    doc["success"] = true;
+    doc["code"] = newCode;
+    
+    String responseStr;
+    serializeJson(doc, responseStr);
+    
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);
 }

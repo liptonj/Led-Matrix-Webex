@@ -28,6 +28,19 @@ struct BridgeUpdate {
 };
 
 /**
+ * @brief Bridge Command structure
+ */
+struct BridgeCommand {
+    String command;
+    String requestId;
+    String payload;  // JSON payload as string
+    bool valid;
+};
+
+// Command handler callback type
+typedef void (*BridgeCommandHandler)(const BridgeCommand& cmd);
+
+/**
  * @brief Bridge WebSocket Client Class
  * 
  * Connects to the Node.js bridge server for real-time presence updates.
@@ -121,6 +134,46 @@ public:
      * @return true if pairing mode enabled
      */
     bool isPairingMode() const { return !pairing_code.isEmpty(); }
+    
+    /**
+     * @brief Set command handler callback
+     * @param handler Function to call when command received
+     */
+    void setCommandHandler(BridgeCommandHandler handler) { command_handler = handler; }
+    
+    /**
+     * @brief Check if there's a pending command
+     * @return true if command available
+     */
+    bool hasCommand() const { return command_pending; }
+    
+    /**
+     * @brief Get the latest command
+     * @return BridgeCommand structure
+     */
+    BridgeCommand getCommand();
+    
+    /**
+     * @brief Send command response back to app
+     * @param requestId Request ID from the command
+     * @param success Whether command succeeded
+     * @param data Response data (JSON object as string)
+     * @param error Error message if failed
+     */
+    void sendCommandResponse(const String& requestId, bool success, 
+                            const String& data = "", const String& error = "");
+    
+    /**
+     * @brief Send current config to app
+     * @param config JSON config object as string
+     */
+    void sendConfig(const String& config);
+    
+    /**
+     * @brief Send current status to app
+     * @param status JSON status object as string
+     */
+    void sendStatus(const String& status);
 
 private:
     WebSocketsClient ws_client;
@@ -131,7 +184,10 @@ private:
     bool joined_room;
     bool peer_connected;
     bool update_pending;
+    bool command_pending;
     BridgeUpdate last_update;
+    BridgeCommand last_command;
+    BridgeCommandHandler command_handler;
     unsigned long last_reconnect;
     
     void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);

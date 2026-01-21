@@ -19,6 +19,7 @@
 #include "webex/webex_client.h"
 #include "webex/xapi_websocket.h"
 #include "bridge/bridge_client.h"
+#include "bridge/pairing_manager.h"
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
 #include "time/time_manager.h"
@@ -37,6 +38,7 @@ WebServerManager web_server;
 WebexClient webex_client;
 XAPIWebSocket xapi_websocket;
 BridgeClient bridge_client;
+PairingManager pairing_manager;
 MerakiMQTTClient mqtt_client;
 OTAManager ota_manager;
 WiFiManager wifi_manager;
@@ -49,6 +51,9 @@ AppState app_state;
 void setup_time();
 void update_display();
 void check_for_updates();
+void handleBridgeCommand(const BridgeCommand& cmd);
+String buildStatusJson();
+String buildConfigJson();
 
 /**
  * @brief Arduino setup function
@@ -131,6 +136,11 @@ void setup() {
         }
     }
 
+    // Initialize pairing manager (generates/loads pairing code)
+    Serial.println("[INIT] Initializing pairing manager...");
+    pairing_manager.begin();
+    Serial.printf("[INIT] Pairing code: %s\n", pairing_manager.getCode().c_str());
+
     // Look for bridge server
     if (app_state.wifi_connected) {
         Serial.println("[INIT] Searching for bridge server...");
@@ -138,7 +148,10 @@ void setup() {
         uint16_t bridge_port;
         if (mdns_manager.discoverBridge(bridge_host, bridge_port)) {
             Serial.printf("[INIT] Found bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
-            bridge_client.begin(bridge_host, bridge_port);
+            // Set command handler before connecting
+            bridge_client.setCommandHandler(handleBridgeCommand);
+            // Connect with pairing code for embedded app mode
+            bridge_client.beginWithPairing(bridge_host, bridge_port, pairing_manager.getCode());
         }
     }
 
@@ -468,5 +481,149 @@ void check_for_updates() {
         }
     } else {
         Serial.println("[OTA] No updates available.");
+    }
+}
+
+/**
+ * @brief Build JSON string with current device status
+ */
+String buildStatusJson() {
+    JsonDocument doc;
+    
+    doc["wifi_connected"] = app_state.wifi_connected;
+    doc["webex_authenticated"] = app_state.webex_authenticated;
+    doc["bridge_connected"] = app_state.bridge_connected;
+    doc["webex_status"] = app_state.webex_status;
+    doc["camera_on"] = app_state.camera_on;
+    doc["mic_muted"] = app_state.mic_muted;
+    doc["in_call"] = app_state.in_call;
+    doc["pairing_code"] = pairing_manager.getCode();
+    doc["ip_address"] = WiFi.localIP().toString();
+    doc["mac_address"] = WiFi.macAddress();
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["uptime"] = millis() / 1000;
+    doc["firmware_version"] = FIRMWARE_VERSION;
+    doc["rssi"] = WiFi.RSSI();
+    
+    // Sensor data
+    doc["temperature"] = app_state.temperature;
+    doc["humidity"] = app_state.humidity;
+    doc["door_status"] = app_state.door_status;
+    doc["air_quality"] = app_state.air_quality_index;
+    doc["tvoc"] = app_state.tvoc;
+    
+    String result;
+    serializeJson(doc, result);
+    return result;
+}
+
+/**
+ * @brief Build JSON string with current device config
+ */
+String buildConfigJson() {
+    JsonDocument doc;
+    
+    doc["device_name"] = config_manager.getDeviceName();
+    doc["display_name"] = config_manager.getDisplayName();
+    doc["brightness"] = config_manager.getBrightness();
+    doc["scroll_speed_ms"] = config_manager.getScrollSpeedMs();
+    doc["poll_interval"] = config_manager.getWebexPollInterval();
+    doc["time_zone"] = config_manager.getTimeZone();
+    doc["time_format"] = config_manager.getTimeFormat();
+    doc["date_format"] = config_manager.getDateFormat();
+    doc["ntp_server"] = config_manager.getNtpServer();
+    doc["has_webex_credentials"] = config_manager.hasWebexCredentials();
+    doc["has_webex_tokens"] = config_manager.hasWebexTokens();
+    doc["ota_url"] = config_manager.getOTAUrl();
+    doc["auto_update"] = config_manager.getAutoUpdate();
+    doc["pairing_code"] = pairing_manager.getCode();
+    
+    String result;
+    serializeJson(doc, result);
+    return result;
+}
+
+/**
+ * @brief Handle commands received from embedded app via bridge
+ */
+void handleBridgeCommand(const BridgeCommand& cmd) {
+    Serial.printf("[CMD] Processing command: %s\n", cmd.command.c_str());
+    
+    if (cmd.command == "get_status") {
+        // Send current status
+        bridge_client.sendStatus(buildStatusJson());
+        
+    } else if (cmd.command == "get_config") {
+        // Send current config
+        bridge_client.sendConfig(buildConfigJson());
+        
+    } else if (cmd.command == "set_config") {
+        // Parse and apply config changes
+        JsonDocument doc;
+        DeserializationError error = deserializeJson(doc, cmd.payload);
+        
+        if (error) {
+            bridge_client.sendCommandResponse(cmd.requestId, false, "", "Invalid JSON");
+            return;
+        }
+        
+        // Apply settings
+        if (doc["display_name"].is<const char*>()) {
+            config_manager.setDisplayName(doc["display_name"].as<String>());
+        }
+        if (doc["brightness"].is<int>()) {
+            uint8_t brightness = doc["brightness"].as<uint8_t>();
+            config_manager.setBrightness(brightness);
+            matrix_display.setBrightness(brightness);
+        }
+        if (doc["scroll_speed_ms"].is<int>()) {
+            uint16_t speed = doc["scroll_speed_ms"].as<uint16_t>();
+            config_manager.setScrollSpeedMs(speed);
+            matrix_display.setScrollSpeedMs(speed);
+        }
+        if (doc["time_zone"].is<const char*>()) {
+            config_manager.setTimeZone(doc["time_zone"].as<String>());
+            applyTimeConfig(config_manager, &app_state);
+        }
+        if (doc["time_format"].is<const char*>()) {
+            config_manager.setTimeFormat(doc["time_format"].as<String>());
+        }
+        if (doc["date_format"].is<const char*>()) {
+            config_manager.setDateFormat(doc["date_format"].as<String>());
+        }
+        
+        bridge_client.sendCommandResponse(cmd.requestId, true, buildConfigJson(), "");
+        Serial.println("[CMD] Config updated");
+        
+    } else if (cmd.command == "set_brightness") {
+        JsonDocument doc;
+        deserializeJson(doc, cmd.payload);
+        uint8_t brightness = doc["value"] | 128;
+        config_manager.setBrightness(brightness);
+        matrix_display.setBrightness(brightness);
+        bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
+        
+    } else if (cmd.command == "regenerate_pairing") {
+        String newCode = pairing_manager.generateCode(true);
+        JsonDocument resp;
+        resp["code"] = newCode;
+        String respStr;
+        serializeJson(resp, respStr);
+        bridge_client.sendCommandResponse(cmd.requestId, true, respStr, "");
+        
+    } else if (cmd.command == "reboot") {
+        bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
+        delay(500);
+        ESP.restart();
+        
+    } else if (cmd.command == "factory_reset") {
+        bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
+        config_manager.factoryReset();
+        delay(500);
+        ESP.restart();
+        
+    } else {
+        bridge_client.sendCommandResponse(cmd.requestId, false, "", 
+            "Unknown command: " + cmd.command);
     }
 }

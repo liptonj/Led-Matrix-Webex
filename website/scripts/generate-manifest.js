@@ -77,11 +77,66 @@ function extractVersion(tag) {
  * Find asset URL for a specific board type and asset type
  * @param {Array} assets - Release assets array
  * @param {string} boardType - 'esp32' or 'esp32s3'
- * @param {string} assetType - 'firmware' or 'filesystem'
+ * @param {string} assetType - 'firmware', 'filesystem', or 'bundle'
  * @returns {string|null} - Asset download URL or null if not found
  */
 function findAssetUrl(assets, boardType, assetType) {
-    // Define search patterns in priority order
+    // Handle bundle type (LMWB format)
+    if (assetType === 'bundle') {
+        // Look for firmware-ota-{boardType}.bin pattern
+        const patterns = [
+            `firmware-ota-${boardType}.bin`,
+            `firmware_ota_${boardType}.bin`,
+            `firmware-ota_${boardType}.bin`,
+        ];
+        
+        for (const pattern of patterns) {
+            const asset = assets.find(a => {
+                const name = a.name.toLowerCase();
+                // Skip bootstrap bundles
+                if (name.includes('bootstrap')) {
+                    return false;
+                }
+                return name === pattern.toLowerCase();
+            });
+            if (asset) {
+                return asset.browser_download_url;
+            }
+        }
+        
+        // Fallback: partial match for OTA bundle files
+        for (const asset of assets) {
+            const name = asset.name.toLowerCase();
+            if (name.includes('bootstrap')) {
+                continue;
+            }
+            if (!name.endsWith('.bin')) {
+                continue;
+            }
+            
+            // Must contain both 'firmware' and 'ota'
+            if (!name.includes('firmware') || !name.includes('ota')) {
+                continue;
+            }
+            
+            // Check board type match
+            if (boardType === 'esp32s3') {
+                if (name.includes('esp32s3') || name.includes('esp32-s3')) {
+                    return asset.browser_download_url;
+                }
+            } else if (boardType === 'esp32') {
+                if (name.includes('esp32') && 
+                    !name.includes('esp32s3') && 
+                    !name.includes('esp32-s3')) {
+                    return asset.browser_download_url;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    // Define search patterns in priority order for firmware/filesystem
     const patterns = assetType === 'firmware'
         ? [
             // Board-specific patterns (highest priority)
@@ -103,8 +158,12 @@ function findAssetUrl(assets, boardType, assetType) {
     for (const pattern of patterns) {
         const asset = assets.find(a => {
             const name = a.name.toLowerCase();
-            // Skip bootstrap and OTA bundle files
-            if (name.includes('bootstrap') || name.includes('ota_bundle')) {
+            // Skip bootstrap and OTA bundle files for firmware/filesystem
+            if (name.includes('bootstrap')) {
+                return false;
+            }
+            // Skip OTA bundles when looking for plain firmware
+            if (assetType === 'firmware' && name.includes('ota')) {
                 return false;
             }
             return name === pattern.toLowerCase();
@@ -117,10 +176,14 @@ function findAssetUrl(assets, boardType, assetType) {
     // Fallback: partial match for board-specific files
     for (const asset of assets) {
         const name = asset.name.toLowerCase();
-        if (name.includes('bootstrap') || name.includes('ota_bundle')) {
+        if (name.includes('bootstrap')) {
             continue;
         }
         if (!name.endsWith('.bin')) {
+            continue;
+        }
+        // Skip OTA bundles when looking for plain firmware
+        if (assetType === 'firmware' && name.includes('ota')) {
             continue;
         }
 
@@ -149,30 +212,26 @@ function findAssetUrl(assets, boardType, assetType) {
 }
 
 /**
- * Build OTA-compatible firmware/filesystem structure from latest release
+ * Build OTA-compatible bundle structure from latest release
  */
 function buildOtaStructure(latestRelease) {
     if (!latestRelease || !latestRelease.assets) {
-        return { firmware: {}, filesystem: {} };
+        return { bundle: {} };
     }
 
     const boardTypes = ['esp32', 'esp32s3'];
-    const firmware = {};
-    const filesystem = {};
+    const bundle = {};
 
     for (const boardType of boardTypes) {
-        const firmwareUrl = findAssetUrl(latestRelease.assets, boardType, 'firmware');
-        const filesystemUrl = findAssetUrl(latestRelease.assets, boardType, 'filesystem');
+        // Only use LMWB bundle files
+        const bundleUrl = findAssetUrl(latestRelease.assets, boardType, 'bundle');
 
-        if (firmwareUrl) {
-            firmware[boardType] = { url: firmwareUrl };
-        }
-        if (filesystemUrl) {
-            filesystem[boardType] = { url: filesystemUrl };
+        if (bundleUrl) {
+            bundle[boardType] = { url: bundleUrl };
         }
     }
 
-    return { firmware, filesystem };
+    return { bundle };
 }
 
 async function generateManifest() {
@@ -188,14 +247,13 @@ async function generateManifest() {
         const version = extractVersion(latestTag);
 
         // Build OTA-compatible structure from latest release
-        const { firmware, filesystem } = buildOtaStructure(latestRelease);
+        const { bundle } = buildOtaStructure(latestRelease);
         
-        // Create manifest with both OTA fields and versions array
+        // Create manifest with OTA fields and versions array
         const manifest = {
             // OTA-compatible fields (for firmware checkUpdateFromManifest)
             version: version,
-            firmware: firmware,
-            filesystem: filesystem,
+            bundle: bundle,  // LMWB bundle files (firmware + filesystem combined)
             // Metadata
             generated: new Date().toISOString(),
             latest: latestTag,
@@ -214,12 +272,8 @@ async function generateManifest() {
         
         console.log(`✓ Manifest generated: ${OUTPUT_FILE}`);
         console.log(`  Latest version: ${manifest.version}`);
-        console.log(`  Firmware URLs:`);
-        for (const [board, data] of Object.entries(firmware)) {
-            console.log(`    ${board}: ${data.url ? '✓' : '✗ missing'}`);
-        }
-        console.log(`  Filesystem URLs:`);
-        for (const [board, data] of Object.entries(filesystem)) {
+        console.log(`  Bundle URLs:`);
+        for (const [board, data] of Object.entries(bundle)) {
             console.log(`    ${board}: ${data.url ? '✓' : '✗ missing'}`);
         }
         console.log(`  Total versions: ${manifest.versions.length}`);

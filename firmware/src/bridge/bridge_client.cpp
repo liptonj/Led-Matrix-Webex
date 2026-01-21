@@ -16,11 +16,13 @@ BridgeClient* g_bridge_instance = nullptr;
 
 BridgeClient::BridgeClient()
     : bridge_port(8080), connected(false), joined_room(false), 
-      peer_connected(false), update_pending(false), last_reconnect(0) {
+      peer_connected(false), update_pending(false), command_pending(false),
+      command_handler(nullptr), last_reconnect(0) {
     last_update.valid = false;
     last_update.camera_on = false;
     last_update.mic_muted = false;
     last_update.in_call = false;
+    last_command.valid = false;
 }
 
 BridgeClient::~BridgeClient() {
@@ -93,6 +95,87 @@ void BridgeClient::loop() {
 BridgeUpdate BridgeClient::getUpdate() {
     update_pending = false;
     return last_update;
+}
+
+BridgeCommand BridgeClient::getCommand() {
+    command_pending = false;
+    return last_command;
+}
+
+void BridgeClient::sendCommandResponse(const String& requestId, bool success, 
+                                       const String& data, const String& error) {
+    if (!connected) {
+        return;
+    }
+    
+    JsonDocument doc;
+    doc["type"] = "command_response";
+    doc["requestId"] = requestId;
+    doc["success"] = success;
+    
+    if (!data.isEmpty()) {
+        // Parse data string as JSON and add to response
+        JsonDocument dataDoc;
+        DeserializationError err = deserializeJson(dataDoc, data);
+        if (!err) {
+            doc["data"] = dataDoc;
+        }
+    }
+    
+    if (!error.isEmpty()) {
+        doc["error"] = error;
+    }
+    
+    String message;
+    serializeJson(doc, message);
+    ws_client.sendTXT(message);
+    
+    Serial.printf("[BRIDGE] Sent command response for %s (success=%d)\n", 
+                  requestId.c_str(), success);
+}
+
+void BridgeClient::sendConfig(const String& config) {
+    if (!connected) {
+        return;
+    }
+    
+    JsonDocument doc;
+    doc["type"] = "config";
+    
+    // Parse config string and merge into response
+    JsonDocument configDoc;
+    DeserializationError err = deserializeJson(configDoc, config);
+    if (!err) {
+        doc["data"] = configDoc;
+    }
+    
+    String message;
+    serializeJson(doc, message);
+    ws_client.sendTXT(message);
+    
+    Serial.println("[BRIDGE] Sent config to app");
+}
+
+void BridgeClient::sendStatus(const String& status) {
+    if (!connected) {
+        return;
+    }
+    
+    JsonDocument doc;
+    doc["type"] = "status";
+    
+    // Parse status string and merge into response
+    JsonDocument statusDoc;
+    DeserializationError err = deserializeJson(statusDoc, status);
+    if (!err) {
+        doc["data"] = statusDoc;
+    }
+    
+    String message;
+    serializeJson(doc, message);
+    ws_client.sendTXT(message);
+    
+    Serial.println("[BRIDGE] Sent status to app");
 }
 
 void BridgeClient::disconnect() {
@@ -243,6 +326,57 @@ void BridgeClient::parseMessage(const String& message) {
         Serial.printf("[BRIDGE] Connection status - Webex: %s, Clients: %d\n", 
                       webex_status.c_str(), clients);
                       
+    } else if (type == "command") {
+        // Command from app via bridge
+        last_command.command = doc["command"].as<String>();
+        last_command.requestId = doc["requestId"].as<String>();
+        
+        // Serialize payload back to string for handler
+        JsonObject payload = doc["payload"];
+        if (!payload.isNull()) {
+            serializeJson(payload, last_command.payload);
+        } else {
+            last_command.payload = "{}";
+        }
+        
+        last_command.valid = true;
+        command_pending = true;
+        
+        Serial.printf("[BRIDGE] Command received: %s (id=%s)\n", 
+                      last_command.command.c_str(), 
+                      last_command.requestId.c_str());
+        
+        // Call handler if set
+        if (command_handler) {
+            command_handler(last_command);
+        }
+        
+    } else if (type == "get_config") {
+        // App requesting config - handled in main.cpp
+        Serial.println("[BRIDGE] Config request received");
+        last_command.command = "get_config";
+        last_command.requestId = doc["requestId"].as<String>();
+        last_command.payload = "{}";
+        last_command.valid = true;
+        command_pending = true;
+        
+        if (command_handler) {
+            command_handler(last_command);
+        }
+        
+    } else if (type == "get_status") {
+        // App requesting status
+        Serial.println("[BRIDGE] Status request received");
+        last_command.command = "get_status";
+        last_command.requestId = doc["requestId"].as<String>();
+        last_command.payload = "{}";
+        last_command.valid = true;
+        command_pending = true;
+        
+        if (command_handler) {
+            command_handler(last_command);
+        }
+        
     } else if (type == "error") {
         String error_msg = doc["message"].as<String>();
         Serial.printf("[BRIDGE] Error: %s\n", error_msg.c_str());

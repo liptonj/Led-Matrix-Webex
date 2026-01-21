@@ -14,7 +14,8 @@ const API = {
     otaBootloader: '/api/ota/bootloader',
     otaUpload: '/api/ota/upload',
     reboot: '/api/reboot',
-    factoryReset: '/api/factory-reset'
+    factoryReset: '/api/factory-reset',
+    regeneratePairingCode: '/api/pairing/regenerate'
 };
 
 const TIME_ZONES = [
@@ -173,6 +174,24 @@ async function loadStatus() {
 }
 
 function updateStatusDisplay(data) {
+    // Pairing code
+    const pairingCodeEl = document.getElementById('pairing-code');
+    if (pairingCodeEl && data.pairing_code) {
+        pairingCodeEl.textContent = data.pairing_code;
+    }
+    
+    // Bridge/App status
+    const bridgeStatusEl = document.getElementById('bridge-status');
+    if (bridgeStatusEl) {
+        bridgeStatusEl.textContent = data.bridge_connected ? 'Connected' : 'Disconnected';
+        bridgeStatusEl.style.color = data.bridge_connected ? '#6cc04a' : '#ff5c5c';
+    }
+    const appStatusEl = document.getElementById('app-status');
+    if (appStatusEl) {
+        appStatusEl.textContent = data.embedded_app_connected ? 'Connected' : 'Waiting...';
+        appStatusEl.style.color = data.embedded_app_connected ? '#6cc04a' : '#888';
+    }
+    
     // Webex status
     const statusEl = document.getElementById('webex-status');
     statusEl.textContent = data.webex_status || '--';
@@ -339,6 +358,12 @@ function initEventListeners() {
 
     // Webex auth button
     document.getElementById('webex-auth-btn').addEventListener('click', startWebexAuth);
+    
+    // Regenerate pairing code button
+    const regenerateBtn = document.getElementById('regenerate-code');
+    if (regenerateBtn) {
+        regenerateBtn.addEventListener('click', regeneratePairingCode);
+    }
 
     // xAPI form
     document.getElementById('xapi-form').addEventListener('submit', saveXAPIConfig);
@@ -488,6 +513,26 @@ async function startWebexAuth() {
         }
     } catch (error) {
         alert('Failed to start authorization');
+    }
+}
+
+async function regeneratePairingCode() {
+    if (!confirm('Generate a new pairing code? You will need to re-pair the embedded app.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(API.regeneratePairingCode, { method: 'POST' });
+        const data = await response.json();
+        
+        if (data.success && data.code) {
+            document.getElementById('pairing-code').textContent = data.code;
+            alert('New pairing code generated: ' + data.code);
+        } else {
+            alert(data.error || 'Failed to regenerate pairing code');
+        }
+    } catch (error) {
+        alert('Failed to regenerate pairing code');
     }
 }
 

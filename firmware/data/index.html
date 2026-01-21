@@ -133,8 +133,27 @@
         <!-- Webex Tab -->
         <section id="webex" class="tab-content">
             <div class="card">
-                <h2>Webex Configuration</h2>
-                <p class="help-text">Enter your Webex Integration credentials from <a href="https://developer.webex.com/my-apps" target="_blank">developer.webex.com</a></p>
+                <h2>Bridge Pairing</h2>
+                <p class="help-text">Enter this code in the Webex Embedded App to pair your display.</p>
+                <div class="pairing-code-container">
+                    <span id="pairing-code" class="pairing-code">------</span>
+                    <button id="regenerate-code" class="btn btn-secondary">Regenerate</button>
+                </div>
+                <div class="status-grid" style="margin-top: 1rem;">
+                    <div class="status-item">
+                        <span class="label">Bridge:</span>
+                        <span id="bridge-status" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Embedded App:</span>
+                        <span id="app-status" class="value">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Webex Configuration (Legacy)</h2>
+                <p class="help-text">Optional: Direct Webex OAuth for standalone mode. Enter your Webex Integration credentials from <a href="https://developer.webex.com/my-apps" target="_blank">developer.webex.com</a></p>
                 <form id="webex-form">
                     <div class="form-group">
                         <label for="webex-client-id">Client ID:</label>
