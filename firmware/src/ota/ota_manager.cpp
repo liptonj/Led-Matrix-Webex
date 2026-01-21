@@ -696,9 +696,15 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
 #endif
 
-    uint8_t buffer[4096];
+    // Use smaller buffer to reduce heap pressure during download
+    uint8_t buffer[2048];
     size_t app_written = 0;
     int lastProgress = -1;
+    
+    // Warn if heap is getting low
+    if (ESP.getFreeHeap() < 80000) {
+        Serial.printf("[OTA] WARNING: Low heap before firmware download: %u bytes\n", ESP.getFreeHeap());
+    }
 
     while (app_written < app_size) {
 #ifndef NATIVE_BUILD
@@ -751,7 +757,18 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             int progress = (app_written * 100) / app_size;
             if (progress / 5 > lastProgress / 5) {
                 lastProgress = progress;
-                Serial.printf("[OTA] firmware: %d%% (heap: %u)\n", progress, ESP.getFreeHeap());
+                uint32_t freeHeap = ESP.getFreeHeap();
+                Serial.printf("[OTA] firmware: %d%% (heap: %u)\n", progress, freeHeap);
+                Serial.flush();
+                
+                // Check for critically low heap
+                if (freeHeap < 50000) {
+                    Serial.println("[OTA] CRITICAL: Heap too low, aborting update");
+                    Update.abort();
+                    http.end();
+                    return false;
+                }
+                
                 int displayProgress = (progress * 85) / 100;
                 matrix_display.showUpdatingProgress(latest_version, displayProgress, 
                     String("Firmware ") + String(progress) + "%");
