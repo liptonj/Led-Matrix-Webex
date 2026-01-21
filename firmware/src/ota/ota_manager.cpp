@@ -706,46 +706,70 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         Serial.printf("[OTA] WARNING: Low heap before firmware download: %u bytes\n", ESP.getFreeHeap());
     }
 
+    unsigned long lastDataTime = millis();
+    
     while (app_written < app_size) {
 #ifndef NATIVE_BUILD
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(1));  // Minimal yield
 #else
         yield();
 #endif
         size_t available = stream->available();
         if (available == 0) {
-            unsigned long waitStart = millis();
-            while (stream->available() == 0 && stream->connected()) {
-                if (millis() - waitStart > 30000) {
-                    Serial.println("[OTA] Stream timeout during app download");
-                    Update.abort();
-                    http.end();
-                    return false;
-                }
-#ifndef NATIVE_BUILD
-                vTaskDelay(pdMS_TO_TICKS(20));
-#else
-                delay(20);
-#endif
+            // Check if connection is still alive
+            if (!stream->connected()) {
+                Serial.printf("[OTA] Stream disconnected during firmware at %d%% (%u/%u bytes)\n", 
+                              (app_written * 100) / app_size,
+                              static_cast<unsigned>(app_written), 
+                              static_cast<unsigned>(app_size));
+                Serial.flush();
+                Update.abort();
+                http.end();
+                return false;
             }
-            available = stream->available();
+            
+            // Check for timeout
+            if (millis() - lastDataTime > 30000) {
+                Serial.printf("[OTA] Stream timeout at %d%% - no data for 30s\n", 
+                              (app_written * 100) / app_size);
+                Serial.flush();
+                Update.abort();
+                http.end();
+                return false;
+            }
+            
+#ifndef NATIVE_BUILD
+            vTaskDelay(pdMS_TO_TICKS(10));
+#else
+            delay(10);
+#endif
+            continue;
         }
-
-        if (available == 0 && !stream->connected()) {
-            Serial.printf("[OTA] Stream disconnected during firmware at %d%% (%u/%u bytes)\n", 
-                          (app_written * 100) / app_size,
-                          static_cast<unsigned>(app_written), 
-                          static_cast<unsigned>(app_size));
-            Serial.flush();
-            break;
-        }
+        
+        lastDataTime = millis();  // Reset timeout on data received
 
         size_t remaining = app_size - app_written;
         size_t toRead = min(min(available, sizeof(buffer)), remaining);
+        
+        unsigned long readStart = millis();
         int bytesRead = stream->readBytes(buffer, toRead);
+        unsigned long readTime = millis() - readStart;
+        
+        // Warn if read is taking too long (possible SSL stall)
+        if (readTime > 1000) {
+            Serial.printf("[OTA] WARNING: Slow read: %lu ms for %d bytes\n", readTime, bytesRead);
+        }
 
         if (bytesRead > 0) {
+            unsigned long writeStart = millis();
             size_t bytesWritten = Update.write(buffer, bytesRead);
+            unsigned long writeTime = millis() - writeStart;
+            
+            // Warn if write is taking too long
+            if (writeTime > 500) {
+                Serial.printf("[OTA] WARNING: Slow write: %lu ms for %u bytes\n", writeTime, bytesWritten);
+            }
+            
             if (bytesWritten != static_cast<size_t>(bytesRead)) {
                 Serial.printf("[OTA] App write failed: wrote %d of %d\n", bytesWritten, bytesRead);
                 Update.abort();
@@ -758,7 +782,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             if (progress / 5 > lastProgress / 5) {
                 lastProgress = progress;
                 uint32_t freeHeap = ESP.getFreeHeap();
-                Serial.printf("[OTA] firmware: %d%% (heap: %u)\n", progress, freeHeap);
+                Serial.printf("[OTA] firmware: %d%% (heap: %u, last read: %lums)\n", progress, freeHeap, readTime);
                 Serial.flush();
                 
                 // Check for critically low heap

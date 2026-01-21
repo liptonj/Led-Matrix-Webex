@@ -194,6 +194,7 @@ private:
     String bridge_host;
     uint16_t bridge_port;
     String pairing_code;
+    String ws_path;
     bool connected;
     bool joined_room;
     bool peer_connected;
@@ -213,7 +214,7 @@ private:
      * @param ssl Output: whether to use SSL
      * @return true if parsing succeeded
      */
-    bool parseUrl(const String& url, String& host, uint16_t& port, bool& ssl);
+    bool parseUrl(const String& url, String& host, uint16_t& port, bool& ssl, String& path);
     
     void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);
     void parseMessage(const String& message);
