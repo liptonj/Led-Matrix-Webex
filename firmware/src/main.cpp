@@ -257,8 +257,10 @@ void loop() {
         Serial.printf("[WEBEX] OAuth exchange %s\n", auth_ok ? "successful" : "failed");
     }
 
-    // Process bridge client
-    if (bridge_client.isConnected()) {
+    // Process bridge client (skip during OTA to save resources)
+    if (matrix_display.isOTALocked()) {
+        // Skip bridge processing during OTA update
+    } else if (bridge_client.isConnected()) {
         bridge_client.loop();
         
         // Update connection state based on room join status
@@ -274,7 +276,7 @@ void loop() {
                 app_state.in_call = (update.status == "meeting" || update.status == "busy");
             }
         }
-    } else if (app_state.wifi_connected) {
+    } else if (app_state.wifi_connected && !matrix_display.isOTALocked()) {
         // Check if bridge was never initialized (WiFi connected after startup)
         if (!bridge_client.isInitialized()) {
             Serial.println("[BRIDGE] WiFi connected, initializing bridge connection...");

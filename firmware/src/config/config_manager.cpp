@@ -467,15 +467,15 @@ void ConfigManager::setAutoUpdate(bool enabled) {
 }
 
 String ConfigManager::getFailedOTAVersion() const {
-    return loadString("failed_ota_version", "");
+    return loadString("fail_ota_ver", "");
 }
 
 void ConfigManager::setFailedOTAVersion(const String& version) {
-    saveString("failed_ota_version", version);
+    saveString("fail_ota_ver", version);
 }
 
 void ConfigManager::clearFailedOTAVersion() {
-    saveString("failed_ota_version", "");
+    saveString("fail_ota_ver", "");
 }
 
 // Time Configuration
