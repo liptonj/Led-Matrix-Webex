@@ -54,7 +54,7 @@ def get_build_id() -> str:
 
 
 def get_firmware_version() -> str:
-    """Get firmware version from platformio.ini or fallback."""
+    """Get bootstrap version from platformio.ini or fallback."""
     # Try to get from platformio.ini [version] section
     try:
         import configparser
@@ -62,6 +62,10 @@ def get_firmware_version() -> str:
         ini_path = os.path.join(env.subst("$PROJECT_DIR"), "platformio.ini")
         config = configparser.ConfigParser()
         config.read(ini_path)
+        # Bootstrap firmware uses bootstrap_version key
+        if config.has_option("version", "bootstrap_version"):
+            return config.get("version", "bootstrap_version").strip()
+        # Fallback to firmware_version if present
         if config.has_option("version", "firmware_version"):
             return config.get("version", "firmware_version").strip()
     except Exception:
