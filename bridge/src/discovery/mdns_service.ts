@@ -2,6 +2,10 @@
  * mDNS Service
  *
  * Advertises the bridge server via mDNS for automatic discovery.
+ * 
+ * ESP32 devices search for "_webex-bridge._tcp" service type.
+ * The bonjour-service library automatically formats the service type
+ * by prepending "_" and appending "._tcp" (or ._udp).
  */
 
 import { Bonjour, Service } from 'bonjour-service';
@@ -23,11 +27,15 @@ export class MDNSService {
     start(): void {
         this.bonjour = new Bonjour();
 
-        // Publish the service
+        this.logger.info(`Starting mDNS service: ${this.serviceName} on port ${this.port}`);
+
+        // Publish the service with correct format for ESP32 discovery
+        // ESP32 searches for "_webex-bridge._tcp" service type
         this.service = this.bonjour.publish({
             name: this.serviceName,
-            type: 'webex-bridge',
+            type: 'webex-bridge',  // bonjour-service will format as _webex-bridge._tcp
             port: this.port,
+            protocol: 'tcp',
             txt: {
                 version: '1.0.0',
                 protocol: 'websocket'
@@ -36,27 +44,56 @@ export class MDNSService {
 
         this.service.on('up', () => {
             this.logger.info(`mDNS service published: ${this.serviceName}._webex-bridge._tcp.local:${this.port}`);
+            this.logger.info(`ESP32 devices should now be able to discover this bridge`);
+            this.logger.debug(`mDNS TXT records: version=1.0.0, protocol=websocket`);
         });
 
         this.service.on('error', (error) => {
             this.logger.error(`mDNS service error: ${error}`);
         });
-
-        this.logger.info(`mDNS service starting: ${this.serviceName}`);
     }
 
     stop(): void {
+        this.logger.info('Stopping mDNS service...');
+        
         if (this.service && typeof this.service.stop === 'function') {
-            this.service.stop();
+            try {
+                this.service.stop();
+                this.logger.info('mDNS service stopped successfully');
+            } catch (error) {
+                this.logger.error(`Error stopping mDNS service: ${error}`);
+            }
             this.service = null;
         }
 
         if (this.bonjour) {
-            this.bonjour.destroy();
+            try {
+                this.bonjour.destroy();
+                this.logger.info('Bonjour instance destroyed');
+            } catch (error) {
+                this.logger.error(`Error destroying Bonjour instance: ${error}`);
+            }
             this.bonjour = null;
         }
+    }
 
-        this.logger.info('mDNS service stopped');
+    /**
+     * Check if the mDNS service is currently running
+     */
+    isRunning(): boolean {
+        return this.service !== null && this.bonjour !== null;
+    }
+
+    /**
+     * Get service information for debugging
+     */
+    getServiceInfo(): { name: string; type: string; port: number; running: boolean } {
+        return {
+            name: this.serviceName,
+            type: '_webex-bridge._tcp',
+            port: this.port,
+            running: this.isRunning()
+        };
     }
 
     getServiceName(): string {

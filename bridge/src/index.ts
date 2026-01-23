@@ -38,6 +38,7 @@ let deviceStore: DeviceStore | null = null;
 
 async function main(): Promise<void> {
     logger.info('Starting Webex Bridge Server...');
+    logger.debug(`Configuration: WS_PORT=${process.env.WS_PORT || '8080'}, LOG_LEVEL=${process.env.LOG_LEVEL || 'info'}`);
     
     // Initialize device store for persistence
     const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
@@ -55,8 +56,12 @@ async function main(): Promise<void> {
     mdnsService = new MDNSService(serviceName, wsPort, logger);
     mdnsService.start();
     
+    // Log service info for debugging
+    const serviceInfo = mdnsService.getServiceInfo();
     logger.info(`Webex Bridge Server is running on port ${wsPort}`);
-    logger.info(`mDNS advertising as ${serviceName}.local`);
+    logger.info(`mDNS service: ${serviceInfo.name}.${serviceInfo.type}.local:${serviceInfo.port}`);
+    logger.info(`ESP32 devices can discover this bridge by searching for "${serviceInfo.type}" service`);
+    logger.debug(`mDNS running: ${serviceInfo.running}`);
     
     // Handle shutdown
     process.on('SIGINT', shutdown);

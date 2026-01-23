@@ -90,6 +90,7 @@ export class WebSocketServer {
         });
 
         this.logger.info(`WebSocket server started on port ${this.port}`);
+        this.logger.debug(`WebSocket server listening on ws://0.0.0.0:${this.port}`);
     }
 
     stop(): void {
@@ -136,6 +137,7 @@ export class WebSocketServer {
     private handleConnection(ws: WebSocket): void {
         const clientId = `client-${Date.now()}`;
         this.logger.info(`New connection: ${clientId}`);
+        this.logger.debug(`Client ${clientId} connected, total clients: ${this.clients.size + 1}`);
 
         // Initialize client with temporary ID
         const client: Client = {
@@ -146,14 +148,16 @@ export class WebSocketServer {
         this.clients.set(ws, client);
 
         // Send connection confirmation
-        this.sendMessage(ws, {
+        const connectionMsg = {
             type: 'connection',
             data: {
                 webex: 'connected',
                 clients: this.clients.size
             },
             timestamp: new Date().toISOString()
-        });
+        };
+        this.logger.debug(`[${clientId}] Sending: ${JSON.stringify(connectionMsg)}`);
+        this.sendMessage(ws, connectionMsg);
 
         // Handle messages
         ws.on('message', (data: Buffer) => {
@@ -165,6 +169,7 @@ export class WebSocketServer {
             const client = this.clients.get(ws);
             if (client) {
                 this.logger.info(`Client disconnected: ${client.deviceId}`);
+                this.logger.debug(`[${client.deviceId}] Disconnect - type=${client.clientType} room=${client.pairingCode}`);
                 
                 // Clean up pairing room
                 if (client.pairingCode) {
@@ -212,9 +217,15 @@ export class WebSocketServer {
     }
 
     private handleMessage(ws: WebSocket, data: string): void {
+        const client = this.clients.get(ws);
+        const clientId = client?.deviceId || 'unknown';
+        const clientType = client?.clientType || 'unregistered';
+        
+        // Log every incoming message with raw JSON
+        this.logger.debug(`[${clientId}] (${clientType}) Received: ${data}`);
+        
         try {
             const message: Message = JSON.parse(data);
-            const client = this.clients.get(ws);
 
             switch (message.type) {
                 case 'subscribe':
@@ -222,11 +233,13 @@ export class WebSocketServer {
                     if (client && message.deviceId) {
                         client.deviceId = message.deviceId;
                         this.logger.info(`Device registered: ${message.deviceId}`);
+                        this.logger.debug(`[${message.deviceId}] Subscribe complete`);
                     }
                     break;
 
                 case 'join':
                     // Join a pairing room
+                    this.logger.debug(`[${clientId}] Join request: code=${message.code} type=${message.clientType} deviceId=${message.deviceId}`);
                     if (message.code && message.clientType) {
                         this.joinRoom(ws, message.code, message.clientType, {
                             deviceId: message.deviceId,
@@ -235,6 +248,7 @@ export class WebSocketServer {
                             ipAddress: message.ip_address
                         });
                     } else {
+                        this.logger.debug(`[${clientId}] Join rejected: missing code or clientType`);
                         this.sendMessage(ws, { 
                             type: 'error', 
                             message: 'Missing code or clientType' 
@@ -244,16 +258,19 @@ export class WebSocketServer {
 
                 case 'status':
                     // Relay status update to paired client
+                    this.logger.debug(`[${clientId}] Status update: status=${message.status} camera=${message.camera_on} mic_muted=${message.mic_muted} in_call=${message.in_call}`);
                     this.relayStatus(ws, message);
                     break;
 
                 case 'command':
                     // Relay command from app to display
+                    this.logger.debug(`[${clientId}] Command: ${message.command} requestId=${message.requestId}`);
                     this.relayCommand(ws, message);
                     break;
 
                 case 'command_response':
                     // Relay command response from display to app
+                    this.logger.debug(`[${clientId}] Command response: requestId=${message.requestId} success=${message.success}`);
                     this.relayCommandResponse(ws, message);
                     break;
 
@@ -324,6 +341,9 @@ export class WebSocketServer {
             };
             this.rooms.set(code, room);
             this.logger.info(`Created pairing room: ${code}`);
+            this.logger.debug(`Room ${code} created, total rooms: ${this.rooms.size}`);
+        } else {
+            this.logger.debug(`Room ${code} exists: display=${room.display !== null} app=${room.app !== null}`);
         }
 
         // Add client to room
@@ -363,7 +383,7 @@ export class WebSocketServer {
         room.lastActivity = new Date();
 
         // Send confirmation
-        this.sendMessage(ws, {
+        const joinedMsg = {
             type: 'joined',
             data: {
                 code,
@@ -372,11 +392,14 @@ export class WebSocketServer {
                 appConnected: room.app !== null
             },
             timestamp: new Date().toISOString()
-        });
+        };
+        this.logger.debug(`[${client.deviceId}] Sending joined confirmation: ${JSON.stringify(joinedMsg.data)}`);
+        this.sendMessage(ws, joinedMsg);
 
         // Notify the other client if present
         const otherClient = clientType === 'display' ? room.app : room.display;
         if (otherClient && otherClient.readyState === WebSocket.OPEN) {
+            this.logger.debug(`Room ${code}: Notifying peer of new ${clientType}`);
             this.sendMessage(otherClient, {
                 type: 'peer_connected',
                 data: {
@@ -384,6 +407,8 @@ export class WebSocketServer {
                 },
                 timestamp: new Date().toISOString()
             });
+        } else {
+            this.logger.debug(`Room ${code}: No peer to notify (${clientType === 'display' ? 'app' : 'display'} not connected)`);
         }
     }
 
@@ -413,7 +438,7 @@ export class WebSocketServer {
 
         if (target && target.readyState === WebSocket.OPEN) {
             // Forward the status message
-            this.sendMessage(target, {
+            const statusMsg = {
                 type: 'status',
                 status: message.status,
                 camera_on: message.camera_on,
@@ -422,10 +447,11 @@ export class WebSocketServer {
                 display_name: message.display_name,
                 data: message.data,
                 timestamp: new Date().toISOString()
-            });
-            this.logger.debug(`Relayed status from ${client.clientType} to peer in room ${client.pairingCode}`);
+            };
+            this.sendMessage(target, statusMsg);
+            this.logger.debug(`Relayed status from ${client.clientType} to peer in room ${client.pairingCode}: ${JSON.stringify(statusMsg)}`);
         } else {
-            this.logger.debug(`No peer connected in room ${client.pairingCode} to receive status`);
+            this.logger.debug(`No peer connected in room ${client.pairingCode} to receive status (target=${target ? 'exists but closed' : 'null'})`);
         }
     }
 
@@ -553,7 +579,13 @@ export class WebSocketServer {
 
     private sendMessage(ws: WebSocket, message: Message): void {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(message));
+            const data = JSON.stringify(message);
+            ws.send(data);
+            // Log outgoing messages at debug level
+            const client = this.clients.get(ws);
+            if (client) {
+                this.logger.debug(`[${client.deviceId}] Sending: ${data}`);
+            }
         }
     }
 }
