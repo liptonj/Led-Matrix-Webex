@@ -13,6 +13,7 @@
 
 #include "boot_validator.h"
 #include "config/config_manager.h"
+#include "debug.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
 #include "web/web_server.h"
@@ -48,6 +49,9 @@ WiFiManager wifi_manager;
 // Application state (defined in app_state.h)
 #include "app_state.h"
 AppState app_state;
+
+// Debug mode flag (used by DEBUG_LOG macro in debug.h)
+bool g_debug_mode = false;
 
 // Forward declarations
 void setup_time();
@@ -88,6 +92,12 @@ void setup() {
         Serial.println("[ERROR] Failed to initialize configuration!");
         boot_validator.onCriticalFailure("Config", "Failed to load configuration");
         // Won't return - device reboots to bootloader
+    }
+
+    // Initialize debug mode from config
+    g_debug_mode = config_manager.getDebugMode();
+    if (g_debug_mode) {
+        Serial.println("[INIT] Debug mode ENABLED - verbose logging active");
     }
 
     // Initialize display
@@ -146,21 +156,49 @@ void setup() {
     // Set command handler before connecting
     bridge_client.setCommandHandler(handleBridgeCommand);
 
-    // Look for bridge server - try local mDNS first, then cloud
+    // Look for bridge server
     if (app_state.wifi_connected) {
         Serial.println("[INIT] Searching for bridge server...");
         String bridge_host;
         uint16_t bridge_port;
         bool bridge_found = false;
         
-        // Try 1: Local mDNS discovery
-        if (mdns_manager.discoverBridge(bridge_host, bridge_port)) {
-            Serial.printf("[INIT] Found local bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
-            bridge_client.beginWithPairing(bridge_host, bridge_port, pairing_manager.getCode());
+        // Try 1: Check for user-configured bridge URL
+        String configured_url = config_manager.getBridgeUrl();
+        if (!configured_url.isEmpty()) {
+            Serial.printf("[INIT] Using configured bridge URL: %s\n", configured_url.c_str());
+            bridge_client.beginWithUrl(configured_url, pairing_manager.getCode());
             bridge_found = true;
         }
         
-        // Try 2: Cloud bridge via discovery endpoint
+        // Try 2: Check for user-configured bridge host/port
+        if (!bridge_found) {
+            String configured_host = config_manager.getBridgeHost();
+            if (!configured_host.isEmpty()) {
+                uint16_t configured_port = config_manager.getBridgePort();
+                bool use_ssl = config_manager.getBridgeUseSSL();
+                
+                // Build URL from host/port/ssl settings
+                String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
+                Serial.printf("[INIT] Using configured bridge: %s\n", manual_url.c_str());
+                bridge_client.beginWithUrl(manual_url, pairing_manager.getCode());
+                bridge_found = true;
+            }
+        }
+        
+        // Try 3: Local mDNS discovery
+        if (!bridge_found) {
+            Serial.println("[INIT] Attempting mDNS discovery for local bridge...");
+            if (mdns_manager.discoverBridge(bridge_host, bridge_port)) {
+                Serial.printf("[INIT] Found local bridge via mDNS at %s:%d\n", bridge_host.c_str(), bridge_port);
+                bridge_client.beginWithPairing(bridge_host, bridge_port, pairing_manager.getCode());
+                bridge_found = true;
+            } else {
+                Serial.println("[INIT] mDNS discovery failed - no local bridge found");
+            }
+        }
+        
+        // Try 4: Cloud bridge via discovery endpoint
         if (!bridge_found) {
             Serial.println("[INIT] No local bridge found, trying cloud bridge...");
             if (bridge_discovery.fetchConfig()) {
@@ -172,6 +210,17 @@ void setup() {
                 // Use hardcoded fallback
                 Serial.println("[INIT] Discovery failed, using default cloud bridge");
                 bridge_client.beginWithUrl("wss://bridge.5ls.us", pairing_manager.getCode());
+                bridge_found = true;
+            }
+        }
+        
+        // Try 5: Fallback URL from discovery config (if cloud fails to connect)
+        // This provides a configurable local network fallback
+        if (!bridge_found) {
+            String fallback_url = bridge_discovery.getFallbackUrl();
+            if (!fallback_url.isEmpty()) {
+                Serial.printf("[INIT] Trying fallback bridge: %s\n", fallback_url.c_str());
+                bridge_client.beginWithUrl(fallback_url, pairing_manager.getCode());
                 bridge_found = true;
             }
         }
@@ -257,44 +306,108 @@ void loop() {
         Serial.printf("[WEBEX] OAuth exchange %s\n", auth_ok ? "successful" : "failed");
     }
 
+    // Check if bridge configuration was changed via web interface
+    // Add periodic logging to verify this check is running
+    static unsigned long last_check_log = 0;
+    unsigned long now = millis();
+    if (now - last_check_log > 10000) {  // Log every 10 seconds
+        Serial.printf("[MAIN] Bridge config check: changed=%d wifi=%d\n", 
+                      app_state.bridge_config_changed, app_state.wifi_connected);
+        last_check_log = now;
+    }
+    
+    if (app_state.bridge_config_changed && app_state.wifi_connected) {
+        Serial.println("[MAIN] Bridge configuration changed - reconnecting...");
+        app_state.bridge_config_changed = false;
+        
+        // Disconnect current connection
+        bridge_client.disconnect();
+        
+        // Reconnect with new configuration
+        String configured_url = config_manager.getBridgeUrl();
+        if (!configured_url.isEmpty()) {
+            Serial.printf("[MAIN] Connecting to new bridge URL: %s\n", configured_url.c_str());
+            bridge_client.beginWithUrl(configured_url, pairing_manager.getCode());
+        } else {
+            // Check for host/port configuration
+            String configured_host = config_manager.getBridgeHost();
+            if (!configured_host.isEmpty()) {
+                uint16_t configured_port = config_manager.getBridgePort();
+                bool use_ssl = config_manager.getBridgeUseSSL();
+                
+                String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
+                Serial.printf("[MAIN] Connecting to new bridge: %s\n", manual_url.c_str());
+                bridge_client.beginWithUrl(manual_url, pairing_manager.getCode());
+            } else {
+                Serial.println("[MAIN] No bridge configuration found after change");
+            }
+        }
+    }
+
     // Process bridge client (skip during OTA to save resources)
     if (matrix_display.isOTALocked()) {
         // Skip bridge processing during OTA update
-    } else if (bridge_client.isConnected()) {
-        bridge_client.loop();
-        
-        // Update connection state based on room join status
-        app_state.bridge_connected = bridge_client.isJoined();
-        app_state.embedded_app_connected = bridge_client.isPeerConnected();
-
-        // Check for presence updates from bridge
-        if (bridge_client.hasUpdate()) {
-            BridgeUpdate update = bridge_client.getUpdate();
-            app_state.webex_status = update.status;
-            // Derive in_call from status if not connected to xAPI
-            if (!app_state.xapi_connected) {
-                app_state.in_call = (update.status == "meeting" || update.status == "busy");
-            }
-        }
-    } else if (app_state.wifi_connected && !matrix_display.isOTALocked()) {
-        // Check if bridge was never initialized (WiFi connected after startup)
+    } else if (app_state.wifi_connected) {
+        // Initialize bridge if not yet done
         if (!bridge_client.isInitialized()) {
             Serial.println("[BRIDGE] WiFi connected, initializing bridge connection...");
             
-            // Try cloud bridge via discovery endpoint
-            if (bridge_discovery.fetchConfig()) {
-                String bridge_url = bridge_discovery.getBridgeUrl();
-                Serial.printf("[BRIDGE] Using cloud bridge: %s\n", bridge_url.c_str());
-                bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
+            // Try 1: Check for user-configured bridge URL
+            String configured_url = config_manager.getBridgeUrl();
+            if (!configured_url.isEmpty()) {
+                Serial.printf("[BRIDGE] Using configured bridge URL: %s\n", configured_url.c_str());
+                bridge_client.beginWithUrl(configured_url, pairing_manager.getCode());
             } else {
-                // Use hardcoded fallback
-                Serial.println("[BRIDGE] Discovery failed, using default cloud bridge");
-                bridge_client.beginWithUrl("wss://bridge.5ls.us", pairing_manager.getCode());
+                // Try 2: Check for user-configured bridge host/port
+                String configured_host = config_manager.getBridgeHost();
+                if (!configured_host.isEmpty()) {
+                    uint16_t configured_port = config_manager.getBridgePort();
+                    bool use_ssl = config_manager.getBridgeUseSSL();
+                    
+                    String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
+                    Serial.printf("[BRIDGE] Using configured bridge: %s\n", manual_url.c_str());
+                    bridge_client.beginWithUrl(manual_url, pairing_manager.getCode());
+                } else {
+                    // Try cloud bridge via discovery endpoint
+                    if (bridge_discovery.fetchConfig()) {
+                        String bridge_url = bridge_discovery.getBridgeUrl();
+                        Serial.printf("[BRIDGE] Using cloud bridge: %s\n", bridge_url.c_str());
+                        bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
+                    } else {
+                        // Use hardcoded fallback
+                        Serial.println("[BRIDGE] Discovery failed, using default cloud bridge");
+                        bridge_client.beginWithUrl("wss://bridge.5ls.us", pairing_manager.getCode());
+                    }
+                }
+            }
+        }
+        
+        // CRITICAL: Always call loop() when initialized - this is required for
+        // the WebSocketsClient library to complete handshakes and process messages
+        if (bridge_client.isInitialized()) {
+            bridge_client.loop();
+        }
+        
+        // Update connection state
+        if (bridge_client.isConnected()) {
+            app_state.bridge_connected = bridge_client.isJoined();
+            app_state.embedded_app_connected = bridge_client.isPeerConnected();
+
+            // Check for presence updates from bridge
+            if (bridge_client.hasUpdate()) {
+                BridgeUpdate update = bridge_client.getUpdate();
+                app_state.webex_status = update.status;
+                // Derive in_call from status if not connected to xAPI
+                if (!app_state.xapi_connected) {
+                    app_state.in_call = (update.status == "meeting" || update.status == "busy");
+                }
             }
         } else {
-            // Try to reconnect to bridge (works for both local and cloud)
-            bridge_client.reconnect();
+            app_state.bridge_connected = false;
+            app_state.embedded_app_connected = false;
         }
+    } else {
+        // WiFi not connected
         app_state.bridge_connected = false;
         app_state.embedded_app_connected = false;
     }

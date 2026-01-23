@@ -98,16 +98,34 @@ void MDNSManager::advertiseHTTP(uint16_t port) {
 }
 
 bool MDNSManager::discoverBridge(String& host, uint16_t& port) {
-    if (!initialized) return false;
+    if (!initialized) {
+        Serial.println("[MDNS] Discovery not initialized");
+        return false;
+    }
     
     Serial.println("[MDNS] Searching for bridge server...");
+    Serial.printf("[MDNS] Query: service=%s, protocol=%s\n", 
+                  MDNS_SERVICE_BRIDGE, MDNS_PROTOCOL_TCP);
     
     int n = MDNS.queryService(MDNS_SERVICE_BRIDGE, MDNS_PROTOCOL_TCP);
     
+    Serial.printf("[MDNS] Query returned %d result(s)\n", n);
+    
     if (n == 0) {
         Serial.println("[MDNS] No bridge server found");
+        Serial.println("[MDNS] Hint: Check that bridge server is running and advertising mDNS");
+        Serial.println("[MDNS] Hint: Try 'dns-sd -B _webex-bridge._tcp' on macOS/Linux to verify");
         bridge_found = false;
         return false;
+    }
+    
+    // Log all discovered services
+    for (int i = 0; i < n; i++) {
+        Serial.printf("[MDNS] Service %d: %s at %s:%d\n", 
+                      i, 
+                      MDNS.hostname(i).c_str(),
+                      MDNS.IP(i).toString().c_str(), 
+                      MDNS.port(i));
     }
     
     // Use the first discovered service
@@ -119,7 +137,7 @@ bool MDNSManager::discoverBridge(String& host, uint16_t& port) {
     host = bridge_host;
     port = bridge_port;
     
-    Serial.printf("[MDNS] Found bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
+    Serial.printf("[MDNS] Selected bridge at %s:%d\n", bridge_host.c_str(), bridge_port);
     return true;
 }
 

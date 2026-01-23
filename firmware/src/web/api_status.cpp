@@ -195,6 +195,16 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["ntp_server"] = config_manager->getNtpServer().isEmpty() ? "pool.ntp.org" : config_manager->getNtpServer();
     doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
     doc["date_format"] = config_manager->getDateFormat().isEmpty() ? "mdy" : config_manager->getDateFormat();
+    
+    // Bridge configuration
+    doc["bridge_url"] = config_manager->getBridgeUrl().isEmpty() ? "" : config_manager->getBridgeUrl();
+    doc["bridge_host"] = config_manager->getBridgeHost().isEmpty() ? "" : config_manager->getBridgeHost();
+    doc["bridge_port"] = config_manager->getBridgePort();
+    doc["bridge_use_ssl"] = config_manager->getBridgeUseSSL();
+    doc["has_bridge_config"] = config_manager->hasBridgeConfig();
+    
+    // Debug configuration
+    doc["debug_mode"] = config_manager->getDebugMode();
 
     String responseStr;
     serializeJson(doc, responseStr);
@@ -368,6 +378,85 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             config_manager->setDateFormat(date_format);
             time_config_updated = true;
         }
+    }
+    
+    // Bridge configuration
+    // Always trigger reconnection if ANY bridge config is provided in the request
+    // This ensures reconnection even if going from cloud discovery to manual config
+    bool bridge_url_provided = doc["bridge_url"].is<const char*>();
+    bool bridge_host_provided = doc["bridge_host"].is<const char*>();
+    bool bridge_port_provided = doc["bridge_port"].is<int>();
+    bool bridge_ssl_provided = doc["bridge_use_ssl"].is<bool>();
+    bool bridge_config_provided = bridge_url_provided || bridge_host_provided || 
+                                   bridge_port_provided || bridge_ssl_provided;
+    bool bridge_config_changed = false;
+    
+    Serial.printf("[WEB] Bridge config detection: url=%d host=%d port=%d ssl=%d total=%d\n",
+                  bridge_url_provided, bridge_host_provided, bridge_port_provided, 
+                  bridge_ssl_provided, bridge_config_provided);
+    
+    if (doc["bridge_url"].is<const char*>()) {
+        String bridge_url = doc["bridge_url"].as<String>();
+        bridge_url.trim();
+        String current_url = config_manager->getBridgeUrl();
+        if (bridge_url != current_url) {
+            bridge_config_changed = true;
+        }
+        config_manager->setBridgeUrl(bridge_url);
+        Serial.printf("[WEB] Bridge URL saved: %s\n", bridge_url.isEmpty() ? "(empty)" : bridge_url.c_str());
+    }
+    if (doc["bridge_host"].is<const char*>()) {
+        String bridge_host = doc["bridge_host"].as<String>();
+        bridge_host.trim();
+        String current_host = config_manager->getBridgeHost();
+        if (bridge_host != current_host) {
+            bridge_config_changed = true;
+        }
+        config_manager->setBridgeHost(bridge_host);
+        Serial.printf("[WEB] Bridge host saved: %s\n", bridge_host.isEmpty() ? "(empty)" : bridge_host.c_str());
+    }
+    if (doc["bridge_port"].is<int>()) {
+        uint16_t bridge_port = doc["bridge_port"].as<uint16_t>();
+        if (bridge_port == 0) bridge_port = 443;
+        uint16_t current_port = config_manager->getBridgePort();
+        if (bridge_port != current_port) {
+            bridge_config_changed = true;
+        }
+        config_manager->setBridgePort(bridge_port);
+        Serial.printf("[WEB] Bridge port saved: %d\n", bridge_port);
+    }
+    if (doc["bridge_use_ssl"].is<bool>()) {
+        bool bridge_use_ssl = doc["bridge_use_ssl"].as<bool>();
+        bool current_ssl = config_manager->getBridgeUseSSL();
+        if (bridge_use_ssl != current_ssl) {
+            bridge_config_changed = true;
+        }
+        config_manager->setBridgeUseSSL(bridge_use_ssl);
+        Serial.printf("[WEB] Bridge SSL saved: %s\n", bridge_use_ssl ? "true" : "false");
+    }
+    
+    // Trigger bridge reconnection if config changed OR if config was provided
+    // (handles switching from auto-discovery to manual config)
+    Serial.printf("[WEB] Bridge trigger check: provided=%d changed=%d condition=%d\n",
+                  bridge_config_provided, bridge_config_changed, 
+                  (bridge_config_provided || bridge_config_changed));
+    if (bridge_config_provided || bridge_config_changed) {
+        Serial.println("[WEB] Bridge configuration updated - triggering reconnection");
+        app_state->bridge_config_changed = true;
+        Serial.printf("[WEB] app_state->bridge_config_changed set to: %d\n", 
+                      app_state->bridge_config_changed);
+    } else {
+        Serial.println("[WEB] Bridge reconnection NOT triggered");
+    }
+
+    // Debug configuration
+    if (doc["debug_mode"].is<bool>()) {
+        bool debug_mode = doc["debug_mode"].as<bool>();
+        config_manager->setDebugMode(debug_mode);
+        // Update global flag immediately so logging takes effect
+        extern bool g_debug_mode;
+        g_debug_mode = debug_mode;
+        Serial.printf("[WEB] Debug mode %s\n", debug_mode ? "enabled" : "disabled");
     }
 
     if (time_config_updated) {

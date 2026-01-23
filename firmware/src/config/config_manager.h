@@ -95,6 +95,18 @@ public:
     void setDisplayMetric(const String& metric);
     bool hasMQTTConfig() const;
 
+    // Bridge Configuration
+    String getBridgeUrl() const;
+    void setBridgeUrl(const String& url);
+    String getBridgeHost() const;
+    void setBridgeHost(const String& host);
+    uint16_t getBridgePort() const;
+    void setBridgePort(uint16_t port);
+    bool getBridgeUseSSL() const;
+    void setBridgeUseSSL(bool use_ssl);
+    bool hasBridgeConfig() const;
+    void clearBridgeConfig();
+
     // OTA Configuration
     String getOTAUrl() const;
     void setOTAUrl(const String& url);
@@ -103,6 +115,10 @@ public:
     String getFailedOTAVersion() const;
     void setFailedOTAVersion(const String& version);
     void clearFailedOTAVersion();
+
+    // Debug Configuration
+    bool getDebugMode() const;
+    void setDebugMode(bool enabled);
 
     // Time Configuration
     String getTimeZone() const;
@@ -152,6 +168,10 @@ private:
     mutable String cached_ntp_server;
     mutable String cached_time_format;
     mutable String cached_date_format;
+    mutable String cached_bridge_url;
+    mutable String cached_bridge_host;
+    mutable uint16_t cached_bridge_port;
+    mutable bool cached_bridge_use_ssl;
     mutable bool cache_loaded;
 
     void loadCache() const;

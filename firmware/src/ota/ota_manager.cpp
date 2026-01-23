@@ -4,6 +4,7 @@
  */
 
 #include "ota_manager.h"
+#include "../common/ca_certs.h"
 #include "../display/matrix_display.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -73,7 +74,7 @@ bool OTAManager::checkUpdateFromManifest() {
     Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
     
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     
     HTTPClient http;
     http.begin(client, manifest_url);
@@ -165,7 +166,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
     
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     
     HTTPClient http;
     http.begin(client, update_url);
@@ -404,7 +405,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 #endif
 
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
 
     HTTPClient http;
     http.begin(client, url);
@@ -575,7 +576,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 #endif
 
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
 
     HTTPClient http;
     http.begin(client, url);

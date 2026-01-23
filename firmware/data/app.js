@@ -15,7 +15,8 @@ const API = {
     otaUpload: '/api/ota/upload',
     reboot: '/api/reboot',
     factoryReset: '/api/factory-reset',
-    regeneratePairingCode: '/api/pairing/regenerate'
+    regeneratePairingCode: '/api/pairing/regenerate',
+    bridgeClear: '/api/bridge/clear'
 };
 
 const TIME_ZONES = [
@@ -321,6 +322,7 @@ async function loadConfig() {
         document.getElementById('display-metric').value = config.display_metric || 'tvoc';
         document.getElementById('ota-url').value = config.ota_url || '';
         document.getElementById('auto-update').checked = config.auto_update || false;
+        document.getElementById('debug-mode').checked = config.debug_mode || false;
         document.getElementById('time-format').value = config.time_format || '24h';
         document.getElementById('date-format').value = config.date_format || 'mdy';
         document.getElementById('ntp-server').value = config.ntp_server || 'pool.ntp.org';
@@ -356,6 +358,9 @@ async function loadConfig() {
             authStatus.textContent = 'Not configured';
             authStatus.style.color = '#ff5c5c';
         }
+
+        // Update bridge form
+        updateBridgeFormFromConfig(config);
     } catch (error) {
         console.error('Failed to load config:', error);
     }
@@ -376,6 +381,9 @@ function initEventListeners() {
 
     // WiFi form
     document.getElementById('wifi-form').addEventListener('submit', saveWifi);
+
+    // Bridge form
+    initBridgeForm();
 
     // Webex form
     document.getElementById('webex-form').addEventListener('submit', saveWebexCredentials);
@@ -436,10 +444,157 @@ function initEventListeners() {
     document.getElementById('perform-update').addEventListener('click', performUpdate);
     initManualUpload();
 
+    // Debug form
+    document.getElementById('debug-form').addEventListener('submit', saveDebugSettings);
+
     // System buttons
     document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
     document.getElementById('boot-bootstrap-btn').addEventListener('click', bootToBootstrap);
     document.getElementById('factory-reset-btn').addEventListener('click', factoryReset);
+}
+
+// Bridge Functions
+function initBridgeForm() {
+    const modeSelect = document.getElementById('bridge-mode');
+    const urlSection = document.getElementById('bridge-url-section');
+    const manualSection = document.getElementById('bridge-manual-section');
+    const bridgeForm = document.getElementById('bridge-form');
+    const clearBtn = document.getElementById('bridge-clear');
+
+    if (!modeSelect || !bridgeForm) {
+        return;
+    }
+
+    // Show/hide sections based on mode
+    modeSelect.addEventListener('change', () => {
+        const mode = modeSelect.value;
+        urlSection.style.display = mode === 'url' ? 'block' : 'none';
+        manualSection.style.display = mode === 'manual' ? 'block' : 'none';
+    });
+
+    bridgeForm.addEventListener('submit', saveBridgeConfig);
+    
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearBridgeConfig);
+    }
+}
+
+function updateBridgeFormFromConfig(config) {
+    const modeSelect = document.getElementById('bridge-mode');
+    const urlSection = document.getElementById('bridge-url-section');
+    const manualSection = document.getElementById('bridge-manual-section');
+    const currentUrlEl = document.getElementById('bridge-current-url');
+
+    if (!modeSelect) {
+        return;
+    }
+
+    // Determine mode from saved config
+    let mode = 'auto';
+    let displayUrl = 'Auto (Cloud)';
+
+    if (config.bridge_url && config.bridge_url.trim() !== '') {
+        mode = 'url';
+        displayUrl = config.bridge_url;
+        document.getElementById('bridge-url').value = config.bridge_url;
+    } else if (config.bridge_host && config.bridge_host.trim() !== '') {
+        mode = 'manual';
+        document.getElementById('bridge-host').value = config.bridge_host;
+        document.getElementById('bridge-port').value = config.bridge_port || 8080;
+        document.getElementById('bridge-use-ssl').checked = config.bridge_use_ssl || false;
+        
+        const protocol = config.bridge_use_ssl ? 'wss' : 'ws';
+        displayUrl = `${protocol}://${config.bridge_host}:${config.bridge_port || 8080}`;
+    }
+
+    modeSelect.value = mode;
+    urlSection.style.display = mode === 'url' ? 'block' : 'none';
+    manualSection.style.display = mode === 'manual' ? 'block' : 'none';
+
+    if (currentUrlEl) {
+        currentUrlEl.textContent = displayUrl;
+    }
+}
+
+async function saveBridgeConfig(e) {
+    e.preventDefault();
+
+    const mode = document.getElementById('bridge-mode').value;
+    const data = {};
+
+    if (mode === 'url') {
+        const url = document.getElementById('bridge-url').value.trim();
+        if (!url) {
+            alert('Please enter a bridge URL');
+            return;
+        }
+        data.bridge_url = url;
+        data.bridge_host = '';
+        data.bridge_port = 443;
+        data.bridge_use_ssl = true;
+    } else if (mode === 'manual') {
+        const host = document.getElementById('bridge-host').value.trim();
+        if (!host) {
+            alert('Please enter a bridge host');
+            return;
+        }
+        data.bridge_url = '';
+        data.bridge_host = host;
+        data.bridge_port = parseInt(document.getElementById('bridge-port').value) || 8080;
+        data.bridge_use_ssl = document.getElementById('bridge-use-ssl').checked;
+    } else {
+        // Auto mode - clear config
+        data.bridge_url = '';
+        data.bridge_host = '';
+        data.bridge_port = 443;
+        data.bridge_use_ssl = true;
+    }
+
+    try {
+        const response = await fetch(API.config, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            alert('Bridge configuration saved! The device will reconnect to the bridge.');
+            loadConfig();
+        } else {
+            alert('Failed to save bridge config - server returned error');
+        }
+    } catch (error) {
+        console.error('Error saving bridge config:', error);
+        alert('Failed to save bridge config - network error');
+    }
+}
+
+async function clearBridgeConfig() {
+    if (!confirm('Clear bridge configuration and use auto-discovery?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(API.config, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                bridge_url: '',
+                bridge_host: '',
+                bridge_port: 443,
+                bridge_use_ssl: true
+            })
+        });
+
+        if (response.ok) {
+            alert('Bridge configuration cleared. Using auto-discovery.');
+            loadConfig();
+        } else {
+            alert('Failed to clear bridge config');
+        }
+    } catch (error) {
+        alert('Failed to clear bridge config');
+    }
 }
 
 // WiFi Functions
@@ -735,6 +890,29 @@ async function saveOTASettings(e) {
         await loadConfig();
     } catch (error) {
         alert('Failed to save OTA settings');
+    }
+}
+
+async function saveDebugSettings(e) {
+    e.preventDefault();
+
+    const data = {
+        debug_mode: document.getElementById('debug-mode').checked
+    };
+
+    try {
+        const response = await fetch(API.config, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!response.ok) {
+            throw new Error('Save failed');
+        }
+        alert('Debug settings saved!');
+        await loadConfig();
+    } catch (error) {
+        alert('Failed to save debug settings');
     }
 }
 

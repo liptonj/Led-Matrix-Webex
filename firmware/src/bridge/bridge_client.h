@@ -2,6 +2,8 @@
  * @file bridge_client.h
  * @brief Bridge WebSocket Client Header
  * 
+ * Uses Links2004 WebSockets library with SSL certificate bundle.
+ * 
  * Supports two modes:
  * 1. Legacy mode: Direct presence subscription (original behavior)
  * 2. Pairing mode: Join a pairing room to receive status from embedded app
@@ -207,11 +209,12 @@ private:
     unsigned long last_reconnect;
     
     /**
-     * @brief Parse a WebSocket URL into host, port, and SSL flag
+     * @brief Parse a WebSocket URL into host, port, SSL flag, and path
      * @param url Full URL (ws:// or wss://)
      * @param host Output: hostname
      * @param port Output: port number
      * @param ssl Output: whether to use SSL
+     * @param path Output: URL path
      * @return true if parsing succeeded
      */
     bool parseUrl(const String& url, String& host, uint16_t& port, bool& ssl, String& path);
