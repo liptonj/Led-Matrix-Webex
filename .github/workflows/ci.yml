@@ -626,6 +626,41 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Create firmware directory
+        run: mkdir -p website/public/updates/firmware
+
+      - name: Download firmware from latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Downloading firmware binaries from latest release..."
+          
+          # Get latest release tag (use current tag since we just created the release)
+          LATEST_TAG="${GITHUB_REF#refs/tags/}"
+          echo "Release tag: $LATEST_TAG"
+          
+          # Download all firmware binaries
+          cd website/public/updates/firmware
+          
+          # Main firmware files
+          gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32s3.bin" --clobber || echo "firmware-ota-esp32s3.bin not found"
+          gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32.bin" --clobber || echo "firmware-ota-esp32.bin not found"
+          gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
+          gh release download "$LATEST_TAG" --pattern "firmware-esp32.bin" --clobber || echo "firmware-esp32.bin not found"
+          gh release download "$LATEST_TAG" --pattern "littlefs-esp32s3.bin" --clobber || echo "littlefs-esp32s3.bin not found"
+          gh release download "$LATEST_TAG" --pattern "littlefs-esp32.bin" --clobber || echo "littlefs-esp32.bin not found"
+          gh release download "$LATEST_TAG" --pattern "firmware-esp32s3-merged.bin" --clobber || echo "firmware-esp32s3-merged.bin not found"
+          gh release download "$LATEST_TAG" --pattern "firmware-esp32-merged.bin" --clobber || echo "firmware-esp32-merged.bin not found"
+          
+          # Bootstrap files (for web installer)
+          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32s3.bin" --clobber || echo "bootstrap-esp32s3.bin not found"
+          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32.bin" --clobber || echo "bootstrap-esp32.bin not found"
+          gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32s3.bin" --clobber || echo "bootstrap-ota-esp32s3.bin not found"
+          gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32.bin" --clobber || echo "bootstrap-ota-esp32.bin not found"
+          
+          echo "Downloaded firmware files:"
+          ls -la
+
       - name: Generate manifest from GitHub releases
         working-directory: website
         env:
