@@ -35,6 +35,11 @@
 #define MDNS_HOSTNAME "webex-display"
 #endif
 
+// Compile-time gate for GitHub releases background fetch
+#ifndef RELEASE_FETCH_ENABLED
+#define RELEASE_FETCH_ENABLED 0
+#endif
+
 // Global instances
 ConfigStore config_store;
 WiFiProvisioner wifi_provisioner;
@@ -47,16 +52,25 @@ bool ota_in_progress = false;
 unsigned long last_status_print = 0;
 unsigned long last_ip_print = 0;
 String mdns_hostname = MDNS_HOSTNAME;
-bool releases_fetch_in_progress = false;
 bool mdns_started = false;
 bool wifi_connected_handled = false;
+bool ota_upload_failed = false;
+
+#if RELEASE_FETCH_ENABLED
+bool releases_fetch_in_progress = false;
 unsigned long last_releases_fetch_attempt = 0;
 int releases_fetch_retry_count = 0;
 const int MAX_FETCH_RETRIES = 3;
 unsigned long wifi_connected_time = 0;
 bool releases_cached_message_shown = false;  // Only show message once
-const bool RELEASE_FETCH_ENABLED = false;
-bool ota_upload_failed = false;
+#endif
+
+// Serial command buffer
+String serial_buffer = "";
+bool serial_wifi_pending = false;
+String serial_wifi_ssid = "";
+String serial_wifi_password = "";
+bool serial_auto_ota = false;
 
 // Forward declarations
 void print_startup_banner();
@@ -67,10 +81,16 @@ void print_status();
 void print_connection_info();
 void start_mdns();
 void ota_progress_callback(int progress, const char* message);
+void handle_connected_state();
+void process_serial_commands();
+void handle_serial_wifi_command(const String& command);
+
+#if RELEASE_FETCH_ENABLED
 void fetch_releases_task(void* param);
 void ensure_releases_fetch_started();
-void handle_connected_state();
+#endif
 
+#if RELEASE_FETCH_ENABLED
 /**
  * @brief Background task to fetch releases from GitHub
  */
@@ -126,6 +146,7 @@ void fetch_releases_task(void* param) {
     releases_fetch_in_progress = false;
     vTaskDelete(NULL);  // Task complete, delete self
 }
+#endif
 
 /**
  * @brief Arduino setup function
@@ -192,13 +213,16 @@ void setup() {
  * @brief Arduino main loop
  */
 void loop() {
+    // Process serial commands from website's Web Serial interface
+    process_serial_commands();
+
     // Process WiFi provisioner
     wifi_provisioner.loop();
 
     // Process web server
     web_setup.loop();
 
-    // Handle pending actions from web interface
+    // Handle pending actions from web interface and serial commands
     handle_pending_actions();
 
     // Handle post-connection setup for any connection path
@@ -299,8 +323,10 @@ void attempt_stored_wifi_connection() {
         Serial.printf("[BOOT] Web UI: http://%s or http://%s.local\n",
                       WiFi.localIP().toString().c_str(), mdns_hostname.c_str());
 
+#if RELEASE_FETCH_ENABLED
         // Start background task to fetch releases for web UI
         ensure_releases_fetch_started();
+#endif
     } else {
         Serial.println("[BOOT] WiFi connection failed");
         display.showError("WiFi Failed");
@@ -353,7 +379,7 @@ void start_provisioning_mode() {
 }
 
 /**
- * @brief Handle pending actions from web interface
+ * @brief Handle pending actions from web interface and serial commands
  */
 void handle_pending_actions() {
     // Skip if OTA already in progress
@@ -361,11 +387,11 @@ void handle_pending_actions() {
         return;
     }
 
-    // Check for pending WiFi connection
+    // Check for pending WiFi connection from web interface
     if (web_setup.isWiFiPending()) {
         web_setup.clearWiFiPending();
 
-        Serial.println("[BOOT] WiFi credentials updated, connecting...");
+        Serial.println("[BOOT] WiFi credentials updated via web, connecting...");
         display.showConnecting(config_store.getWiFiSSID());
 
         // Stop current provisioning
@@ -382,14 +408,60 @@ void handle_pending_actions() {
             // Show connected status
             display.showConnected(WiFi.localIP().toString(), mdns_hostname);
 
+#if RELEASE_FETCH_ENABLED
             // Start background task to fetch releases for web UI
             ensure_releases_fetch_started();
+#endif
 
             // Stay in station mode but keep web server running
             // User can trigger OTA via web interface
         } else {
             Serial.println("[BOOT] Connection failed, restarting provisioning...");
             display.showError("Connect Failed");
+            delay(2000);
+            start_provisioning_mode();
+        }
+    }
+
+    // Check for pending WiFi connection from serial command
+    if (serial_wifi_pending) {
+        serial_wifi_pending = false;
+
+        Serial.println("[SERIAL] WiFi credentials updated via serial, connecting...");
+        display.showConnecting(serial_wifi_ssid);
+
+        // Stop current provisioning if active
+        if (wifi_provisioner.isAPActive()) {
+            wifi_provisioner.stopProvisioning();
+        }
+
+        // Try to connect with new credentials
+        if (wifi_provisioner.connectWithStoredCredentials()) {
+            Serial.println("[SERIAL] WiFi connected successfully!");
+            Serial.printf("[SERIAL] IP: %s\n", WiFi.localIP().toString().c_str());
+
+            // Start mDNS
+            start_mdns();
+
+            // Show connected status
+            display.showConnected(WiFi.localIP().toString(), mdns_hostname);
+
+            // Start web server if not already running
+            if (!web_setup.isRunning()) {
+                web_setup.begin(&config_store, &wifi_provisioner, &ota_downloader);
+            }
+
+            // Auto-start OTA if requested
+            if (serial_auto_ota) {
+                Serial.println("[SERIAL] Auto-OTA enabled, starting firmware download...");
+                delay(2000);  // Wait for network to stabilize
+                ota_in_progress = true;
+                ota_downloader.checkAndInstall();
+            }
+        } else {
+            Serial.println("[SERIAL] WiFi connection failed");
+            Serial.println("[SERIAL] Please check SSID and password");
+            display.showError("WiFi Failed");
             delay(2000);
             start_provisioning_mode();
         }
@@ -439,13 +511,11 @@ void handle_pending_actions() {
     }
 }
 
+#if RELEASE_FETCH_ENABLED
 /**
  * @brief Ensure releases fetch runs with backoff and retry limits
  */
 void ensure_releases_fetch_started() {
-    if (!RELEASE_FETCH_ENABLED) {
-        return;
-    }
     if (!wifi_provisioner.isConnected()) {
         Serial.println("[TASK] Cannot start release fetch - WiFi not connected");
         return;
@@ -507,16 +577,19 @@ void ensure_releases_fetch_started() {
         Serial.println("[TASK] Release fetch task created successfully");
     }
 }
+#endif
 
 /**
  * @brief Handle actions once WiFi is connected
  */
 void handle_connected_state() {
     if (wifi_provisioner.isConnected()) {
+#if RELEASE_FETCH_ENABLED
         // Track when WiFi first connected
         if (wifi_connected_time == 0) {
             wifi_connected_time = millis();
         }
+#endif
         
         if (!mdns_started) {
             start_mdns();
@@ -527,18 +600,22 @@ void handle_connected_state() {
             wifi_connected_handled = true;
         }
 
+#if RELEASE_FETCH_ENABLED
         // Only try fetching releases after WiFi has been stable for at least 2 seconds
         // This prevents premature fetch attempts during DHCP/DNS setup
         if (millis() - wifi_connected_time > 2000) {
             ensure_releases_fetch_started();
         }
+#endif
         return;
     }
 
     // Reset flags on disconnect so we re-run setup on reconnect
     mdns_started = false;
     wifi_connected_handled = false;
+#if RELEASE_FETCH_ENABLED
     wifi_connected_time = 0;  // Reset connection time
+#endif
 }
 
 /**
@@ -616,4 +693,133 @@ void start_mdns() {
  */
 void ota_progress_callback(int progress, const char* message) {
     display.showOTAProgress(progress, String(message));
+}
+
+/**
+ * @brief Process incoming serial commands
+ * 
+ * Supports commands from the website's Web Serial interface:
+ * - WIFI:<ssid>:<password>:<auto_ota> - Configure WiFi and optionally start OTA
+ * - STATUS - Print current status
+ * - SCAN - Scan and print WiFi networks
+ * - OTA - Start OTA firmware download
+ */
+void process_serial_commands() {
+    while (Serial.available()) {
+        char c = Serial.read();
+        
+        if (c == '\n' || c == '\r') {
+            if (serial_buffer.length() > 0) {
+                serial_buffer.trim();
+                
+                // Log received command (mask password)
+                if (serial_buffer.startsWith("WIFI:")) {
+                    Serial.println("[SERIAL] Received WiFi configuration command");
+                } else {
+                    Serial.printf("[SERIAL] Received: %s\n", serial_buffer.c_str());
+                }
+                
+                // Process command
+                if (serial_buffer.startsWith("WIFI:")) {
+                    handle_serial_wifi_command(serial_buffer);
+                } else if (serial_buffer == "STATUS") {
+                    print_status();
+                } else if (serial_buffer == "SCAN") {
+                    Serial.println("[SERIAL] Scanning WiFi networks...");
+                    
+                    // Perform a fresh scan
+                    int n = WiFi.scanNetworks(false, false);  // Sync scan, no hidden networks
+                    
+                    Serial.println("[SERIAL] Available networks:");
+                    if (n == 0) {
+                        Serial.println("[SERIAL] No networks found");
+                    } else {
+                        for (int i = 0; i < n; i++) {
+                            Serial.printf("  %d. %s (%d dBm)\n",
+                                          i + 1,
+                                          WiFi.SSID(i).c_str(),
+                                          WiFi.RSSI(i));
+                        }
+                    }
+                    Serial.println("[SERIAL] Scan complete");
+                } else if (serial_buffer == "OTA") {
+                    if (wifi_provisioner.isConnected()) {
+                        Serial.println("[SERIAL] Starting OTA download...");
+                        ota_in_progress = true;
+                        ota_downloader.checkAndInstall();
+                    } else {
+                        Serial.println("[SERIAL] Error: WiFi not connected");
+                    }
+                } else if (serial_buffer == "HELP") {
+                    Serial.println("[SERIAL] Available commands:");
+                    Serial.println("  WIFI:<ssid>:<password>:<auto_ota> - Configure WiFi");
+                    Serial.println("  STATUS - Print device status");
+                    Serial.println("  SCAN - List available WiFi networks");
+                    Serial.println("  OTA - Start firmware download");
+                    Serial.println("  HELP - Show this help");
+                } else {
+                    Serial.printf("[SERIAL] Unknown command: %s\n", serial_buffer.c_str());
+                }
+                
+                serial_buffer = "";
+            }
+        } else {
+            serial_buffer += c;
+            
+            // Prevent buffer overflow
+            if (serial_buffer.length() > 256) {
+                Serial.println("[SERIAL] Buffer overflow, clearing");
+                serial_buffer = "";
+            }
+        }
+    }
+}
+
+/**
+ * @brief Handle WIFI serial command
+ * Format: WIFI:<ssid>:<password>:<auto_ota>
+ */
+void handle_serial_wifi_command(const String& command) {
+    // Parse command: WIFI:<ssid>:<password>:<auto_ota>
+    // Find first colon after "WIFI:"
+    int first_colon = command.indexOf(':', 5);
+    if (first_colon < 0) {
+        Serial.println("[SERIAL] Invalid WIFI command format");
+        return;
+    }
+    
+    // Find second colon (end of password)
+    int second_colon = command.indexOf(':', first_colon + 1);
+    if (second_colon < 0) {
+        // No auto_ota flag, use whole rest as password
+        second_colon = command.length();
+    }
+    
+    String ssid = command.substring(5, first_colon);
+    String password = command.substring(first_colon + 1, second_colon);
+    bool auto_ota = false;
+    
+    if (second_colon < (int)command.length() - 1) {
+        String auto_ota_str = command.substring(second_colon + 1);
+        auto_ota = (auto_ota_str == "1" || auto_ota_str == "true");
+    }
+    
+    if (ssid.isEmpty()) {
+        Serial.println("[SERIAL] Error: SSID cannot be empty");
+        return;
+    }
+    
+    Serial.printf("[SERIAL] Configuring WiFi: SSID='%s', AutoOTA=%s\n", 
+                  ssid.c_str(), auto_ota ? "yes" : "no");
+    
+    // Save credentials
+    config_store.setWiFiCredentials(ssid, password);
+    
+    // Set pending flags
+    serial_wifi_pending = true;
+    serial_wifi_ssid = ssid;
+    serial_wifi_password = password;
+    serial_auto_ota = auto_ota;
+    
+    Serial.println("[SERIAL] WiFi credentials saved, connecting...");
 }

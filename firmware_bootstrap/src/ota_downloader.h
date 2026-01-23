@@ -186,6 +186,20 @@ private:
                                   const char* label,
                                   int start_progress,
                                   int end_progress);
+    
+    /**
+     * @brief Check and install from website manifest (manifest.json)
+     * @param manifest_url URL to the manifest.json file
+     * @return true if install started
+     */
+    bool checkAndInstallFromManifest(const String& manifest_url);
+    
+    /**
+     * @brief Download and install LMWB bundle (firmware + LittleFS combined)
+     * @param bundle_url URL to the LMWB bundle file
+     * @return true if successful
+     */
+    bool downloadAndInstallBundle(const String& bundle_url);
 
     void updateStatus(OTAStatus new_status, const String& message);
     void updateProgress(int new_progress, const String& message);

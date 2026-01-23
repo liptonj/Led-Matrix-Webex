@@ -84,6 +84,12 @@ public:
      */
     void setOTAUploadProgressCallback(OTAUploadProgressCallback callback);
 
+    /**
+     * @brief Check if the web server is currently running
+     * @return true if server is active
+     */
+    bool isRunning() const { return running; }
+
 private:
     AsyncWebServer* server;
     DNSServer* dns_server;

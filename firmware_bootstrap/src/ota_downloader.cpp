@@ -94,7 +94,13 @@ bool OTADownloader::checkAndInstall() {
         return downloadAndInstall(ota_url, "");
     }
     
-    // GitHub releases URL - fetch all releases
+    // Website manifest URL (manifest.json) - preferred method
+    if (ota_url.endsWith("manifest.json")) {
+        Serial.println("[OTA] Using website manifest for firmware download");
+        return checkAndInstallFromManifest(ota_url);
+    }
+    
+    // GitHub releases URL - legacy fallback
     if (ota_url.indexOf("api.github.com") >= 0 || ota_url.indexOf("/releases") >= 0) {
         // Fetch releases (excluding prereleases for auto-install)
         int count = fetchAvailableReleases(false);  // false = skip prereleases
@@ -114,6 +120,238 @@ bool OTADownloader::checkAndInstall() {
     
     updateStatus(OTAStatus::ERROR_PARSE, "Invalid OTA URL format");
     return false;
+}
+
+bool OTADownloader::checkAndInstallFromManifest(const String& manifest_url) {
+    Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
+    updateProgress(8, "Fetching manifest...");
+    
+    WiFiClientSecure client;
+    client.setInsecure();  // Skip certificate validation
+    
+    HTTPClient http;
+    http.begin(client, manifest_url);
+    http.addHeader("User-Agent", "ESP32-Bootstrap");
+    http.setTimeout(30000);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    
+    int http_code = http.GET();
+    
+    if (http_code != HTTP_CODE_OK) {
+        Serial.printf("[OTA] Manifest fetch failed: %d\n", http_code);
+        updateStatus(OTAStatus::ERROR_DOWNLOAD, String("Manifest fetch failed: ") + String(http_code));
+        http.end();
+        return false;
+    }
+    
+    String payload = http.getString();
+    http.end();
+    
+    Serial.printf("[OTA] Received manifest: %d bytes\n", payload.length());
+    
+    // Parse manifest JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (error) {
+        Serial.printf("[OTA] Manifest parse error: %s\n", error.c_str());
+        updateStatus(OTAStatus::ERROR_PARSE, String("Manifest parse error: ") + error.c_str());
+        return false;
+    }
+    
+    // Extract version info
+    String version = doc["version"].as<String>();
+    String build_id = doc["build_id"].as<String>();
+    
+    Serial.printf("[OTA] Manifest version: %s (build: %s)\n", version.c_str(), build_id.c_str());
+    
+    // Determine board type
+    #if defined(ESP32_S3_BOARD)
+    const char* board_type = "esp32s3";
+    #else
+    const char* board_type = "esp32";
+    #endif
+    
+    // Get bundle URL for this board
+    String bundle_url = doc["bundle"][board_type]["url"].as<String>();
+    
+    if (bundle_url.isEmpty()) {
+        Serial.printf("[OTA] No bundle found for %s in manifest\n", board_type);
+        updateStatus(OTAStatus::ERROR_NO_FIRMWARE, String("No firmware for ") + board_type);
+        return false;
+    }
+    
+    Serial.printf("[OTA] Bundle URL: %s\n", bundle_url.c_str());
+    updateProgress(10, "Downloading " + version + "...");
+    
+    // Download and install the LMWB bundle
+    return downloadAndInstallBundle(bundle_url);
+}
+
+bool OTADownloader::downloadAndInstallBundle(const String& bundle_url) {
+    Serial.printf("[OTA] Downloading LMWB bundle from %s\n", bundle_url.c_str());
+    updateProgress(15, "Downloading bundle...");
+    
+    WiFiClientSecure client;
+    client.setInsecure();
+    
+    HTTPClient http;
+    http.begin(client, bundle_url);
+    http.addHeader("User-Agent", "ESP32-Bootstrap");
+    http.setTimeout(120000);  // 2 minute timeout for large downloads
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    
+    int http_code = http.GET();
+    
+    if (http_code != HTTP_CODE_OK) {
+        Serial.printf("[OTA] Bundle download failed: %d\n", http_code);
+        updateStatus(OTAStatus::ERROR_DOWNLOAD, String("Download failed: HTTP ") + String(http_code));
+        http.end();
+        return false;
+    }
+    
+    int content_length = http.getSize();
+    Serial.printf("[OTA] Bundle size: %d bytes\n", content_length);
+    
+    if (content_length <= 16) {
+        updateStatus(OTAStatus::ERROR_PARSE, "Bundle too small");
+        http.end();
+        return false;
+    }
+    
+    WiFiClient* stream = http.getStreamPtr();
+    
+    // Read LMWB header (16 bytes)
+    uint8_t header[16];
+    size_t header_read = 0;
+    unsigned long header_start = millis();
+    
+    while (header_read < 16) {
+        if (millis() - header_start > 10000) {
+            updateStatus(OTAStatus::ERROR_DOWNLOAD, "Header timeout");
+            http.end();
+            return false;
+        }
+        if (stream->available()) {
+            int bytes = stream->readBytes(header + header_read, 16 - header_read);
+            if (bytes > 0) header_read += bytes;
+        }
+        delay(5);
+    }
+    
+    // Verify LMWB magic
+    if (header[0] != 'L' || header[1] != 'M' || header[2] != 'W' || header[3] != 'B') {
+        Serial.println("[OTA] Invalid bundle magic - not LMWB format");
+        updateStatus(OTAStatus::ERROR_PARSE, "Invalid bundle format");
+        http.end();
+        return false;
+    }
+    
+    // Parse header (little-endian)
+    size_t app_size = header[4] | (header[5] << 8) | (header[6] << 16) | (header[7] << 24);
+    size_t fs_size = header[8] | (header[9] << 8) | (header[10] << 16) | (header[11] << 24);
+    
+    Serial.printf("[OTA] Bundle: app=%u bytes, fs=%u bytes\n", app_size, fs_size);
+    updateProgress(20, "Installing firmware...");
+    
+    // Phase 1: Flash firmware
+    if (!Update.begin(app_size, U_FLASH)) {
+        Serial.printf("[OTA] Update.begin failed: %s\n", Update.errorString());
+        updateStatus(OTAStatus::ERROR_FLASH, String("Flash error: ") + Update.errorString());
+        http.end();
+        return false;
+    }
+    
+    uint8_t buffer[4096];
+    size_t written = 0;
+    
+    while (written < app_size) {
+        size_t available = stream->available();
+        if (available == 0) {
+            if (!stream->connected()) break;
+            delay(10);
+            continue;
+        }
+        
+        size_t to_read = min(min(available, sizeof(buffer)), app_size - written);
+        int bytes_read = stream->readBytes(buffer, to_read);
+        
+        if (bytes_read > 0) {
+            size_t bytes_written = Update.write(buffer, bytes_read);
+            if (bytes_written != (size_t)bytes_read) {
+                updateStatus(OTAStatus::ERROR_FLASH, "Flash write error");
+                Update.abort();
+                http.end();
+                return false;
+            }
+            written += bytes_written;
+            
+            int progress = 20 + (written * 50) / app_size;
+            updateProgress(progress, String("Firmware: ") + String(written / 1024) + "KB");
+        }
+    }
+    
+    if (!Update.end(true)) {
+        updateStatus(OTAStatus::ERROR_VERIFY, String("Verify error: ") + Update.errorString());
+        http.end();
+        return false;
+    }
+    
+    Serial.println("[OTA] Firmware flashed, installing filesystem...");
+    updateProgress(75, "Installing filesystem...");
+    
+    // Phase 2: Flash LittleFS
+    LittleFS.end();
+    
+    if (!Update.begin(fs_size, U_SPIFFS)) {
+        Serial.printf("[OTA] FS Update.begin failed: %s\n", Update.errorString());
+        updateStatus(OTAStatus::ERROR_FLASH, String("FS error: ") + Update.errorString());
+        http.end();
+        return false;
+    }
+    
+    written = 0;
+    while (written < fs_size) {
+        size_t available = stream->available();
+        if (available == 0) {
+            if (!stream->connected()) break;
+            delay(10);
+            continue;
+        }
+        
+        size_t to_read = min(min(available, sizeof(buffer)), fs_size - written);
+        int bytes_read = stream->readBytes(buffer, to_read);
+        
+        if (bytes_read > 0) {
+            size_t bytes_written = Update.write(buffer, bytes_read);
+            if (bytes_written != (size_t)bytes_read) {
+                updateStatus(OTAStatus::ERROR_FLASH, "FS write error");
+                Update.abort();
+                http.end();
+                return false;
+            }
+            written += bytes_written;
+            
+            int progress = 75 + (written * 20) / fs_size;
+            updateProgress(progress, String("Filesystem: ") + String(written / 1024) + "KB");
+        }
+    }
+    
+    if (!Update.end(true)) {
+        updateStatus(OTAStatus::ERROR_VERIFY, String("FS verify error: ") + Update.errorString());
+        http.end();
+        return false;
+    }
+    
+    http.end();
+    
+    updateStatus(OTAStatus::SUCCESS, "Update complete!");
+    updateProgress(100, "Rebooting...");
+    
+    Serial.println("[OTA] Bundle update complete, rebooting in 2 seconds...");
+    delay(2000);
+    ESP.restart();
+    return true;
 }
 
 bool OTADownloader::downloadAndInstall(const String& firmware_url, const String& littlefs_url) {
