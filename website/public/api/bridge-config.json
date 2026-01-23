@@ -2,10 +2,11 @@
   "version": 1,
   "bridge": {
     "url": "wss://bridge.5ls.us",
-    "fallback_url": "ws://webex-bridge.local:8080"
+    "fallback_url": "ws://homeassistant.local:8080"
   },
   "features": {
     "pairing_enabled": true
   },
-  "updated_at": "2026-01-21T00:00:00Z"
+  "updated_at": "2026-01-22T00:00:00Z",
+  "notes": "fallback_url port should match the actual bridge server port in Home Assistant"
 }

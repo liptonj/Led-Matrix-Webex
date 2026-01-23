@@ -140,13 +140,13 @@
                         <!-- Camera/Mic Toggles -->
                         <div class="hardware-toggles">
                             <h3>Camera & Microphone</h3>
-                            <p class="help-text">Toggle to indicate your current camera/mic state</p>
+                            <p class="help-text">Mic state auto-updates during calls. Camera is manual (SDK limitation).</p>
                             <div class="toggle-buttons">
-                                <button id="camera-toggle" class="toggle-btn" data-active="false">
+                                <button id="camera-toggle" class="toggle-btn" data-active="false" title="Camera state must be set manually - not available from Webex SDK">
                                     <span class="icon" id="camera-icon">📷</span>
                                     <span class="label" id="camera-label">Camera Off</span>
                                 </button>
-                                <button id="mic-toggle" class="toggle-btn" data-active="true">
+                                <button id="mic-toggle" class="toggle-btn" data-active="true" title="Auto-detected during calls, or toggle manually">
                                     <span class="icon" id="mic-icon">🎤</span>
                                     <span class="label" id="mic-label">Mic On</span>
                                 </button>

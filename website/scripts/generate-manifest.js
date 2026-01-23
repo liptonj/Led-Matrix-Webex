@@ -13,6 +13,10 @@ const GITHUB_API = 'https://api.github.com/repos/liptonj/Led-Matrix-Webex/releas
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GITHUB_API_TOKEN;
 const OUTPUT_FILE = path.join(__dirname, '../public/updates/manifest.json');
 
+// Base URL for firmware hosted on the website (not GitHub)
+// Files are downloaded by deploy workflow and placed in /updates/firmware/
+const WEBSITE_FIRMWARE_BASE = 'https://display.5ls.us/updates/firmware';
+
 function fetchReleases() {
     return new Promise((resolve, reject) => {
         const headers = {
@@ -239,7 +243,8 @@ function extractBuildId(release) {
 }
 
 /**
- * Build OTA-compatible bundle structure from latest release
+ * Build OTA-compatible bundle structure with local URLs
+ * Uses firmware hosted on the website (downloaded from GitHub during deploy)
  */
 function buildOtaStructure(latestRelease) {
     if (!latestRelease || !latestRelease.assets) {
@@ -250,11 +255,15 @@ function buildOtaStructure(latestRelease) {
     const bundle = {};
 
     for (const boardType of boardTypes) {
-        // Only use LMWB bundle files
-        const bundleUrl = findAssetUrl(latestRelease.assets, boardType, 'bundle');
+        // Check if the bundle exists in the release
+        const githubUrl = findAssetUrl(latestRelease.assets, boardType, 'bundle');
 
-        if (bundleUrl) {
-            bundle[boardType] = { url: bundleUrl };
+        if (githubUrl) {
+            // Use local URL instead of GitHub URL
+            // Files are downloaded to /updates/firmware/ during deploy
+            bundle[boardType] = { 
+                url: `${WEBSITE_FIRMWARE_BASE}/firmware-ota-${boardType}.bin`
+            };
         }
     }
 

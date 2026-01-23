@@ -30,6 +30,9 @@ const CONFIG = {
     connectionTimeout: 5000,
     wsReconnectDelay: 3000,
     wsPingInterval: 30000,
+    // New: Continuous sync and call polling intervals
+    statusSyncInterval: 30000,   // Sync status to bridge every 30 seconds
+    callPollInterval: 5000,      // Poll for call state every 5 seconds (for mic status)
     // Bridge config from discovery endpoint (populated at runtime)
     discoveredBridgeUrl: null,
     discoveredFallbackUrl: null
@@ -62,6 +65,8 @@ const state = {
     lastSyncTime: null,
     meetingCheckTimer: null,
     statusPollTimer: null,
+    callPollTimer: null,       // Timer for polling call state (mic status)
+    statusSyncTimer: null,     // Timer for periodic status sync to bridge
     displayConfig: {},
     pendingCommands: new Map(),  // requestId -> { resolve, reject, timeout }
     commandTimeout: 10000  // 10 second timeout for commands
@@ -581,11 +586,13 @@ function updateDisplayConfigFromBridge(data) {
 }
 
 function disconnectBridge() {
+    // Close WebSocket connection
     if (state.ws) {
         state.ws.close();
         state.ws = null;
     }
     
+    // Clear WebSocket-specific timers
     if (state.wsReconnectTimer) {
         clearTimeout(state.wsReconnectTimer);
         state.wsReconnectTimer = null;
@@ -594,6 +601,12 @@ function disconnectBridge() {
     if (state.wsPingTimer) {
         clearInterval(state.wsPingTimer);
         state.wsPingTimer = null;
+    }
+    
+    // Clear status sync timer (will restart when reconnected)
+    if (state.statusSyncTimer) {
+        clearInterval(state.statusSyncTimer);
+        state.statusSyncTimer = null;
     }
     
     localStorage.removeItem(CONFIG.bridgeUrlKey);
@@ -773,6 +786,17 @@ async function startPresenceMonitoring() {
         // Check initial meeting state
         await checkMeetingState();
         
+        // SDK requires listen() before registering event handlers
+        if (state.webexApp.listen) {
+            try {
+                await state.webexApp.listen();
+                logActivity('info', 'SDK event listener registered');
+            } catch (listenError) {
+                console.warn('app.listen() failed:', listenError);
+                // Continue anyway - events may still work in some contexts
+            }
+        }
+        
         // Register for meeting events
         if (state.webexApp.on) {
             // Listen for meeting changes
@@ -783,6 +807,11 @@ async function startPresenceMonitoring() {
             
             // Listen for view state changes
             state.webexApp.on('application:viewStateChanged', handleViewStateChange);
+            
+            // Listen for theme changes
+            state.webexApp.on('application:themeChanged', (theme) => {
+                logActivity('info', `Theme changed: ${theme}`);
+            });
         } else if (state.webexApp.context && state.webexApp.context.on) {
             // v1.x fallback
             state.webexApp.context.on('meeting', handleMeetingChange);
@@ -790,6 +819,17 @@ async function startPresenceMonitoring() {
         
         // Poll for meeting state periodically
         state.meetingCheckTimer = setInterval(checkMeetingState, CONFIG.meetingCheckInterval);
+        
+        // Poll for call state (to detect mic changes during calls)
+        state.callPollTimer = setInterval(checkCallState, CONFIG.callPollInterval);
+        
+        // Start periodic status sync to ensure bridge is always up to date
+        state.statusSyncTimer = setInterval(() => {
+            if (state.isConnected && state.autoSync && state.currentStatus) {
+                syncStatusToDisplay();
+            }
+        }, CONFIG.statusSyncInterval);
+        
         logActivity('success', 'Meeting/call detection active');
         
     } catch (error) {
@@ -839,19 +879,110 @@ function handleMeetingChange(meeting) {
 
 function handleCallStateChange(call) {
     // Sidebar API call state event (v2.x)
-    logActivity('info', `Call state: ${call?.state || 'unknown'}`);
+    if (!call) return;
     
-    if (call && call.state === 'Started') {
+    logActivity('info', `Call state: ${call.state || 'unknown'}`);
+    
+    if (call.state === 'Started' || call.state === 'Connected') {
         state.isInCall = true;
         setStatus('meeting', true);
-    } else if (call && call.state === 'Ended') {
+        
+        // Extract mic mute state from SDK if available
+        if (call.localParticipant && call.localParticipant.isMuted !== undefined) {
+            const wasMuted = state.micMuted;
+            state.micMuted = call.localParticipant.isMuted;
+            
+            if (wasMuted !== state.micMuted) {
+                updateMicToggle();
+                logActivity('info', `Mic from SDK: ${state.micMuted ? 'muted' : 'on'}`);
+            }
+        }
+        
+        // Sync status with extracted state
+        if (state.autoSync && state.isConnected) {
+            syncStatusToDisplay();
+        }
+    } else if (call.state === 'Ended' || call.state === 'Disconnected') {
         state.isInCall = false;
-        // Optionally set status back
+        logActivity('info', 'Call ended');
+        // Optionally set status back to available
+        // setStatus('active', true);
     }
 }
 
 function handleViewStateChange(viewState) {
     logActivity('info', `View state: ${viewState}`);
+}
+
+/**
+ * Poll active calls via Sidebar API to detect mic state changes
+ * This is needed because the SDK doesn't always fire events for mute changes
+ */
+async function checkCallState() {
+    if (!state.webexApp || !state.isInitialized) return;
+    
+    try {
+        // Get sidebar context (v2.x SDK)
+        let sidebar = null;
+        
+        if (state.webexApp.context && state.webexApp.context.getSidebar) {
+            sidebar = await state.webexApp.context.getSidebar().catch(() => null);
+        }
+        
+        if (!sidebar || !sidebar.getCalls) return;
+        
+        const callsResult = await sidebar.getCalls().catch(() => null);
+        if (!callsResult) return;
+        
+        // Handle both array and object with items property
+        const calls = Array.isArray(callsResult) ? callsResult : (callsResult.items || []);
+        
+        if (calls.length > 0) {
+            // Find an active call
+            const activeCall = calls.find(c => 
+                c.state === 'Connected' || c.state === 'Started' || c.state === 'Connecting'
+            );
+            
+            if (activeCall) {
+                const wasInCall = state.isInCall;
+                state.isInCall = true;
+                
+                // Update mic state from call's local participant
+                if (activeCall.localParticipant && activeCall.localParticipant.isMuted !== undefined) {
+                    const wasMuted = state.micMuted;
+                    state.micMuted = activeCall.localParticipant.isMuted;
+                    
+                    // Only sync if state changed
+                    if (wasMuted !== state.micMuted) {
+                        updateMicToggle();
+                        logActivity('info', `Mic state updated: ${state.micMuted ? 'muted' : 'on'}`);
+                        if (state.autoSync && state.isConnected) {
+                            syncStatusToDisplay();
+                        }
+                    }
+                }
+                
+                // Set meeting status if we just entered a call
+                if (!wasInCall) {
+                    setStatus('meeting', true);
+                }
+            } else {
+                // No active call found
+                if (state.isInCall) {
+                    state.isInCall = false;
+                    logActivity('info', 'No active call detected');
+                }
+            }
+        } else {
+            // No calls at all
+            if (state.isInCall) {
+                state.isInCall = false;
+            }
+        }
+    } catch (error) {
+        // Sidebar API may not be available in all contexts (e.g., space tab)
+        // This is expected, so we silently ignore
+    }
 }
 
 function setupStatusButtons() {
@@ -1536,7 +1667,46 @@ function logActivity(type, message) {
 // ============================================================
 // Cleanup
 // ============================================================
+
+/**
+ * Clean up all timers and connections
+ */
+function cleanupAllTimers() {
+    if (state.meetingCheckTimer) {
+        clearInterval(state.meetingCheckTimer);
+        state.meetingCheckTimer = null;
+    }
+    if (state.statusPollTimer) {
+        clearInterval(state.statusPollTimer);
+        state.statusPollTimer = null;
+    }
+    if (state.callPollTimer) {
+        clearInterval(state.callPollTimer);
+        state.callPollTimer = null;
+    }
+    if (state.statusSyncTimer) {
+        clearInterval(state.statusSyncTimer);
+        state.statusSyncTimer = null;
+    }
+    if (state.wsPingTimer) {
+        clearInterval(state.wsPingTimer);
+        state.wsPingTimer = null;
+    }
+    if (state.wsReconnectTimer) {
+        clearTimeout(state.wsReconnectTimer);
+        state.wsReconnectTimer = null;
+    }
+}
+
 window.addEventListener('beforeunload', () => {
-    if (state.meetingCheckTimer) clearInterval(state.meetingCheckTimer);
-    if (state.statusPollTimer) clearInterval(state.statusPollTimer);
+    cleanupAllTimers();
+    
+    // Stop listening for SDK events if possible
+    if (state.webexApp && state.webexApp.stopListening) {
+        try {
+            state.webexApp.stopListening();
+        } catch (e) {
+            // Ignore errors during cleanup
+        }
+    }
 });
