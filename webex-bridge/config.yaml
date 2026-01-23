@@ -26,10 +26,12 @@ ports_description:
 # Configuration options shown in HA UI
 options:
   ws_port: 8080
+  mdns_service_name: "webex-bridge"
   log_level: "info"
 
 schema:
   ws_port: port
+  mdns_service_name: str?
   log_level: list(error|warn|info|debug)
 
 # Startup configuration
