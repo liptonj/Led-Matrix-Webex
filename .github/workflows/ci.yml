@@ -109,14 +109,42 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
 
-          # Only copy the OTA bundle (bundled version only)
+          # Copy LMWB OTA bundle
           if [ -f "$BUILD_DIR/firmware-ota-esp32s3.bin" ]; then
             cp "$BUILD_DIR/firmware-ota-esp32s3.bin" artifacts/firmware-ota-esp32s3.bin
             echo "✓ Included LMWB OTA bundle in artifacts"
           fi
 
+          # Copy individual firmware and littlefs for web installer
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
+            echo "✓ Included firmware.bin for web installer"
+          fi
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32s3.bin
+            echo "✓ Included littlefs.bin for web installer"
+          fi
+
           echo "ESP32-S3 artifacts:"
           ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          # Create a merged binary that can be flashed at offset 0
+          # This includes bootloader, partition table, and app
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
+            esptool.py --chip esp32s3 merge_bin \
+              -o artifacts/firmware-esp32s3-merged.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0x260000 $BUILD_DIR/firmware.bin \
+              0x700000 $BUILD_DIR/littlefs.bin
+            echo "✓ Created merged binary for web installer"
+          fi
 
       - name: Upload ESP32-S3 artifacts
         uses: actions/upload-artifact@v4
@@ -179,14 +207,41 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
 
-          # Only copy the OTA bundle (bundled version only)
+          # Copy LMWB OTA bundle
           if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
             cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
             echo "✓ Included LMWB OTA bundle in artifacts"
           fi
 
+          # Copy individual firmware and littlefs for web installer
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
+            echo "✓ Included firmware.bin for web installer"
+          fi
+          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
+            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
+            echo "✓ Included littlefs.bin for web installer"
+          fi
+
           echo "ESP32 artifacts:"
           ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32"
+          # Create a merged binary that can be flashed at offset 0
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
+            esptool.py --chip esp32 merge_bin \
+              -o artifacts/firmware-esp32-merged.bin \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              0x1000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0x150000 $BUILD_DIR/firmware.bin \
+              0x3D0000 $BUILD_DIR/littlefs.bin
+            echo "✓ Created merged binary for web installer"
+          fi
 
       - name: Upload ESP32 artifacts
         uses: actions/upload-artifact@v4
@@ -285,7 +340,7 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
 
-          # Only copy the OTA bundle (bundled version only)
+          # Copy LMWB OTA bundle
           if [ -f "$BUILD_DIR/bootstrap-ota-esp32s3.bin" ]; then
             cp "$BUILD_DIR/bootstrap-ota-esp32s3.bin" artifacts/bootstrap-ota-esp32s3.bin
             echo "✓ Included LMWB OTA bundle in artifacts"
@@ -293,6 +348,24 @@ jobs:
 
           echo "Bootstrap ESP32-S3 artifacts:"
           ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          # Create a merged binary that includes bootloader, partition table, and app
+          # This is what web installer needs to flash a new device
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
+            esptool.py --chip esp32s3 merge_bin \
+              -o artifacts/bootstrap-esp32s3.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0x10000 $BUILD_DIR/firmware.bin \
+              0x700000 $BUILD_DIR/littlefs.bin
+            echo "✓ Created merged bootstrap binary for web installer"
+          fi
 
       - name: Upload ESP32-S3 bootstrap artifacts
         uses: actions/upload-artifact@v4
@@ -344,7 +417,7 @@ jobs:
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32"
 
-          # Only copy the OTA bundle (bundled version only)
+          # Copy LMWB OTA bundle
           if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
             cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
             echo "✓ Included LMWB OTA bundle in artifacts"
@@ -352,6 +425,23 @@ jobs:
 
           echo "Bootstrap ESP32 artifacts:"
           ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32"
+          # Create a merged binary for web installer
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
+            esptool.py --chip esp32 merge_bin \
+              -o artifacts/bootstrap-esp32.bin \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              0x1000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0x10000 $BUILD_DIR/firmware.bin \
+              0x3D0000 $BUILD_DIR/littlefs.bin
+            echo "✓ Created merged bootstrap binary for web installer"
+          fi
 
       - name: Upload ESP32 bootstrap artifacts
         uses: actions/upload-artifact@v4
@@ -504,8 +594,16 @@ jobs:
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
             release/firmware/firmware-ota-esp32s3.bin
             release/firmware/firmware-ota-esp32.bin
+            release/firmware/firmware-esp32s3.bin
+            release/firmware/firmware-esp32.bin
+            release/firmware/littlefs-esp32s3.bin
+            release/firmware/littlefs-esp32.bin
+            release/firmware/firmware-esp32s3-merged.bin
+            release/firmware/firmware-esp32-merged.bin
             release/bootstrap/bootstrap-ota-esp32s3.bin
             release/bootstrap/bootstrap-ota-esp32.bin
+            release/bootstrap/bootstrap-esp32s3.bin
+            release/bootstrap/bootstrap-esp32.bin
 
   # ============================================================================
   # Deploy Website (only on version tags, after release)
