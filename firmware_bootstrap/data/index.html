@@ -67,17 +67,10 @@
             </details>
             
             <div class="form-group" style="margin-top:16px">
-                <label for="manual-file">Manual Firmware Upload (.bin or bundle)</label>
+                <label for="manual-file">Manual Firmware Upload (.bin)</label>
                 <input type="file" id="manual-file" accept=".bin">
                 <button id="manual-upload-btn" class="btn btn-secondary" disabled>Upload Firmware</button>
-                <p class="help-text" id="manual-upload-status">Select a firmware or OTA bundle file to upload.</p>
-            </div>
-
-            <div class="form-group" style="margin-top:16px">
-                <label for="manual-fs-file">Manual LittleFS Upload (.bin)</label>
-                <input type="file" id="manual-fs-file" accept=".bin">
-                <button id="manual-fs-upload-btn" class="btn btn-secondary" disabled>Upload LittleFS</button>
-                <p class="help-text" id="manual-fs-upload-status">Select a LittleFS image to upload.</p>
+                <p class="help-text" id="manual-upload-status">Select a firmware file to upload (web assets are embedded).</p>
             </div>
         </div>
 

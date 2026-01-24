@@ -13,7 +13,64 @@
     <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 </head>
 <body>
-    <header>
+    <!-- Skip to main content link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+
+    <!-- Navigation -->
+    <button class="nav-toggle" aria-expanded="false" aria-controls="main-nav" aria-label="Toggle navigation menu">
+        <span></span>
+        <span></span>
+        <span></span>
+    </button>
+    <div class="nav-backdrop"></div>
+    <nav class="main-nav" id="main-nav" aria-label="Main navigation" aria-hidden="true">
+        <div class="nav-header">
+            <img src="icon-512.png" alt="">
+            <span>LED Matrix Webex</span>
+        </div>
+        <div class="nav-links">
+            <a href="index.html">
+                <span class="nav-icon">🏠</span>
+                Home
+            </a>
+            <a href="install.html">
+                <span class="nav-icon">🔌</span>
+                Install
+            </a>
+            <a href="hardware.html">
+                <span class="nav-icon">📦</span>
+                Hardware
+            </a>
+            <a href="troubleshooting.html">
+                <span class="nav-icon">🔧</span>
+                Troubleshoot
+            </a>
+            <div class="nav-divider"></div>
+            <a href="versions.html">
+                <span class="nav-icon">⬇️</span>
+                Downloads
+            </a>
+            <a href="api-docs.html">
+                <span class="nav-icon">📚</span>
+                API Docs
+            </a>
+            <a href="embedded/index.html">
+                <span class="nav-icon">📱</span>
+                Embedded App
+            </a>
+            <div class="nav-divider"></div>
+            <a href="https://github.com/liptonj/Led-Matrix-Webex" target="_blank" rel="noopener">
+                <span class="nav-icon">💻</span>
+                GitHub
+                <span class="external-icon">↗</span>
+            </a>
+        </div>
+        <div class="nav-footer">
+            <p>v1.1.16 | MIT License</p>
+        </div>
+    </nav>
+
+    <header class="site-header">
         <div class="container">
             <div class="header-brand">
                 <img src="icon-512.png" alt="LED Matrix Webex Display Logo" class="site-logo">
@@ -21,12 +78,12 @@
             </div>
             <p class="tagline">Show your Webex presence status on a physical LED matrix display</p>
             <div class="header-actions">
-                <button class="theme-toggle" type="button" aria-pressed="false">Theme: Light</button>
+                <button class="theme-toggle" type="button" aria-pressed="true">Theme: Dark</button>
             </div>
         </div>
     </header>
 
-    <main class="container">
+    <main class="container" id="main-content">
         <section class="hero">
             <div class="status-examples">
                 <div class="status-card">
@@ -89,7 +146,11 @@
                     <h3>📚 API Documentation</h3>
                     <p>Integrate with your own apps</p>
                 </a>
-                <a href="https://github.com/liptonj/Led-Matrix-Webex" class="link-card" target="_blank">
+                <a href="troubleshooting.html" class="link-card">
+                    <h3>🔧 Troubleshooting</h3>
+                    <p>Diagnose and fix common issues</p>
+                </a>
+                <a href="https://github.com/liptonj/Led-Matrix-Webex" class="link-card" target="_blank" rel="noopener">
                     <h3>💻 GitHub Repository</h3>
                     <p>View source code and contribute</p>
                 </a>
@@ -100,20 +161,21 @@
             <h2>Architecture</h2>
             <p>Three deployment modes to fit your needs:</p>
             <ul>
-                <li><strong>Direct Mode:</strong> ESP32 connects directly to Webex API</li>
+                <li><strong>Direct Mode:</strong> ESP32-S3 connects directly to Webex API</li>
                 <li><strong>Bridge Mode:</strong> Node.js bridge server handles multiple displays</li>
                 <li><strong>Home Assistant:</strong> Integrated with Home Assistant ecosystem</li>
             </ul>
         </section>
     </main>
 
-    <footer>
+    <footer class="site-footer">
         <div class="container">
             <p>Open source project - MIT License</p>
-            <p><a href="https://github.com/liptonj/Led-Matrix-Webex" target="_blank">GitHub</a></p>
+            <p><a href="https://github.com/liptonj/Led-Matrix-Webex" target="_blank" rel="noopener">GitHub</a></p>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/navigation.js"></script>
 </body>
 </html>

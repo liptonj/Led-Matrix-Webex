@@ -20,9 +20,6 @@ const refreshReleasesBtn = document.getElementById('refresh-releases-btn');
 const manualFileInput = document.getElementById('manual-file');
 const manualUploadBtn = document.getElementById('manual-upload-btn');
 const manualUploadStatus = document.getElementById('manual-upload-status');
-const manualFsFileInput = document.getElementById('manual-fs-file');
-const manualFsUploadBtn = document.getElementById('manual-fs-upload-btn');
-const manualFsUploadStatus = document.getElementById('manual-fs-upload-status');
 
 // Status elements
 const wifiStatus = document.getElementById('wifi-status');
@@ -353,17 +350,9 @@ if (manualFileInput && manualUploadBtn && manualUploadStatus) {
     manualFileInput.addEventListener('change', () => {
         const hasFile = manualFileInput.files && manualFileInput.files.length > 0;
         manualUploadBtn.disabled = !hasFile;
-        manualUploadStatus.textContent = hasFile ? 'Ready to upload.' : 'Select a firmware or OTA bundle file to upload.';
+        manualUploadStatus.textContent = hasFile ? 'Ready to upload.' : 'Select a firmware file to upload.';
     });
     manualUploadBtn.addEventListener('click', startManualUpload);
-}
-if (manualFsFileInput && manualFsUploadBtn && manualFsUploadStatus) {
-    manualFsFileInput.addEventListener('change', () => {
-        const hasFile = manualFsFileInput.files && manualFsFileInput.files.length > 0;
-        manualFsUploadBtn.disabled = !hasFile;
-        manualFsUploadStatus.textContent = hasFile ? 'Ready to upload.' : 'Select a LittleFS image to upload.';
-    });
-    manualFsUploadBtn.addEventListener('click', startManualFsUpload);
 }
 
 // Initial status load
@@ -385,14 +374,8 @@ async function startManualUpload() {
     }
 
     const file = manualFileInput.files[0];
-    const filename = (file.name || '').toLowerCase();
-    if (filename.includes('littlefs') || filename.includes('spiffs')) {
-        manualUploadStatus.textContent = 'This looks like a LittleFS image. Use "Upload LittleFS".';
-        manualUploadBtn.disabled = false;
-        return;
-    }
 
-    if (!confirm('Upload firmware or OTA bundle file? The device will restart when complete.')) {
+    if (!confirm('Upload firmware file? The device will restart when complete.')) {
         return;
     }
 
@@ -500,117 +483,3 @@ async function startManualUpload() {
     xhr.send(formData);
 }
 
-async function startManualFsUpload() {
-    if (!manualFsFileInput.files || manualFsFileInput.files.length === 0) {
-        manualFsUploadStatus.textContent = 'No file selected.';
-        return;
-    }
-
-    if (!confirm('Upload LittleFS image? The device will restart when complete.')) {
-        return;
-    }
-
-    const file = manualFsFileInput.files[0];
-    const uploadUrl = new URL('/api/ota/upload-fs', window.location.href);
-    const pingUrl = new URL('/api/ota/ping', window.location.href);
-    const formData = new FormData();
-    formData.append('littlefs', file, file.name);
-
-    manualFsUploadBtn.disabled = true;
-    manualFsUploadStatus.textContent = `Connecting to ${uploadUrl.host}...`;
-
-    try {
-        const pingResponse = await fetch(pingUrl.toString(), { cache: 'no-store' });
-        if (!pingResponse.ok) {
-            manualFsUploadStatus.textContent = 'Upload endpoint not reachable.';
-            manualFsUploadBtn.disabled = false;
-            return;
-        }
-        const pingData = await pingResponse.json().catch(() => null);
-        if (!pingData || !pingData.ok) {
-            manualFsUploadStatus.textContent = 'Upload endpoint not ready.';
-            manualFsUploadBtn.disabled = false;
-            return;
-        }
-    } catch (error) {
-        manualFsUploadStatus.textContent = 'Upload endpoint not reachable.';
-        manualFsUploadBtn.disabled = false;
-        return;
-    }
-
-    manualFsUploadStatus.textContent = 'Uploading...';
-    manualUploadInProgress = true;
-    if (statusIntervalId) {
-        clearInterval(statusIntervalId);
-        statusIntervalId = null;
-    }
-    if (refreshReleasesBtn) {
-        refreshReleasesBtn.disabled = true;
-    }
-
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', uploadUrl.toString());
-    xhr.timeout = 120000;
-
-    xhr.upload.onprogress = (event) => {
-        if (!event.lengthComputable) {
-            return;
-        }
-        const percent = Math.round((event.loaded / event.total) * 100);
-        manualFsUploadStatus.textContent = `Uploading... ${percent}%`;
-    };
-
-    xhr.onload = () => {
-        let message = 'Upload complete. Rebooting...';
-        let wasSuccessful = xhr.status >= 200 && xhr.status < 300;
-
-        if (xhr.responseText) {
-            try {
-                const response = JSON.parse(xhr.responseText);
-                if (typeof response.success === 'boolean') {
-                    wasSuccessful = response.success;
-                }
-                message = response.message || message;
-            } catch (error) {
-                console.error('LittleFS upload response parse failed:', error);
-            }
-        }
-        manualFsUploadStatus.textContent = message;
-        if (!wasSuccessful) {
-            manualFsUploadBtn.disabled = false;
-        }
-        manualUploadInProgress = false;
-        if (!statusIntervalId) {
-            statusIntervalId = setInterval(updateStatus, 5000);
-        }
-        if (refreshReleasesBtn) {
-            refreshReleasesBtn.disabled = false;
-        }
-    };
-
-    xhr.onerror = () => {
-        manualFsUploadStatus.textContent = 'Upload failed. Please try again.';
-        manualFsUploadBtn.disabled = false;
-        manualUploadInProgress = false;
-        if (!statusIntervalId) {
-            statusIntervalId = setInterval(updateStatus, 5000);
-        }
-        if (refreshReleasesBtn) {
-            refreshReleasesBtn.disabled = false;
-        }
-    };
-
-    xhr.ontimeout = () => {
-        manualFsUploadStatus.textContent = 'Upload timed out. Please try again.';
-        manualFsUploadBtn.disabled = false;
-        manualUploadInProgress = false;
-        if (!statusIntervalId) {
-            statusIntervalId = setInterval(updateStatus, 5000);
-        }
-        if (refreshReleasesBtn) {
-            refreshReleasesBtn.disabled = false;
-        }
-    };
-
-    xhr.send(formData);
-}

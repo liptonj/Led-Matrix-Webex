@@ -165,27 +165,32 @@ bool OTADownloader::checkAndInstallFromManifest(const String& manifest_url) {
     
     Serial.printf("[OTA] Manifest version: %s (build: %s)\n", version.c_str(), build_id.c_str());
     
-    // Determine board type
+    // Determine board type (only ESP32-S3 supported)
     #if defined(ESP32_S3_BOARD)
     const char* board_type = "esp32s3";
     #else
     const char* board_type = "esp32";
     #endif
     
-    // Get bundle URL for this board
-    String bundle_url = doc["bundle"][board_type]["url"].as<String>();
+    // Try firmware URL first (new format - web assets embedded in firmware)
+    String firmware_url = doc["firmware"][board_type]["url"].as<String>();
     
-    if (bundle_url.isEmpty()) {
-        Serial.printf("[OTA] No bundle found for %s in manifest\n", board_type);
+    // Fallback to bundle URL for backwards compatibility
+    if (firmware_url.isEmpty()) {
+        firmware_url = doc["bundle"][board_type]["url"].as<String>();
+    }
+    
+    if (firmware_url.isEmpty()) {
+        Serial.printf("[OTA] No firmware found for %s in manifest\n", board_type);
         updateStatus(OTAStatus::ERROR_NO_FIRMWARE, String("No firmware for ") + board_type);
         return false;
     }
     
-    Serial.printf("[OTA] Bundle URL: %s\n", bundle_url.c_str());
+    Serial.printf("[OTA] Firmware URL: %s\n", firmware_url.c_str());
     updateProgress(10, "Downloading " + version + "...");
     
-    // Download and install the LMWB bundle
-    return downloadAndInstallBundle(bundle_url);
+    // Download and install firmware only (web assets are embedded)
+    return downloadAndInstall(firmware_url, "");
 }
 
 bool OTADownloader::downloadAndInstallBundle(const String& bundle_url) {
@@ -413,9 +418,15 @@ bool OTADownloader::selectReleaseAssets(const JsonArray& assets, String& firmwar
         if (name_lower.indexOf("fullflash") >= 0) {
             continue;
         }
+        
+        // Skip merged binaries (for web installer, not OTA)
+        if (name_lower.indexOf("merged") >= 0) {
+            continue;
+        }
 
         const String download = asset["browser_download_url"].as<String>();
 
+        // LittleFS/SPIFFS detection (optional - web assets now embedded in firmware)
         if (name_lower.indexOf("littlefs") >= 0 || name_lower.indexOf("spiffs") >= 0) {
             int priority = 0;
             #if defined(ESP32_S3_BOARD)
@@ -466,7 +477,9 @@ bool OTADownloader::selectReleaseAssets(const JsonArray& assets, String& firmwar
         }
     }
 
-    return firmware_priority > 0 && littlefs_priority > 0;
+    // Only firmware is required now (web assets embedded in firmware)
+    // LittleFS is optional for backwards compatibility
+    return firmware_priority > 0;
 }
 
 bool OTADownloader::downloadAndInstallBinary(const String& url,
