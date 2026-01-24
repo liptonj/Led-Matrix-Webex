@@ -1,6 +1,6 @@
 {
   "name": "LED Matrix Webex Display - Bootstrap",
-  "version": "1.0.6",
+  "version": "1.2.0",
   "home_assistant_domain": "webex_display",
   "new_install_prompt_erase": true,
   "builds": [
