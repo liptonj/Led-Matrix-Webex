@@ -3,7 +3,7 @@
 # Note: version is automatically set by CI from git release tags (e.g., v1.2.0 -> "1.2.0")
 
 name: "Webex Bridge"
-version: "dev"
+version: "1.1.14"
 slug: "webex_bridge"
 description: "Bridge server for real-time Webex presence updates to LED Matrix Display"
 url: "https://github.com/liptonj/Led-Matrix-Webex"
