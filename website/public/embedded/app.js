@@ -605,13 +605,15 @@ function updateDisplayConfigFromBridge(data) {
 }
 
 function disconnectBridge() {
-    // Close WebSocket connection
-    if (state.ws) {
-        state.ws.close();
-        state.ws = null;
-    }
+    console.log('[Disconnect] Starting disconnect...');
     
-    // Clear WebSocket-specific timers
+    // IMPORTANT: Set isConnected to false FIRST to prevent auto-reconnect
+    // The onclose handler checks this flag before attempting reconnect
+    state.isConnected = false;
+    state.wsConnected = false;
+    state.wsPeerConnected = false;
+    
+    // Clear all timers BEFORE closing WebSocket
     if (state.wsReconnectTimer) {
         clearTimeout(state.wsReconnectTimer);
         state.wsReconnectTimer = null;
@@ -622,22 +624,27 @@ function disconnectBridge() {
         state.wsPingTimer = null;
     }
     
-    // Clear status sync timer (will restart when reconnected)
     if (state.statusSyncTimer) {
         clearInterval(state.statusSyncTimer);
         state.statusSyncTimer = null;
     }
     
+    // Now close WebSocket connection
+    if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+    }
+    
+    // Clear saved credentials from localStorage
     localStorage.removeItem(CONFIG.bridgeUrlKey);
     localStorage.removeItem(CONFIG.pairingCodeKey);
+    console.log('[Disconnect] Cleared localStorage:', CONFIG.bridgeUrlKey, CONFIG.pairingCodeKey);
     
     state.bridgeUrl = null;
     state.pairingCode = null;
-    state.wsConnected = false;
-    state.wsPeerConnected = false;
-    state.isConnected = false;
     
     logActivity('info', 'Disconnected from bridge');
+    console.log('[Disconnect] Complete - showing setup screen');
     showSetupScreen();
 }
 
