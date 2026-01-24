@@ -73,6 +73,39 @@ const state = {
 };
 
 // ============================================================
+// App Version
+// ============================================================
+
+/**
+ * Fetch app version from the manifest
+ * Updates the footer version display
+ */
+async function fetchAppVersion() {
+    try {
+        const response = await fetch('/updates/manifest.json');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const manifest = await response.json();
+        const version = manifest.version || manifest.latest;
+        
+        if (version) {
+            const versionEl = document.getElementById('app-version');
+            if (versionEl) {
+                // Ensure 'v' prefix for display
+                const displayVersion = version.startsWith('v') ? version : `v${version}`;
+                versionEl.textContent = displayVersion;
+            }
+            logActivity('info', `App version: ${version}`);
+        }
+    } catch (error) {
+        console.warn('Failed to fetch app version:', error);
+        // Keep default version display if fetch fails
+    }
+}
+
+// ============================================================
 // Bridge Discovery
 // ============================================================
 
@@ -125,6 +158,9 @@ async function initializeApp() {
     
     // Setup event listeners
     setupEventListeners();
+    
+    // Fetch and display app version
+    await fetchAppVersion();
     
     // Fetch bridge configuration from discovery endpoint
     await fetchBridgeConfig();
@@ -605,7 +641,7 @@ function updateDisplayConfigFromBridge(data) {
 }
 
 function disconnectBridge() {
-    console.log('[Disconnect] Starting disconnect...');
+    logActivity('info', 'Disconnecting from bridge...');
     
     // IMPORTANT: Set isConnected to false FIRST to prevent auto-reconnect
     // The onclose handler checks this flag before attempting reconnect
@@ -638,13 +674,12 @@ function disconnectBridge() {
     // Clear saved credentials from localStorage
     localStorage.removeItem(CONFIG.bridgeUrlKey);
     localStorage.removeItem(CONFIG.pairingCodeKey);
-    console.log('[Disconnect] Cleared localStorage:', CONFIG.bridgeUrlKey, CONFIG.pairingCodeKey);
+    localStorage.removeItem(CONFIG.connectionModeKey);
     
     state.bridgeUrl = null;
     state.pairingCode = null;
     
-    logActivity('info', 'Disconnected from bridge');
-    console.log('[Disconnect] Complete - showing setup screen');
+    logActivity('success', 'Pairing cleared - enter new code to reconnect');
     showSetupScreen();
 }
 
@@ -702,7 +737,6 @@ async function connectToDisplay(address) {
         document.getElementById('display-host').textContent = address;
         document.getElementById('ip-address').textContent = data.ip_address || address;
         document.getElementById('firmware-version').textContent = data.firmware_version || '--';
-        document.getElementById('app-version').textContent = 'v' + (data.firmware_version || '1.0.0');
         
         // Show main screen
         showMainScreen();
@@ -1385,15 +1419,25 @@ function setupEventListeners() {
     });
     
     // Disconnect button
-    document.getElementById('disconnect-display')?.addEventListener('click', () => {
-        if (confirm('Disconnect from this display?')) {
-            if (state.connectionMode === 'bridge') {
-                disconnectBridge();
-            } else {
-                disconnectDisplay();
-            }
-        }
-    });
+    const disconnectBtn = document.getElementById('disconnect-display');
+    if (disconnectBtn) {
+        disconnectBtn.addEventListener('click', () => {
+            // Visual feedback - change button text
+            disconnectBtn.textContent = 'Disconnecting...';
+            disconnectBtn.disabled = true;
+            
+            logActivity('info', 'Disconnect clicked, mode: ' + state.connectionMode);
+            
+            // Small delay to show feedback, then disconnect
+            setTimeout(() => {
+                if (state.connectionMode === 'bridge') {
+                    disconnectBridge();
+                } else {
+                    disconnectDisplay();
+                }
+            }, 100);
+        });
+    }
     
     // Brightness slider
     document.getElementById('brightness').addEventListener('input', (e) => {
