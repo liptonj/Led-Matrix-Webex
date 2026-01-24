@@ -13,3 +13,10 @@
   Access-Control-Allow-Origin: *
   Access-Control-Allow-Methods: GET, POST, OPTIONS
   Access-Control-Allow-Headers: Content-Type
+  Cache-Control: no-cache, must-revalidate
+
+# Embedded App JS/CSS - Force revalidation to ensure latest version
+/embedded/app.js
+  Cache-Control: no-cache, must-revalidate
+/embedded/style.css
+  Cache-Control: no-cache, must-revalidate
