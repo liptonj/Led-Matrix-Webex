@@ -73,12 +73,14 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     // Extract presence information
     presence.status = doc["status"].as<String>();
     presence.display_name = doc["displayName"].as<String>();
+    presence.first_name = doc["firstName"].as<String>();
     presence.email = doc["emails"][0].as<String>();
     presence.last_activity = doc["lastActivity"].as<String>();
     presence.valid = true;
     
-    Serial.printf("[WEBEX] Presence: %s (%s)\n", 
-                  presence.status.c_str(), presence.display_name.c_str());
+    Serial.printf("[WEBEX] Presence: %s (%s, first: %s)\n", 
+                  presence.status.c_str(), presence.display_name.c_str(),
+                  presence.first_name.c_str());
     
     return true;
 }

@@ -38,6 +38,7 @@ struct AppState {
     String sensor_mac = "";
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
+    unsigned long last_bridge_status_time = 0;  // Track when last status received from bridge
     // Time tracking
     bool time_synced = false;
 };

@@ -30,6 +30,7 @@
 #define COLOR_BUSY      0xF800  // Red
 #define COLOR_OFFLINE   0x8410  // Gray
 #define COLOR_OOO       0x8010  // Purple
+#define COLOR_PRESENTING 0xF81F // Magenta for presenting/sharing
 
 // Page rotation
 #define DEFAULT_PAGE_INTERVAL_MS 5000  // 5 seconds between pages

@@ -53,6 +53,7 @@ const state = {
     wsPeerConnected: false,
     wsReconnectTimer: null,
     wsPingTimer: null,
+    peerDisconnectTimer: null, // Debounce timer for peer disconnect (handles reconnection race)
     isConnected: false,
     currentStatus: null,
     previousStatus: null,
@@ -232,7 +233,16 @@ async function initializeWebexSDK() {
         
         // App still works for configuration even without Webex
         document.getElementById('user-name').textContent = 'Not in Webex';
-        document.getElementById('user-status').textContent = 'Configuration mode only';
+        document.getElementById('user-status').textContent = 'Standalone mode - set status manually';
+        
+        // Set default status to 'active' when not in Webex context
+        // This allows the app to work in standalone/testing mode
+        setStatus('active', true);
+        logActivity('info', 'Default status set to Available (standalone mode)');
+        
+        // Still setup status buttons for manual control
+        setupStatusButtons();
+        setupHardwareToggles();
     }
 }
 
@@ -375,6 +385,14 @@ async function connectToBridge(bridgeUrl, pairingCode) {
         
         logActivity('success', `Connected to bridge with code: ${pairingCode}`);
         
+        // Send initial status to display if we have one
+        if (state.currentStatus && state.autoSync) {
+            setTimeout(() => {
+                syncStatusToDisplay();
+                logActivity('info', 'Sent initial status to display');
+            }, 1000); // Small delay to ensure display is ready
+        }
+        
     } catch (error) {
         console.error('Bridge connection failed:', error);
         logActivity('error', `Failed to connect: ${error.message}`);
@@ -437,25 +455,51 @@ function handleBridgeMessage(data) {
             case 'joined':
                 logActivity('success', `Joined room ${message.data?.code}`);
                 state.wsPeerConnected = message.data?.displayConnected || false;
+                // Clear any pending disconnect timer
+                if (state.peerDisconnectTimer) {
+                    clearTimeout(state.peerDisconnectTimer);
+                    state.peerDisconnectTimer = null;
+                }
                 if (state.wsPeerConnected) {
                     logActivity('info', 'Display is connected');
                     // Request initial status and config from display
-                    sendBridgeCommand('get_status').catch(() => {});
-                    sendBridgeCommand('get_config').catch(() => {});
+                    requestDisplayState();
                 }
                 break;
                 
             case 'peer_connected':
                 logActivity('success', `${message.data?.peerType} connected`);
+                // Clear any pending disconnect timer (handles reconnection race condition)
+                if (state.peerDisconnectTimer) {
+                    clearTimeout(state.peerDisconnectTimer);
+                    state.peerDisconnectTimer = null;
+                    logActivity('info', 'Display reconnected (cancelled disconnect)');
+                }
                 state.wsPeerConnected = true;
-                // Request status and config when display connects
-                sendBridgeCommand('get_status').catch(() => {});
-                sendBridgeCommand('get_config').catch(() => {});
+                // Small delay before requesting status to let display fully initialize
+                setTimeout(() => {
+                    if (state.wsPeerConnected) {
+                        requestDisplayState();
+                    }
+                }, 500);
                 break;
                 
             case 'peer_disconnected':
-                logActivity('info', `${message.data?.peerType} disconnected`);
-                state.wsPeerConnected = false;
+                // Delay handling disconnect to allow for reconnection scenarios
+                // This handles the race condition when a display reconnects and we get
+                // peer_connected followed by peer_disconnected (from old socket closing)
+                logActivity('info', `${message.data?.peerType} disconnect detected, waiting for reconnect...`);
+                if (state.peerDisconnectTimer) {
+                    clearTimeout(state.peerDisconnectTimer);
+                }
+                state.peerDisconnectTimer = setTimeout(() => {
+                    state.peerDisconnectTimer = null;
+                    if (state.wsPeerConnected) {
+                        // Still marked as connected, so actually disconnect now
+                        logActivity('info', `${message.data?.peerType} disconnected`);
+                        state.wsPeerConnected = false;
+                    }
+                }, 2000); // Wait 2 seconds before marking as disconnected
                 break;
                 
             case 'status':
@@ -493,6 +537,18 @@ function handleBridgeMessage(data) {
     } catch (error) {
         console.error('Failed to parse bridge message:', error);
     }
+}
+
+/**
+ * Request status and config from the display
+ */
+function requestDisplayState() {
+    sendBridgeCommand('get_status').catch((err) => {
+        logActivity('error', `Failed to get status: ${err.message}`);
+    });
+    sendBridgeCommand('get_config').catch((err) => {
+        logActivity('error', `Failed to get config: ${err.message}`);
+    });
 }
 
 /**
@@ -1789,6 +1845,10 @@ function cleanupAllTimers() {
     if (state.wsReconnectTimer) {
         clearTimeout(state.wsReconnectTimer);
         state.wsReconnectTimer = null;
+    }
+    if (state.peerDisconnectTimer) {
+        clearTimeout(state.peerDisconnectTimer);
+        state.peerDisconnectTimer = null;
     }
 }
 

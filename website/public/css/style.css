@@ -111,6 +111,36 @@ header h1 {
     margin-bottom: 0.5rem;
 }
 
+.header-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.header-brand h1 {
+    margin-bottom: 0;
+}
+
+.site-logo {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+}
+
+@media (max-width: 600px) {
+    .site-logo {
+        width: 48px;
+        height: 48px;
+    }
+    
+    .header-brand {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+}
+
 .tagline {
     font-size: 1.2rem;
     opacity: 0.9;

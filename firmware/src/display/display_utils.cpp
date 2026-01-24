@@ -12,7 +12,8 @@ uint16_t MatrixDisplay::getStatusColor(const String& status) {
     if (status == "active") return COLOR_ACTIVE;
     if (status == "inactive" || status == "away") return COLOR_AWAY;
     if (status == "DoNotDisturb" || status == "dnd") return COLOR_DND;
-    if (status == "busy" || status == "meeting") return COLOR_BUSY;
+    if (status == "busy" || status == "meeting" || status == "call") return COLOR_BUSY;
+    if (status == "presenting") return COLOR_PRESENTING;
     if (status == "OutOfOffice" || status == "ooo") return COLOR_OOO;
     return COLOR_OFFLINE;
 }
@@ -23,8 +24,11 @@ String MatrixDisplay::getStatusText(const String& status) {
     if (status == "DoNotDisturb" || status == "dnd") return "DND";
     if (status == "busy") return "BUSY";
     if (status == "meeting") return "IN A CALL";
+    if (status == "call") return "ON A CALL";
+    if (status == "presenting") return "PRESENTING";
     if (status == "OutOfOffice" || status == "ooo") return "OOO";
     if (status == "pending") return "PENDING";
+    if (status == "unknown") return "UNKNOWN";
     return "OFFLINE";
 }
 

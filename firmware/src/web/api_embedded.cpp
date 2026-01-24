@@ -67,15 +67,23 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
             app_state->webex_status = "active";
         } else if (newStatus == "away" || newStatus == "inactive") {
             app_state->webex_status = "away";
-        } else if (newStatus == "dnd" || newStatus == "donotdisturb") {
+        } else if (newStatus == "dnd" || newStatus == "donotdisturb" || newStatus == "DoNotDisturb") {
             app_state->webex_status = "dnd";
-        } else if (newStatus == "meeting" || newStatus == "call" || newStatus == "busy") {
+        } else if (newStatus == "presenting") {
+            app_state->webex_status = "presenting";
+            app_state->in_call = true;
+        } else if (newStatus == "call") {
+            app_state->webex_status = "call";
+            app_state->in_call = true;
+        } else if (newStatus == "meeting" || newStatus == "busy") {
             app_state->webex_status = "meeting";
             app_state->in_call = true;
-        } else if (newStatus == "ooo" || newStatus == "outofoffice") {
+        } else if (newStatus == "ooo" || newStatus == "outofoffice" || newStatus == "OutOfOffice") {
             app_state->webex_status = "ooo";
         } else if (newStatus == "offline") {
             app_state->webex_status = "offline";
+        } else if (newStatus == "unknown") {
+            app_state->webex_status = "unknown";
         } else {
             app_state->webex_status = newStatus;
         }

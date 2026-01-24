@@ -6,67 +6,182 @@
     <title>Install Firmware - LED Matrix Webex Display</title>
     <link rel="stylesheet" href="css/style.css">
     <meta name="description" content="Install LED Matrix Webex Display firmware directly from your browser - no software required">
+    <!-- Favicons -->
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
     
     <!-- ESP Web Tools for browser-based flashing -->
     <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
     
     <style>
-        .install-section {
-            text-align: center;
-            padding: 2rem;
-            margin: 2rem 0;
+        /* Wizard Container */
+        .wizard-container {
+            max-width: 700px;
+            margin: 2rem auto;
+        }
+        
+        /* Progress Steps */
+        .wizard-progress {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 2rem;
+            gap: 0;
+        }
+        
+        .progress-step {
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+        
+        .progress-step .step-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--color-border);
+            color: var(--color-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 1rem;
+            z-index: 1;
+            transition: all 0.3s ease;
+        }
+        
+        .progress-step.active .step-circle {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .progress-step.completed .step-circle {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .progress-step.completed .step-circle::after {
+            content: '✓';
+        }
+        
+        .progress-step .step-label {
+            position: absolute;
+            top: 48px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.75rem;
+            color: var(--color-muted);
+            white-space: nowrap;
+        }
+        
+        .progress-step.active .step-label,
+        .progress-step.completed .step-label {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        .progress-connector {
+            width: 80px;
+            height: 3px;
+            background: var(--color-border);
+            transition: background 0.3s ease;
+        }
+        
+        .progress-connector.completed {
+            background: #4CAF50;
+        }
+        
+        /* Wizard Step Content */
+        .wizard-step {
+            display: none;
             background: var(--card-bg);
             border-radius: 12px;
             border: 1px solid var(--border-color);
-        }
-        
-        .install-section h2 {
-            margin-bottom: 1rem;
-        }
-        
-        .install-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 2rem;
-            justify-content: center;
-            margin: 2rem 0;
-        }
-        
-        .install-card {
-            background: var(--bg-secondary);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
             padding: 2rem;
-            max-width: 350px;
             text-align: center;
+            animation: fadeIn 0.3s ease;
         }
         
-        .install-card h3 {
-            margin-bottom: 0.5rem;
+        .wizard-step.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .wizard-step h2 {
+            margin-bottom: 1rem;
             color: var(--text-primary);
         }
         
-        .install-card p {
+        .wizard-step p {
             color: var(--text-secondary);
             margin-bottom: 1.5rem;
-            font-size: 0.9rem;
         }
         
-        .install-card .chip-info {
+        /* Device Selection */
+        .device-cards {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 1.5rem 0;
+        }
+        
+        .device-card {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            max-width: 280px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .device-card:hover {
+            border-color: #4CAF50;
+        }
+        
+        .device-card.selected {
+            border-color: #4CAF50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+        
+        .device-card h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        
+        .device-card p {
             font-size: 0.85rem;
-            color: var(--text-muted);
-            margin-top: 1rem;
+            margin-bottom: 0;
         }
         
+        .device-card .chip-badge {
+            display: inline-block;
+            background: var(--color-border);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        
+        /* ESP Install Button Styling */
         esp-web-install-button {
             --esp-tools-button-color: #4CAF50;
             --esp-tools-button-text-color: white;
+            margin: 1.5rem 0;
+            display: block;
         }
         
         esp-web-install-button::part(button) {
             background-color: #4CAF50;
             color: white;
-            padding: 12px 24px;
+            padding: 14px 32px;
             font-size: 1.1rem;
             font-weight: 600;
             border: none;
@@ -79,6 +194,7 @@
             background-color: #45a049;
         }
         
+        /* Requirements Box */
         .requirements {
             background: #fff3cd;
             border: 1px solid #ffc107;
@@ -99,50 +215,18 @@
             color: #856404;
         }
         
-        .steps {
-            text-align: left;
-            max-width: 600px;
-            margin: 2rem auto;
-        }
-        
-        .steps ol {
-            padding-left: 1.5rem;
-        }
-        
-        .steps li {
-            margin: 1rem 0;
-            line-height: 1.6;
-        }
-        
-        .warning {
-            background: #f8d7da;
-            border: 1px solid #f5c6cb;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-            color: #721c24;
-        }
-        
-        .info {
-            background: #d1ecf1;
-            border: 1px solid #bee5eb;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-            color: #0c5460;
-        }
-        
         .browser-support {
             display: flex;
-            gap: 1rem;
+            gap: 0.5rem;
             justify-content: center;
             margin: 1rem 0;
+            flex-wrap: wrap;
         }
         
         .browser {
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 0.8rem;
             border-radius: 6px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
         
         .browser.supported {
@@ -155,6 +239,226 @@
             color: #721c24;
         }
         
+        /* WiFi Config Form */
+        .wifi-form {
+            text-align: left;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        .wifi-form .form-group {
+            margin-bottom: 1.25rem;
+        }
+        
+        .wifi-form label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        
+        .wifi-form input[type="text"],
+        .wifi-form input[type="password"],
+        .wifi-form select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--card-bg);
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+        
+        .network-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .network-row select {
+            flex: 1;
+        }
+        
+        .btn-scan {
+            padding: 0.75rem 1rem;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        
+        .btn-scan:hover {
+            background: #1976D2;
+        }
+        
+        .btn-scan:disabled {
+            background: #90CAF9;
+            cursor: wait;
+        }
+        
+        .btn-primary-large {
+            width: 100%;
+            padding: 1rem;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 1rem;
+        }
+        
+        .btn-primary-large:hover {
+            background: #45a049;
+        }
+        
+        .btn-primary-large:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* Status Messages */
+        .status-message {
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+            text-align: center;
+            display: none;
+        }
+        
+        .status-message.visible {
+            display: block;
+        }
+        
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        /* Console */
+        .serial-console {
+            margin-top: 1.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            text-align: left;
+        }
+        
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            background: #333;
+            color: white;
+            font-size: 0.9rem;
+        }
+        
+        .btn-clear {
+            padding: 0.25rem 0.75rem;
+            background: #555;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        
+        .console-output {
+            height: 150px;
+            overflow-y: auto;
+            background: #1a1a1a;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 0.8rem;
+            padding: 0.75rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        /* Success Screen */
+        .success-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        
+        .success-message {
+            color: #4CAF50;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        /* Navigation Buttons */
+        .wizard-nav {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .btn-secondary {
+            padding: 0.75rem 1.5rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        
+        .btn-secondary:hover {
+            background: var(--color-border);
+        }
+        
+        .btn-next {
+            padding: 0.75rem 1.5rem;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        .btn-next:hover {
+            background: #45a049;
+        }
+        
+        .btn-next:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* Help Link */
+        .help-link {
+            margin-top: 2rem;
+            text-align: center;
+        }
+        
+        .help-link a {
+            color: var(--color-primary);
+        }
+        
+        /* Dark mode overrides */
         @media (prefers-color-scheme: dark) {
             .requirements {
                 background: #332701;
@@ -163,15 +467,20 @@
             .requirements h4, .requirements ul {
                 color: #ffc107;
             }
-            .warning {
-                background: #2c0b0e;
-                border-color: #842029;
-                color: #ea868f;
+            .status-message.success {
+                background: #0f3d0f;
+                color: #90ee90;
+                border-color: #2e5a2e;
             }
-            .info {
-                background: #032830;
-                border-color: #055160;
-                color: #6edff6;
+            .status-message.error {
+                background: #3d0f0f;
+                color: #ff9090;
+                border-color: #5a2e2e;
+            }
+            .status-message.info {
+                background: #0f2d3d;
+                color: #90d0ee;
+                border-color: #2e4a5a;
             }
         }
     </style>
@@ -179,7 +488,10 @@
 <body>
     <header>
         <div class="container">
-            <h1>🚦 LED Matrix Webex Display</h1>
+            <div class="header-brand">
+                <img src="icon-512.png" alt="LED Matrix Webex Display Logo" class="site-logo">
+                <h1>LED Matrix Webex Display</h1>
+            </div>
             <p class="tagline">Install firmware directly from your browser</p>
             <div class="header-actions">
                 <a href="index.html" class="btn-link">← Back to Home</a>
@@ -188,637 +500,152 @@
     </header>
 
     <main class="container">
-        <section class="install-section">
-            <h2>Web Installer</h2>
-            <p>Flash your ESP32 device directly from your browser - no software installation required!</p>
-            
-            <div class="browser-support">
-                <span class="browser supported">✓ Chrome</span>
-                <span class="browser supported">✓ Edge</span>
-                <span class="browser unsupported">✗ Firefox</span>
-                <span class="browser unsupported">✗ Safari</span>
+        <div class="wizard-container">
+            <!-- Progress Indicator -->
+            <div class="wizard-progress">
+                <div class="progress-step active" data-step="1">
+                    <div class="step-circle">1</div>
+                    <span class="step-label">Flash Device</span>
+                </div>
+                <div class="progress-connector"></div>
+                <div class="progress-step" data-step="2">
+                    <div class="step-circle">2</div>
+                    <span class="step-label">Configure WiFi</span>
+                </div>
+                <div class="progress-connector"></div>
+                <div class="progress-step" data-step="3">
+                    <div class="step-circle">3</div>
+                    <span class="step-label">Complete</span>
+                </div>
             </div>
-            
-            <div class="requirements">
-                <h4>Requirements</h4>
-                <ul>
-                    <li>Google Chrome or Microsoft Edge browser</li>
-                    <li>USB cable connected to your ESP32 device</li>
-                    <li>USB drivers installed (usually automatic)</li>
-                </ul>
-            </div>
-        </section>
 
-        <section class="install-section">
-            <h2>Choose Your Device</h2>
-            
-            <div class="install-buttons">
-                <!-- ESP32-S3 Bootstrap -->
-                <div class="install-card">
-                    <h3>ESP32-S3 Bootstrap</h3>
-                    <p>Initial setup firmware for new ESP32-S3 devices. Includes WiFi provisioning and OTA download of main firmware.</p>
-                    
-                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
-                        <button slot="activate">Install Bootstrap</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
-                        <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
-                    </esp-web-install-button>
-                    
-                    <p class="chip-info">For ESP32-S3 boards (8MB flash)</p>
+            <!-- Step 1: Flash Device -->
+            <div class="wizard-step active" id="step-1">
+                <h2>Flash Your Device</h2>
+                <p>Connect your ESP32 via USB and select your board type below.</p>
+                
+                <div class="browser-support">
+                    <span class="browser supported">✓ Chrome</span>
+                    <span class="browser supported">✓ Edge</span>
+                    <span class="browser unsupported">✗ Firefox</span>
+                    <span class="browser unsupported">✗ Safari</span>
                 </div>
                 
-                <!-- ESP32 Bootstrap -->
-                <div class="install-card">
-                    <h3>ESP32 Bootstrap</h3>
-                    <p>Initial setup firmware for standard ESP32 devices. Includes WiFi provisioning and OTA download of main firmware.</p>
-                    
-                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32.json">
-                        <button slot="activate">Install Bootstrap</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
-                        <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
-                    </esp-web-install-button>
-                    
-                    <p class="chip-info">For standard ESP32 boards (4MB flash)</p>
-                </div>
-            </div>
-            
-            <div class="info">
-                <strong>Tip:</strong> Not sure which ESP32 you have? Most development boards with "S3" in the name are ESP32-S3. 
-                Check your board's documentation if unsure.
-            </div>
-        </section>
-
-        <section class="install-section">
-            <h2>Installation Steps</h2>
-            
-            <div class="steps">
-                <ol>
-                    <li>
-                        <strong>Connect your ESP32</strong><br>
-                        Plug your ESP32 into your computer using a USB data cable (not a charge-only cable).
-                    </li>
-                    <li>
-                        <strong>Put device in boot mode (if needed)</strong><br>
-                        Most ESP32-S3 boards auto-detect. For other boards, hold the BOOT button while clicking Install.
-                    </li>
-                    <li>
-                        <strong>Click "Install Bootstrap"</strong><br>
-                        Select your device's serial port when prompted. The installation takes about 30 seconds.
-                    </li>
-                    <li>
-                        <strong>Configure WiFi (below)</strong><br>
-                        After flashing, use the WiFi Configuration section below to send credentials directly to the device.
-                    </li>
-                    <li>
-                        <strong>Main firmware downloads automatically</strong><br>
-                        The device will download and install the main firmware over-the-air.
-                    </li>
-                </ol>
-            </div>
-        </section>
-
-        <section class="install-section" id="wifi-config-section">
-            <h2>WiFi Configuration (via USB)</h2>
-            <p>After flashing, configure WiFi directly from your browser - no need to connect to the device's AP!</p>
-            
-            <div class="wifi-config-card">
-                <div class="form-group">
-                    <label>WiFi Network</label>
-                    <div class="network-select-row">
-                        <select id="wifi-ssid-select" onchange="onNetworkSelect()">
-                            <option value="">-- Click "Scan Networks" first --</option>
-                        </select>
-                        <button id="scan-btn" class="btn-scan" onclick="scanNetworks()">Scan Networks</button>
+                <div class="device-cards">
+                    <div class="device-card" data-device="esp32s3" onclick="selectDevice('esp32s3')">
+                        <h3>ESP32-S3</h3>
+                        <p>Recommended for new builds</p>
+                        <span class="chip-badge">8MB Flash</span>
                     </div>
-                    <input type="text" id="wifi-ssid" placeholder="Or enter network name manually" style="margin-top: 0.5rem;">
-                </div>
-                <div class="form-group">
-                    <label for="wifi-password">WiFi Password</label>
-                    <input type="password" id="wifi-password" placeholder="Enter your WiFi password">
-                </div>
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="auto-install-firmware" checked>
-                        Automatically download main firmware after WiFi connects
-                    </label>
+                    <div class="device-card" data-device="esp32" onclick="selectDevice('esp32')">
+                        <h3>ESP32</h3>
+                        <p>Standard ESP32 boards</p>
+                        <span class="chip-badge">4MB Flash</span>
+                    </div>
                 </div>
                 
-                <button id="send-wifi-btn" class="btn-send-wifi" onclick="sendWiFiConfig()">
-                    Send WiFi Configuration
-                </button>
+                <!-- ESP32-S3 Install Button (hidden until selected) -->
+                <div id="install-esp32s3" style="display: none;">
+                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
+                        <button slot="activate">Install Bootstrap Firmware</button>
+                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
+                        <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
+                    </esp-web-install-button>
+                </div>
                 
-                <div id="wifi-status" class="wifi-status"></div>
+                <!-- ESP32 Install Button (hidden until selected) -->
+                <div id="install-esp32" style="display: none;">
+                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32.json">
+                        <button slot="activate">Install Bootstrap Firmware</button>
+                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
+                        <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
+                    </esp-web-install-button>
+                </div>
                 
-                <div class="serial-console" id="serial-console">
+                <div class="requirements">
+                    <h4>Requirements</h4>
+                    <ul>
+                        <li>USB data cable (not charge-only)</li>
+                        <li>ESP32 may need BOOT button held during flash</li>
+                    </ul>
+                </div>
+                
+                <div id="flash-status" class="status-message"></div>
+            </div>
+
+            <!-- Step 2: Configure WiFi -->
+            <div class="wizard-step" id="step-2">
+                <h2>Configure WiFi</h2>
+                <p>Send WiFi credentials to your device via USB serial connection.</p>
+                
+                <div class="wifi-form">
+                    <div class="form-group">
+                        <label>WiFi Network</label>
+                        <div class="network-row">
+                            <select id="wifi-ssid-select" onchange="onNetworkSelect()">
+                                <option value="">-- Click Scan first --</option>
+                            </select>
+                            <button id="scan-btn" class="btn-scan" onclick="scanNetworks()">Scan</button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="wifi-ssid">Network Name (SSID)</label>
+                        <input type="text" id="wifi-ssid" placeholder="Enter manually or select above">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="wifi-password">WiFi Password</label>
+                        <input type="password" id="wifi-password" placeholder="Enter your WiFi password">
+                    </div>
+                    
+                    <button id="send-wifi-btn" class="btn-primary-large" onclick="sendWiFiConfig()">
+                        Send WiFi Configuration
+                    </button>
+                </div>
+                
+                <div id="wifi-status" class="status-message"></div>
+                
+                <div class="serial-console">
                     <div class="console-header">
                         <span>Device Console</span>
                         <button onclick="clearConsole()" class="btn-clear">Clear</button>
                     </div>
                     <div id="console-output" class="console-output"></div>
                 </div>
+                
+                <div class="wizard-nav">
+                    <button class="btn-secondary" onclick="goToStep(1)">← Back</button>
+                    <button class="btn-next" id="btn-finish" onclick="goToStep(3)" disabled>Finish Setup →</button>
+                </div>
             </div>
-            
-            <div class="info" style="margin-top: 1rem;">
-                <strong>How it works:</strong> This sends WiFi credentials via USB serial connection. 
-                The device will connect to your WiFi and automatically download the main firmware.
-            </div>
-            
-            <div class="info" style="margin-top: 1rem; background: var(--bg-secondary);">
-                <strong>Alternative:</strong> You can still configure WiFi the traditional way by connecting 
-                to the device's "Webex-Display-XXXX" WiFi network after flashing.
-            </div>
-        </section>
-        
-        <style>
-            .wifi-config-card {
-                background: var(--bg-secondary);
-                border-radius: 12px;
-                padding: 1.5rem;
-                margin: 1rem 0;
-            }
-            
-            .wifi-config-card .form-group {
-                margin-bottom: 1rem;
-            }
-            
-            .wifi-config-card label {
-                display: block;
-                margin-bottom: 0.5rem;
-                font-weight: 500;
-            }
-            
-            .wifi-config-card input[type="text"],
-            .wifi-config-card input[type="password"] {
-                width: 100%;
-                padding: 0.75rem;
-                border: 1px solid var(--border-color);
-                border-radius: 6px;
-                background: var(--card-bg);
-                color: var(--text-primary);
-                font-size: 1rem;
-            }
-            
-            .wifi-config-card input[type="checkbox"] {
-                margin-right: 0.5rem;
-            }
-            
-            .network-select-row {
-                display: flex;
-                gap: 0.5rem;
-            }
-            
-            .network-select-row select {
-                flex: 1;
-                padding: 0.75rem;
-                border: 1px solid var(--border-color);
-                border-radius: 6px;
-                background: var(--card-bg);
-                color: var(--text-primary);
-                font-size: 1rem;
-            }
-            
-            .btn-scan {
-                padding: 0.75rem 1rem;
-                background: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 0.9rem;
-                font-weight: 500;
-                cursor: pointer;
-                white-space: nowrap;
-            }
-            
-            .btn-scan:hover {
-                background: #1976D2;
-            }
-            
-            .btn-scan:disabled {
-                background: #90CAF9;
-                cursor: wait;
-            }
-            
-            .btn-send-wifi {
-                width: 100%;
-                padding: 1rem;
-                background: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 1.1rem;
-                font-weight: 600;
-                cursor: pointer;
-                margin-top: 1rem;
-            }
-            
-            .btn-send-wifi:hover {
-                background: #45a049;
-            }
-            
-            .btn-send-wifi:disabled {
-                background: #ccc;
-                cursor: not-allowed;
-            }
-            
-            .wifi-status {
-                margin-top: 1rem;
-                padding: 0.75rem;
-                border-radius: 6px;
-                text-align: center;
-                display: none;
-            }
-            
-            .wifi-status.success {
-                display: block;
-                background: #d4edda;
-                color: #155724;
-                border: 1px solid #c3e6cb;
-            }
-            
-            .wifi-status.error {
-                display: block;
-                background: #f8d7da;
-                color: #721c24;
-                border: 1px solid #f5c6cb;
-            }
-            
-            .wifi-status.info {
-                display: block;
-                background: #d1ecf1;
-                color: #0c5460;
-                border: 1px solid #bee5eb;
-            }
-            
-            .serial-console {
-                margin-top: 1.5rem;
-                border: 1px solid var(--border-color);
-                border-radius: 8px;
-                overflow: hidden;
-            }
-            
-            .console-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 0.5rem 1rem;
-                background: #333;
-                color: white;
-                font-size: 0.9rem;
-            }
-            
-            .btn-clear {
-                padding: 0.25rem 0.75rem;
-                background: #555;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 0.8rem;
-            }
-            
-            .console-output {
-                height: 200px;
-                overflow-y: auto;
-                background: #1a1a1a;
-                color: #0f0;
-                font-family: monospace;
-                font-size: 0.85rem;
-                padding: 0.75rem;
-                white-space: pre-wrap;
-                word-break: break-all;
-            }
-            
-            @media (prefers-color-scheme: dark) {
-                .wifi-status.success {
-                    background: #0f3d0f;
-                    color: #90ee90;
-                    border-color: #2e5a2e;
-                }
-                .wifi-status.error {
-                    background: #3d0f0f;
-                    color: #ff9090;
-                    border-color: #5a2e2e;
-                }
-                .wifi-status.info {
-                    background: #0f2d3d;
-                    color: #90d0ee;
-                    border-color: #2e4a5a;
-                }
-            }
-        </style>
-        
-        <script>
-            let serialPort = null;
-            let serialReader = null;
-            let serialWriter = null;
-            let readLoopRunning = false;
-            
-            function logToConsole(message, type = 'info') {
-                const output = document.getElementById('console-output');
-                const timestamp = new Date().toLocaleTimeString();
-                const prefix = type === 'tx' ? '>> ' : type === 'rx' ? '<< ' : '-- ';
-                output.textContent += `[${timestamp}] ${prefix}${message}\n`;
-                output.scrollTop = output.scrollHeight;
-            }
-            
-            function clearConsole() {
-                document.getElementById('console-output').textContent = '';
-            }
-            
-            function setWifiStatus(message, type) {
-                const status = document.getElementById('wifi-status');
-                status.textContent = message;
-                status.className = 'wifi-status ' + type;
-            }
-            
-            async function connectSerial() {
-                if (serialPort) return true;
-                
-                try {
-                    serialPort = await navigator.serial.requestPort();
-                    await serialPort.open({ baudRate: 115200 });
-                    
-                    const textEncoder = new TextEncoderStream();
-                    textEncoder.readable.pipeTo(serialPort.writable);
-                    serialWriter = textEncoder.writable.getWriter();
-                    
-                    const textDecoder = new TextDecoderStream();
-                    serialPort.readable.pipeTo(textDecoder.writable);
-                    serialReader = textDecoder.readable.getReader();
-                    
-                    logToConsole('Serial port connected', 'info');
-                    startReadLoop();
-                    return true;
-                } catch (error) {
-                    logToConsole('Failed to connect: ' + error.message, 'error');
-                    return false;
-                }
-            }
-            
-            async function startReadLoop() {
-                if (readLoopRunning) return;
-                readLoopRunning = true;
-                
-                try {
-                    while (true) {
-                        const { value, done } = await serialReader.read();
-                        if (done) break;
-                        if (value) {
-                            // Split by newlines and log each line
-                            const lines = value.split('\n');
-                            for (const line of lines) {
-                                if (line.trim()) {
-                                    logToConsole(line.trim(), 'rx');
-                                    
-                                    // Check for WiFi connection success
-                                    if (line.includes('WiFi connected') || line.includes('Got IP:')) {
-                                        setWifiStatus('WiFi connected successfully!', 'success');
-                                    }
-                                    if (line.includes('WiFi connection failed') || line.includes('WiFi: Failed')) {
-                                        setWifiStatus('WiFi connection failed. Check credentials.', 'error');
-                                    }
-                                    if (line.includes('[OTA]') && line.includes('complete')) {
-                                        setWifiStatus('Firmware installed! Device will reboot.', 'success');
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (error) {
-                    if (error.name !== 'NetworkError') {
-                        logToConsole('Read error: ' + error.message, 'error');
-                    }
-                }
-                readLoopRunning = false;
-            }
-            
-            async function sendSerial(data) {
-                if (!serialWriter) {
-                    logToConsole('Not connected', 'error');
-                    return false;
-                }
-                try {
-                    await serialWriter.write(data + '\n');
-                    logToConsole(data, 'tx');
-                    return true;
-                } catch (error) {
-                    logToConsole('Write error: ' + error.message, 'error');
-                    return false;
-                }
-            }
-            
-            // Track discovered networks
-            let discoveredNetworks = [];
-            let scanInProgress = false;
-            
-            async function scanNetworks() {
-                if (scanInProgress) return;
-                
-                const scanBtn = document.getElementById('scan-btn');
-                const select = document.getElementById('wifi-ssid-select');
-                
-                scanBtn.disabled = true;
-                scanBtn.textContent = 'Scanning...';
-                setWifiStatus('Connecting to device...', 'info');
-                
-                // Connect to serial if not already connected
-                if (!await connectSerial()) {
-                    setWifiStatus('Failed to connect. Select the serial port.', 'error');
-                    scanBtn.disabled = false;
-                    scanBtn.textContent = 'Scan Networks';
-                    return;
-                }
-                
-                // Wait for device to be ready
-                await new Promise(r => setTimeout(r, 500));
-                
-                scanInProgress = true;
-                discoveredNetworks = [];
-                
-                setWifiStatus('Scanning for WiFi networks...', 'info');
-                
-                // Send scan command
-                await sendSerial('SCAN');
-                
-                // Wait for scan results (device prints them to serial)
-                // Results come as "[SERIAL] Available networks:" followed by numbered list
-                await new Promise(r => setTimeout(r, 3000));
-                
-                scanInProgress = false;
-                scanBtn.disabled = false;
-                scanBtn.textContent = 'Scan Networks';
-                
-                // Parse networks from console output
-                parseNetworksFromConsole();
-                
-                if (discoveredNetworks.length > 0) {
-                    setWifiStatus(`Found ${discoveredNetworks.length} networks`, 'success');
-                    updateNetworkDropdown();
-                } else {
-                    setWifiStatus('No networks found. Try scanning again.', 'error');
-                }
-            }
-            
-            function parseNetworksFromConsole() {
-                const output = document.getElementById('console-output').textContent;
-                const lines = output.split('\n');
-                
-                discoveredNetworks = [];
-                let inNetworkList = false;
-                
-                // Parse from the most recent scan (scan backwards to find latest)
-                const reversedLines = [...lines].reverse();
-                let foundScanComplete = false;
-                
-                for (const line of reversedLines) {
-                    // Look for scan complete marker (signals end of latest scan)
-                    if (line.includes('Scan complete')) {
-                        foundScanComplete = true;
-                        continue;
-                    }
-                    
-                    // Look for available networks header (signals start of scan results)
-                    if (line.includes('Available networks:')) {
-                        if (foundScanComplete) break;  // We've got the latest scan
-                        continue;
-                    }
-                    
-                    // Parse network entries: "  1. NetworkName (-70 dBm)"
-                    if (foundScanComplete) {
-                        const match = line.match(/\d+\.\s+(.+?)\s+\((-?\d+)\s*dBm\)/);
-                        if (match) {
-                            // Add to beginning since we're parsing backwards
-                            discoveredNetworks.unshift({
-                                ssid: match[1],
-                                rssi: parseInt(match[2])
-                            });
-                        }
-                    }
-                }
-                
-                // Sort by signal strength (strongest first)
-                discoveredNetworks.sort((a, b) => b.rssi - a.rssi);
-            }
-            
-            function updateNetworkDropdown() {
-                const select = document.getElementById('wifi-ssid-select');
-                select.innerHTML = '<option value="">-- Select a network --</option>';
-                
-                for (const network of discoveredNetworks) {
-                    const option = document.createElement('option');
-                    option.value = network.ssid;
-                    // Show signal strength bars
-                    let bars = '▂';
-                    if (network.rssi > -70) bars = '▂▄';
-                    if (network.rssi > -60) bars = '▂▄▆';
-                    if (network.rssi > -50) bars = '▂▄▆█';
-                    option.textContent = `${network.ssid} ${bars} (${network.rssi} dBm)`;
-                    select.appendChild(option);
-                }
-            }
-            
-            function onNetworkSelect() {
-                const select = document.getElementById('wifi-ssid-select');
-                const input = document.getElementById('wifi-ssid');
-                if (select.value) {
-                    input.value = select.value;
-                }
-            }
-            
-            async function sendWiFiConfig() {
-                const ssid = document.getElementById('wifi-ssid').value.trim();
-                const password = document.getElementById('wifi-password').value;
-                const autoInstall = document.getElementById('auto-install-firmware').checked;
-                
-                if (!ssid) {
-                    setWifiStatus('Please enter a WiFi network name', 'error');
-                    return;
-                }
-                
-                setWifiStatus('Connecting to device...', 'info');
-                
-                // Connect to serial if not already connected
-                if (!await connectSerial()) {
-                    setWifiStatus('Failed to connect to device. Select the serial port.', 'error');
-                    return;
-                }
-                
-                // Wait a moment for device to be ready
-                await new Promise(r => setTimeout(r, 500));
-                
-                setWifiStatus('Sending WiFi configuration...', 'info');
-                
-                // Send WiFi configuration command
-                // Format: WIFI:<ssid>:<password>:<auto_ota>
-                const command = `WIFI:${ssid}:${password}:${autoInstall ? '1' : '0'}`;
-                await sendSerial(command);
-                
-                setWifiStatus('WiFi credentials sent. Waiting for connection...', 'info');
-            }
-            
-            // Check if Web Serial is supported
-            if (!('serial' in navigator)) {
-                document.getElementById('wifi-config-section').innerHTML = `
-                    <h2>WiFi Configuration (via USB)</h2>
-                    <div class="warning">
-                        <strong>Web Serial not supported</strong><br>
-                        Your browser doesn't support Web Serial. Use Chrome or Edge, 
-                        or configure WiFi by connecting to the device's AP after flashing.
-                    </div>
-                `;
-            }
-        </script>
 
-        <section class="install-section">
-            <h2>Troubleshooting</h2>
-            
-            <div class="warning">
-                <strong>Device not detected?</strong>
-                <ul>
-                    <li>Try a different USB cable (some cables are charge-only)</li>
-                    <li>Try a different USB port</li>
-                    <li>On Windows, you may need to install <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers" target="_blank">CP210x drivers</a></li>
-                    <li>On macOS, try allowing "USB Accessories" in Security settings</li>
-                </ul>
-            </div>
-            
-            <div class="info">
-                <strong>Need help?</strong> Check the <a href="https://github.com/liptonj/Led-Matrix-Webex/issues" target="_blank">GitHub Issues</a> or open a new issue.
-            </div>
-        </section>
-        
-        <section class="install-section">
-            <h2>Advanced: Direct Firmware Install</h2>
-            <p>Already have the bootstrap installed and want to manually flash the main firmware?</p>
-            
-            <div class="install-buttons">
-                <!-- ESP32-S3 Main Firmware -->
-                <div class="install-card">
-                    <h3>ESP32-S3 Main Firmware</h3>
-                    <p>Full firmware for ESP32-S3. Use this for manual updates or if OTA isn't working.</p>
-                    
-                    <esp-web-install-button manifest="updates/manifest-firmware-esp32s3.json">
-                        <button slot="activate">Install Firmware</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial.</span>
-                    </esp-web-install-button>
-                    
-                    <p class="chip-info">Installs to OTA partition (preserves bootstrap)</p>
+            <!-- Step 3: Complete -->
+            <div class="wizard-step" id="step-3">
+                <div class="success-icon">🎉</div>
+                <div class="success-message">Setup Complete!</div>
+                <p>Your LED Matrix Display is now connected and downloading the main firmware.</p>
+                
+                <div class="status-message success visible" style="margin: 1.5rem 0;">
+                    <strong>What happens next:</strong><br>
+                    The device will automatically download and install the main firmware over WiFi. 
+                    This takes about 1-2 minutes. The display will show status updates.
                 </div>
                 
-                <!-- ESP32 Main Firmware -->
-                <div class="install-card">
-                    <h3>ESP32 Main Firmware</h3>
-                    <p>Full firmware for standard ESP32. Use this for manual updates or if OTA isn't working.</p>
-                    
-                    <esp-web-install-button manifest="updates/manifest-firmware-esp32.json">
-                        <button slot="activate">Install Firmware</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial.</span>
-                    </esp-web-install-button>
-                    
-                    <p class="chip-info">Installs to OTA partition (preserves bootstrap)</p>
+                <p style="margin-top: 2rem;">
+                    Once the main firmware is installed, your display will show a pairing code.<br>
+                    Use the <a href="embedded/index.html">Webex Embedded App</a> to connect.
+                </p>
+                
+                <div class="wizard-nav" style="justify-content: center;">
+                    <a href="index.html" class="btn-next">Return to Home</a>
                 </div>
             </div>
-        </section>
+        </div>
+        
+        <div class="help-link">
+            <p>Need help? Check the <a href="hardware.html">Hardware Guide</a> or <a href="https://github.com/liptonj/Led-Matrix-Webex/issues" target="_blank">GitHub Issues</a></p>
+        </div>
     </main>
 
     <footer>
@@ -829,5 +656,333 @@
     </footer>
 
     <script src="js/main.js"></script>
+    <script>
+        // Wizard state
+        let currentStep = 1;
+        let selectedDevice = null;
+        let flashComplete = false;
+        let wifiConfigured = false;
+        
+        // Serial connection
+        let serialPort = null;
+        let serialReader = null;
+        let serialWriter = null;
+        let readLoopRunning = false;
+        
+        // Device selection
+        function selectDevice(device) {
+            selectedDevice = device;
+            
+            // Update UI
+            document.querySelectorAll('.device-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            document.querySelector(`[data-device="${device}"]`).classList.add('selected');
+            
+            // Show appropriate install button
+            document.getElementById('install-esp32s3').style.display = device === 'esp32s3' ? 'block' : 'none';
+            document.getElementById('install-esp32').style.display = device === 'esp32' ? 'block' : 'none';
+        }
+        
+        // Step navigation
+        function goToStep(step) {
+            currentStep = step;
+            
+            // Update step visibility
+            document.querySelectorAll('.wizard-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`step-${step}`).classList.add('active');
+            
+            // Update progress indicators
+            document.querySelectorAll('.progress-step').forEach(el => {
+                const stepNum = parseInt(el.dataset.step);
+                el.classList.remove('active', 'completed');
+                if (stepNum === step) {
+                    el.classList.add('active');
+                } else if (stepNum < step) {
+                    el.classList.add('completed');
+                }
+            });
+            
+            // Update connectors
+            document.querySelectorAll('.progress-connector').forEach((el, i) => {
+                if (i < step - 1) {
+                    el.classList.add('completed');
+                } else {
+                    el.classList.remove('completed');
+                }
+            });
+        }
+        
+        // Flash status
+        function setFlashStatus(message, type) {
+            const status = document.getElementById('flash-status');
+            status.textContent = message;
+            status.className = 'status-message visible ' + type;
+        }
+        
+        // Listen for ESP Web Tools events
+        document.querySelectorAll('esp-web-install-button').forEach(button => {
+            button.addEventListener('state-changed', (event) => {
+                const state = event.detail.state;
+                
+                if (state === 'initializing') {
+                    setFlashStatus('Connecting to device...', 'info');
+                } else if (state === 'preparing' || state === 'erasing') {
+                    setFlashStatus('Preparing device...', 'info');
+                } else if (state === 'writing') {
+                    setFlashStatus('Flashing firmware...', 'info');
+                } else if (state === 'finished') {
+                    setFlashStatus('Flash complete! Click "Continue" to configure WiFi.', 'success');
+                    flashComplete = true;
+                    // Auto-advance to step 2 after a short delay
+                    setTimeout(() => goToStep(2), 1500);
+                } else if (state === 'error') {
+                    setFlashStatus('Flash failed. Check connection and try again.', 'error');
+                }
+            });
+        });
+        
+        // Serial console functions
+        function logToConsole(message, type = 'info') {
+            const output = document.getElementById('console-output');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'tx' ? '>> ' : type === 'rx' ? '<< ' : '-- ';
+            output.textContent += `[${timestamp}] ${prefix}${message}\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function clearConsole() {
+            document.getElementById('console-output').textContent = '';
+        }
+        
+        function setWifiStatus(message, type) {
+            const status = document.getElementById('wifi-status');
+            status.textContent = message;
+            status.className = 'status-message visible ' + type;
+            
+            // Enable finish button on success
+            if (type === 'success' && message.includes('connected')) {
+                wifiConfigured = true;
+                document.getElementById('btn-finish').disabled = false;
+            }
+        }
+        
+        async function connectSerial() {
+            if (serialPort) return true;
+            
+            try {
+                serialPort = await navigator.serial.requestPort();
+                await serialPort.open({ baudRate: 115200 });
+                
+                const textEncoder = new TextEncoderStream();
+                textEncoder.readable.pipeTo(serialPort.writable);
+                serialWriter = textEncoder.writable.getWriter();
+                
+                const textDecoder = new TextDecoderStream();
+                serialPort.readable.pipeTo(textDecoder.writable);
+                serialReader = textDecoder.readable.getReader();
+                
+                logToConsole('Serial port connected', 'info');
+                startReadLoop();
+                return true;
+            } catch (error) {
+                logToConsole('Failed to connect: ' + error.message, 'error');
+                return false;
+            }
+        }
+        
+        async function startReadLoop() {
+            if (readLoopRunning) return;
+            readLoopRunning = true;
+            
+            try {
+                while (true) {
+                    const { value, done } = await serialReader.read();
+                    if (done) break;
+                    if (value) {
+                        const lines = value.split('\n');
+                        for (const line of lines) {
+                            if (line.trim()) {
+                                logToConsole(line.trim(), 'rx');
+                                
+                                // Check for WiFi connection success
+                                if (line.includes('WiFi connected') || line.includes('Got IP:')) {
+                                    setWifiStatus('WiFi connected successfully! You can now finish setup.', 'success');
+                                }
+                                if (line.includes('WiFi connection failed') || line.includes('WiFi: Failed')) {
+                                    setWifiStatus('WiFi connection failed. Check credentials and try again.', 'error');
+                                }
+                                if (line.includes('[OTA]') && line.includes('complete')) {
+                                    setWifiStatus('Firmware download complete! Device will reboot.', 'success');
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                if (error.name !== 'NetworkError') {
+                    logToConsole('Read error: ' + error.message, 'error');
+                }
+            }
+            readLoopRunning = false;
+        }
+        
+        async function sendSerial(data) {
+            if (!serialWriter) {
+                logToConsole('Not connected', 'error');
+                return false;
+            }
+            try {
+                await serialWriter.write(data + '\n');
+                logToConsole(data, 'tx');
+                return true;
+            } catch (error) {
+                logToConsole('Write error: ' + error.message, 'error');
+                return false;
+            }
+        }
+        
+        // Network scanning
+        let discoveredNetworks = [];
+        let scanInProgress = false;
+        
+        async function scanNetworks() {
+            if (scanInProgress) return;
+            
+            const scanBtn = document.getElementById('scan-btn');
+            scanBtn.disabled = true;
+            scanBtn.textContent = '...';
+            setWifiStatus('Connecting to device...', 'info');
+            
+            if (!await connectSerial()) {
+                setWifiStatus('Failed to connect. Select the serial port.', 'error');
+                scanBtn.disabled = false;
+                scanBtn.textContent = 'Scan';
+                return;
+            }
+            
+            await new Promise(r => setTimeout(r, 500));
+            
+            scanInProgress = true;
+            discoveredNetworks = [];
+            
+            setWifiStatus('Scanning for WiFi networks...', 'info');
+            await sendSerial('SCAN');
+            
+            await new Promise(r => setTimeout(r, 3000));
+            
+            scanInProgress = false;
+            scanBtn.disabled = false;
+            scanBtn.textContent = 'Scan';
+            
+            parseNetworksFromConsole();
+            
+            if (discoveredNetworks.length > 0) {
+                setWifiStatus(`Found ${discoveredNetworks.length} networks`, 'success');
+                updateNetworkDropdown();
+            } else {
+                setWifiStatus('No networks found. Try again.', 'info');
+            }
+        }
+        
+        function parseNetworksFromConsole() {
+            const output = document.getElementById('console-output').textContent;
+            const lines = output.split('\n');
+            
+            discoveredNetworks = [];
+            const reversedLines = [...lines].reverse();
+            let foundScanComplete = false;
+            
+            for (const line of reversedLines) {
+                if (line.includes('Scan complete')) {
+                    foundScanComplete = true;
+                    continue;
+                }
+                
+                if (line.includes('Available networks:')) {
+                    if (foundScanComplete) break;
+                    continue;
+                }
+                
+                if (foundScanComplete) {
+                    const match = line.match(/\d+\.\s+(.+?)\s+\((-?\d+)\s*dBm\)/);
+                    if (match) {
+                        discoveredNetworks.unshift({
+                            ssid: match[1],
+                            rssi: parseInt(match[2])
+                        });
+                    }
+                }
+            }
+            
+            discoveredNetworks.sort((a, b) => b.rssi - a.rssi);
+        }
+        
+        function updateNetworkDropdown() {
+            const select = document.getElementById('wifi-ssid-select');
+            select.innerHTML = '<option value="">-- Select a network --</option>';
+            
+            for (const network of discoveredNetworks) {
+                const option = document.createElement('option');
+                option.value = network.ssid;
+                let bars = '▂';
+                if (network.rssi > -70) bars = '▂▄';
+                if (network.rssi > -60) bars = '▂▄▆';
+                if (network.rssi > -50) bars = '▂▄▆█';
+                option.textContent = `${network.ssid} ${bars}`;
+                select.appendChild(option);
+            }
+        }
+        
+        function onNetworkSelect() {
+            const select = document.getElementById('wifi-ssid-select');
+            const input = document.getElementById('wifi-ssid');
+            if (select.value) {
+                input.value = select.value;
+            }
+        }
+        
+        async function sendWiFiConfig() {
+            const ssid = document.getElementById('wifi-ssid').value.trim();
+            const password = document.getElementById('wifi-password').value;
+            
+            if (!ssid) {
+                setWifiStatus('Please enter a WiFi network name', 'error');
+                return;
+            }
+            
+            setWifiStatus('Connecting to device...', 'info');
+            
+            if (!await connectSerial()) {
+                setWifiStatus('Failed to connect. Select the serial port.', 'error');
+                return;
+            }
+            
+            await new Promise(r => setTimeout(r, 500));
+            
+            setWifiStatus('Sending WiFi configuration...', 'info');
+            
+            const command = `WIFI:${ssid}:${password}:1`;
+            await sendSerial(command);
+            
+            setWifiStatus('Credentials sent. Waiting for connection...', 'info');
+        }
+        
+        // Check Web Serial support
+        if (!('serial' in navigator)) {
+            document.getElementById('step-2').innerHTML = `
+                <h2>Configure WiFi</h2>
+                <div class="status-message error visible">
+                    <strong>Web Serial not supported</strong><br>
+                    Your browser doesn't support Web Serial. Use Chrome or Edge, 
+                    or configure WiFi by connecting to the device's "Webex-Display-XXXX" WiFi network.
+                </div>
+                <div class="wizard-nav">
+                    <button class="btn-secondary" onclick="goToStep(1)">← Back</button>
+                    <button class="btn-next" onclick="goToStep(3)">Skip & Finish →</button>
+                </div>
+            `;
+        }
+    </script>
 </body>
 </html>

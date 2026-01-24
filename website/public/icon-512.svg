@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <style>
+      .led { rx: 3; ry: 3; }
+      .cyan { fill: #00D4FF; }
+      .green { fill: #7ED321; }
+      .white { fill: #FFFFFF; }
+    </style>
+  </defs>
+
+  <!-- Dark background -->
+  <rect width="512" height="512" fill="#12121f" rx="48" ry="48"/>
+
+  <!-- Grid pattern -->
+  <g opacity="0.06">
+    <pattern id="grid" width="12" height="12" patternUnits="userSpaceOnUse">
+      <rect width="10" height="10" x="1" y="1" fill="#333" rx="2" ry="2"/>
+    </pattern>
+    <rect width="512" height="512" fill="url(#grid)" rx="48" ry="48"/>
+  </g>
+
+  <!-- CYAN LOOP - Left loop -->
+  <!-- Top arc -->
+  <rect x="92" y="108" width="10" height="10" class="led cyan"/>
+  <rect x="104" y="96" width="10" height="10" class="led cyan"/>
+  <rect x="116" y="88" width="10" height="10" class="led cyan"/>
+  <rect x="128" y="84" width="10" height="10" class="led cyan"/>
+  <rect x="140" y="80" width="10" height="10" class="led cyan"/>
+  <rect x="152" y="80" width="10" height="10" class="led cyan"/>
+  <rect x="164" y="80" width="10" height="10" class="led cyan"/>
+  <rect x="176" y="84" width="10" height="10" class="led cyan"/>
+  <rect x="188" y="88" width="10" height="10" class="led cyan"/>
+  <rect x="200" y="96" width="10" height="10" class="led cyan"/>
+  <rect x="212" y="108" width="10" height="10" class="led cyan"/>
+  
+  <!-- Right side of cyan going down - BEHIND green -->
+  <rect x="224" y="120" width="10" height="10" class="led cyan"/>
+  <rect x="232" y="132" width="10" height="10" class="led cyan"/>
+  <rect x="240" y="148" width="10" height="10" class="led cyan"/>
+  <rect x="244" y="164" width="10" height="10" class="led cyan"/>
+  
+  <!-- Left side of cyan going down -->
+  <rect x="80" y="120" width="10" height="10" class="led cyan"/>
+  <rect x="68" y="136" width="10" height="10" class="led cyan"/>
+  <rect x="60" y="152" width="10" height="10" class="led cyan"/>
+  <rect x="52" y="168" width="10" height="10" class="led cyan"/>
+  <rect x="48" y="184" width="10" height="10" class="led cyan"/>
+  <rect x="48" y="200" width="10" height="10" class="led cyan"/>
+  <rect x="52" y="216" width="10" height="10" class="led cyan"/>
+  <rect x="60" y="232" width="10" height="10" class="led cyan"/>
+  <rect x="68" y="248" width="10" height="10" class="led cyan"/>
+  <rect x="80" y="264" width="10" height="10" class="led cyan"/>
+  
+  <!-- Bottom arc of cyan -->
+  <rect x="92" y="276" width="10" height="10" class="led cyan"/>
+  <rect x="104" y="288" width="10" height="10" class="led cyan"/>
+  <rect x="116" y="296" width="10" height="10" class="led cyan"/>
+  <rect x="128" y="300" width="10" height="10" class="led cyan"/>
+  <rect x="140" y="304" width="10" height="10" class="led cyan"/>
+  <rect x="152" y="304" width="10" height="10" class="led cyan"/>
+  <rect x="164" y="304" width="10" height="10" class="led cyan"/>
+  <rect x="176" y="300" width="10" height="10" class="led cyan"/>
+  <rect x="188" y="296" width="10" height="10" class="led cyan"/>
+  <rect x="200" y="288" width="10" height="10" class="led cyan"/>
+  <rect x="212" y="276" width="10" height="10" class="led cyan"/>
+  
+  <!-- Right side of cyan coming back up - IN FRONT of green -->
+  <rect x="224" y="264" width="10" height="10" class="led cyan"/>
+  <rect x="232" y="252" width="10" height="10" class="led cyan"/>
+  <rect x="240" y="236" width="10" height="10" class="led cyan"/>
+  <rect x="244" y="220" width="10" height="10" class="led cyan"/>
+
+  <!-- GREEN LOOP - Right loop -->
+  <!-- Top arc -->
+  <rect x="300" y="108" width="10" height="10" class="led green"/>
+  <rect x="312" y="96" width="10" height="10" class="led green"/>
+  <rect x="324" y="88" width="10" height="10" class="led green"/>
+  <rect x="336" y="84" width="10" height="10" class="led green"/>
+  <rect x="348" y="80" width="10" height="10" class="led green"/>
+  <rect x="360" y="80" width="10" height="10" class="led green"/>
+  <rect x="372" y="80" width="10" height="10" class="led green"/>
+  <rect x="384" y="84" width="10" height="10" class="led green"/>
+  <rect x="396" y="88" width="10" height="10" class="led green"/>
+  <rect x="408" y="96" width="10" height="10" class="led green"/>
+  <rect x="420" y="108" width="10" height="10" class="led green"/>
+  
+  <!-- Right side of green going down -->
+  <rect x="432" y="120" width="10" height="10" class="led green"/>
+  <rect x="440" y="136" width="10" height="10" class="led green"/>
+  <rect x="448" y="152" width="10" height="10" class="led green"/>
+  <rect x="456" y="168" width="10" height="10" class="led green"/>
+  <rect x="460" y="184" width="10" height="10" class="led green"/>
+  <rect x="460" y="200" width="10" height="10" class="led green"/>
+  <rect x="456" y="216" width="10" height="10" class="led green"/>
+  <rect x="448" y="232" width="10" height="10" class="led green"/>
+  <rect x="440" y="248" width="10" height="10" class="led green"/>
+  <rect x="432" y="264" width="10" height="10" class="led green"/>
+  
+  <!-- Left side of green going down - IN FRONT of cyan -->
+  <rect x="288" y="120" width="10" height="10" class="led green"/>
+  <rect x="276" y="136" width="10" height="10" class="led green"/>
+  <rect x="268" y="152" width="10" height="10" class="led green"/>
+  <rect x="260" y="168" width="10" height="10" class="led green"/>
+  <rect x="256" y="184" width="10" height="10" class="led green"/>
+  <rect x="256" y="200" width="10" height="10" class="led green"/>
+  <rect x="260" y="216" width="10" height="10" class="led green"/>
+  <rect x="268" y="232" width="10" height="10" class="led green"/>
+  <rect x="276" y="248" width="10" height="10" class="led green"/>
+  <rect x="288" y="264" width="10" height="10" class="led green"/>
+  
+  <!-- Bottom arc of green -->
+  <rect x="300" y="276" width="10" height="10" class="led green"/>
+  <rect x="312" y="288" width="10" height="10" class="led green"/>
+  <rect x="324" y="296" width="10" height="10" class="led green"/>
+  <rect x="336" y="300" width="10" height="10" class="led green"/>
+  <rect x="348" y="304" width="10" height="10" class="led green"/>
+  <rect x="360" y="304" width="10" height="10" class="led green"/>
+  <rect x="372" y="304" width="10" height="10" class="led green"/>
+  <rect x="384" y="300" width="10" height="10" class="led green"/>
+  <rect x="396" y="296" width="10" height="10" class="led green"/>
+  <rect x="408" y="288" width="10" height="10" class="led green"/>
+  <rect x="420" y="276" width="10" height="10" class="led green"/>
+
+  <!-- "DISPLAY" text centered at bottom -->
+  <!-- D -->
+  <rect x="128" y="388" width="8" height="8" class="led white"/>
+  <rect x="136" y="388" width="8" height="8" class="led white"/>
+  <rect x="128" y="396" width="8" height="8" class="led white"/>
+  <rect x="144" y="396" width="8" height="8" class="led white"/>
+  <rect x="128" y="404" width="8" height="8" class="led white"/>
+  <rect x="144" y="404" width="8" height="8" class="led white"/>
+  <rect x="128" y="412" width="8" height="8" class="led white"/>
+  <rect x="144" y="412" width="8" height="8" class="led white"/>
+  <rect x="128" y="420" width="8" height="8" class="led white"/>
+  <rect x="136" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- I -->
+  <rect x="164" y="388" width="8" height="8" class="led white"/>
+  <rect x="172" y="388" width="8" height="8" class="led white"/>
+  <rect x="180" y="388" width="8" height="8" class="led white"/>
+  <rect x="172" y="396" width="8" height="8" class="led white"/>
+  <rect x="172" y="404" width="8" height="8" class="led white"/>
+  <rect x="172" y="412" width="8" height="8" class="led white"/>
+  <rect x="164" y="420" width="8" height="8" class="led white"/>
+  <rect x="172" y="420" width="8" height="8" class="led white"/>
+  <rect x="180" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- S -->
+  <rect x="204" y="388" width="8" height="8" class="led white"/>
+  <rect x="212" y="388" width="8" height="8" class="led white"/>
+  <rect x="220" y="388" width="8" height="8" class="led white"/>
+  <rect x="196" y="396" width="8" height="8" class="led white"/>
+  <rect x="204" y="404" width="8" height="8" class="led white"/>
+  <rect x="212" y="404" width="8" height="8" class="led white"/>
+  <rect x="224" y="412" width="8" height="8" class="led white"/>
+  <rect x="196" y="420" width="8" height="8" class="led white"/>
+  <rect x="204" y="420" width="8" height="8" class="led white"/>
+  <rect x="212" y="420" width="8" height="8" class="led white"/>
+  <rect x="220" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- P -->
+  <rect x="240" y="388" width="8" height="8" class="led white"/>
+  <rect x="248" y="388" width="8" height="8" class="led white"/>
+  <rect x="256" y="388" width="8" height="8" class="led white"/>
+  <rect x="240" y="396" width="8" height="8" class="led white"/>
+  <rect x="264" y="396" width="8" height="8" class="led white"/>
+  <rect x="240" y="404" width="8" height="8" class="led white"/>
+  <rect x="248" y="404" width="8" height="8" class="led white"/>
+  <rect x="256" y="404" width="8" height="8" class="led white"/>
+  <rect x="240" y="412" width="8" height="8" class="led white"/>
+  <rect x="240" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- L -->
+  <rect x="280" y="388" width="8" height="8" class="led white"/>
+  <rect x="280" y="396" width="8" height="8" class="led white"/>
+  <rect x="280" y="404" width="8" height="8" class="led white"/>
+  <rect x="280" y="412" width="8" height="8" class="led white"/>
+  <rect x="280" y="420" width="8" height="8" class="led white"/>
+  <rect x="288" y="420" width="8" height="8" class="led white"/>
+  <rect x="296" y="420" width="8" height="8" class="led white"/>
+  <rect x="304" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- A -->
+  <rect x="328" y="388" width="8" height="8" class="led white"/>
+  <rect x="336" y="388" width="8" height="8" class="led white"/>
+  <rect x="320" y="396" width="8" height="8" class="led white"/>
+  <rect x="344" y="396" width="8" height="8" class="led white"/>
+  <rect x="320" y="404" width="8" height="8" class="led white"/>
+  <rect x="328" y="404" width="8" height="8" class="led white"/>
+  <rect x="336" y="404" width="8" height="8" class="led white"/>
+  <rect x="344" y="404" width="8" height="8" class="led white"/>
+  <rect x="320" y="412" width="8" height="8" class="led white"/>
+  <rect x="344" y="412" width="8" height="8" class="led white"/>
+  <rect x="320" y="420" width="8" height="8" class="led white"/>
+  <rect x="344" y="420" width="8" height="8" class="led white"/>
+  
+  <!-- Y -->
+  <rect x="360" y="388" width="8" height="8" class="led white"/>
+  <rect x="384" y="388" width="8" height="8" class="led white"/>
+  <rect x="368" y="396" width="8" height="8" class="led white"/>
+  <rect x="376" y="396" width="8" height="8" class="led white"/>
+  <rect x="372" y="404" width="8" height="8" class="led white"/>
+  <rect x="372" y="412" width="8" height="8" class="led white"/>
+  <rect x="372" y="420" width="8" height="8" class="led white"/>
+
+  <!-- Panel frame -->
+  <rect x="0" y="0" width="512" height="512" fill="none" stroke="#2d2d44" stroke-width="6" rx="48" ry="48"/>
+</svg>

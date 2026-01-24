@@ -18,8 +18,10 @@
  * @brief Webex Presence Information
  */
 struct WebexPresence {
-    String status;           // active, inactive, DoNotDisturb, busy, OutOfOffice, pending
+    String status;           // active, call, DoNotDisturb, inactive, meeting,
+                             // OutOfOffice, pending, presenting, unknown
     String display_name;
+    String first_name;       // User's first name for auto-population
     String email;
     String last_activity;
     bool valid;

@@ -397,19 +397,23 @@ void loop() {
             if (bridge_client.hasUpdate()) {
                 BridgeUpdate update = bridge_client.getUpdate();
                 app_state.webex_status = update.status;
+                app_state.last_bridge_status_time = millis();  // Track when we received status
                 // Derive in_call from status if not connected to xAPI
                 if (!app_state.xapi_connected) {
-                    app_state.in_call = (update.status == "meeting" || update.status == "busy");
+                    app_state.in_call = (update.status == "meeting" || update.status == "busy" ||
+                                         update.status == "call" || update.status == "presenting");
                 }
             }
         } else {
             app_state.bridge_connected = false;
             app_state.embedded_app_connected = false;
+            app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
         }
     } else {
         // WiFi not connected
         app_state.bridge_connected = false;
         app_state.embedded_app_connected = false;
+        app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
     }
 
     // Process xAPI WebSocket
@@ -426,19 +430,45 @@ void loop() {
         }
     }
 
-    // Poll Webex API if bridge not connected (fallback)
-    if (!app_state.bridge_connected && app_state.webex_authenticated) {
+    // Poll Webex API as fallback when bridge status is unavailable or stale
+    // Conditions for fallback polling:
+    // 1. Bridge not connected at all, OR
+    // 2. Bridge connected but embedded app not connected, OR  
+    // 3. Bridge connected but status is stale (no update in 60+ seconds)
+    const unsigned long BRIDGE_STALE_THRESHOLD = 60000UL;  // 60 seconds
+    bool bridge_status_stale = (app_state.last_bridge_status_time > 0) && 
+                               (current_time - app_state.last_bridge_status_time > BRIDGE_STALE_THRESHOLD);
+    bool need_api_fallback = !app_state.bridge_connected || 
+                             !app_state.embedded_app_connected ||
+                             bridge_status_stale;
+    
+    if (need_api_fallback && app_state.webex_authenticated) {
         unsigned long poll_interval = config_manager.getWebexPollInterval() * 1000UL;
 
         if (current_time - app_state.last_poll_time >= poll_interval) {
             app_state.last_poll_time = current_time;
+            
+            // Log why we're polling (for debugging)
+            if (bridge_status_stale) {
+                Serial.println("[WEBEX] Bridge status stale, polling API directly");
+            } else if (!app_state.embedded_app_connected && app_state.bridge_connected) {
+                Serial.println("[WEBEX] Embedded app not connected, polling API directly");
+            }
 
             WebexPresence presence;
             if (webex_client.getPresence(presence)) {
                 app_state.webex_status = presence.status;
+                
+                // Auto-populate display name with firstName if not already set
+                if (config_manager.getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {
+                    config_manager.setDisplayName(presence.first_name);
+                    Serial.printf("[WEBEX] Auto-populated display name: %s\n", presence.first_name.c_str());
+                }
+                
                 // Derive in_call from status if not connected to xAPI
                 if (!app_state.xapi_connected) {
-                    app_state.in_call = (presence.status == "meeting" || presence.status == "busy");
+                    app_state.in_call = (presence.status == "meeting" || presence.status == "busy" ||
+                                         presence.status == "call" || presence.status == "presenting");
                 }
             }
         }
@@ -505,15 +535,27 @@ void loop() {
     if (current_time - last_connection_print >= 15000) {
         last_connection_print = current_time;
         if (app_state.wifi_connected) {
+            // Determine status source for logging
+            const char* status_source = "API";
+            if (app_state.bridge_connected && app_state.embedded_app_connected) {
+                status_source = "Bridge/App";
+            } else if (app_state.bridge_connected) {
+                status_source = "Bridge (no app)";
+            }
+            
             Serial.println();
             Serial.println("=== WEBEX STATUS DISPLAY ===");
             Serial.printf("IP: %s | mDNS: %s.local\n",
                           WiFi.localIP().toString().c_str(),
                           mdns_manager.getHostname().c_str());
-            Serial.printf("Status: %s | Bridge: %s | MQTT: %s\n",
+            Serial.printf("Status: %s (via %s) | MQTT: %s\n",
                           app_state.webex_status.c_str(),
-                          app_state.bridge_connected ? "Yes" : "No",
+                          status_source,
                           app_state.mqtt_connected ? "Yes" : "No");
+            Serial.printf("Bridge: %s | App: %s | API Auth: %s\n",
+                          app_state.bridge_connected ? "Yes" : "No",
+                          app_state.embedded_app_connected ? "Yes" : "No",
+                          app_state.webex_authenticated ? "Yes" : "No");
             Serial.println("============================");
         }
     }

@@ -382,7 +382,7 @@ async function loadDisplayStatus() {
         document.getElementById('firmware-build-id').textContent = data.firmware_build_id || '--';
         document.getElementById('current-version').textContent = data.firmware_version || '--';
         document.getElementById('current-build-id').textContent = data.firmware_build_id || '--';
-        document.getElementById('app-version').textContent = 'v' + (data.firmware_version || '1.0.0');
+        document.getElementById('app-version').textContent = 'v' + (data.firmware_version || '1.1.16');
         document.getElementById('ip-address').textContent = data.ip_address || '--';
         document.getElementById('mac-address').textContent = data.mac_address || '--';
         document.getElementById('display-host').textContent = data.ip_address || state.localHost;
