@@ -242,6 +242,25 @@ body {
     font-size: 13px;
 }
 
+.clear-pairing-section {
+    background-color: rgba(255, 204, 0, 0.1);
+    border: 1px solid var(--color-warning);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.clear-pairing-section .help-text {
+    color: var(--color-warning);
+    margin-bottom: 10px;
+}
+
+.clear-pairing-section .btn-warning {
+    width: auto;
+    padding: 8px 16px;
+}
+
 /* ============================================================
    Tabs
    ============================================================ */

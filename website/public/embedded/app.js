@@ -207,6 +207,19 @@ function showSetupScreen() {
     document.getElementById('setup-screen').style.display = 'block';
     document.getElementById('main-screen').style.display = 'none';
     updateConnectionStatus('display', false);
+    
+    // Show clear pairing button if there's a saved pairing
+    const savedCode = localStorage.getItem(CONFIG.pairingCodeKey);
+    const clearSection = document.getElementById('clear-pairing-section');
+    if (clearSection) {
+        clearSection.style.display = savedCode ? 'block' : 'none';
+    }
+    
+    // Pre-fill the pairing code input if saved
+    const pairingInput = document.getElementById('pairing-code');
+    if (pairingInput && savedCode) {
+        pairingInput.value = savedCode;
+    }
 }
 
 function showMainScreen() {
@@ -334,8 +347,14 @@ async function connectToBridge(bridgeUrl, pairingCode) {
         state.wsConnected = false;
         updateConnectionStatus('display', false);
         
+        // Clear saved pairing on connection failure so user can enter new code
+        localStorage.removeItem(CONFIG.bridgeUrlKey);
+        localStorage.removeItem(CONFIG.pairingCodeKey);
+        state.bridgeUrl = null;
+        state.pairingCode = null;
+        
         if (errorEl) {
-            errorEl.textContent = `Cannot connect to bridge. ${error.message}`;
+            errorEl.textContent = `Cannot connect to bridge. ${error.message}. Please re-enter your pairing code.`;
             errorEl.style.display = 'block';
         }
         
@@ -1316,6 +1335,30 @@ function setupEventListeners() {
             e.preventDefault();
             document.getElementById('connect-bridge-btn').click();
         }
+    });
+    
+    // Clear pairing button
+    document.getElementById('clear-pairing-btn')?.addEventListener('click', () => {
+        localStorage.removeItem(CONFIG.bridgeUrlKey);
+        localStorage.removeItem(CONFIG.pairingCodeKey);
+        localStorage.removeItem(CONFIG.storageKey);
+        state.bridgeUrl = null;
+        state.pairingCode = null;
+        state.displayAddress = null;
+        
+        // Clear the input fields
+        const pairingInput = document.getElementById('pairing-code');
+        if (pairingInput) pairingInput.value = '';
+        
+        // Hide the clear pairing section
+        const clearSection = document.getElementById('clear-pairing-section');
+        if (clearSection) clearSection.style.display = 'none';
+        
+        // Hide error message
+        const errorEl = document.getElementById('connection-error');
+        if (errorEl) errorEl.style.display = 'none';
+        
+        logActivity('info', 'Saved pairing cleared - enter new code');
     });
     
     // Setup screen - direct connect button
