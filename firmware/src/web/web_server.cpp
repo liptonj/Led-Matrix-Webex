@@ -20,6 +20,7 @@
 
 #include "web_server.h"
 #include "ota_bundle.h"
+#include "embedded_assets.h"
 #include "../meraki/mqtt_client.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -44,13 +45,34 @@ WebServerManager::WebServerManager()
 }
 
 WebServerManager::~WebServerManager() {
+    stop();
+}
+
+void WebServerManager::stop() {
+    if (!running) {
+        return;
+    }
+    
+    Serial.println("[WEB] Stopping web server...");
+    
     if (server) {
+        server->end();
         delete server;
+        server = nullptr;
     }
     if (dns_server) {
         dns_server->stop();
         delete dns_server;
+        dns_server = nullptr;
     }
+    
+    // Unmount LittleFS since serveStatic() handlers had references to it
+    // This ensures clean state for OTA filesystem flashing
+    LittleFS.end();
+    
+    running = false;
+    captive_portal_active = false;
+    Serial.println("[WEB] Web server stopped, LittleFS unmounted");
 }
 
 void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules) {
@@ -58,9 +80,10 @@ void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManag
     app_state = state;
     module_manager = modules;
 
-    // Initialize LittleFS for static files
+    // Initialize LittleFS for dynamic user content (configs, downloads)
+    // Static web assets are now embedded in firmware
     if (!LittleFS.begin(true)) {
-        Serial.println("[WEB] Failed to mount LittleFS!");
+        Serial.println("[WEB] Failed to mount LittleFS (dynamic content may be unavailable)");
     }
 
     // Create server on port 80
@@ -369,14 +392,29 @@ void WebServerManager::setupRoutes() {
         request->redirect("http://192.168.4.1/?portal=1");
     });
 
-    // STATIC FILE HANDLERS - Register AFTER all API endpoints
-    // This ensures API routes are checked first, preventing VFS errors
+    // EMBEDDED STATIC FILE HANDLERS - Register AFTER all API endpoints
+    // Static assets are now embedded in firmware (gzipped) for atomic OTA updates
     
-    // Serve embedded app static files
-    server->serveStatic("/embedded/", LittleFS, "/embedded/").setDefaultFile("index.html");
+    // Register handlers for all embedded assets
+    for (size_t i = 0; i < EMBEDDED_ASSETS_COUNT; i++) {
+        const EmbeddedAsset& asset = EMBEDDED_ASSETS[i];
+        
+        // Capture asset by value for lambda
+        const uint8_t* data = asset.data;
+        size_t size = asset.size;
+        const char* content_type = asset.content_type;
+        
+        server->on(asset.url_path, HTTP_GET, [data, size, content_type](AsyncWebServerRequest* request) {
+            AsyncWebServerResponse* response = request->beginResponse_P(200, content_type, data, size);
+            response->addHeader("Content-Encoding", "gzip");
+            response->addHeader("Cache-Control", "public, max-age=86400");  // Cache for 24 hours
+            request->send(response);
+        });
+    }
     
-    // Serve main app static files (must be last)
-    server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+    // Dynamic content from LittleFS (user configs, downloads)
+    // Keep LittleFS mounted for dynamic user content
+    server->serveStatic("/data/", LittleFS, "/data/");
 
     // 404 handler for anything not matched
     server->onNotFound([this](AsyncWebServerRequest* request) {
@@ -388,8 +426,18 @@ void WebServerManager::setupRoutes() {
                 request->redirect("http://192.168.4.1/?portal=1");
                 return;
             }
-            // For non-API requests, try serving index.html (SPA fallback)
-            request->send(LittleFS, "/index.html", "text/html");
+            // For non-API requests, serve embedded index.html (SPA fallback)
+            // Find the index.html asset
+            for (size_t i = 0; i < EMBEDDED_ASSETS_COUNT; i++) {
+                if (strcmp(EMBEDDED_ASSETS[i].url_path, "/index.html") == 0) {
+                    AsyncWebServerResponse* response = request->beginResponse_P(
+                        200, "text/html", EMBEDDED_ASSETS[i].data, EMBEDDED_ASSETS[i].size);
+                    response->addHeader("Content-Encoding", "gzip");
+                    request->send(response);
+                    return;
+                }
+            }
+            request->send(404, "text/plain", "Not found");
         }
     });
 }

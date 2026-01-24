@@ -4,6 +4,7 @@
  */
 
 #include "web_setup.h"
+#include "embedded_assets.h"
 #include "debug.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -137,13 +138,9 @@ void WebSetup::begin(ConfigStore* config, WiFiProvisioner* wifi, OTADownloader* 
     LOG_DEBUG(WEB_TAG, "Config store: %p, WiFi provisioner: %p, OTA downloader: %p",
               config, wifi, ota);
 
-    // Initialize LittleFS for static files
-    LOG_DEBUG(WEB_TAG, "Mounting LittleFS...");
-    if (!LittleFS.begin(true)) {
-        LOG_WARN(WEB_TAG, "Failed to mount LittleFS, using embedded HTML");
-    } else {
-        LOG_INFO(WEB_TAG, "LittleFS mounted successfully");
-    }
+    // LittleFS no longer needed for static files (now embedded in firmware)
+    // Skip mounting - this avoids conflicts with main firmware's LittleFS partition
+    LOG_INFO(WEB_TAG, "Static files embedded in firmware, skipping LittleFS mount");
 
     // Create server on port 80
     LOG_DEBUG(WEB_TAG, "Creating AsyncWebServer on port 80");
@@ -390,29 +387,38 @@ void WebSetup::setupRoutes() {
         }
     );
 
-    // Serve static files from LittleFS only if bootstrap marker file exists
-    // This protects the bootstrap from main firmware's LittleFS which shares the same partition.
-    // If marker doesn't exist, the embedded HTML is used instead.
-    if (LittleFS.exists("/.bootstrap_ui")) {
-        if (LittleFS.exists("/index.html.gz")) {
-            LOG_INFO(WEB_TAG, "Bootstrap marker found, using LittleFS gzip UI");
-            server->on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-                AsyncWebServerResponse* response = request->beginResponse(LittleFS, "/index.html.gz", "text/html");
+    // Serve embedded static assets (gzipped, compiled into firmware)
+    // This eliminates LittleFS dependency for static files and enables atomic OTA updates
+    LOG_INFO(WEB_TAG, "Using embedded web assets (%d files)", EMBEDDED_ASSETS_COUNT);
+    
+    // Serve root (/) with embedded index.html
+    server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        for (size_t i = 0; i < EMBEDDED_ASSETS_COUNT; i++) {
+            if (strcmp(EMBEDDED_ASSETS[i].url_path, "/index.html") == 0) {
+                AsyncWebServerResponse* response = request->beginResponse_P(
+                    200, "text/html", EMBEDDED_ASSETS[i].data, EMBEDDED_ASSETS[i].size);
                 response->addHeader("Content-Encoding", "gzip");
+                response->addHeader("Cache-Control", "public, max-age=86400");
                 request->send(response);
-            });
-        } else {
-            LOG_INFO(WEB_TAG, "Bootstrap marker found, using LittleFS UI");
+                return;
+            }
         }
-        if (LittleFS.exists("/index.html")) {
-            server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-        } else {
-            server->serveStatic("/", LittleFS, "/");
-        }
-    } else {
-        LOG_INFO(WEB_TAG, "No bootstrap marker, using embedded HTML");
-        server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
-            handleRoot(request);
+        request->send(404, "text/plain", "Not found");
+    });
+
+    for (size_t i = 0; i < EMBEDDED_ASSETS_COUNT; i++) {
+        const EmbeddedAsset& asset = EMBEDDED_ASSETS[i];
+        
+        // Capture asset by value for lambda
+        const uint8_t* data = asset.data;
+        size_t size = asset.size;
+        const char* content_type = asset.content_type;
+        
+        server->on(asset.url_path, HTTP_GET, [data, size, content_type](AsyncWebServerRequest* request) {
+            AsyncWebServerResponse* response = request->beginResponse_P(200, content_type, data, size);
+            response->addHeader("Content-Encoding", "gzip");
+            response->addHeader("Cache-Control", "public, max-age=86400");
+            request->send(response);
         });
     }
 

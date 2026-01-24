@@ -198,7 +198,8 @@ bool OTADownloader::downloadAndInstallBundle(const String& bundle_url) {
     HTTPClient http;
     http.begin(client, bundle_url);
     http.addHeader("User-Agent", "ESP32-Bootstrap");
-    http.setTimeout(120000);  // 2 minute timeout for large downloads
+    // HTTPClient::setTimeout takes uint16_t; cap to 60s to avoid overflow
+    http.setTimeout(60000);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     
     int http_code = http.GET();

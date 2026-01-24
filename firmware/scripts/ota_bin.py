@@ -9,7 +9,6 @@ Default 'pio run -t upload' will now flash to ota_0 partition instead of factory
 Use 'pio run -t upload_factory' if you intentionally want to update the bootstrap.
 """
 import os
-import struct
 
 Import("env")
 
@@ -18,10 +17,11 @@ Import("env")
 # Bootstrap Protection: Override default upload address
 # ==============================================================================
 def _get_ota_app_address(pioenv: str) -> str:
-    """Get the OTA partition address for uploads (protects bootstrap)."""
-    if "esp32s3" in pioenv:
-        return "0x260000"  # ota_0 for 8MB flash
-    return "0x150000"  # ota_0 for 4MB flash
+    """Get the OTA partition address for uploads (protects bootstrap).
+    
+    Note: Only ESP32-S3 8MB is supported. 4MB ESP32 support has been dropped.
+    """
+    return "0x260000"  # ota_0 for 8MB flash
 
 
 def _override_upload_address():
@@ -65,29 +65,23 @@ _override_upload_address()
 
 
 def _ota_params(pioenv: str, use_factory: bool = False) -> dict:
-    """Get flash parameters for the given environment.
+    """Get flash parameters for ESP32-S3 8MB environment.
+    
+    Note: 4MB ESP32 support has been dropped. Web assets are now embedded
+    in firmware, eliminating the need for separate LittleFS OTA updates.
     
     Args:
         pioenv: PlatformIO environment name
         use_factory: If True, target factory partition (bootstrap).
                      If False, target ota_0 partition (main firmware).
     """
-    if "esp32s3" in pioenv:
-        return {
-            "chip": "esp32s3",
-            "flash_freq": "80m",
-            "flash_size": "8MB",
-            # factory=0x10000 (bootstrap), ota_0=0x260000 (main firmware)
-            "app_addr": "0x10000" if use_factory else "0x260000",
-            "fs_addr": "0x700000",
-        }
+    # ESP32-S3 8MB only (4MB ESP32 support dropped)
     return {
-        "chip": "esp32",
-        "flash_freq": "40m",
-        "flash_size": "4MB",
-        # factory=0x10000 (bootstrap), ota_0=0x150000 (main firmware)
-        "app_addr": "0x10000" if use_factory else "0x150000",
-        "fs_addr": "0x3D0000",
+        "chip": "esp32s3",
+        "flash_freq": "80m",
+        "flash_size": "8MB",
+        # factory=0x10000 (bootstrap), ota_0=0x260000 (main firmware)
+        "app_addr": "0x10000" if use_factory else "0x260000",
     }
 
 
@@ -146,39 +140,16 @@ def _apply_env_defines() -> None:
         print("[ENV] No credentials found in .env file")
 
 
-def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
-    _apply_env_defines()
-    if env is None:
-        env = _kwargs.get("env")
-    if env is None:
-        print("Skipping OTA bundle: build environment not available.")
-        return 1
-    pioenv = env["PIOENV"]
-    build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
-    firmware_bin = os.path.join(build_dir, "firmware.bin")
-    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-    ota_bin = os.path.join(build_dir, f"firmware-ota-{pioenv}.bin")
-    if not os.path.exists(firmware_bin) or not os.path.exists(littlefs_bin):
-        print("Skipping OTA bundle: firmware or LittleFS bin missing.")
-        return 1
-
-    app_size = os.path.getsize(firmware_bin)
-    fs_size = os.path.getsize(littlefs_bin)
-
-    with open(ota_bin, "wb") as output:
-        output.write(b"LMWB")
-        output.write(struct.pack("<III", app_size, fs_size, 0))
-        with open(firmware_bin, "rb") as firmware:
-            output.write(firmware.read())
-        with open(littlefs_bin, "rb") as littlefs:
-            output.write(littlefs.read())
-
-    print(f"Created OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-    return 0
+# Note: LMWB bundle creation (_merge_ota_bin) has been removed.
+# Web assets are now embedded in firmware, eliminating the need for
+# bundled firmware + LittleFS OTA updates. OTA now only downloads firmware.bin.
 
 
 def _upload_to_partition(source=None, target=None, env=None, use_factory=False, **kwargs):
     """Upload firmware to specified partition.
+    
+    Note: Web assets are now embedded in firmware, so we only upload firmware.bin.
+    LittleFS is only used for dynamic user content and doesn't need to be uploaded.
     
     Args:
         use_factory: If True, upload to factory partition (DANGEROUS - overwrites bootstrap).
@@ -190,11 +161,11 @@ def _upload_to_partition(source=None, target=None, env=None, use_factory=False, 
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
     firmware_bin = os.path.join(build_dir, "firmware.bin")
-    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
     params = _ota_params(pioenv, use_factory=use_factory)
 
     partition_name = "FACTORY (bootstrap)" if use_factory else "OTA_0 (main firmware)"
-    print(f"[UPLOAD] Uploading to {partition_name} partition at {params['app_addr']}")
+    print(f"[UPLOAD] Uploading firmware to {partition_name} partition at {params['app_addr']}")
+    print("[UPLOAD] Web assets are embedded in firmware - no separate LittleFS upload needed")
     
     if use_factory:
         print("[UPLOAD] WARNING: This will overwrite the bootstrap firmware!")
@@ -209,8 +180,7 @@ def _upload_to_partition(source=None, target=None, env=None, use_factory=False, 
     esptool_path = os.path.join(core_dir, "packages", "tool-esptoolpy", "esptool.py")
     cmd = (
         f'"{python_exe}" "{esptool_path}" --chip {params["chip"]} {port_arg} '
-        f'--baud {speed} write_flash {params["app_addr"]} "{firmware_bin}" '
-        f'{params["fs_addr"]} "{littlefs_bin}"'
+        f'--baud {speed} write_flash {params["app_addr"]} "{firmware_bin}"'
     )
     return env.Execute(cmd)
 
@@ -225,17 +195,8 @@ def _upload_factory_bin(source=None, target=None, env=None, **kwargs):
     return _upload_to_partition(source, target, env, use_factory=True, **kwargs)
 
 
-env.AddCustomTarget(
-    name="build_ota_bin",
-    dependencies=None,
-    actions=[
-        "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
-        _merge_ota_bin,
-    ],
-    title="Build merged OTA bin",
-    description="Builds a single bin with app + LittleFS (no bootloader)",
-)
+# Note: build_ota_bin target removed - LMWB bundles no longer needed
+# Web assets are now embedded in firmware for atomic OTA updates
 
 # Safe upload - targets OTA partition, protects bootstrap
 env.AddCustomTarget(
@@ -243,11 +204,10 @@ env.AddCustomTarget(
     dependencies=None,
     actions=[
         "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
         _upload_ota_bin,
     ],
     title="Upload to OTA partition (SAFE)",
-    description="Uploads firmware + LittleFS to ota_0 partition, protecting bootstrap",
+    description="Uploads firmware to ota_0 partition, protecting bootstrap",
 )
 
 # Legacy alias for backwards compatibility
@@ -256,12 +216,10 @@ env.AddCustomTarget(
     dependencies=None,
     actions=[
         "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
-        _merge_ota_bin,
         _upload_ota_bin,
     ],
-    title="Upload merged OTA bin (SAFE)",
-    description="Builds bundle and uploads to ota_0 partition, protecting bootstrap",
+    title="Upload firmware (SAFE)",
+    description="Uploads firmware to ota_0 partition, protecting bootstrap",
 )
 
 # Dangerous upload - targets factory partition (only for bootstrap updates)
@@ -270,7 +228,6 @@ env.AddCustomTarget(
     dependencies=None,
     actions=[
         "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
         _upload_factory_bin,
     ],
     title="Upload to FACTORY partition (DANGER)",

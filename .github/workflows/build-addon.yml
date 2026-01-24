@@ -47,8 +47,8 @@ jobs:
           cache-dependency-path: "bridge/package-lock.json"
 
       - name: Install dependencies
-        # --ignore-engines needed because @webex/* packages have invalid engine: "npm": "please-use-yarn"
-        run: npm ci --ignore-engines
+        # @webex/* packages report a nonstandard npm engine; npm does not fail without engine-strict
+        run: npm ci
 
       - name: Build TypeScript
         run: npm run build

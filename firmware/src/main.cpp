@@ -162,7 +162,7 @@ void setup() {
         String bridge_host;
         uint16_t bridge_port;
         bool bridge_found = false;
-        
+
         // Try 1: Check for user-configured bridge URL
         String configured_url = config_manager.getBridgeUrl();
         if (!configured_url.isEmpty()) {
@@ -170,14 +170,14 @@ void setup() {
             bridge_client.beginWithUrl(configured_url, pairing_manager.getCode());
             bridge_found = true;
         }
-        
+
         // Try 2: Check for user-configured bridge host/port
         if (!bridge_found) {
             String configured_host = config_manager.getBridgeHost();
             if (!configured_host.isEmpty()) {
                 uint16_t configured_port = config_manager.getBridgePort();
                 bool use_ssl = config_manager.getBridgeUseSSL();
-                
+
                 // Build URL from host/port/ssl settings
                 String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
                 Serial.printf("[INIT] Using configured bridge: %s\n", manual_url.c_str());
@@ -185,7 +185,7 @@ void setup() {
                 bridge_found = true;
             }
         }
-        
+
         // Try 3: Local mDNS discovery
         if (!bridge_found) {
             Serial.println("[INIT] Attempting mDNS discovery for local bridge...");
@@ -197,7 +197,7 @@ void setup() {
                 Serial.println("[INIT] mDNS discovery failed - no local bridge found");
             }
         }
-        
+
         // Try 4: Cloud bridge via discovery endpoint
         if (!bridge_found) {
             Serial.println("[INIT] No local bridge found, trying cloud bridge...");
@@ -213,7 +213,7 @@ void setup() {
                 bridge_found = true;
             }
         }
-        
+
         // Try 5: Fallback URL from discovery config (if cloud fails to connect)
         // This provides a configurable local network fallback
         if (!bridge_found) {
@@ -224,7 +224,7 @@ void setup() {
                 bridge_found = true;
             }
         }
-        
+
         if (bridge_found) {
             app_state.bridge_connected = false;  // Will be set true on successful connection
         }
@@ -311,18 +311,18 @@ void loop() {
     static unsigned long last_check_log = 0;
     unsigned long now = millis();
     if (now - last_check_log > 10000) {  // Log every 10 seconds
-        Serial.printf("[MAIN] Bridge config check: changed=%d wifi=%d\n", 
+        Serial.printf("[MAIN] Bridge config check: changed=%d wifi=%d\n",
                       app_state.bridge_config_changed, app_state.wifi_connected);
         last_check_log = now;
     }
-    
+
     if (app_state.bridge_config_changed && app_state.wifi_connected) {
         Serial.println("[MAIN] Bridge configuration changed - reconnecting...");
         app_state.bridge_config_changed = false;
-        
+
         // Disconnect current connection
         bridge_client.disconnect();
-        
+
         // Reconnect with new configuration
         String configured_url = config_manager.getBridgeUrl();
         if (!configured_url.isEmpty()) {
@@ -334,7 +334,7 @@ void loop() {
             if (!configured_host.isEmpty()) {
                 uint16_t configured_port = config_manager.getBridgePort();
                 bool use_ssl = config_manager.getBridgeUseSSL();
-                
+
                 String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
                 Serial.printf("[MAIN] Connecting to new bridge: %s\n", manual_url.c_str());
                 bridge_client.beginWithUrl(manual_url, pairing_manager.getCode());
@@ -351,7 +351,7 @@ void loop() {
         // Initialize bridge if not yet done
         if (!bridge_client.isInitialized()) {
             Serial.println("[BRIDGE] WiFi connected, initializing bridge connection...");
-            
+
             // Try 1: Check for user-configured bridge URL
             String configured_url = config_manager.getBridgeUrl();
             if (!configured_url.isEmpty()) {
@@ -363,7 +363,7 @@ void loop() {
                 if (!configured_host.isEmpty()) {
                     uint16_t configured_port = config_manager.getBridgePort();
                     bool use_ssl = config_manager.getBridgeUseSSL();
-                    
+
                     String manual_url = (use_ssl ? "wss://" : "ws://") + configured_host + ":" + String(configured_port);
                     Serial.printf("[BRIDGE] Using configured bridge: %s\n", manual_url.c_str());
                     bridge_client.beginWithUrl(manual_url, pairing_manager.getCode());
@@ -381,13 +381,13 @@ void loop() {
                 }
             }
         }
-        
+
         // CRITICAL: Always call loop() when initialized - this is required for
         // the WebSocketsClient library to complete handshakes and process messages
         if (bridge_client.isInitialized()) {
             bridge_client.loop();
         }
-        
+
         // Update connection state
         if (bridge_client.isConnected()) {
             app_state.bridge_connected = bridge_client.isJoined();
@@ -433,21 +433,21 @@ void loop() {
     // Poll Webex API as fallback when bridge status is unavailable or stale
     // Conditions for fallback polling:
     // 1. Bridge not connected at all, OR
-    // 2. Bridge connected but embedded app not connected, OR  
+    // 2. Bridge connected but embedded app not connected, OR
     // 3. Bridge connected but status is stale (no update in 60+ seconds)
     const unsigned long BRIDGE_STALE_THRESHOLD = 60000UL;  // 60 seconds
-    bool bridge_status_stale = (app_state.last_bridge_status_time > 0) && 
+    bool bridge_status_stale = (app_state.last_bridge_status_time > 0) &&
                                (current_time - app_state.last_bridge_status_time > BRIDGE_STALE_THRESHOLD);
-    bool need_api_fallback = !app_state.bridge_connected || 
+    bool need_api_fallback = !app_state.bridge_connected ||
                              !app_state.embedded_app_connected ||
                              bridge_status_stale;
-    
+
     if (need_api_fallback && app_state.webex_authenticated) {
         unsigned long poll_interval = config_manager.getWebexPollInterval() * 1000UL;
 
         if (current_time - app_state.last_poll_time >= poll_interval) {
             app_state.last_poll_time = current_time;
-            
+
             // Log why we're polling (for debugging)
             if (bridge_status_stale) {
                 Serial.println("[WEBEX] Bridge status stale, polling API directly");
@@ -458,13 +458,13 @@ void loop() {
             WebexPresence presence;
             if (webex_client.getPresence(presence)) {
                 app_state.webex_status = presence.status;
-                
+
                 // Auto-populate display name with firstName if not already set
                 if (config_manager.getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {
                     config_manager.setDisplayName(presence.first_name);
                     Serial.printf("[WEBEX] Auto-populated display name: %s\n", presence.first_name.c_str());
                 }
-                
+
                 // Derive in_call from status if not connected to xAPI
                 if (!app_state.xapi_connected) {
                     app_state.in_call = (presence.status == "meeting" || presence.status == "busy" ||
@@ -542,7 +542,7 @@ void loop() {
             } else if (app_state.bridge_connected) {
                 status_source = "Bridge (no app)";
             }
-            
+
             Serial.println();
             Serial.println("=== WEBEX STATUS DISPLAY ===");
             Serial.printf("IP: %s | mDNS: %s.local\n",
@@ -676,11 +676,11 @@ void check_for_updates() {
             // Check if this version previously failed - skip to avoid retry loop
             String failed_version = config_manager.getFailedOTAVersion();
             if (!failed_version.isEmpty() && failed_version == new_version) {
-                Serial.printf("[OTA] Skipping auto-update - version %s previously failed\n", 
+                Serial.printf("[OTA] Skipping auto-update - version %s previously failed\n",
                               new_version.c_str());
                 return;
             }
-            
+
             Serial.println("[OTA] Auto-update enabled, installing...");
             matrix_display.showUpdating(new_version);
 
@@ -693,7 +693,7 @@ void check_for_updates() {
                 matrix_display.unlockFromOTA();  // Unlock display on failure
                 // Record this version as failed to prevent retry loop
                 config_manager.setFailedOTAVersion(new_version);
-                Serial.printf("[OTA] Marked version %s as failed - will not auto-retry\n", 
+                Serial.printf("[OTA] Marked version %s as failed - will not auto-retry\n",
                               new_version.c_str());
             }
         }
@@ -707,7 +707,7 @@ void check_for_updates() {
  */
 String buildStatusJson() {
     JsonDocument doc;
-    
+
     doc["wifi_connected"] = app_state.wifi_connected;
     doc["webex_authenticated"] = app_state.webex_authenticated;
     doc["bridge_connected"] = app_state.bridge_connected;
@@ -722,14 +722,14 @@ String buildStatusJson() {
     doc["uptime"] = millis() / 1000;
     doc["firmware_version"] = FIRMWARE_VERSION;
     doc["rssi"] = WiFi.RSSI();
-    
+
     // Sensor data
     doc["temperature"] = app_state.temperature;
     doc["humidity"] = app_state.humidity;
     doc["door_status"] = app_state.door_status;
     doc["air_quality"] = app_state.air_quality_index;
     doc["tvoc"] = app_state.tvoc;
-    
+
     String result;
     serializeJson(doc, result);
     return result;
@@ -740,7 +740,7 @@ String buildStatusJson() {
  */
 String buildConfigJson() {
     JsonDocument doc;
-    
+
     doc["device_name"] = config_manager.getDeviceName();
     doc["display_name"] = config_manager.getDisplayName();
     doc["brightness"] = config_manager.getBrightness();
@@ -755,7 +755,7 @@ String buildConfigJson() {
     doc["ota_url"] = config_manager.getOTAUrl();
     doc["auto_update"] = config_manager.getAutoUpdate();
     doc["pairing_code"] = pairing_manager.getCode();
-    
+
     String result;
     serializeJson(doc, result);
     return result;
@@ -766,25 +766,25 @@ String buildConfigJson() {
  */
 void handleBridgeCommand(const BridgeCommand& cmd) {
     Serial.printf("[CMD] Processing command: %s\n", cmd.command.c_str());
-    
+
     if (cmd.command == "get_status") {
         // Send current status
         bridge_client.sendStatus(buildStatusJson());
-        
+
     } else if (cmd.command == "get_config") {
         // Send current config
         bridge_client.sendConfig(buildConfigJson());
-        
+
     } else if (cmd.command == "set_config") {
         // Parse and apply config changes
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, cmd.payload);
-        
+
         if (error) {
             bridge_client.sendCommandResponse(cmd.requestId, false, "", "Invalid JSON");
             return;
         }
-        
+
         // Apply settings
         if (doc["display_name"].is<const char*>()) {
             config_manager.setDisplayName(doc["display_name"].as<String>());
@@ -809,10 +809,10 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
         if (doc["date_format"].is<const char*>()) {
             config_manager.setDateFormat(doc["date_format"].as<String>());
         }
-        
+
         bridge_client.sendCommandResponse(cmd.requestId, true, buildConfigJson(), "");
         Serial.println("[CMD] Config updated");
-        
+
     } else if (cmd.command == "set_brightness") {
         JsonDocument doc;
         deserializeJson(doc, cmd.payload);
@@ -820,7 +820,7 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
         config_manager.setBrightness(brightness);
         matrix_display.setBrightness(brightness);
         bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
-        
+
     } else if (cmd.command == "regenerate_pairing") {
         String newCode = pairing_manager.generateCode(true);
         JsonDocument resp;
@@ -828,20 +828,20 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
         String respStr;
         serializeJson(resp, respStr);
         bridge_client.sendCommandResponse(cmd.requestId, true, respStr, "");
-        
+
     } else if (cmd.command == "reboot") {
         bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
         delay(500);
         ESP.restart();
-        
+
     } else if (cmd.command == "factory_reset") {
         bridge_client.sendCommandResponse(cmd.requestId, true, "", "");
         config_manager.factoryReset();
         delay(500);
         ESP.restart();
-        
+
     } else {
-        bridge_client.sendCommandResponse(cmd.requestId, false, "", 
+        bridge_client.sendCommandResponse(cmd.requestId, false, "",
             "Unknown command: " + cmd.command);
     }
 }

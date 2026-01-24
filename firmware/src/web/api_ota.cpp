@@ -85,6 +85,13 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     // Give the response time to be sent
     delay(200);
     
+    // Stop the web server before OTA to prevent LittleFS conflicts
+    // The async web server's serveStatic() handlers keep references to LittleFS
+    // which causes issues when OTA tries to unmount and flash the filesystem partition
+    Serial.println("[WEB] Stopping web server for OTA...");
+    stop();
+    delay(100);  // Allow async tasks to finish
+    
     // Trigger OTA update (this will reboot on success)
     if (!ota_manager.performUpdate()) {
         Serial.println("[WEB] OTA update failed");
@@ -92,6 +99,8 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
         // Mark version as failed to prevent auto-retry loops
         config_manager->setFailedOTAVersion(new_version);
         Serial.printf("[WEB] Marked version %s as failed\n", new_version.c_str());
+        Serial.println("[WEB] Restarting web server after OTA failure...");
+        begin(config_manager, app_state, module_manager);
     }
 }
 

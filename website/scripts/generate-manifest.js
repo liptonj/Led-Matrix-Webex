@@ -3,6 +3,9 @@
 /**
  * Generate firmware version manifest from GitHub releases
  * This script fetches release information and creates manifest.json
+ * 
+ * Note: Web assets are now embedded in firmware. OTA updates only download
+ * firmware.bin - no more LMWB bundles or separate LittleFS downloads.
  */
 
 const https = require('https');
@@ -55,11 +58,13 @@ function fetchReleases() {
 }
 
 function transformRelease(release) {
-    // Filter to only include OTA bundle files (firmware-ota-*.bin and bootstrap-ota-*.bin)
-    const otaBundles = release.assets
+    // Filter to firmware binary files (web assets now embedded in firmware)
+    const firmwareFiles = release.assets
         .filter(asset => {
             const name = asset.name.toLowerCase();
-            return name.endsWith('.bin') && name.includes('ota');
+            return name.endsWith('.bin') && 
+                   name.includes('firmware') && 
+                   !name.includes('bootstrap');
         })
         .map(asset => ({
             name: asset.name,
@@ -75,7 +80,7 @@ function transformRelease(release) {
         build_date: release.published_at,
         notes: release.body ? release.body.split('\n')[0] : '',
         prerelease: release.prerelease,
-        bundles: otaBundles
+        firmware: firmwareFiles  // Renamed from bundles - now firmware-only
     };
 }
 
@@ -88,96 +93,30 @@ function extractVersion(tag) {
 }
 
 /**
- * Find asset URL for a specific board type and asset type
+ * Find asset URL for a specific board type
  * @param {Array} assets - Release assets array
- * @param {string} boardType - 'esp32' or 'esp32s3'
- * @param {string} assetType - 'firmware', 'filesystem', or 'bundle'
+ * @param {string} boardType - 'esp32s3' (only supported board now)
  * @returns {string|null} - Asset download URL or null if not found
  */
-function findAssetUrl(assets, boardType, assetType) {
-    // Handle bundle type (LMWB format)
-    if (assetType === 'bundle') {
-        // Look for firmware-ota-{boardType}.bin pattern
-        const patterns = [
-            `firmware-ota-${boardType}.bin`,
-            `firmware_ota_${boardType}.bin`,
-            `firmware-ota_${boardType}.bin`,
-        ];
-        
-        for (const pattern of patterns) {
-            const asset = assets.find(a => {
-                const name = a.name.toLowerCase();
-                // Skip bootstrap bundles
-                if (name.includes('bootstrap')) {
-                    return false;
-                }
-                return name === pattern.toLowerCase();
-            });
-            if (asset) {
-                return asset.browser_download_url;
-            }
-        }
-        
-        // Fallback: partial match for OTA bundle files
-        for (const asset of assets) {
-            const name = asset.name.toLowerCase();
-            if (name.includes('bootstrap')) {
-                continue;
-            }
-            if (!name.endsWith('.bin')) {
-                continue;
-            }
-            
-            // Must contain both 'firmware' and 'ota'
-            if (!name.includes('firmware') || !name.includes('ota')) {
-                continue;
-            }
-            
-            // Check board type match
-            if (boardType === 'esp32s3') {
-                if (name.includes('esp32s3') || name.includes('esp32-s3')) {
-                    return asset.browser_download_url;
-                }
-            } else if (boardType === 'esp32') {
-                if (name.includes('esp32') && 
-                    !name.includes('esp32s3') && 
-                    !name.includes('esp32-s3')) {
-                    return asset.browser_download_url;
-                }
-            }
-        }
-        
-        return null;
-    }
+function findFirmwareUrl(assets, boardType) {
+    // Look for firmware-{boardType}.bin pattern (web assets now embedded)
+    const patterns = [
+        `firmware-${boardType}.bin`,
+        `firmware_${boardType}.bin`,
+        // Legacy: also check for OTA bundles for backwards compatibility
+        `firmware-ota-${boardType}.bin`,
+        `firmware_ota_${boardType}.bin`,
+    ];
     
-    // Define search patterns in priority order for firmware/filesystem
-    const patterns = assetType === 'firmware'
-        ? [
-            // Board-specific patterns (highest priority)
-            `firmware_${boardType}.bin`,
-            `firmware-${boardType}.bin`,
-            `firmware_${boardType.replace('esp32', 'esp32-')}.bin`,
-            // Generic fallback (lowest priority)
-            'firmware.bin'
-          ]
-        : [
-            // Board-specific patterns (highest priority)
-            `littlefs_${boardType}.bin`,
-            `littlefs-${boardType}.bin`,
-            `littlefs_${boardType.replace('esp32', 'esp32-')}.bin`,
-            // Generic fallback (lowest priority)
-            'littlefs.bin'
-          ];
-
     for (const pattern of patterns) {
         const asset = assets.find(a => {
             const name = a.name.toLowerCase();
-            // Skip bootstrap and OTA bundle files for firmware/filesystem
+            // Skip bootstrap files
             if (name.includes('bootstrap')) {
                 return false;
             }
-            // Skip OTA bundles when looking for plain firmware
-            if (assetType === 'firmware' && name.includes('ota')) {
+            // Skip merged files (used for web installer, not OTA)
+            if (name.includes('merged')) {
                 return false;
             }
             return name === pattern.toLowerCase();
@@ -186,42 +125,25 @@ function findAssetUrl(assets, boardType, assetType) {
             return asset.browser_download_url;
         }
     }
-
-    // Fallback: partial match for board-specific files
+    
+    // Fallback: partial match for board-specific firmware files
     for (const asset of assets) {
         const name = asset.name.toLowerCase();
-        if (name.includes('bootstrap')) {
+        if (name.includes('bootstrap') || name.includes('merged')) {
             continue;
         }
-        if (!name.endsWith('.bin')) {
+        if (!name.endsWith('.bin') || !name.includes('firmware')) {
             continue;
         }
-        // Skip OTA bundles when looking for plain firmware
-        if (assetType === 'firmware' && name.includes('ota')) {
-            continue;
-        }
-
-        const isFirmware = assetType === 'firmware' && name.includes('firmware');
-        const isFilesystem = assetType === 'filesystem' && 
-            (name.includes('littlefs') || name.includes('spiffs'));
-
-        if (isFirmware || isFilesystem) {
-            // Check board type match
-            if (boardType === 'esp32s3') {
-                if (name.includes('esp32s3') || name.includes('esp32-s3')) {
-                    return asset.browser_download_url;
-                }
-            } else if (boardType === 'esp32') {
-                // Match esp32 but NOT esp32s3
-                if (name.includes('esp32') && 
-                    !name.includes('esp32s3') && 
-                    !name.includes('esp32-s3')) {
-                    return asset.browser_download_url;
-                }
+        
+        // Check board type match
+        if (boardType === 'esp32s3') {
+            if (name.includes('esp32s3') || name.includes('esp32-s3')) {
+                return asset.browser_download_url;
             }
         }
     }
-
+    
     return null;
 }
 
@@ -243,31 +165,40 @@ function extractBuildId(release) {
 }
 
 /**
- * Build OTA-compatible bundle structure with local URLs
+ * Build OTA-compatible firmware structure with local URLs
  * Uses firmware hosted on the website (downloaded from GitHub during deploy)
+ * 
+ * Note: Web assets are now embedded in firmware. Only firmware.bin is needed for OTA.
+ * The "bundle" key is kept for backwards compatibility with older firmware versions.
  */
 function buildOtaStructure(latestRelease) {
     if (!latestRelease || !latestRelease.assets) {
-        return { bundle: {} };
+        return { firmware: {}, bundle: {} };
     }
 
-    const boardTypes = ['esp32', 'esp32s3'];
-    const bundle = {};
+    // Only ESP32-S3 is supported (4MB ESP32 dropped)
+    const boardTypes = ['esp32s3'];
+    const firmware = {};
+    const bundle = {};  // Legacy key for backwards compatibility
 
     for (const boardType of boardTypes) {
-        // Check if the bundle exists in the release
-        const githubUrl = findAssetUrl(latestRelease.assets, boardType, 'bundle');
+        // Check if the firmware exists in the release
+        const githubUrl = findFirmwareUrl(latestRelease.assets, boardType);
 
         if (githubUrl) {
             // Use local URL instead of GitHub URL
             // Files are downloaded to /updates/firmware/ during deploy
+            firmware[boardType] = { 
+                url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}.bin`
+            };
+            // Also provide as bundle for backwards compatibility with older firmware
             bundle[boardType] = { 
-                url: `${WEBSITE_FIRMWARE_BASE}/firmware-ota-${boardType}.bin`
+                url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}.bin`
             };
         }
     }
 
-    return { bundle };
+    return { firmware, bundle };
 }
 
 async function generateManifest() {
@@ -283,7 +214,7 @@ async function generateManifest() {
         const version = extractVersion(latestTag);
 
         // Build OTA-compatible structure from latest release
-        const { bundle } = buildOtaStructure(latestRelease);
+        const { firmware, bundle } = buildOtaStructure(latestRelease);
         
         // Extract build metadata from latest release
         const buildId = latestRelease ? extractBuildId(latestRelease) : 'unknown';
@@ -295,7 +226,8 @@ async function generateManifest() {
             version: version,
             build_id: buildId,
             build_date: buildDate,
-            bundle: bundle,  // LMWB bundle files (firmware + filesystem combined)
+            firmware: firmware,  // New: firmware-only (web assets embedded)
+            bundle: bundle,      // Legacy: kept for backwards compatibility
             // Metadata
             generated: new Date().toISOString(),
             latest: latestTag,
@@ -316,8 +248,8 @@ async function generateManifest() {
         console.log(`  Latest version: ${manifest.version}`);
         console.log(`  Build ID: ${manifest.build_id}`);
         console.log(`  Build date: ${manifest.build_date}`);
-        console.log(`  Bundle URLs:`);
-        for (const [board, data] of Object.entries(bundle)) {
+        console.log(`  Firmware URLs (web assets embedded):`);
+        for (const [board, data] of Object.entries(firmware)) {
             console.log(`    ${board}: ${data.url ? '✓' : '✗ missing'}`);
         }
         console.log(`  Total versions: ${manifest.versions.length}`);

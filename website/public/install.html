@@ -458,6 +458,123 @@
             color: var(--color-primary);
         }
         
+        /* Recovery Section */
+        .recovery-toggle {
+            text-align: center;
+            margin: 2rem 0;
+        }
+        
+        .btn-recovery-toggle {
+            background: transparent;
+            border: 1px dashed var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-recovery-toggle:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+        
+        .recovery-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 1rem 0 2rem 0;
+        }
+        
+        .recovery-section h2 {
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .recovery-section > p {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+        
+        .recovery-options {
+            display: grid;
+            gap: 1.5rem;
+        }
+        
+        .recovery-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1.5rem;
+        }
+        
+        .recovery-card h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        
+        .recovery-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        
+        .device-select-inline {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .device-select-inline label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .recovery-help {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        
+        .recovery-help h4 {
+            margin-bottom: 0.75rem;
+        }
+        
+        .recovery-help ul {
+            margin: 0;
+            padding-left: 1.25rem;
+        }
+        
+        .recovery-help li {
+            margin: 0.5rem 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        .recovery-help strong {
+            color: var(--text-primary);
+        }
+        
         /* Dark mode overrides */
         @media (prefers-color-scheme: dark) {
             .requirements {
@@ -531,31 +648,18 @@
                     <span class="browser unsupported">✗ Safari</span>
                 </div>
                 
+                <!-- ESP32-S3 is the only supported board (8MB flash required for embedded web assets) -->
                 <div class="device-cards">
-                    <div class="device-card" data-device="esp32s3" onclick="selectDevice('esp32s3')">
+                    <div class="device-card selected" data-device="esp32s3">
                         <h3>ESP32-S3</h3>
-                        <p>Recommended for new builds</p>
-                        <span class="chip-badge">8MB Flash</span>
-                    </div>
-                    <div class="device-card" data-device="esp32" onclick="selectDevice('esp32')">
-                        <h3>ESP32</h3>
-                        <p>Standard ESP32 boards</p>
-                        <span class="chip-badge">4MB Flash</span>
+                        <p>8MB Flash required</p>
+                        <span class="chip-badge">Recommended</span>
                     </div>
                 </div>
                 
-                <!-- ESP32-S3 Install Button (hidden until selected) -->
-                <div id="install-esp32s3" style="display: none;">
+                <!-- ESP32-S3 Install Button -->
+                <div id="install-esp32s3">
                     <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
-                        <button slot="activate">Install Bootstrap Firmware</button>
-                        <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
-                        <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
-                    </esp-web-install-button>
-                </div>
-                
-                <!-- ESP32 Install Button (hidden until selected) -->
-                <div id="install-esp32" style="display: none;">
-                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32.json">
                         <button slot="activate">Install Bootstrap Firmware</button>
                         <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
                         <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
@@ -571,6 +675,10 @@
                 </div>
                 
                 <div id="flash-status" class="status-message"></div>
+                
+                <div class="wizard-nav" style="justify-content: flex-end;">
+                    <button class="btn-next" id="btn-step1-next" onclick="goToStep(2)">Continue to WiFi Setup →</button>
+                </div>
             </div>
 
             <!-- Step 2: Configure WiFi -->
@@ -643,6 +751,60 @@
             </div>
         </div>
         
+        <!-- Recovery Section Toggle -->
+        <div class="recovery-toggle">
+            <button class="btn-recovery-toggle" onclick="toggleRecovery()">
+                🔧 Having trouble? Need to recover a device?
+            </button>
+        </div>
+        
+        <!-- Recovery Section (hidden by default) -->
+        <div class="recovery-section" id="recovery-section" style="display: none;">
+            <h2>Device Recovery</h2>
+            <p>Use these options if your device is stuck, OTA update failed, or you need to start fresh.</p>
+            
+            <div class="recovery-options">
+                <!-- Re-flash Bootstrap -->
+                <div class="recovery-card">
+                    <h3>🔄 Re-flash Bootstrap</h3>
+                    <p>Use this if the device is unresponsive or stuck in a boot loop. This will reset the device to factory state.</p>
+                    
+                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
+                        <button slot="activate">Flash Bootstrap (ESP32-S3)</button>
+                    </esp-web-install-button>
+                </div>
+                
+                <!-- Direct Firmware Flash -->
+                <div class="recovery-card">
+                    <h3>⬇️ Flash Main Firmware Directly</h3>
+                    <p>Use this if OTA download keeps failing. Flashes the main firmware directly via USB, bypassing OTA.</p>
+                    
+                    <esp-web-install-button manifest="updates/manifest-firmware-esp32s3.json">
+                        <button slot="activate">Flash Firmware (ESP32-S3)</button>
+                    </esp-web-install-button>
+                </div>
+                
+                <!-- Factory Reset via Serial -->
+                <div class="recovery-card">
+                    <h3>🗑️ Factory Reset via Serial</h3>
+                    <p>Send a factory reset command to clear all saved settings (WiFi, Webex credentials, etc.).</p>
+                    
+                    <button class="btn-danger" onclick="sendFactoryReset()">Send Factory Reset Command</button>
+                    <div id="reset-status" class="status-message" style="margin-top: 1rem;"></div>
+                </div>
+            </div>
+            
+            <div class="recovery-help">
+                <h4>Common Recovery Scenarios:</h4>
+                <ul>
+                    <li><strong>Device won't boot / stuck on logo:</strong> Re-flash the Bootstrap firmware</li>
+                    <li><strong>OTA download keeps failing:</strong> Flash the Main Firmware directly via USB</li>
+                    <li><strong>WiFi won't connect / wrong network:</strong> Re-flash Bootstrap or use Factory Reset</li>
+                    <li><strong>Want to start completely fresh:</strong> Re-flash Bootstrap (erases everything)</li>
+                </ul>
+            </div>
+        </div>
+        
         <div class="help-link">
             <p>Need help? Check the <a href="hardware.html">Hardware Guide</a> or <a href="https://github.com/liptonj/Led-Matrix-Webex/issues" target="_blank">GitHub Issues</a></p>
         </div>
@@ -669,20 +831,8 @@
         let serialWriter = null;
         let readLoopRunning = false;
         
-        // Device selection
-        function selectDevice(device) {
-            selectedDevice = device;
-            
-            // Update UI
-            document.querySelectorAll('.device-card').forEach(card => {
-                card.classList.remove('selected');
-            });
-            document.querySelector(`[data-device="${device}"]`).classList.add('selected');
-            
-            // Show appropriate install button
-            document.getElementById('install-esp32s3').style.display = device === 'esp32s3' ? 'block' : 'none';
-            document.getElementById('install-esp32').style.display = device === 'esp32' ? 'block' : 'none';
-        }
+        // Device selection - ESP32-S3 only (8MB flash required)
+        selectedDevice = 'esp32s3';
         
         // Step navigation
         function goToStep(step) {
@@ -982,6 +1132,43 @@
                     <button class="btn-next" onclick="goToStep(3)">Skip & Finish →</button>
                 </div>
             `;
+        }
+        
+        // Recovery section functions
+        function toggleRecovery() {
+            const section = document.getElementById('recovery-section');
+            if (section.style.display === 'none') {
+                section.style.display = 'block';
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                section.style.display = 'none';
+            }
+        }
+        
+        function setResetStatus(message, type) {
+            const status = document.getElementById('reset-status');
+            status.textContent = message;
+            status.className = 'status-message visible ' + type;
+        }
+        
+        async function sendFactoryReset() {
+            if (!confirm('This will erase all settings (WiFi, Webex credentials, device name). Continue?')) {
+                return;
+            }
+            
+            setResetStatus('Connecting to device...', 'info');
+            
+            if (!await connectSerial()) {
+                setResetStatus('Failed to connect. Select the serial port.', 'error');
+                return;
+            }
+            
+            await new Promise(r => setTimeout(r, 500));
+            
+            setResetStatus('Sending factory reset command...', 'info');
+            await sendSerial('FACTORY_RESET');
+            
+            setResetStatus('Factory reset command sent. Device will reboot.', 'success');
         }
     </script>
 </body>

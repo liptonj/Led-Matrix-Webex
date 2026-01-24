@@ -1,38 +1,41 @@
 # mypy: ignore-errors
+"""
+Bootstrap Firmware Build Scripts for ESP32-S3.
+
+Note: Web assets are now embedded in firmware, so LittleFS is not
+included in the full-flash binary or OTA updates. The merged binary
+includes only bootloader, partitions, and firmware.
+
+4MB ESP32 support has been dropped.
+"""
 import os
-import struct
 
 Import("env")
 
 
-def _flash_params(pioenv: str) -> dict:
-    if "esp32s3" in pioenv:
-        return {
-            "chip": "esp32s3",
-            "flash_freq": "80m",
-            "flash_size": "8MB",
-            "app_addr": "0x10000",
-            "fs_addr": "0x700000",
-        }
+def _flash_params() -> dict:
+    """Get flash parameters for ESP32-S3 8MB."""
     return {
-        "chip": "esp32",
-        "flash_freq": "40m",
-        "flash_size": "4MB",
+        "chip": "esp32s3",
+        "flash_freq": "80m",
+        "flash_size": "8MB",
         "app_addr": "0x10000",
-        "fs_addr": "0x3D0000",
     }
 
 
 def _merge_bootstrap_bin(source, target, env):
+    """Create merged binary for full-flash (bootloader + partitions + firmware).
+    
+    Note: LittleFS not included - web assets are now embedded in firmware.
+    """
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
     firmware_bin = os.path.join(build_dir, "firmware.bin")
-    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
     bootloader_bin = os.path.join(build_dir, "bootloader.bin")
     partitions_bin = os.path.join(build_dir, "partitions.bin")
     merged_bin = os.path.join(build_dir, f"bootstrap-full-{pioenv}.bin")
 
-    params = _flash_params(pioenv)
+    params = _flash_params()
 
     core_dir = env.subst("$PLATFORMIO_CORE_DIR") or os.path.expanduser("~/.platformio")
     penv_python = os.path.join(core_dir, "penv", "bin", "python")
@@ -47,29 +50,31 @@ def _merge_bootstrap_bin(source, target, env):
     )
     esptool_path = os.path.join(core_dir, "packages", "tool-esptoolpy", "esptool.py")
 
-    if not all(
-        os.path.exists(path)
-        for path in [firmware_bin, littlefs_bin, bootloader_bin, partitions_bin, boot_app0]
-    ):
+    required_files = [firmware_bin, bootloader_bin, partitions_bin, boot_app0]
+    if not all(os.path.exists(path) for path in required_files):
         print("Skipping merged bootstrap binary: required files not found.")
         return 1
 
+    # Merge without LittleFS - web assets are now embedded in firmware
     cmd = (
         f'"{python_exe}" "{esptool_path}" --chip {params["chip"]} merge_bin '
         f'-o "{merged_bin}" --flash_mode dio --flash_freq {params["flash_freq"]} '
         f'--flash_size {params["flash_size"]} 0x0 "{bootloader_bin}" '
         f'0x8000 "{partitions_bin}" 0xE000 "{boot_app0}" '
-        f'{params["app_addr"]} "{firmware_bin}" {params["fs_addr"]} "{littlefs_bin}"'
+        f'{params["app_addr"]} "{firmware_bin}"'
     )
     return env.Execute(cmd)
 
 
 def _upload_bootstrap_bin(source, target, env):
+    """Upload bootstrap to device (bootloader + partitions + firmware).
+    
+    Note: LittleFS not included - web assets are now embedded in firmware.
+    """
     pioenv = env["PIOENV"]
     build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
-    params = _flash_params(pioenv)
+    params = _flash_params()
     firmware_bin = os.path.join(build_dir, "firmware.bin")
-    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
     bootloader_bin = os.path.join(build_dir, "bootloader.bin")
     partitions_bin = os.path.join(build_dir, "partitions.bin")
 
@@ -89,20 +94,20 @@ def _upload_bootstrap_bin(source, target, env):
         "partitions",
         "boot_app0.bin",
     )
-    if not all(
-        os.path.exists(path)
-        for path in [firmware_bin, littlefs_bin, bootloader_bin, partitions_bin, boot_app0]
-    ):
+    
+    required_files = [firmware_bin, bootloader_bin, partitions_bin, boot_app0]
+    if not all(os.path.exists(path) for path in required_files):
         print("Skipping bootstrap upload: required files not found.")
         return 1
+    
+    # Upload without LittleFS - web assets are now embedded in firmware
     cmd = (
         f'"{python_exe}" "{esptool_path}" --chip {params["chip"]} {port_arg} '
         f'--baud {speed} --before default_reset --after hard_reset write_flash '
         f'0x0 "{bootloader_bin}" '
         f'0x8000 "{partitions_bin}" '
         f'0xE000 "{boot_app0}" '
-        f'{params["app_addr"]} "{firmware_bin}" '
-        f'{params["fs_addr"]} "{littlefs_bin}"'
+        f'{params["app_addr"]} "{firmware_bin}"'
     )
     return env.Execute(cmd)
 
@@ -112,11 +117,10 @@ env.AddCustomTarget(
     dependencies=None,
     actions=[
         "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
         _merge_bootstrap_bin,
     ],
     title="Build bootstrap full-flash bin",
-    description="Builds a single bin with bootloader + partitions + app + LittleFS",
+    description="Builds a single bin with bootloader + partitions + firmware (web assets embedded)",
 )
 
 env.AddCustomTarget(
@@ -124,55 +128,12 @@ env.AddCustomTarget(
     dependencies=None,
     actions=[
         "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
         _merge_bootstrap_bin,
         _upload_bootstrap_bin,
     ],
     title="Upload bootstrap full-flash bin",
-    description="Builds and uploads a single full-flash bootstrap bin",
+    description="Builds and uploads bootstrap (web assets embedded in firmware)",
 )
 
-
-def _merge_ota_bin(_source=None, _target=None, env=None, **_kwargs):
-    """Create LMWB OTA bundle (app + filesystem with header)."""
-    if env is None:
-        env = _kwargs.get("env")
-    if env is None:
-        print("Skipping OTA bundle: build environment not available.")
-        return 1
-    pioenv = env["PIOENV"]
-    build_dir = os.path.join(env.subst("$PROJECT_BUILD_DIR"), pioenv)
-    firmware_bin = os.path.join(build_dir, "firmware.bin")
-    littlefs_bin = os.path.join(build_dir, "littlefs.bin")
-    ota_bin = os.path.join(build_dir, f"bootstrap-ota-{pioenv}.bin")
-
-    if not os.path.exists(firmware_bin) or not os.path.exists(littlefs_bin):
-        print("Skipping OTA bundle: firmware or LittleFS bin missing.")
-        return 1
-
-    app_size = os.path.getsize(firmware_bin)
-    fs_size = os.path.getsize(littlefs_bin)
-
-    with open(ota_bin, "wb") as output:
-        output.write(b"LMWB")
-        output.write(struct.pack("<III", app_size, fs_size, 0))
-        with open(firmware_bin, "rb") as firmware:
-            output.write(firmware.read())
-        with open(littlefs_bin, "rb") as littlefs:
-            output.write(littlefs.read())
-
-    print(f"Created OTA bundle: {ota_bin} (app={app_size} bytes, fs={fs_size} bytes)")
-    return 0
-
-
-env.AddCustomTarget(
-    name="build_bootstrap_ota_bin",
-    dependencies=None,
-    actions=[
-        "pio run -e $PIOENV",
-        "pio run -e $PIOENV -t buildfs",
-        _merge_ota_bin,
-    ],
-    title="Build bootstrap OTA bin",
-    description="Builds bootstrap LMWB bundle with app + LittleFS (no bootloader)",
-)
+# Note: build_bootstrap_ota_bin target removed - LMWB bundles no longer needed
+# Web assets are now embedded in firmware for atomic OTA updates

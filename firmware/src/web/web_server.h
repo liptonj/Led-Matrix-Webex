@@ -37,6 +37,14 @@ public:
     void loop();
     
     /**
+     * @brief Stop the web server and cleanup resources
+     * 
+     * Call this before OTA updates to properly unmount LittleFS
+     * and prevent async file access conflicts.
+     */
+    void stop();
+    
+    /**
      * @brief Check if server is running
      * @return true if server is running
      */

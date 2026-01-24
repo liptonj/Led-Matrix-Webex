@@ -32,6 +32,10 @@ Thumbs.db
 # Secrets (never commit these!)
 firmware/include/secrets.h
 
+# Auto-generated embedded assets (created by pre-build script)
+firmware/src/web/embedded_assets.h
+firmware_bootstrap/src/embedded_assets.h
+
 # Build artifacts
 *.bin
 *.elf

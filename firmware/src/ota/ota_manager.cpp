@@ -116,25 +116,27 @@ bool OTAManager::checkUpdateFromManifest() {
                   latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
                   latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
     
-    // Extract URLs for this board - prefer bundle if available
+    // Extract URLs for this board - prefer firmware-only (web assets embedded)
     #if defined(ESP32_S3_BOARD)
     const char* board_type = "esp32s3";
     #else
     const char* board_type = "esp32";
     #endif
     
-    // Try bundle first (preferred - single download)
+    // Try firmware-only first (preferred - web assets now embedded in firmware)
+    firmware_url = doc["firmware"][board_type]["url"].as<String>();
+    
+    // Legacy fallback: bundle (for transition period)
     bundle_url = doc["bundle"][board_type]["url"].as<String>();
     
-    // Fallback to separate firmware + filesystem
-    firmware_url = doc["firmware"][board_type]["url"].as<String>();
-    littlefs_url = doc["filesystem"][board_type]["url"].as<String>();
+    // Clear filesystem URL - no longer needed
+    littlefs_url = "";
     
+    bool has_firmware = !firmware_url.isEmpty();
     bool has_bundle = !bundle_url.isEmpty();
-    bool has_separate = !firmware_url.isEmpty() && !littlefs_url.isEmpty();
     
-    if (!has_bundle && !has_separate) {
-        Serial.printf("[OTA] Missing %s assets in manifest\n", board_type);
+    if (!has_firmware && !has_bundle) {
+        Serial.printf("[OTA] Missing %s firmware in manifest\n", board_type);
         return false;
     }
     
@@ -144,11 +146,10 @@ bool OTAManager::checkUpdateFromManifest() {
     if (update_available) {
         Serial.printf("[OTA] Update available: %s -> %s\n", 
                       current_version.c_str(), latest_version.c_str());
-        if (has_bundle) {
-            Serial.printf("[OTA] Bundle: %s\n", bundle_url.c_str());
-        } else {
+        if (has_firmware) {
             Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
-            Serial.printf("[OTA] Filesystem: %s\n", littlefs_url.c_str());
+        } else {
+            Serial.printf("[OTA] Legacy bundle: %s\n", bundle_url.c_str());
         }
     } else {
         Serial.println("[OTA] Already on latest version");
@@ -227,27 +228,25 @@ bool OTAManager::performUpdate() {
         return false;
     }
     
-    // Prefer LMWB bundle (single download)
-    if (!bundle_url.isEmpty()) {
-        Serial.println("[OTA] Using LMWB bundle for update");
-        if (!downloadAndInstallBundle(bundle_url)) {
-            return false;
-        }
-    } else if (!firmware_url.isEmpty() && !littlefs_url.isEmpty()) {
-        // Fallback to separate downloads
-        Serial.println("[OTA] Using separate firmware + LittleFS downloads");
+    // Web assets are now embedded in firmware - only need to download firmware.bin
+    // No more LMWB bundles or separate LittleFS downloads needed
+    if (!firmware_url.isEmpty()) {
+        Serial.println("[OTA] Downloading firmware (web assets embedded)");
         if (!downloadAndInstallBinary(firmware_url, U_FLASH, "firmware")) {
             return false;
         }
-        if (!downloadAndInstallBinary(littlefs_url, U_SPIFFS, "LittleFS")) {
+    } else if (!bundle_url.isEmpty()) {
+        // Legacy fallback: support old LMWB bundles for transition period
+        Serial.println("[OTA] Using legacy LMWB bundle for update");
+        if (!downloadAndInstallBundle(bundle_url)) {
             return false;
         }
     } else {
-        Serial.println("[OTA] Missing asset URLs");
+        Serial.println("[OTA] Missing firmware URL");
         return false;
     }
 
-    Serial.println("[OTA] Firmware + LittleFS update successful!");
+    Serial.println("[OTA] Firmware update successful!");
     Serial.println("[OTA] Rebooting...");
     
     // Show complete status
@@ -376,14 +375,16 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
         }
     }
 
-    // Prefer bundle, fallback to separate files
-    if (bundle_priority > 0) {
-        Serial.printf("[OTA] Using bundle: %s\n", bundle_url.c_str());
+    // Prefer firmware-only (web assets now embedded in firmware)
+    if (firmware_priority > 0) {
+        Serial.printf("[OTA] Using firmware: %s\n", firmware_url.c_str());
+        littlefs_url = "";  // Clear - no longer needed
         return true;
     }
     
-    if (firmware_priority > 0 && littlefs_priority > 0) {
-        Serial.println("[OTA] Bundle not found, using separate firmware + littlefs");
+    // Legacy fallback: use bundle if firmware-only not available
+    if (bundle_priority > 0) {
+        Serial.printf("[OTA] Using legacy bundle: %s\n", bundle_url.c_str());
         return true;
     }
     
