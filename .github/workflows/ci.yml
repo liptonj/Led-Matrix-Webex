@@ -154,103 +154,6 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Main Firmware - ESP32 Build
-  # ============================================================================
-  firmware-build-esp32:
-    name: Main Firmware (ESP32)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: firmware
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: ${{ runner.os }}-pio-esp32-${{ hashFiles('firmware/platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-esp32-
-            ${{ runner.os }}-pio-
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio esptool
-
-      - name: Create secrets.h for build
-        run: |
-          cat > include/secrets.h << 'EOF'
-          #ifndef SECRETS_H
-          #define SECRETS_H
-          // Placeholder secrets for CI build
-          #define WIFI_SSID "ci-placeholder"
-          #define WIFI_PASSWORD "ci-placeholder"
-          #endif
-          EOF
-
-      - name: Build firmware and LMWB OTA bundle (ESP32)
-        run: pio run -t build_ota_bin -e esp32
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          BUILD_DIR=".pio/build/esp32"
-
-          # Copy LMWB OTA bundle
-          if [ -f "$BUILD_DIR/firmware-ota-esp32.bin" ]; then
-            cp "$BUILD_DIR/firmware-ota-esp32.bin" artifacts/firmware-ota-esp32.bin
-            echo "✓ Included LMWB OTA bundle in artifacts"
-          fi
-
-          # Copy individual firmware and littlefs for web installer
-          if [ -f "$BUILD_DIR/firmware.bin" ]; then
-            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
-            echo "✓ Included firmware.bin for web installer"
-          fi
-          if [ -f "$BUILD_DIR/littlefs.bin" ]; then
-            cp "$BUILD_DIR/littlefs.bin" artifacts/littlefs-esp32.bin
-            echo "✓ Included littlefs.bin for web installer"
-          fi
-
-          echo "ESP32 artifacts:"
-          ls -la artifacts/
-
-      - name: Create merged binary for web installer
-        run: |
-          BUILD_DIR=".pio/build/esp32"
-          # Create a merged binary that can be flashed at offset 0
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
-            esptool.py --chip esp32 merge_bin \
-              -o artifacts/firmware-esp32-merged.bin \
-              --flash_mode dio \
-              --flash_freq 40m \
-              --flash_size 4MB \
-              0x1000 $BUILD_DIR/bootloader.bin \
-              0x8000 $BUILD_DIR/partitions.bin \
-              0x150000 $BUILD_DIR/firmware.bin \
-              0x3D0000 $BUILD_DIR/littlefs.bin
-            echo "✓ Created merged binary for web installer"
-          fi
-
-      - name: Upload ESP32 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-esp32
-          path: firmware/artifacts/
-          retention-days: 7
-
-  # ============================================================================
   # Native Simulation Build and Test
   # ============================================================================
   firmware-native-test:
@@ -375,88 +278,12 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Bootstrap Firmware - ESP32 Build
-  # ============================================================================
-  bootstrap-build-esp32:
-    name: Bootstrap Firmware (ESP32)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: firmware_bootstrap
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: ${{ runner.os }}-pio-bootstrap-esp32-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-bootstrap-esp32-
-            ${{ runner.os }}-pio-
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio esptool
-
-      - name: Build bootstrap firmware and LMWB OTA bundle (ESP32)
-        run: pio run -t build_bootstrap_ota_bin -e esp32
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p artifacts
-          BUILD_DIR=".pio/build/esp32"
-
-          # Copy LMWB OTA bundle
-          if [ -f "$BUILD_DIR/bootstrap-ota-esp32.bin" ]; then
-            cp "$BUILD_DIR/bootstrap-ota-esp32.bin" artifacts/bootstrap-ota-esp32.bin
-            echo "✓ Included LMWB OTA bundle in artifacts"
-          fi
-
-          echo "Bootstrap ESP32 artifacts:"
-          ls -la artifacts/
-
-      - name: Create merged binary for web installer
-        run: |
-          BUILD_DIR=".pio/build/esp32"
-          # Create a merged binary for web installer
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
-            esptool.py --chip esp32 merge_bin \
-              -o artifacts/bootstrap-esp32.bin \
-              --flash_mode dio \
-              --flash_freq 40m \
-              --flash_size 4MB \
-              0x1000 $BUILD_DIR/bootloader.bin \
-              0x8000 $BUILD_DIR/partitions.bin \
-              0x10000 $BUILD_DIR/firmware.bin \
-              0x3D0000 $BUILD_DIR/littlefs.bin
-            echo "✓ Created merged bootstrap binary for web installer"
-          fi
-
-      - name: Upload ESP32 bootstrap artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bootstrap-esp32
-          path: firmware_bootstrap/artifacts/
-          retention-days: 7
-
-  # ============================================================================
   # Create Release (only on version tags)
   # ============================================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [bridge-test, firmware-build-esp32s3, firmware-build-esp32, firmware-native-test, bootstrap-build-esp32s3, bootstrap-build-esp32]
+    needs: [bridge-test, firmware-build-esp32s3, firmware-native-test, bootstrap-build-esp32s3]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -471,22 +298,10 @@ jobs:
           name: firmware-esp32s3
           path: release/firmware/
 
-      - name: Download ESP32 firmware artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: firmware-esp32
-          path: release/firmware/
-
       - name: Download ESP32-S3 bootstrap artifacts
         uses: actions/download-artifact@v4
         with:
           name: bootstrap-esp32s3
-          path: release/bootstrap/
-
-      - name: Download ESP32 bootstrap artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bootstrap-esp32
           path: release/bootstrap/
 
       - name: Download bridge artifacts
@@ -543,17 +358,11 @@ jobs:
             release/bootstrap-${{ steps.version.outputs.VERSION }}.zip
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
             release/firmware/firmware-ota-esp32s3.bin
-            release/firmware/firmware-ota-esp32.bin
             release/firmware/firmware-esp32s3.bin
-            release/firmware/firmware-esp32.bin
             release/firmware/littlefs-esp32s3.bin
-            release/firmware/littlefs-esp32.bin
             release/firmware/firmware-esp32s3-merged.bin
-            release/firmware/firmware-esp32-merged.bin
             release/bootstrap/bootstrap-ota-esp32s3.bin
-            release/bootstrap/bootstrap-ota-esp32.bin
             release/bootstrap/bootstrap-esp32s3.bin
-            release/bootstrap/bootstrap-esp32.bin
 
   # ============================================================================
   # Deploy Website (only on version tags, after release)
@@ -592,21 +401,15 @@ jobs:
           # Download all firmware binaries
           cd website/public/updates/firmware
           
-          # Main firmware files
+          # Main firmware files (ESP32-S3 only)
           gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32s3.bin" --clobber || echo "firmware-ota-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32.bin" --clobber || echo "firmware-ota-esp32.bin not found"
           gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "firmware-esp32.bin" --clobber || echo "firmware-esp32.bin not found"
           gh release download "$LATEST_TAG" --pattern "littlefs-esp32s3.bin" --clobber || echo "littlefs-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "littlefs-esp32.bin" --clobber || echo "littlefs-esp32.bin not found"
           gh release download "$LATEST_TAG" --pattern "firmware-esp32s3-merged.bin" --clobber || echo "firmware-esp32s3-merged.bin not found"
-          gh release download "$LATEST_TAG" --pattern "firmware-esp32-merged.bin" --clobber || echo "firmware-esp32-merged.bin not found"
           
           # Bootstrap files (for web installer)
           gh release download "$LATEST_TAG" --pattern "bootstrap-esp32s3.bin" --clobber || echo "bootstrap-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32.bin" --clobber || echo "bootstrap-esp32.bin not found"
           gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32s3.bin" --clobber || echo "bootstrap-ota-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32.bin" --clobber || echo "bootstrap-ota-esp32.bin not found"
           
           echo "Downloaded firmware files:"
           ls -la
