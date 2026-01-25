@@ -51,6 +51,7 @@ BootstrapDisplay display;
 bool ota_in_progress = false;
 unsigned long last_status_print = 0;
 unsigned long last_ip_print = 0;
+unsigned long last_mdns_refresh = 0;
 String mdns_hostname = MDNS_HOSTNAME;
 bool mdns_started = false;
 bool wifi_connected_handled = false;
@@ -239,6 +240,22 @@ void loop() {
 
     // Update display animations (scrolling text)
     display.update();
+
+    // Refresh mDNS every 60 seconds to prevent TTL expiry (TTL is 120s)
+    if (mdns_started && wifi_provisioner.isConnected() && 
+        (millis() - last_mdns_refresh >= 60000)) {
+        Serial.println("[MDNS] Refreshing mDNS announcement...");
+        MDNS.end();
+        delay(100);
+        if (MDNS.begin(mdns_hostname.c_str())) {
+            MDNS.addService("http", "tcp", 80);
+            Serial.printf("[MDNS] Refreshed: %s.local\n", mdns_hostname.c_str());
+            last_mdns_refresh = millis();
+        } else {
+            Serial.println("[MDNS] Refresh failed!");
+            mdns_started = false;
+        }
+    }
 
     // Print connection info every 10 seconds (so it's visible when serial connects)
     if (millis() - last_ip_print >= 10000) {
@@ -611,7 +628,11 @@ void handle_connected_state() {
     }
 
     // Reset flags on disconnect so we re-run setup on reconnect
-    mdns_started = false;
+    if (mdns_started) {
+        Serial.println("[MDNS] WiFi disconnected, stopping mDNS...");
+        MDNS.end();
+        mdns_started = false;
+    }
     wifi_connected_handled = false;
 #if RELEASE_FETCH_ENABLED
     wifi_connected_time = 0;  // Reset connection time
@@ -677,8 +698,10 @@ void start_mdns() {
     for (int attempt = 1; attempt <= 3; attempt++) {
         if (MDNS.begin(MDNS_HOSTNAME)) {
             mdns_started = true;
+            last_mdns_refresh = millis();  // Initialize refresh timer
             Serial.printf("[BOOT] mDNS started: %s.local\n", mdns_hostname.c_str());
             MDNS.addService("http", "tcp", 80);
+            Serial.println("[BOOT] mDNS will refresh every 60 seconds");
             return;
         }
         Serial.printf("[BOOT] mDNS start failed (attempt %d/3)\n", attempt);

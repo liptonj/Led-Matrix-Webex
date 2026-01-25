@@ -217,9 +217,12 @@ jobs:
         run: |
           mkdir -p artifacts
           BUILD_DIR=".pio/build/esp32s3"
-          # Create a merged binary that includes bootloader, partition table, and app
+          # Locate boot_app0.bin from framework
+          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          
+          # Create a merged binary that includes bootloader, partition table, boot_app0, and app
           # This is what web installer needs to flash a new device (web assets embedded)
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ]; then
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BOOT_APP0" ]; then
             esptool.py --chip esp32s3 merge_bin \
               -o artifacts/bootstrap-esp32s3.bin \
               --flash_mode dio \
@@ -227,9 +230,15 @@ jobs:
               --flash_size 8MB \
               0x0000 $BUILD_DIR/bootloader.bin \
               0x8000 $BUILD_DIR/partitions.bin \
+              0xE000 $BOOT_APP0 \
               0x10000 $BUILD_DIR/firmware.bin
-            echo "✓ Created merged bootstrap binary for web installer (web assets embedded)"
+            echo "✓ Created merged bootstrap binary for web installer (includes bootloader, partitions, boot_app0, and firmware)"
             ls -la artifacts/
+          else
+            echo "ERROR: Missing required files for merged binary"
+            ls -la $BUILD_DIR/
+            test -f "$BOOT_APP0" && echo "boot_app0.bin: found" || echo "boot_app0.bin: MISSING"
+            exit 1
           fi
 
       - name: Upload ESP32-S3 bootstrap artifacts
