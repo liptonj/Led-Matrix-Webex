@@ -153,24 +153,21 @@ void MDNSManager::refreshBridgeDiscovery() {
 }
 
 void MDNSManager::refresh() {
+    // ESP32's mDNS implementation handles TTL refreshes automatically.
+    // Previously, we tried to restart mDNS every 60s which caused instability.
+    // The mDNS responder daemon handles multicast announcements internally.
+    // 
+    // This function is kept for API compatibility but no longer restarts mDNS.
+    // If mDNS becomes unresponsive, the only reliable fix is a device reboot.
+    
     if (!initialized) return;
     
-    // Refresh periodically (TTL is typically 120s, refresh at 60s)
-    if (millis() - last_refresh < MDNS_REFRESH_INTERVAL_MS) {
+    // Just log status periodically for debugging (every 5 minutes)
+    if (millis() - last_refresh < 300000) {  // 5 minutes
         return;
     }
     last_refresh = millis();
     
-    // Re-initialize mDNS to force re-announcement
-    Serial.println("[MDNS] Refreshing mDNS announcement...");
-    MDNS.end();
-    delay(100);
-    
-    if (MDNS.begin(current_hostname.c_str())) {
-        MDNS.addService(MDNS_SERVICE_HTTP, MDNS_PROTOCOL_TCP, 80);
-        Serial.printf("[MDNS] Refreshed: %s.local\n", current_hostname.c_str());
-    } else {
-        Serial.println("[MDNS] Refresh failed!");
-        initialized = false;
-    }
+    Serial.printf("[MDNS] Active: %s.local (no refresh needed - handled by ESP-IDF)\n", 
+                  current_hostname.c_str());
 }

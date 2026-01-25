@@ -395,6 +395,10 @@ void WebServerManager::setupRoutes() {
     // EMBEDDED STATIC FILE HANDLERS - Register AFTER all API endpoints
     // Static assets are now embedded in firmware (gzipped) for atomic OTA updates
     
+    // Find index.html for root handler and 404 fallback
+    const uint8_t* index_data = nullptr;
+    size_t index_size = 0;
+    
     // Register handlers for all embedded assets
     for (size_t i = 0; i < EMBEDDED_ASSETS_COUNT; i++) {
         const EmbeddedAsset& asset = EMBEDDED_ASSETS[i];
@@ -404,10 +408,26 @@ void WebServerManager::setupRoutes() {
         size_t size = asset.size;
         const char* content_type = asset.content_type;
         
+        // Remember index.html for root handler
+        if (strcmp(asset.url_path, "/index.html") == 0) {
+            index_data = data;
+            index_size = size;
+        }
+        
         server->on(asset.url_path, HTTP_GET, [data, size, content_type](AsyncWebServerRequest* request) {
             AsyncWebServerResponse* response = request->beginResponse_P(200, content_type, data, size);
             response->addHeader("Content-Encoding", "gzip");
             response->addHeader("Cache-Control", "public, max-age=86400");  // Cache for 24 hours
+            request->send(response);
+        });
+    }
+    
+    // Explicit root handler - serve index.html
+    if (index_data != nullptr) {
+        server->on("/", HTTP_GET, [index_data, index_size](AsyncWebServerRequest* request) {
+            AsyncWebServerResponse* response = request->beginResponse_P(200, "text/html", index_data, index_size);
+            response->addHeader("Content-Encoding", "gzip");
+            response->addHeader("Cache-Control", "public, max-age=86400");
             request->send(response);
         });
     }
