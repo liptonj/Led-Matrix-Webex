@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Script from 'next/script';
 import Link from 'next/link';
-import { Button, Alert, AlertTitle } from '@/components/ui';
-import { isWebSerialSupported } from '@/lib/utils';
+import { Button, Alert } from '@/components/ui';
+import { useSerial } from '@/hooks/useSerial';
+import { EspWebInstallButton } from './EspWebInstallButton';
 
 type WizardStep = 1 | 2 | 3;
 
@@ -12,24 +13,156 @@ export function InstallWizard() {
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const [flashStatus, setFlashStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
   const [wifiStatus, setWifiStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
-  const [serialSupported, setSerialSupported] = useState(true);
-  const [consoleOutput, setConsoleOutput] = useState<string[]>(['Initializing...']);
+  const [ssid, setSsid] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [showConsole, setShowConsole] = useState(false);
+  const [flashComplete, setFlashComplete] = useState(false);
+  const [availableNetworks, setAvailableNetworks] = useState<string[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [useManualEntry, setUseManualEntry] = useState(false);
+
+  const {
+    status: serialStatus,
+    isConnected,
+    isSupported,
+    error: serialError,
+    output: serialOutput,
+    connect,
+    writeLine,
+    clearOutput,
+  } = useSerial();
 
   useEffect(() => {
-    setSerialSupported(isWebSerialSupported());
-  }, []);
+    if (serialError) {
+      setWifiStatus({ message: serialError, type: 'error' });
+    }
+  }, [serialError]);
 
-  const goToStep = (step: WizardStep) => {
+  const parseNetworksFromOutput = (output: string[]): string[] => {
+    const networks: string[] = [];
+    const seenNetworks = new Set<string>();
+    
+    // Look for lines that contain SSID information
+    // Format expected: "SSID: NetworkName" or "WIFI_SCAN: NetworkName"
+    for (const line of output) {
+      const ssidMatch = line.match(/(?:SSID|WIFI_SCAN):\s*(.+?)(?:\s|$)/i);
+      if (ssidMatch && ssidMatch[1]) {
+        const network = ssidMatch[1].trim();
+        if (network && !seenNetworks.has(network)) {
+          seenNetworks.add(network);
+          networks.push(network);
+        }
+      }
+    }
+    
+    return networks;
+  };
+
+  const scanWifiNetworks = useCallback(async () => {
+    if (!isSupported || isScanning) return;
+    
+    setIsScanning(true);
+    setWifiStatus({ message: 'Scanning for WiFi networks...', type: 'info' });
+    
+    // Connect if not already connected
+    const connected = isConnected || await connect();
+    if (!connected) {
+      setWifiStatus({ message: 'Failed to connect. You can enter WiFi manually below.', type: 'error' });
+      setIsScanning(false);
+      setUseManualEntry(true);
+      return;
+    }
+    
+    // Send WiFi scan command
+    const sent = await writeLine('SCAN_WIFI');
+    if (!sent) {
+      setWifiStatus({ message: 'Failed to start scan. You can enter WiFi manually below.', type: 'error' });
+      setIsScanning(false);
+      setUseManualEntry(true);
+      return;
+    }
+    
+    // Wait for scan results (device will output them to serial)
+    // Parse from serial output in the next few seconds
+    setTimeout(() => {
+      // Parse networks from serial output
+      const networks = parseNetworksFromOutput(serialOutput);
+      if (networks.length > 0) {
+        setAvailableNetworks(networks);
+        setWifiStatus({ message: `Found ${networks.length} network(s)`, type: 'success' });
+      } else {
+        setWifiStatus({ message: 'No networks found. You can enter WiFi manually below.', type: 'info' });
+        setUseManualEntry(true);
+      }
+      setIsScanning(false);
+    }, 5000);
+  }, [isSupported, isScanning, isConnected, connect, writeLine, serialOutput]);
+
+  const goToStep = useCallback((step: WizardStep) => {
     setCurrentStep(step);
-  };
+    
+    // Auto-start WiFi scan when entering step 2
+    if (step === 2) {
+      scanWifiNetworks();
+    }
+  }, [scanWifiNetworks]);
 
-  const addConsoleLog = (message: string) => {
-    setConsoleOutput(prev => [...prev.slice(-29), message]);
-  };
+  // Listen for ESP Web Tools flash complete event
+  useEffect(() => {
+    const handleFlashComplete = () => {
+      setFlashComplete(true);
+      setFlashStatus({ message: 'Firmware flashed successfully!', type: 'success' });
+      // Auto-advance to WiFi step after 2 seconds
+      setTimeout(() => {
+        goToStep(2);
+      }, 2000);
+    };
 
-  const clearConsole = () => {
-    setConsoleOutput([]);
+    window.addEventListener('esp-web-install-complete', handleFlashComplete);
+    return () => window.removeEventListener('esp-web-install-complete', handleFlashComplete);
+  }, [goToStep]);
+
+  const handleSendWifi = async () => {
+    const trimmedSsid = ssid.trim();
+    if (!trimmedSsid) {
+      setWifiStatus({ message: 'Please enter a WiFi network name (SSID).', type: 'error' });
+      return;
+    }
+
+    setIsSending(true);
+    setWifiStatus({
+      message: isConnected ? 'Sending WiFi credentials...' : 'Connecting to device...',
+      type: 'info',
+    });
+
+    const connected = isConnected || await connect();
+    if (!connected) {
+      setWifiStatus({ message: 'Failed to connect to the device. Please try again.', type: 'error' });
+      setIsSending(false);
+      return;
+    }
+
+    const command = `WIFI:${trimmedSsid}:${password}`;
+    const sent = await writeLine(command);
+
+    if (!sent) {
+      setWifiStatus({ message: 'Failed to send WiFi credentials.', type: 'error' });
+      setIsSending(false);
+      return;
+    }
+
+    setWifiStatus({
+      message: `WiFi credentials sent. The device should connect to "${trimmedSsid}".`,
+      type: 'success',
+    });
+    setIsSending(false);
+    
+    // Auto-advance to complete after successful WiFi config
+    setTimeout(() => {
+      goToStep(3);
+    }, 2000);
   };
 
   return (
@@ -41,7 +174,7 @@ export function InstallWizard() {
         strategy="lazyOnload"
       />
 
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         {/* Progress Steps */}
         <div className="flex justify-center mb-8 gap-0">
           {[1, 2, 3].map((step, index) => (
@@ -76,14 +209,14 @@ export function InstallWizard() {
         {/* Step 1: Flash Device */}
         <div className={`card text-center animate-fade-in ${currentStep === 1 ? 'block' : 'hidden'}`}>
           <h2 className="text-xl font-semibold mb-4">Flash Your Device</h2>
-          <p className="text-[var(--color-text-muted)] mb-6">Connect your ESP32 via USB and select your board type below.</p>
+          <p className="text-[var(--color-text-muted)] mb-6">Connect your ESP32 via USB and click Install to begin.</p>
           
           {/* Browser Support */}
           <div className="flex gap-2 justify-center mb-6 flex-wrap">
-            <span className="px-3 py-1.5 rounded-md text-sm bg-success/20 text-success">✓ Chrome</span>
-            <span className="px-3 py-1.5 rounded-md text-sm bg-success/20 text-success">✓ Edge</span>
-            <span className="px-3 py-1.5 rounded-md text-sm bg-danger/20 text-danger">✗ Firefox</span>
-            <span className="px-3 py-1.5 rounded-md text-sm bg-danger/20 text-danger">✗ Safari</span>
+            <span className="px-3 py-1.5 rounded-md text-sm bg-green-100 text-green-700">✓ Chrome</span>
+            <span className="px-3 py-1.5 rounded-md text-sm bg-green-100 text-green-700">✓ Edge</span>
+            <span className="px-3 py-1.5 rounded-md text-sm bg-red-100 text-red-700">✗ Firefox</span>
+            <span className="px-3 py-1.5 rounded-md text-sm bg-red-100 text-red-700">✗ Safari</span>
           </div>
 
           {/* Device Card */}
@@ -97,22 +230,43 @@ export function InstallWizard() {
 
           {/* ESP Install Button */}
           <div className="my-6">
-            <esp-web-install-button manifest="/updates/manifest-firmware-esp32s3.json">
+            <EspWebInstallButton manifest="/updates/manifest-firmware-esp32s3.json">
               <button 
                 slot="activate"
                 className="bg-success text-white px-8 py-3.5 text-lg font-semibold border-none rounded-lg cursor-pointer transition-colors hover:brightness-90"
+                onClick={() => setShowConsole(true)}
               >
                 Install Firmware
               </button>
-              <span slot="unsupported" className="text-danger">Your browser doesn&apos;t support Web Serial. Use Chrome or Edge.</span>
-              <span slot="not-allowed" className="text-warning">Serial access denied. Please allow access and try again.</span>
-            </esp-web-install-button>
+              <span slot="unsupported" className="text-red-600">Your browser doesn&apos;t support Web Serial. Use Chrome or Edge.</span>
+              <span slot="not-allowed" className="text-yellow-600">Serial access denied. Please allow access and try again.</span>
+            </EspWebInstallButton>
           </div>
 
+          {/* Console Output Toggle */}
+          {showConsole && (
+            <div className="mt-6 border border-[var(--color-border)] rounded-lg overflow-hidden text-left">
+              <div className="flex justify-between items-center px-4 py-2 bg-[var(--color-code-bg)] text-[var(--color-code-text)] text-sm">
+                <span>Installation Console</span>
+                <button 
+                  onClick={clearOutput}
+                  className="px-3 py-1 bg-[var(--color-surface-alt)] border-none rounded text-xs cursor-pointer hover:brightness-90"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="h-64 overflow-y-auto bg-[var(--color-code-bg)] text-green-400 font-mono text-xs p-3 whitespace-pre-wrap">
+                {(serialOutput.length > 0 ? serialOutput : ['Waiting for device output...']).map((line, i) => (
+                  <div key={i}>{line}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Requirements */}
-          <div className="bg-warning/10 border border-warning rounded-lg p-4 my-4 text-left">
-            <h4 className="text-warning font-medium mb-2">Requirements</h4>
-            <ul className="list-disc list-inside text-warning text-sm">
+          <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-4 my-4 text-left">
+            <h4 className="text-yellow-700 font-medium mb-2">Requirements</h4>
+            <ul className="list-disc list-inside text-yellow-700 text-sm">
               <li>USB data cable (not charge-only)</li>
               <li>ESP32 may need BOOT button held during flash</li>
             </ul>
@@ -124,44 +278,110 @@ export function InstallWizard() {
             </Alert>
           )}
 
-          <div className="flex justify-end mt-8 pt-6 border-t border-[var(--color-border)]">
-            <Button variant="success" onClick={() => goToStep(2)}>
-              Continue to WiFi Setup →
-            </Button>
-          </div>
+          {flashComplete && (
+            <div className="flex justify-end mt-8 pt-6 border-t border-[var(--color-border)]">
+              <Button variant="success" onClick={() => goToStep(2)}>
+                Continue to WiFi Setup →
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Step 2: Configure WiFi */}
         <div className={`card text-center animate-fade-in ${currentStep === 2 ? 'block' : 'hidden'}`}>
           <h2 className="text-xl font-semibold mb-4">Configure WiFi</h2>
           <p className="text-[var(--color-text-muted)] mb-6">
-            {serialSupported 
-              ? 'Send WiFi credentials to your device via USB serial connection.'
+            {isSupported 
+              ? 'Send WiFi credentials directly to your device - no reconnection needed!'
               : 'Your browser doesn\'t support Web Serial.'}
           </p>
 
-          {serialSupported ? (
+          {isSupported ? (
             <>
               <div className="max-w-md mx-auto text-left">
+                {/* WiFi Network Selection */}
                 <div className="mb-4">
-                  <label className="block mb-2 font-medium">Network Name (SSID)</label>
-                  <input 
-                    type="text" 
-                    placeholder="Enter your WiFi network name"
-                    className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                  />
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block font-medium">Network Name (SSID)</label>
+                    {availableNetworks.length > 0 && !useManualEntry && (
+                      <button
+                        type="button"
+                        onClick={() => setUseManualEntry(true)}
+                        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-none"
+                      >
+                        Enter manually
+                      </button>
+                    )}
+                    {useManualEntry && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUseManualEntry(false);
+                          setSsid('');
+                        }}
+                        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-none"
+                      >
+                        Select from list
+                      </button>
+                    )}
+                  </div>
+                  
+                  {isScanning ? (
+                    <div className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-alt)] text-[var(--color-text-muted)] text-center">
+                      🔍 Scanning for networks...
+                    </div>
+                  ) : !useManualEntry && availableNetworks.length > 0 ? (
+                    <select
+                      value={ssid}
+                      onChange={(event) => setSsid(event.target.value)}
+                      className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] cursor-pointer"
+                    >
+                      <option value="">Select a network...</option>
+                      {availableNetworks.map((network) => (
+                        <option key={network} value={network}>
+                          📶 {network}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input 
+                      type="text" 
+                      placeholder="Enter your WiFi network name"
+                      value={ssid}
+                      onChange={(event) => setSsid(event.target.value)}
+                      className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                    />
+                  )}
+                  
+                  {!isScanning && availableNetworks.length === 0 && !useManualEntry && (
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={scanWifiNetworks}
+                        className="text-sm text-primary hover:underline cursor-pointer bg-transparent border-none flex items-center gap-1"
+                      >
+                        🔄 Scan again
+                      </button>
+                    </div>
+                  )}
                 </div>
+
                 <div className="mb-4">
                   <label className="block mb-2 font-medium">WiFi Password</label>
                   <input 
                     type="password" 
                     placeholder="Enter your WiFi password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
                     className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
                   />
                 </div>
-                <Button variant="primary" block>
-                  Send WiFi Configuration
+                <Button variant="primary" block onClick={handleSendWifi} disabled={isSending}>
+                  {isSending ? 'Sending...' : isConnected ? 'Send WiFi Configuration' : 'Connect & Send WiFi'}
                 </Button>
+                <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                  Serial status: {serialStatus === 'connected' ? '✓ Connected' : serialStatus}
+                </p>
               </div>
 
               {wifiStatus && (
@@ -172,17 +392,17 @@ export function InstallWizard() {
 
               {/* Serial Console */}
               <div className="mt-6 border border-[var(--color-border)] rounded-lg overflow-hidden text-left">
-                <div className="flex justify-between items-center px-4 py-2 bg-gray-800 text-white text-sm">
+                <div className="flex justify-between items-center px-4 py-2 bg-[var(--color-code-bg)] text-[var(--color-code-text)] text-sm">
                   <span>Device Console</span>
                   <button 
-                    onClick={clearConsole}
-                    className="px-3 py-1 bg-gray-600 text-white border-none rounded text-xs cursor-pointer hover:bg-gray-500"
+                    onClick={clearOutput}
+                    className="px-3 py-1 bg-[var(--color-surface-alt)] border-none rounded text-xs cursor-pointer hover:brightness-90"
                   >
                     Clear
                   </button>
                 </div>
-                <div className="h-40 overflow-y-auto bg-[#1a1a1a] text-green-400 font-mono text-xs p-3 whitespace-pre-wrap">
-                  {consoleOutput.map((line, i) => (
+                <div className="h-40 overflow-y-auto bg-[var(--color-code-bg)] text-green-400 font-mono text-xs p-3 whitespace-pre-wrap">
+                  {(serialOutput.length > 0 ? serialOutput : ['No serial output yet.']).map((line, i) => (
                     <div key={i}>{line}</div>
                   ))}
                 </div>
@@ -212,7 +432,7 @@ export function InstallWizard() {
 
           <Alert variant="success" className="my-6">
             <strong>What happens next:</strong><br />
-            The device will connect to your WiFi network and display will show your Webex status.
+            The device will connect to your WiFi network and display your Webex status.
             Future firmware updates will be installed automatically over WiFi.
           </Alert>
 
@@ -253,14 +473,14 @@ export function InstallWizard() {
                 <p className="text-sm text-[var(--color-text-muted)] mb-4">
                   Use this if the device is unresponsive or stuck in a boot loop. This will reset the device to factory state.
                 </p>
-                <esp-web-install-button manifest="/updates/manifest-firmware-esp32s3.json">
+                <EspWebInstallButton manifest="/updates/manifest-firmware-esp32s3.json">
                   <button 
                     slot="activate"
                     className="bg-success text-white px-6 py-2.5 font-medium border-none rounded-lg cursor-pointer"
                   >
                     Flash Firmware (ESP32-S3)
                   </button>
-                </esp-web-install-button>
+                </EspWebInstallButton>
               </div>
 
               {/* Factory Reset */}

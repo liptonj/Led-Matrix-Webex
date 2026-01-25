@@ -447,21 +447,37 @@ void loop() {
                 BridgeUpdate update = bridge_client.getUpdate();
                 app_state.webex_status = update.status;
                 app_state.last_bridge_status_time = millis();  // Track when we received status
-                // Derive in_call from status if not connected to xAPI
+                
+                // Store display name from embedded app (Webex user's name)
+                if (!update.display_name.isEmpty()) {
+                    app_state.embedded_app_display_name = update.display_name;
+                }
+                
+                // Apply camera/mic/call state from embedded app
+                // Only update if not connected to xAPI (xAPI has more accurate data)
                 if (!app_state.xapi_connected) {
-                    app_state.in_call = (update.status == "meeting" || update.status == "busy" ||
-                                         update.status == "call" || update.status == "presenting");
+                    app_state.camera_on = update.camera_on;
+                    app_state.mic_muted = update.mic_muted;
+                    app_state.in_call = update.in_call;
+                    
+                    // Fallback: derive in_call from status if not explicitly set
+                    if (!update.in_call && (update.status == "meeting" || update.status == "busy" ||
+                                            update.status == "call" || update.status == "presenting")) {
+                        app_state.in_call = true;
+                    }
                 }
             }
         } else {
             app_state.bridge_connected = false;
             app_state.embedded_app_connected = false;
+            app_state.embedded_app_display_name = "";  // Clear when disconnected
             app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
         }
     } else {
         // WiFi not connected
         app_state.bridge_connected = false;
         app_state.embedded_app_connected = false;
+        app_state.embedded_app_display_name = "";  // Clear when disconnected
         app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
     }
 
@@ -655,7 +671,12 @@ void update_display() {
     // Build display data
     DisplayData data;
     data.webex_status = app_state.webex_status;
-    data.display_name = config_manager.getDisplayName();
+    // Prefer embedded app display name (from Webex SDK), fallback to config
+    if (app_state.embedded_app_connected && !app_state.embedded_app_display_name.isEmpty()) {
+        data.display_name = app_state.embedded_app_display_name;
+    } else {
+        data.display_name = config_manager.getDisplayName();
+    }
     data.camera_on = app_state.camera_on;
     data.mic_muted = app_state.mic_muted;
     data.in_call = app_state.in_call;
@@ -817,12 +838,12 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
     Serial.printf("[CMD] Processing command: %s\n", cmd.command.c_str());
 
     if (cmd.command == "get_status") {
-        // Send current status
-        bridge_client.sendStatus(buildStatusJson());
+        // Send current status as command response
+        bridge_client.sendCommandResponse(cmd.requestId, true, buildStatusJson(), "");
 
     } else if (cmd.command == "get_config") {
-        // Send current config
-        bridge_client.sendConfig(buildConfigJson());
+        // Send current config as command response
+        bridge_client.sendCommandResponse(cmd.requestId, true, buildConfigJson(), "");
 
     } else if (cmd.command == "set_config") {
         // Parse and apply config changes

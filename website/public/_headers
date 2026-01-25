@@ -7,6 +7,10 @@
   Access-Control-Allow-Origin: *
   Cache-Control: public, max-age=300
 
+/updates/firmware/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=86400
+
 # Embedded App - Allow Webex to iframe and enable CORS for local display access
 /embedded/*
   Content-Security-Policy: frame-ancestors 'self' https://*.webex.com https://*.wbx2.com https://*.ciscospark.com
@@ -15,8 +19,7 @@
   Access-Control-Allow-Headers: Content-Type
   Cache-Control: no-cache, must-revalidate
 
-# Embedded App JS/CSS - Force revalidation to ensure latest version
-/embedded/app.js
-  Cache-Control: no-cache, must-revalidate
-/embedded/style.css
-  Cache-Control: no-cache, must-revalidate
+# API endpoints - static JSON data
+/api/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: public, max-age=60

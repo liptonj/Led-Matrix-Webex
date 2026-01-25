@@ -1,10 +1,14 @@
 name: Deploy Website to Cloudflare Pages
 
+# This workflow is for manual re-deployments only.
+# Normal deployments happen via ci.yml when a version tag is pushed.
 on:
-  release:
-    # published: new releases, edited: re-tagged/updated releases
-    types: [published, edited]
   workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual deployment'
+        required: false
+        default: 'Manual re-deployment'
 
 jobs:
   deploy:
@@ -22,6 +26,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: 'npm'
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
 
       - name: Create firmware directory
         run: mkdir -p website/public/updates/firmware
@@ -31,42 +41,42 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Downloading firmware binaries from latest release..."
-          
+
           # Get latest release tag
           LATEST_TAG=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "")
-          
+
           if [ -z "$LATEST_TAG" ]; then
             echo "No releases found, skipping firmware download"
             exit 0
           fi
-          
+
           echo "Latest release: $LATEST_TAG"
-          
-          # Download all firmware binaries
+
+          # Download firmware binaries
           cd website/public/updates/firmware
-          
-          # Main firmware files
-          gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32s3.bin" --clobber || echo "firmware-ota-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "firmware-ota-esp32.bin" --clobber || echo "firmware-ota-esp32.bin not found"
+
+          # Main firmware for OTA updates (ESP32-S3 only, web assets embedded)
           gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "firmware-esp32.bin" --clobber || echo "firmware-esp32.bin not found"
-          gh release download "$LATEST_TAG" --pattern "littlefs-esp32s3.bin" --clobber || echo "littlefs-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "littlefs-esp32.bin" --clobber || echo "littlefs-esp32.bin not found"
-          
-          # Bootstrap files (for web installer)
-          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32s3.bin" --clobber || echo "bootstrap-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32.bin" --clobber || echo "bootstrap-esp32.bin not found"
-          gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32s3.bin" --clobber || echo "bootstrap-ota-esp32s3.bin not found"
-          gh release download "$LATEST_TAG" --pattern "bootstrap-ota-esp32.bin" --clobber || echo "bootstrap-ota-esp32.bin not found"
-          
+
+          # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
+          gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
+
           echo "Downloaded firmware files:"
           ls -la
 
-      - name: Generate manifest from GitHub releases
+      - name: Build website
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/generate-manifest.js
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          echo "Build output contents:"
+          ls -la website/out/
+          echo ""
+          echo "Pages generated:"
+          find website/out -name "index.html" | head -20
 
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -74,7 +84,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: led-matrix-webex
-          directory: website/public
+          directory: website/out
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           branch: main
           wranglerVersion: '3'

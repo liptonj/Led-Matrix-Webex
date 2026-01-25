@@ -57,22 +57,6 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     // Partition storage info
     JsonObject partitions = doc["partitions"].to<JsonObject>();
     
-    // Factory partition info
-    const esp_partition_t* factory = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
-    if (factory) {
-        JsonObject factory_info = partitions["factory"].to<JsonObject>();
-        factory_info["size"] = factory->size;
-        esp_app_desc_t factory_desc;
-        if (esp_ota_get_partition_description(factory, &factory_desc) == ESP_OK) {
-            doc["factory_version"] = String(factory_desc.version);
-        } else {
-            doc["factory_version"] = "empty";
-        }
-    } else {
-        doc["factory_version"] = "n/a";
-    }
-    
     // OTA_0 partition info
     const esp_partition_t* ota0 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, nullptr);
@@ -81,9 +65,20 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         ota0_info["size"] = ota0->size;
         esp_app_desc_t ota0_desc;
         if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
-            ota0_info["version"] = String(ota0_desc.version);
+            // The 'version' field should contain our firmware version (e.g., "1.3.3")
+            // If it starts with "esp-idf:" then the build system didn't set it correctly
+            String version_str = String(ota0_desc.version);
+            if (version_str.startsWith("esp-idf:") || version_str.startsWith("v") || 
+                version_str.isEmpty() || version_str == "1") {
+                // Try project_name as fallback - it might have the version
+                String project_name = String(ota0_desc.project_name);
+                if (!project_name.isEmpty() && !project_name.startsWith("esp-idf")) {
+                    version_str = project_name;
+                }
+            }
+            ota0_info["firmware_version"] = version_str;
         } else {
-            ota0_info["version"] = "empty";
+            ota0_info["firmware_version"] = "empty";
         }
     }
     
@@ -95,9 +90,19 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         ota1_info["size"] = ota1->size;
         esp_app_desc_t ota1_desc;
         if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
-            ota1_info["version"] = String(ota1_desc.version);
+            // The 'version' field should contain our firmware version (e.g., "1.3.3")
+            String version_str = String(ota1_desc.version);
+            if (version_str.startsWith("esp-idf:") || version_str.startsWith("v") || 
+                version_str.isEmpty() || version_str == "1") {
+                // Try project_name as fallback
+                String project_name = String(ota1_desc.project_name);
+                if (!project_name.isEmpty() && !project_name.startsWith("esp-idf")) {
+                    version_str = project_name;
+                }
+            }
+            ota1_info["firmware_version"] = version_str;
         } else {
-            ota1_info["version"] = "empty";
+            ota1_info["firmware_version"] = "empty";
         }
     }
     

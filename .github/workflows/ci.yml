@@ -124,7 +124,7 @@ jobs:
           BUILD_DIR=".pio/build/esp32s3"
           # Locate boot_app0.bin from framework
           BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
-          
+
           # Create a merged binary that includes bootloader, partition table, boot_app0, and app
           # This is what web installer needs to flash a new device from scratch
           if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BOOT_APP0" ]; then
@@ -286,6 +286,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: 'npm'
+          cache-dependency-path: website/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
 
       - name: Create firmware directory
         run: mkdir -p website/public/updates/firmware
@@ -295,28 +301,36 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Downloading firmware binaries from latest release..."
-          
+
           # Get latest release tag (use current tag since we just created the release)
           LATEST_TAG="${GITHUB_REF#refs/tags/}"
           echo "Release tag: $LATEST_TAG"
-          
+
           # Download firmware binaries
           cd website/public/updates/firmware
-          
+
           # Main firmware for OTA updates (ESP32-S3 only, web assets embedded)
           gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
-          
+
           # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
           gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
-          
+
           echo "Downloaded firmware files:"
           ls -la
 
-      - name: Generate manifest from GitHub releases
+      - name: Build website (Next.js)
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/generate-manifest.js
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          echo "Build output contents:"
+          ls -la website/out/
+          echo ""
+          echo "Pages generated:"
+          find website/out -name "index.html" | head -20
 
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
@@ -324,7 +338,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           projectName: led-matrix-webex
-          directory: website/public
+          directory: website/out
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           branch: main
           wranglerVersion: '3'

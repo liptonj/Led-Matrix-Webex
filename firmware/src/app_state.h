@@ -24,6 +24,7 @@ struct AppState {
     bool mqtt_connected = false;
     bool bridge_config_changed = false;  // Flag to trigger bridge reconnection
     String webex_status = "unknown";
+    String embedded_app_display_name = "";  // Display name from embedded app user
     bool camera_on = false;
     bool mic_muted = false;
     bool in_call = false;

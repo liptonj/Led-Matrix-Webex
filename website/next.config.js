@@ -24,6 +24,13 @@ const nextConfig = {
         ],
       },
       {
+        source: '/updates/firmware/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Cache-Control', value: 'public, max-age=86400' },
+        ],
+      },
+      {
         source: '/embedded/:path*',
         headers: [
           {
@@ -34,6 +41,13 @@ const nextConfig = {
           { key: 'Access-Control-Allow-Methods', value: 'GET, POST, OPTIONS' },
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type' },
           { key: 'Cache-Control', value: 'no-cache, must-revalidate' },
+        ],
+      },
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Cache-Control', value: 'public, max-age=60' },
         ],
       },
     ];

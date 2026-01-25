@@ -233,14 +233,13 @@ function updateStatusDisplay(data) {
     document.getElementById('firmware-version').textContent = data.firmware_version || '--';
     document.getElementById('firmware-build-id').textContent = data.firmware_build_id || '--';
     document.getElementById('boot-partition').textContent = data.boot_partition || '--';
-    document.getElementById('factory-version').textContent = data.factory_version || '--';
     
     // Partition versions
     if (data.partitions) {
         document.getElementById('ota0-version').textContent = 
-            data.partitions.ota_0?.version || 'empty';
+            data.partitions.ota_0?.firmware_version || 'empty';
         document.getElementById('ota1-version').textContent = 
-            data.partitions.ota_1?.version || 'empty';
+            data.partitions.ota_1?.firmware_version || 'empty';
         
         // Filesystem usage
         if (data.partitions.filesystem) {

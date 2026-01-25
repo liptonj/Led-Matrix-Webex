@@ -7,8 +7,9 @@ export const metadata: Metadata = {
     template: '%s | LED Matrix Webex Display',
   },
   description: 'Open-source LED matrix display showing your Webex presence status - Available, In Meeting, Do Not Disturb, Away',
-  keywords: ['webex', 'led-matrix', 'esp32', 'presence', 'status', 'display'],
+  keywords: ['webex', 'led-matrix', 'esp32', 'presence', 'status', 'display', 'hub75', 'smart-display'],
   authors: [{ name: 'LED Matrix Webex Project' }],
+  manifest: '/manifest.json',
   icons: {
     icon: [
       { url: '/favicon.ico' },
@@ -16,6 +17,22 @@ export const metadata: Metadata = {
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
     ],
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    siteName: 'LED Matrix Webex Display',
+    title: 'LED Matrix Webex Display',
+    description: 'Open-source LED matrix display showing your Webex presence status',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'LED Matrix Webex Display',
+    description: 'Open-source LED matrix display showing your Webex presence status',
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 };
 

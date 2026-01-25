@@ -1,6 +1,6 @@
 {
   "name": "led-matrix-webex-website",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "description": "Website for LED Matrix Webex Display project",
   "private": true,
   "scripts": {
@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "prebuild": "node scripts/generate-manifest.js",
+    "postbuild": "node scripts/smoke-test.js",
+    "test": "node scripts/smoke-test.js",
     "deploy": "npm run build && wrangler pages deploy out"
   },
   "keywords": [
@@ -31,7 +33,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.18",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3"
   }
 }

@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import Link from 'next/link';
 import { ThemeToggle } from './ThemeToggle';
 import { Navigation } from './Navigation';
 
@@ -15,38 +16,52 @@ export function Header({
 }: HeaderProps) {
   return (
     <>
-      <Navigation />
-      <header 
-        className="text-center py-8 shadow-elevated relative"
-        style={{ background: 'var(--header-gradient)', color: 'var(--footer-text)' }}
-      >
-        <div className="container mx-auto px-4 flex flex-col items-center gap-2">
-          {showBrand && (
-            <div className="flex items-center justify-center gap-3">
-              <Image
-                src="/icon-512.png"
-                alt="LED Matrix Webex Display Logo"
-                width={48}
-                height={48}
-                className="rounded-lg"
-                priority
-              />
-              <h1 className="text-2xl md:text-3xl font-semibold mb-0 text-white">
-                {title}
-              </h1>
+      {/* Top Navigation Bar with Logo and Theme Toggle */}
+      <div className="sticky top-0 z-50 bg-[var(--color-surface)] border-b border-[var(--color-border)] shadow-sm">
+        <div className="container mx-auto px-4 h-16 flex items-center justify-between gap-4">
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-3 no-underline group ml-14 lg:ml-0">
+            <Image
+              src="/icon-512.png"
+              alt="LED Matrix Webex Display"
+              width={40}
+              height={40}
+              className="rounded-lg transition-transform group-hover:scale-105"
+              priority
+            />
+            <div className="hidden sm:block">
+              <div className="font-bold text-base leading-tight">
+                LED Matrix
+              </div>
+              <div className="text-xs text-[var(--color-text-muted)] leading-tight">
+                Webex Display
+              </div>
             </div>
-          )}
-          {!showBrand && (
-            <h1 className="text-2xl md:text-3xl font-semibold mb-0 text-white">
-              {title}
-            </h1>
-          )}
-          <p className="text-base opacity-90 mb-0">{tagline}</p>
-          <div className="mt-4 flex gap-3 items-center">
+          </Link>
+
+          {/* Navigation - includes hamburger on mobile, desktop nav on large screens */}
+          <Navigation />
+
+          {/* Theme Toggle - Desktop only */}
+          <div className="hidden lg:block">
             <ThemeToggle />
           </div>
         </div>
-      </header>
+      </div>
+
+      {/* Hero Section */}
+      {showBrand && (
+        <header className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-12 shadow-lg">
+          <div className="container mx-auto px-4 text-center">
+            <h1 className="text-3xl md:text-4xl font-bold mb-3">
+              {title}
+            </h1>
+            <p className="text-lg opacity-90 max-w-2xl mx-auto">
+              {tagline}
+            </p>
+          </div>
+        </header>
+      )}
     </>
   );
 }
