@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CSS Variables for theming */
+:root {
+  /* Primary brand colors */
+  --color-primary: #00bceb;
+  --color-primary-dark: #0097c1;
+  --color-primary-light: #33c9ef;
+  
+  /* Status colors */
+  --color-success: #6cc04a;
+  --color-warning: #ffcc00;
+  --color-danger: #ff5c5c;
+  --color-purple: #9b59b6;
+  
+  /* Webex status colors */
+  --color-active: #6cc04a;
+  --color-meeting: #ff5c5c;
+  --color-dnd: #ff5c5c;
+  --color-away: #ffcc00;
+  --color-ooo: #9b59b6;
+  --color-offline: #8892a0;
+  
+  /* Dark theme (default) */
+  --color-bg: #1a1a2e;
+  --color-bg-card: #16213e;
+  --color-bg-hover: #1f3460;
+  --color-surface: #16213e;
+  --color-surface-alt: #1f3460;
+  --color-text: #ffffff;
+  --color-text-muted: #8892a0;
+  --color-text-secondary: #a0a8b4;
+  --color-border: #2d3a4f;
+  --color-code-bg: #0e1116;
+  --color-code-text: #e6e8eb;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 2px 12px rgba(0, 0, 0, 0.4);
+  
+  /* Header/Footer */
+  --header-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  --footer-bg: #0e1116;
+  --footer-text: #e6e8eb;
+}
+
+/* Light theme */
+.light {
+  --color-bg: #f4f6f8;
+  --color-bg-card: #ffffff;
+  --color-bg-hover: #e8edf2;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8f9fa;
+  --color-text: #212529;
+  --color-text-muted: #6c757d;
+  --color-text-secondary: #6c757d;
+  --color-border: #dee2e6;
+  --color-code-bg: #212529;
+  --color-code-text: #f8f9fa;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.15);
+  --shadow-elevated: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --header-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --footer-bg: #212529;
+  --footer-text: #ffffff;
+}
+
+/* Base styles */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply font-sans antialiased;
+    color: var(--color-text);
+    background-color: var(--color-bg);
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold leading-tight;
+  }
+
+  h1 { @apply text-3xl md:text-4xl; }
+  h2 { @apply text-2xl md:text-3xl; }
+  h3 { @apply text-xl md:text-2xl; }
+  h4 { @apply text-lg md:text-xl; }
+
+  a {
+    @apply text-primary transition-colors duration-150;
+  }
+
+  a:hover {
+    @apply text-primary-light;
+  }
+
+  code {
+    @apply font-mono text-sm px-1.5 py-0.5 rounded-sm;
+    background: var(--color-code-bg);
+    color: var(--color-code-text);
+  }
+
+  pre {
+    @apply font-mono text-sm p-4 rounded-lg overflow-x-auto my-4;
+    background: var(--color-code-bg);
+    color: var(--color-code-text);
+  }
+
+  pre code {
+    @apply bg-transparent p-0;
+  }
+}
+
+/* Component styles */
+@layer components {
+  .container {
+    @apply max-w-7xl mx-auto px-4;
+  }
+
+  .container-narrow {
+    @apply max-w-3xl mx-auto px-4;
+  }
+
+  .card {
+    @apply rounded-lg p-6 shadow-md border;
+    background-color: var(--color-bg-card);
+    border-color: var(--color-border);
+  }
+
+  .section {
+    @apply my-8 p-6 rounded-lg shadow-md border;
+    background: var(--color-surface);
+    border-color: var(--color-border);
+  }
+
+  .skip-link {
+    @apply absolute -top-10 left-0 bg-primary text-white px-4 py-2 z-[700] transition-all duration-150;
+  }
+
+  .skip-link:focus {
+    @apply top-0;
+  }
+}
+
+/* Utility styles */
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary-light;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .status-dot.active { background-color: var(--color-active); }
+  .status-dot.meeting { background-color: var(--color-meeting); }
+  .status-dot.dnd { background-color: var(--color-dnd); }
+  .status-dot.away { background-color: var(--color-away); }
+  .status-dot.offline { background-color: var(--color-offline); }
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-primary;
+}
+
+/* Print styles */
+@media print {
+  body {
+    @apply bg-white text-black;
+  }
+  
+  .no-print {
+    @apply hidden;
+  }
+}

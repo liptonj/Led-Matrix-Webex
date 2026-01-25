@@ -1,0 +1,35 @@
+{
+  "version": "1.2.0",
+  "build_id": "1769287933",
+  "build_date": "2026-01-24T20:52:13Z",
+  "firmware": {
+    "esp32s3": {
+      "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
+    }
+  },
+  "bundle": {
+    "esp32s3": {
+      "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
+    }
+  },
+  "generated": "2026-01-24T21:01:38.083Z",
+  "latest": "v1.2.0",
+  "versions": [
+    {
+      "tag": "v1.2.0",
+      "version": "1.2.0",
+      "name": "Release v1.2.0",
+      "build_id": "1769287933",
+      "build_date": "2026-01-24T20:52:13Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.1.11...v1.2.0",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.2.0/firmware-esp32s3.bin",
+          "size": 1280608
+        }
+      ]
+    }
+  ]
+}
