@@ -1,0 +1,13 @@
+# Cursor ignore file - excludes from indexing and AI context
+
+# Archived code (deprecated, kept for reference)
+archive/
+
+# Build artifacts
+**/.pio/
+**/node_modules/
+**/dist/
+
+# Large binary files
+*.bin
+*.elf

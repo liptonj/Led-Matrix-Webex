@@ -16,6 +16,7 @@
 #include "debug.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
+#include "serial/serial_commands.h"
 #include "web/web_server.h"
 #include "webex/webex_client.h"
 #include "webex/xapi_websocket.h"
@@ -252,6 +253,10 @@ void setup() {
         ota_manager.setManifestUrl(ota_url);
     }
 
+    // Initialize serial command handler (for web installer WiFi setup)
+    Serial.println("[INIT] Initializing serial command handler...");
+    serial_commands_begin();
+
     Serial.println("[INIT] Setup complete!");
     Serial.println();
 
@@ -274,6 +279,47 @@ void setup() {
  */
 void loop() {
     unsigned long current_time = millis();
+
+    // Process serial commands (for web installer WiFi setup)
+    serial_commands_loop();
+
+    // Handle WiFi credentials set via serial command
+    if (serial_wifi_pending()) {
+        String ssid = serial_wifi_get_ssid();
+        String password = serial_wifi_get_password();
+        serial_wifi_clear_pending();
+
+        Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
+        matrix_display.showConnecting(ssid);
+
+        WiFi.disconnect();
+        WiFi.begin(ssid.c_str(), password.c_str());
+
+        // Wait for connection with timeout
+        unsigned long start = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+            delay(500);
+            Serial.print(".");
+        }
+        Serial.println();
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+            app_state.wifi_connected = true;
+
+            // Start mDNS
+            mdns_manager.begin(config_manager.getDeviceName());
+            mdns_manager.advertiseHTTP(80);
+
+            // Sync time
+            setup_time();
+
+            matrix_display.showConnected(WiFi.localIP().toString());
+        } else {
+            Serial.println("[WIFI] Connection failed!");
+            app_state.wifi_connected = false;
+        }
+    }
 
     // Handle WiFi connection
     wifi_manager.handleConnection(&mdns_manager);

@@ -659,8 +659,8 @@
                 
                 <!-- ESP32-S3 Install Button -->
                 <div id="install-esp32s3">
-                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
-                        <button slot="activate">Install Bootstrap Firmware</button>
+                    <esp-web-install-button manifest="updates/manifest-firmware-esp32s3.json">
+                        <button slot="activate">Install Firmware</button>
                         <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome or Edge.</span>
                         <span slot="not-allowed">Serial access denied. Please allow access and try again.</span>
                     </esp-web-install-button>
@@ -732,16 +732,16 @@
             <div class="wizard-step" id="step-3">
                 <div class="success-icon">🎉</div>
                 <div class="success-message">Setup Complete!</div>
-                <p>Your LED Matrix Display is now connected and downloading the main firmware.</p>
+                <p>Your LED Matrix Display is now connected and ready to use!</p>
                 
                 <div class="status-message success visible" style="margin: 1.5rem 0;">
                     <strong>What happens next:</strong><br>
-                    The device will automatically download and install the main firmware over WiFi. 
-                    This takes about 1-2 minutes. The display will show status updates.
+                    The device will connect to your WiFi network and display will show your Webex status.
+                    Future firmware updates will be installed automatically over WiFi.
                 </div>
                 
                 <p style="margin-top: 2rem;">
-                    Once the main firmware is installed, your display will show a pairing code.<br>
+                    Your display will show a pairing code.<br>
                     Use the <a href="embedded/index.html">Webex Embedded App</a> to connect.
                 </p>
                 
@@ -764,20 +764,10 @@
             <p>Use these options if your device is stuck, OTA update failed, or you need to start fresh.</p>
             
             <div class="recovery-options">
-                <!-- Re-flash Bootstrap -->
+                <!-- Re-flash Firmware -->
                 <div class="recovery-card">
-                    <h3>🔄 Re-flash Bootstrap</h3>
+                    <h3>🔄 Re-flash Firmware</h3>
                     <p>Use this if the device is unresponsive or stuck in a boot loop. This will reset the device to factory state.</p>
-                    
-                    <esp-web-install-button manifest="updates/manifest-bootstrap-esp32s3.json">
-                        <button slot="activate">Flash Bootstrap (ESP32-S3)</button>
-                    </esp-web-install-button>
-                </div>
-                
-                <!-- Direct Firmware Flash -->
-                <div class="recovery-card">
-                    <h3>⬇️ Flash Main Firmware Directly</h3>
-                    <p>Use this if OTA download keeps failing. Flashes the main firmware directly via USB, bypassing OTA.</p>
                     
                     <esp-web-install-button manifest="updates/manifest-firmware-esp32s3.json">
                         <button slot="activate">Flash Firmware (ESP32-S3)</button>
@@ -797,10 +787,9 @@
             <div class="recovery-help">
                 <h4>Common Recovery Scenarios:</h4>
                 <ul>
-                    <li><strong>Device won't boot / stuck on logo:</strong> Re-flash the Bootstrap firmware</li>
-                    <li><strong>OTA download keeps failing:</strong> Flash the Main Firmware directly via USB</li>
-                    <li><strong>WiFi won't connect / wrong network:</strong> Re-flash Bootstrap or use Factory Reset</li>
-                    <li><strong>Want to start completely fresh:</strong> Re-flash Bootstrap (erases everything)</li>
+                    <li><strong>Device won't boot / stuck on logo:</strong> Re-flash the firmware</li>
+                    <li><strong>WiFi won't connect / wrong network:</strong> Re-flash firmware or use Factory Reset</li>
+                    <li><strong>Want to start completely fresh:</strong> Re-flash firmware (erases everything)</li>
                 </ul>
             </div>
         </div>

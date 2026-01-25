@@ -1,0 +1,16 @@
+# ESP32-S3 8MB Flash with dual OTA slots (no factory partition)
+# Name,   Type, SubType, Offset,   Size, Flags
+#
+# Layout:
+#   ota_0   (0x10000)  - Primary firmware / web installer target
+#   ota_1   (0x380000) - OTA update alternate slot
+#   spiffs  (0x6F0000) - LittleFS filesystem (not used, web assets embedded)
+#
+# Web installer flashes to ota_0, OTA updates alternate between slots.
+# A/B update scheme provides automatic rollback if an update fails.
+#
+nvs,      data, nvs,     0x9000,  0x5000,
+otadata,  data, ota,     0xe000,  0x2000,
+ota_0,    app,  ota_0,   0x10000, 0x370000,
+ota_1,    app,  ota_1,   0x380000,0x370000,
+spiffs,   data, spiffs,  0x6F0000,0x110000,

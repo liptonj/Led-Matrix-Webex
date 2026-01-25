@@ -7,10 +7,6 @@
 # ESP32 Firmware specific
 firmware/.vscode/
 firmware/lib/
-firmware/test/
-firmware_bootstrap/.vscode/
-firmware_bootstrap/lib/
-firmware_bootstrap/test/
 
 # Node.js Bridge
 bridge/node_modules/
@@ -34,7 +30,6 @@ firmware/include/secrets.h
 
 # Auto-generated embedded assets (created by pre-build script)
 firmware/src/web/embedded_assets.h
-firmware_bootstrap/src/embedded_assets.h
 
 # Build artifacts
 *.bin
@@ -59,3 +54,6 @@ __pycache__/
 # Temporary files
 tmp/
 temp/
+
+# Archived code (not actively used)
+archive/

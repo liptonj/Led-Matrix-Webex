@@ -111,7 +111,6 @@ jobs:
           BUILD_DIR=".pio/build/esp32s3"
 
           # Copy firmware for OTA updates (web assets are embedded)
-          # This is what bootstrap and main firmware download for OTA
           if [ -f "$BUILD_DIR/firmware.bin" ]; then
             cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
             echo "✓ Included firmware.bin for OTA (web assets embedded)"
@@ -119,6 +118,33 @@ jobs:
 
           echo "ESP32-S3 artifacts:"
           ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          # Locate boot_app0.bin from framework
+          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          
+          # Create a merged binary that includes bootloader, partition table, boot_app0, and app
+          # This is what web installer needs to flash a new device from scratch
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BOOT_APP0" ]; then
+            esptool.py --chip esp32s3 merge_bin \
+              -o artifacts/firmware-merged-esp32s3.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0xE000 $BOOT_APP0 \
+              0x10000 $BUILD_DIR/firmware.bin
+            echo "✓ Created merged binary for web installer (includes bootloader, partitions, boot_app0, and firmware)"
+            ls -la artifacts/
+          else
+            echo "ERROR: Missing required files for merged binary"
+            ls -la $BUILD_DIR/
+            test -f "$BOOT_APP0" && echo "boot_app0.bin: found" || echo "boot_app0.bin: MISSING"
+            exit 1
+          fi
 
       - name: Upload ESP32-S3 artifacts
         uses: actions/upload-artifact@v4
@@ -175,86 +201,12 @@ jobs:
           fi
 
   # ============================================================================
-  # Bootstrap Firmware - ESP32-S3 Build
-  # ============================================================================
-  bootstrap-build-esp32s3:
-    name: Bootstrap Firmware (ESP32-S3)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: firmware_bootstrap
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            ~/.cache/pip
-          key: ${{ runner.os }}-pio-bootstrap-esp32s3-${{ hashFiles('firmware_bootstrap/platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-bootstrap-esp32s3-
-            ${{ runner.os }}-pio-
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio esptool
-
-      - name: Build bootstrap firmware (ESP32-S3)
-        # Web assets are now embedded in firmware via pre-build script
-        run: pio run -e esp32s3
-
-      - name: Create merged binary for web installer
-        run: |
-          mkdir -p artifacts
-          BUILD_DIR=".pio/build/esp32s3"
-          # Locate boot_app0.bin from framework
-          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
-          
-          # Create a merged binary that includes bootloader, partition table, boot_app0, and app
-          # This is what web installer needs to flash a new device (web assets embedded)
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BOOT_APP0" ]; then
-            esptool.py --chip esp32s3 merge_bin \
-              -o artifacts/bootstrap-esp32s3.bin \
-              --flash_mode dio \
-              --flash_freq 80m \
-              --flash_size 8MB \
-              0x0000 $BUILD_DIR/bootloader.bin \
-              0x8000 $BUILD_DIR/partitions.bin \
-              0xE000 $BOOT_APP0 \
-              0x10000 $BUILD_DIR/firmware.bin
-            echo "✓ Created merged bootstrap binary for web installer (includes bootloader, partitions, boot_app0, and firmware)"
-            ls -la artifacts/
-          else
-            echo "ERROR: Missing required files for merged binary"
-            ls -la $BUILD_DIR/
-            test -f "$BOOT_APP0" && echo "boot_app0.bin: found" || echo "boot_app0.bin: MISSING"
-            exit 1
-          fi
-
-      - name: Upload ESP32-S3 bootstrap artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bootstrap-esp32s3
-          path: firmware_bootstrap/artifacts/
-          retention-days: 7
-
-  # ============================================================================
   # Create Release (only on version tags)
   # ============================================================================
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [bridge-test, firmware-build-esp32s3, firmware-native-test, bootstrap-build-esp32s3]
+    needs: [bridge-test, firmware-build-esp32s3, firmware-native-test]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -268,12 +220,6 @@ jobs:
         with:
           name: firmware-esp32s3
           path: release/firmware/
-
-      - name: Download ESP32-S3 bootstrap artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bootstrap-esp32s3
-          path: release/bootstrap/
 
       - name: Download bridge artifacts
         uses: actions/download-artifact@v4
@@ -299,21 +245,11 @@ jobs:
             echo "✓ Firmware version matches: $FIRMWARE_VERSION"
           fi
 
-          # Check bootstrap version
-          BOOTSTRAP_VERSION=$(grep "bootstrap_version" firmware_bootstrap/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
-          if [ "$TAG_VERSION" != "$BOOTSTRAP_VERSION" ]; then
-            echo "::warning::Tag version ($TAG_VERSION) does not match bootstrap version ($BOOTSTRAP_VERSION)"
-          else
-            echo "✓ Bootstrap version matches: $BOOTSTRAP_VERSION"
-          fi
-
       - name: Create release archives
         run: |
           cd release
           # Create firmware release zip (web assets embedded in firmware)
           cd firmware && zip -r ../firmware-${{ steps.version.outputs.VERSION }}.zip . && cd ..
-          # Create bootstrap release zip
-          cd bootstrap && zip -r ../bootstrap-${{ steps.version.outputs.VERSION }}.zip . && cd ..
           # Create bridge release zip
           cd bridge && zip -r ../bridge-${{ steps.version.outputs.VERSION }}.zip . && cd ..
 
@@ -326,10 +262,9 @@ jobs:
           generate_release_notes: true
           files: |
             release/firmware-${{ steps.version.outputs.VERSION }}.zip
-            release/bootstrap-${{ steps.version.outputs.VERSION }}.zip
             release/bridge-${{ steps.version.outputs.VERSION }}.zip
             release/firmware/firmware-esp32s3.bin
-            release/bootstrap/bootstrap-esp32s3.bin
+            release/firmware/firmware-merged-esp32s3.bin
 
   # ============================================================================
   # Deploy Website (only on version tags, after release)
@@ -371,8 +306,8 @@ jobs:
           # Main firmware for OTA updates (ESP32-S3 only, web assets embedded)
           gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
           
-          # Bootstrap for web installer (merged binary with bootloader)
-          gh release download "$LATEST_TAG" --pattern "bootstrap-esp32s3.bin" --clobber || echo "bootstrap-esp32s3.bin not found"
+          # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
+          gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
           
           echo "Downloaded firmware files:"
           ls -la
