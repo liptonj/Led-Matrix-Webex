@@ -454,11 +454,31 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         LittleFS.end();
     }
 
+#ifndef NATIVE_BUILD
+    // For firmware updates, explicitly target the OTA partition using the partition label
+    // This ensures we NEVER overwrite the factory/bootstrap partition
+    if (update_type == U_FLASH && target_partition) {
+        const char* ota_label = target_partition->label;
+        Serial.printf("[OTA] Using explicit partition label: %s\n", ota_label);
+        if (!Update.begin(contentLength, update_type, -1, LOW, ota_label)) {
+            Serial.printf("[OTA] Not enough space for %s: %s\n", label, Update.errorString());
+            http.end();
+            return false;
+        }
+    } else {
+        if (!Update.begin(contentLength, update_type)) {
+            Serial.printf("[OTA] Not enough space for %s: %s\n", label, Update.errorString());
+            http.end();
+            return false;
+        }
+    }
+#else
     if (!Update.begin(contentLength, update_type)) {
         Serial.printf("[OTA] Not enough space for %s: %s\n", label, Update.errorString());
         http.end();
         return false;
     }
+#endif
 
     Serial.printf("[OTA] Flashing %s...\n", label);
     

@@ -11,6 +11,7 @@
 #include <ArduinoJson.h>
 #include <Update.h>
 #include <LittleFS.h>
+#include <esp_ota_ops.h>
 
 OTADownloader::OTADownloader()
     : config_store(nullptr)
@@ -260,8 +261,18 @@ bool OTADownloader::downloadAndInstallBundle(const String& bundle_url) {
     Serial.printf("[OTA] Bundle: app=%u bytes, fs=%u bytes\n", app_size, fs_size);
     updateProgress(20, "Installing firmware...");
     
-    // Phase 1: Flash firmware
-    if (!Update.begin(app_size, U_FLASH)) {
+    // Phase 1: Flash firmware - explicitly target OTA partition (NOT factory!)
+    const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
+    if (!ota_partition) {
+        Serial.println("[OTA] No OTA partition found");
+        updateStatus(OTAStatus::ERROR_FLASH, "No OTA partition found");
+        http.end();
+        return false;
+    }
+    
+    Serial.printf("[OTA] Target partition: %s at 0x%x\n", ota_partition->label, ota_partition->address);
+    
+    if (!Update.begin(app_size, U_FLASH, -1, LOW, ota_partition->label)) {
         Serial.printf("[OTA] Update.begin failed: %s\n", Update.errorString());
         updateStatus(OTAStatus::ERROR_FLASH, String("Flash error: ") + Update.errorString());
         http.end();
@@ -522,11 +533,43 @@ bool OTADownloader::downloadAndInstallBinary(const String& url,
         LittleFS.end();
     }
 
-    if (!Update.begin(content_length, update_type)) {
-        updateStatus(OTAStatus::ERROR_FLASH, 
-                    String("Not enough space: ") + Update.errorString());
-        http.end();
-        return false;
+    // For firmware updates, explicitly target the OTA partition (NOT factory!)
+    // Factory partition contains bootstrap and must never be overwritten
+    if (update_type == U_FLASH) {
+        const esp_partition_t* ota_partition = esp_ota_get_next_update_partition(nullptr);
+        if (!ota_partition) {
+            updateStatus(OTAStatus::ERROR_FLASH, "No OTA partition found");
+            http.end();
+            return false;
+        }
+        
+        Serial.printf("[OTA] Target partition: %s at 0x%x (%d bytes)\n", 
+                      ota_partition->label, ota_partition->address, ota_partition->size);
+        
+        if (content_length > (int)ota_partition->size) {
+            updateStatus(OTAStatus::ERROR_FLASH, 
+                        String("Firmware too large for OTA partition (") + 
+                        String(content_length/1024) + "KB > " + 
+                        String(ota_partition->size/1024) + "KB)");
+            http.end();
+            return false;
+        }
+        
+        // Use explicit partition label to ensure we write to OTA, not factory
+        if (!Update.begin(content_length, update_type, -1, LOW, ota_partition->label)) {
+            updateStatus(OTAStatus::ERROR_FLASH, 
+                        String("Update.begin failed: ") + Update.errorString());
+            http.end();
+            return false;
+        }
+    } else {
+        // For SPIFFS/LittleFS, use default behavior
+        if (!Update.begin(content_length, update_type)) {
+            updateStatus(OTAStatus::ERROR_FLASH, 
+                        String("Not enough space: ") + Update.errorString());
+            http.end();
+            return false;
+        }
     }
 
     updateStatus(OTAStatus::FLASHING, String("Flashing ") + label + "...");
