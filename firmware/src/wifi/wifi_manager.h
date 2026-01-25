@@ -79,6 +79,14 @@ public:
      * @return AP IP address as string (if AP mode active)
      */
     String getAPIPAddress() const;
+    
+    /**
+     * @brief Disable AP mode
+     * 
+     * Call this after successfully connecting to WiFi to disable
+     * the provisioning AP. Safe to call even if AP is not active.
+     */
+    void disableAP();
 
 private:
     ConfigManager* config_manager;

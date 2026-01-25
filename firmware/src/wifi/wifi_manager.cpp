@@ -99,7 +99,15 @@ void WiFiManager::setupWiFi() {
 
     if (WiFi.status() == WL_CONNECTED) {
         app_state->wifi_connected = true;
-        ap_mode_active = false;
+        
+        // Disable AP mode now that we're connected
+        if (ap_mode_active) {
+            Serial.println("[WIFI] Connected to network, disabling AP mode...");
+            WiFi.softAPdisconnect(true);
+            WiFi.mode(WIFI_STA);
+            ap_mode_active = false;
+        }
+        
         Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
         if (matrix_display) {
             matrix_display->showConnected(WiFi.localIP().toString());
@@ -139,6 +147,14 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
         }
         app_state->wifi_connected = true;
+        
+        // Disable AP mode after successful connection/reconnection
+        if (ap_mode_active) {
+            Serial.println("[WIFI] Disabling AP mode after reconnect...");
+            WiFi.softAPdisconnect(true);
+            WiFi.mode(WIFI_STA);
+            ap_mode_active = false;
+        }
 
         if (mdns_manager && !mdns_manager->isInitialized()) {
             Serial.println("[MDNS] Starting mDNS after reconnect...");
@@ -163,4 +179,14 @@ String WiFiManager::getIPAddress() const {
 
 String WiFiManager::getAPIPAddress() const {
     return WiFi.softAPIP().toString();
+}
+
+void WiFiManager::disableAP() {
+    if (ap_mode_active || WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+        Serial.println("[WIFI] Disabling AP mode...");
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        ap_mode_active = false;
+        Serial.println("[WIFI] AP mode disabled");
+    }
 }

@@ -307,6 +307,9 @@ void loop() {
             Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
             app_state.wifi_connected = true;
 
+            // Disable provisioning AP now that we're connected
+            wifi_manager.disableAP();
+
             // Start mDNS
             mdns_manager.begin(config_manager.getDeviceName());
             mdns_manager.advertiseHTTP(80);
