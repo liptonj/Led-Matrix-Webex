@@ -28,10 +28,10 @@ export function FirmwareInstallStep({
         Flash your ESP32-S3 device with the LED Matrix firmware
       </p>
 
-      {/* Info about installation */}
-      <Alert variant="info" className="mb-6">
-        <strong>Note:</strong> This will install the complete firmware package. 
-        WiFi and device settings will need to be reconfigured after installation.
+      {/* Info about WiFi setup */}
+      <Alert variant="success" className="mb-6">
+        <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
+        WiFi directly in the installation dialog. No separate setup required.
       </Alert>
 
       {/* Install Button */}
@@ -80,7 +80,7 @@ export function FirmwareInstallStep({
             <li>Click &quot;Install Firmware&quot; above</li>
             <li>Select your ESP32-S3 device from the popup</li>
             <li>Wait for the firmware to upload (about 30-60 seconds)</li>
-            <li>Configure WiFi when prompted</li>
+            <li><strong>Configure WiFi</strong> when the dialog prompts you</li>
             <li>Close the dialog and click the button below</li>
           </ol>
         </div>
@@ -94,7 +94,7 @@ export function FirmwareInstallStep({
             Installation Complete →
           </Button>
           <p className="text-xs text-[var(--color-text-muted)]">
-            Click after installation is complete
+            Click after you&apos;ve configured WiFi in the installation dialog
           </p>
         </div>
       </div>

@@ -271,6 +271,7 @@ async function generateManifest() {
       name: "LED Matrix Webex Display",
       version: version,
       home_assistant_domain: "webex_display",
+      improv: true,
       builds: [
         {
           chipFamily: "ESP32-S3",
@@ -290,6 +291,7 @@ async function generateManifest() {
       name: "LED Matrix Webex Display (Update)",
       version: version,
       home_assistant_domain: "webex_display",
+      improv: true,
       builds: [
         {
           chipFamily: "ESP32-S3",
