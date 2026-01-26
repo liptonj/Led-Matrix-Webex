@@ -577,6 +577,10 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             return false;
         }
         Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
+        
+        // Store the version for this partition in NVS for future display
+        extern ConfigManager config_manager;
+        config_manager.setPartitionVersion(String(target_partition->label), latest_version);
     }
 #endif
 
@@ -857,6 +861,10 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         return false;
     }
     Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
+    
+    // Store the version for this partition in NVS for future display
+    extern ConfigManager config_manager;
+    config_manager.setPartitionVersion(String(target_partition->label), latest_version);
 #endif
     Serial.flush();
 

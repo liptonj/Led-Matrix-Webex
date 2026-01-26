@@ -116,6 +116,11 @@ public:
     void setFailedOTAVersion(const String& version);
     void clearFailedOTAVersion();
 
+    // Partition Version Tracking (for OTA version display)
+    String getPartitionVersion(const String& partition_label) const;
+    void setPartitionVersion(const String& partition_label, const String& version);
+    void clearPartitionVersion(const String& partition_label);
+
     // Debug Configuration
     bool getDebugMode() const;
     void setDebugMode(bool enabled);

@@ -81,6 +81,7 @@ export function EmbeddedAppClient() {
   const [deviceName, setDeviceName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isRebooting, setIsRebooting] = useState(false);
+  const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const addLog = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -122,8 +123,10 @@ export function EmbeddedAppClient() {
   const joinRequestedRef = useRef(false);
 
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    if (sdkLoaded) {
+      initialize();
+    }
+  }, [initialize, sdkLoaded]);
 
   useEffect(() => {
     async function fetchBridgeConfig() {
@@ -502,7 +505,12 @@ export function EmbeddedAppClient() {
       {/* Webex SDK Script */}
       <Script 
         src="https://binaries.webex.com/static-content-pipeline/webex-embedded-app/v1/webex-embedded-app-sdk.js"
-        strategy="lazyOnload"
+        strategy="afterInteractive"
+        onLoad={() => setSdkLoaded(true)}
+        onError={(e) => {
+          console.error('Failed to load Webex SDK:', e);
+          addLog('Failed to load Webex SDK');
+        }}
       />
 
       <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -793,7 +801,7 @@ export function EmbeddedAppClient() {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-[var(--color-text-muted)]">App Version:</span>
-                        <span className="ml-2">v1.4.3</span>
+                        <span className="ml-2">v1.4.4</span>
                       </div>
                       <div>
                         <span className="text-[var(--color-text-muted)]">Connection:</span>
@@ -872,7 +880,7 @@ export function EmbeddedAppClient() {
           {/* Footer */}
           <footer className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
             <span>LED Matrix Webex Display</span>
-            <span className="ml-2">v1.4.3</span>
+            <span className="ml-2">v1.4.4</span>
           </footer>
         </div>
       </div>

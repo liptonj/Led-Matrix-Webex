@@ -554,6 +554,24 @@ void ConfigManager::clearFailedOTAVersion() {
     saveString("fail_ota_ver", "");
 }
 
+// Partition Version Tracking
+
+String ConfigManager::getPartitionVersion(const String& partition_label) const {
+    String key = "part_ver_" + partition_label;
+    return loadString(key.c_str(), "");
+}
+
+void ConfigManager::setPartitionVersion(const String& partition_label, const String& version) {
+    String key = "part_ver_" + partition_label;
+    saveString(key.c_str(), version);
+    Serial.printf("[CONFIG] Partition %s version set to %s\n", partition_label.c_str(), version.c_str());
+}
+
+void ConfigManager::clearPartitionVersion(const String& partition_label) {
+    String key = "part_ver_" + partition_label;
+    saveString(key.c_str(), "");
+}
+
 // Debug Configuration
 
 bool ConfigManager::getDebugMode() const {

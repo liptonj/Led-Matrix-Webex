@@ -1,6 +1,6 @@
 {
   "name": "LED Matrix Webex Display",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "home_assistant_domain": "webex_display",
   "improv": true,
   "builds": [

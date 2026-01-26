@@ -162,13 +162,44 @@ export function useWebexSDK(): UseWebexSDKReturn {
     [updateState],
   );
 
+  // Helper function to wait for SDK with retry logic
+  const waitForWebexSDK = useCallback((timeout = 5000): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      let attempts = 0;
+
+      const checkSDK = () => {
+        attempts++;
+
+        if (typeof window !== "undefined" && window.Webex?.Application) {
+          resolve(true);
+          return;
+        }
+
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= timeout) {
+          resolve(false);
+          return;
+        }
+
+        // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1000ms
+        const delay = Math.min(100 * Math.pow(2, attempts - 1), 1000);
+        setTimeout(checkSDK, delay);
+      };
+
+      checkSDK();
+    });
+  }, []);
+
   const initialize = useCallback(async () => {
     if (state.isInitialized || appRef.current) {
       return;
     }
 
-    // Check if SDK is available
-    if (typeof window === "undefined" || !window.Webex?.Application) {
+    // Wait for SDK to load with retry logic
+    const sdkAvailable = await waitForWebexSDK(5000);
+
+    if (!sdkAvailable) {
       setError(
         "Webex SDK not available. Make sure you are running inside a Webex embedded app.",
       );
@@ -245,6 +276,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     handleMeetingEvent,
     handleCallEvent,
     handlePresenceEvent,
+    waitForWebexSDK,
   ]);
 
   // Cleanup on unmount

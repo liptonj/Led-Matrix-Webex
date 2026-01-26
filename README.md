@@ -2,7 +2,7 @@
 
 An ESP32-S3 powered 64x32 RGB LED matrix display that shows your Webex presence status at a glance. Perfect for home offices, meeting rooms, or anywhere you want colleagues and family to know your availability without interrupting you.
 
-**Current Version: 1.2.0**
+**Current Version: 1.4.4**
 
 ## Overview
 

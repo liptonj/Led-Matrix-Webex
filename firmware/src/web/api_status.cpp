@@ -63,22 +63,45 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     if (ota0) {
         JsonObject ota0_info = partitions["ota_0"].to<JsonObject>();
         ota0_info["size"] = ota0->size;
-        esp_app_desc_t ota0_desc;
-        if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
-            // The 'version' field should contain our firmware version (e.g., "1.3.3")
-            // If it starts with "esp-idf:" then the build system didn't set it correctly
-            String version_str = String(ota0_desc.version);
-            if (version_str.startsWith("esp-idf:") || version_str.startsWith("v") || 
-                version_str.isEmpty() || version_str == "1") {
-                // Try project_name as fallback - it might have the version
-                String project_name = String(ota0_desc.project_name);
-                if (!project_name.isEmpty() && !project_name.startsWith("esp-idf")) {
-                    version_str = project_name;
+        
+        // Check if this is the currently running partition
+        bool is_running = (running && ota0->address == running->address);
+        
+        if (is_running) {
+            // For the currently running partition, use the compile-time version
+            // because Arduino framework doesn't populate esp_app_desc_t correctly
+            #ifdef FIRMWARE_VERSION
+            ota0_info["firmware_version"] = FIRMWARE_VERSION;
+            #else
+            ota0_info["firmware_version"] = "unknown";
+            #endif
+        } else {
+            // For non-running partitions, try stored version from NVS first
+            String stored_version = config_manager->getPartitionVersion("ota_0");
+            if (!stored_version.isEmpty()) {
+                ota0_info["firmware_version"] = stored_version;
+            } else {
+                // Fallback to reading from app descriptor (likely won't work with Arduino)
+                esp_app_desc_t ota0_desc;
+                if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
+                    String version_str = String(ota0_desc.version);
+                    // Arduino framework often puts "arduino-lib-builder" or "esp-idf:..." here
+                    // If it looks invalid, try project_name as fallback
+                    if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
+                        version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
+                        String project_name = String(ota0_desc.project_name);
+                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") && 
+                            !project_name.startsWith("arduino-lib")) {
+                            version_str = project_name;
+                        } else {
+                            version_str = "unknown";
+                        }
+                    }
+                    ota0_info["firmware_version"] = version_str;
+                } else {
+                    ota0_info["firmware_version"] = "empty";
                 }
             }
-            ota0_info["firmware_version"] = version_str;
-        } else {
-            ota0_info["firmware_version"] = "empty";
         }
     }
     
@@ -88,21 +111,43 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     if (ota1) {
         JsonObject ota1_info = partitions["ota_1"].to<JsonObject>();
         ota1_info["size"] = ota1->size;
-        esp_app_desc_t ota1_desc;
-        if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
-            // The 'version' field should contain our firmware version (e.g., "1.3.3")
-            String version_str = String(ota1_desc.version);
-            if (version_str.startsWith("esp-idf:") || version_str.startsWith("v") || 
-                version_str.isEmpty() || version_str == "1") {
-                // Try project_name as fallback
-                String project_name = String(ota1_desc.project_name);
-                if (!project_name.isEmpty() && !project_name.startsWith("esp-idf")) {
-                    version_str = project_name;
+        
+        // Check if this is the currently running partition
+        bool is_running = (running && ota1->address == running->address);
+        
+        if (is_running) {
+            // For the currently running partition, use the compile-time version
+            #ifdef FIRMWARE_VERSION
+            ota1_info["firmware_version"] = FIRMWARE_VERSION;
+            #else
+            ota1_info["firmware_version"] = "unknown";
+            #endif
+        } else {
+            // For non-running partitions, try stored version from NVS first
+            String stored_version = config_manager->getPartitionVersion("ota_1");
+            if (!stored_version.isEmpty()) {
+                ota1_info["firmware_version"] = stored_version;
+            } else {
+                // Fallback to reading from app descriptor (likely won't work with Arduino)
+                esp_app_desc_t ota1_desc;
+                if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
+                    String version_str = String(ota1_desc.version);
+                    // Arduino framework often puts "arduino-lib-builder" or "esp-idf:..." here
+                    if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
+                        version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
+                        String project_name = String(ota1_desc.project_name);
+                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") && 
+                            !project_name.startsWith("arduino-lib")) {
+                            version_str = project_name;
+                        } else {
+                            version_str = "unknown";
+                        }
+                    }
+                    ota1_info["firmware_version"] = version_str;
+                } else {
+                    ota1_info["firmware_version"] = "empty";
                 }
             }
-            ota1_info["firmware_version"] = version_str;
-        } else {
-            ota1_info["firmware_version"] = "empty";
         }
     }
     
