@@ -263,8 +263,7 @@ jobs:
           echo "Container logs (last 50 lines):"
           az container logs \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --name ${{ env.AZURE_CONTAINER_NAME }} \
-|| echo "No logs available yet"
+            --name ${{ env.AZURE_CONTAINER_NAME }} || echo "No logs available yet"
 
       - name: Deployment summary
         run: |
@@ -349,4 +348,4 @@ jobs:
           echo "Final container logs:"
           az container logs \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --name ${{ env.AZURE_CONTAINER_NAME }} \
+            --name ${{ env.AZURE_CONTAINER_NAME }}
