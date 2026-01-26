@@ -261,6 +261,29 @@ async function generateManifest() {
       console.log(`    ${board}: ${data.url ? "✓" : "✗ missing"}`);
     }
     console.log(`  Total versions: ${manifest.versions.length}`);
+
+    // Update ESP Web Tools manifest for web installer
+    const espWebToolsManifest = {
+      name: "LED Matrix Webex Display",
+      version: version,
+      home_assistant_domain: "webex_display",
+      new_install_prompt_erase: true,
+      builds: [
+        {
+          chipFamily: "ESP32-S3",
+          parts: [
+            {
+              path: "/updates/firmware/firmware-merged-esp32s3.bin",
+              offset: 0
+            }
+          ]
+        }
+      ]
+    };
+
+    const espManifestFile = path.join(outputDir, "manifest-firmware-esp32s3.json");
+    fs.writeFileSync(espManifestFile, JSON.stringify(espWebToolsManifest, null, 2));
+    console.log(`✓ ESP Web Tools manifest updated: ${espManifestFile}`);
   } catch (error) {
     console.error("Failed to generate manifest:", error.message);
     process.exit(1);

@@ -793,7 +793,7 @@ export function EmbeddedAppClient() {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
                         <span className="text-[var(--color-text-muted)]">App Version:</span>
-                        <span className="ml-2">v1.4.0</span>
+                        <span className="ml-2">v1.4.1</span>
                       </div>
                       <div>
                         <span className="text-[var(--color-text-muted)]">Connection:</span>
@@ -872,7 +872,7 @@ export function EmbeddedAppClient() {
           {/* Footer */}
           <footer className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
             <span>LED Matrix Webex Display</span>
-            <span className="ml-2">v1.4.0</span>
+            <span className="ml-2">v1.4.1</span>
           </footer>
         </div>
       </div>

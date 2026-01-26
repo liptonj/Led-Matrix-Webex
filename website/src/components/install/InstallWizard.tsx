@@ -109,20 +109,26 @@ export function InstallWizard() {
     }
   }, [scanWifiNetworks]);
 
-  // Listen for ESP Web Tools flash complete event
-  useEffect(() => {
-    const handleFlashComplete = () => {
-      setFlashComplete(true);
-      setFlashStatus({ message: 'Firmware flashed successfully!', type: 'success' });
-      // Auto-advance to WiFi step after 2 seconds
-      setTimeout(() => {
-        goToStep(2);
-      }, 2000);
-    };
-
-    window.addEventListener('esp-web-install-complete', handleFlashComplete);
-    return () => window.removeEventListener('esp-web-install-complete', handleFlashComplete);
+  // Handle flash complete from ESP Web Tools
+  const handleFlashComplete = useCallback(() => {
+    setFlashComplete(true);
+    setFlashStatus({ message: 'Firmware flashed successfully!', type: 'success' });
+    // Auto-advance to WiFi step after 2 seconds
+    setTimeout(() => {
+      goToStep(2);
+    }, 2000);
   }, [goToStep]);
+
+  const handleFlashError = useCallback((error: string) => {
+    setFlashStatus({ message: `Flash failed: ${error}`, type: 'error' });
+  }, []);
+
+  // Also listen for global event (backward compatibility)
+  useEffect(() => {
+    const onComplete = () => handleFlashComplete();
+    window.addEventListener('esp-web-install-complete', onComplete);
+    return () => window.removeEventListener('esp-web-install-complete', onComplete);
+  }, [handleFlashComplete]);
 
   const handleSendWifi = async () => {
     const trimmedSsid = ssid.trim();
@@ -230,7 +236,11 @@ export function InstallWizard() {
 
           {/* ESP Install Button */}
           <div className="my-6">
-            <EspWebInstallButton manifest="/updates/manifest-firmware-esp32s3.json">
+            <EspWebInstallButton 
+              manifest="/updates/manifest-firmware-esp32s3.json"
+              onInstallComplete={handleFlashComplete}
+              onInstallError={handleFlashError}
+            >
               <button 
                 slot="activate"
                 className="bg-success text-white px-8 py-3.5 text-lg font-semibold border-none rounded-lg cursor-pointer transition-colors hover:brightness-90"
