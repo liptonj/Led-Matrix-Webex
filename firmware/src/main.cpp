@@ -95,6 +95,18 @@ void setup() {
         boot_validator.onCriticalFailure("Config", "Failed to load configuration");
         // Won't return - device reboots to bootloader
     }
+    
+    // Store version for the currently running partition (for OTA version tracking)
+    // This ensures we can always display the correct version even after updates
+    #ifndef NATIVE_BUILD
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        #ifdef FIRMWARE_VERSION
+        config_manager.setPartitionVersion(String(running->label), FIRMWARE_VERSION);
+        Serial.printf("[INIT] Stored version %s for partition %s\n", FIRMWARE_VERSION, running->label);
+        #endif
+    }
+    #endif
 
     // Initialize debug mode from config
     g_debug_mode = config_manager.getDebugMode();

@@ -8,6 +8,8 @@ The System Information page was showing incorrect version information for OTA pa
 
 The running firmware version displayed correctly as "1.4.3" at the top of the page.
 
+**Critical Question**: What happens if we have OTA_1 installed and want to see the version on both partitions?
+
 ## Root Cause
 
 The ESP-IDF framework stores firmware metadata in an `esp_app_desc_t` structure that gets baked into each firmware binary at compile time. This structure contains fields like:
@@ -31,58 +33,129 @@ Reference: `firmware/scripts/patch_app_desc.py.deprecated`
 
 ## Solution
 
-Modified `firmware/src/web/api_status.cpp` to use a hybrid approach:
+Implemented a **hybrid approach** using NVS (Non-Volatile Storage) to track partition versions:
 
-1. **For the currently running partition**: Use the compile-time `FIRMWARE_VERSION` macro
-   - This is always accurate because it's defined at compile time from `platformio.ini`
-   - Bypasses the broken esp_app_desc_t entirely for the active partition
+### 1. Version Storage in NVS
 
-2. **For non-running partitions**: Try to read from esp_app_desc_t
-   - If the version looks invalid (starts with "arduino-lib", "esp-idf:", is empty, etc.)
-   - Fall back to checking `project_name` field
-   - If that's also invalid, display "unknown"
+Added new methods to `ConfigManager` to store and retrieve partition versions:
+- `getPartitionVersion(partition_label)` - Read stored version for a partition
+- `setPartitionVersion(partition_label, version)` - Store version for a partition
+- `clearPartitionVersion(partition_label)` - Clear stored version
 
-### Code Changes
+Storage keys: `part_ver_ota_0`, `part_ver_ota_1`
 
+### 2. Store Version on Boot
+
+In `main.cpp` setup(), after config_manager initializes:
 ```cpp
-// Check if this is the currently running partition
-bool is_running = (running && ota0->address == running->address);
-
-if (is_running) {
-    // Use compile-time version for running partition
-    #ifdef FIRMWARE_VERSION
-    ota0_info["firmware_version"] = FIRMWARE_VERSION;
-    #else
-    ota0_info["firmware_version"] = "unknown";
-    #endif
-} else {
-    // Try to read from app descriptor for non-running partitions
-    // with fallback logic for invalid values
+const esp_partition_t* running = esp_ota_get_running_partition();
+if (running) {
+    config_manager.setPartitionVersion(String(running->label), FIRMWARE_VERSION);
 }
 ```
 
+This ensures the currently running partition's version is always tracked.
+
+### 3. Store Version After OTA Update
+
+In `ota_manager.cpp`, after successfully setting the boot partition:
+```cpp
+esp_err_t err = esp_ota_set_boot_partition(target_partition);
+if (err == ESP_OK) {
+    config_manager.setPartitionVersion(String(target_partition->label), latest_version);
+}
+```
+
+This stores the version of the newly installed firmware.
+
+### 4. Read Version in API
+
+Modified `api_status.cpp` to use a fallback chain:
+
+**For currently running partition:**
+1. Use compile-time `FIRMWARE_VERSION` macro (always accurate)
+
+**For non-running partitions:**
+1. Try stored version from NVS (from OTA update)
+2. If not found, try reading from `esp_app_desc_t`
+3. If that's invalid, fall back to "unknown"
+
+```cpp
+if (is_running) {
+    // Use compile-time version
+    ota0_info["firmware_version"] = FIRMWARE_VERSION;
+} else {
+    // Check NVS storage first
+    String stored_version = config_manager->getPartitionVersion("ota_0");
+    if (!stored_version.isEmpty()) {
+        ota0_info["firmware_version"] = stored_version;
+    } else {
+        // Fallback to app descriptor (likely broken with Arduino)
+        // ... fallback logic ...
+    }
+}
+```
+
+## Scenarios
+
+### Scenario 1: Initial Boot (OTA_0 running, OTA_1 empty)
+- **OTA_0**: Running partition → Uses `FIRMWARE_VERSION` → "1.4.3" ✓
+- **OTA_1**: Empty → Shows "empty" ✓
+- **Stored in NVS**: `part_ver_ota_0 = "1.4.3"`
+
+### Scenario 2: After OTA Update to v1.4.4 (OTA_1 now running)
+- **OTA Update**: Writes v1.4.4 to OTA_1, stores in NVS
+- **Reboot**: Device boots from OTA_1
+- **Boot Process**: Stores `part_ver_ota_1 = "1.4.4"` in NVS
+- **Display**:
+  - **OTA_1**: Running partition → Uses `FIRMWARE_VERSION` → "1.4.4" ✓
+  - **OTA_0**: Non-running → Reads NVS → "1.4.3" ✓
+
+### Scenario 3: After Another Update to v1.4.5 (Back to OTA_0)
+- **OTA Update**: Writes v1.4.5 to OTA_0 (overwrites old 1.4.3), stores in NVS
+- **Reboot**: Device boots from OTA_0
+- **Boot Process**: Updates `part_ver_ota_0 = "1.4.5"` in NVS
+- **Display**:
+  - **OTA_0**: Running partition → Uses `FIRMWARE_VERSION` → "1.4.5" ✓
+  - **OTA_1**: Non-running → Reads NVS → "1.4.4" ✓
+
+## Files Modified
+
+### New/Modified Files
+- `firmware/src/config/config_manager.h` - Added partition version methods
+- `firmware/src/config/config_manager.cpp` - Implemented NVS storage for partition versions
+- `firmware/src/ota/ota_manager.cpp` - Store version after successful OTA update
+- `firmware/src/main.cpp` - Store running partition version on boot
+- `firmware/src/web/api_status.cpp` - Use NVS-stored versions with fallback logic
+
+### Documentation
+- `docs/ota_partition_version_fix.md` - This file
+
 ## Impact
 
-- **OTA_0 Version**: Now correctly shows "1.4.3" (the running firmware)
-- **OTA_1 Version**: Shows "empty" (correct - no firmware installed)
-- **No checksum issues**: No binary modification, pure runtime logic
-- **Future-proof**: When OTA updates install to OTA_1, it will also show the correct version
+- **Current State**: OTA_0 will immediately show "1.4.3" after rebuild/flash (stored on first boot)
+- **After OTA Update**: Both partitions will show correct versions
+- **No Checksum Issues**: No binary modification, only runtime NVS storage
+- **Persistent**: Versions survive reboots and are updated automatically
+- **Backward Compatible**: Fallback logic handles partitions without stored versions
 
-## Testing
+## Testing Checklist
 
-To verify:
-1. Navigate to System Information page in the web UI
-2. Check that "OTA_0 Version" shows the same version as "Firmware Version"
-3. Perform an OTA update (installs to OTA_1)
-4. After update, verify both partitions show correct versions
-
-## Related Files
-
-- `firmware/src/web/api_status.cpp` - Fixed partition version reading logic
-- `firmware/platformio.ini` - Version source of truth: `[version] firmware_version = 1.4.3`
-- `firmware/scripts/version.py` - Injects FIRMWARE_VERSION at compile time
-- `firmware/scripts/patch_app_desc.py.deprecated` - Previous failed approach (binary patching)
+- [x] Navigate to System Information page
+- [x] Verify OTA_0 shows correct version (1.4.3)
+- [ ] Perform OTA update to new version (e.g., 1.4.4)
+- [ ] After reboot, verify both partitions show correct versions
+- [ ] Perform another OTA update (back to alternate partition)
+- [ ] Verify versions are correct and track across multiple updates
 
 ## Future Improvements
 
-If we ever switch from Arduino framework to pure ESP-IDF framework, the esp_app_desc_t will be properly populated and we can remove the "is_running" special case. However, the current hybrid approach works correctly for both frameworks.
+1. **Migration**: On first boot with this new code, it will populate NVS with current version
+2. **Cleanup**: Could add a method to clear all partition version data during factory reset
+3. **ESP-IDF Migration**: If we switch from Arduino to pure ESP-IDF, we could remove the workaround and rely on `esp_app_desc_t` directly
+
+## Related Issues
+
+- Arduino framework doesn't properly set `PROJECT_VER` in app descriptor
+- Binary patching breaks OTA checksums (previous failed approach)
+- Need to track versions across multiple partition swaps
