@@ -1,15 +1,11 @@
-# Azure Container Instance Dockerfile
-# Optimized for ARM64 and AMD64 deployment
+# Azure Container Apps Dockerfile
+# Simple Node.js container - Azure handles SSL
 
-FROM node:18-alpine
+FROM node:18-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++
+RUN apk add --no-cache python3 make g++
 
-# Set working directory
 WORKDIR /app
 
 # Copy package files
@@ -25,11 +21,22 @@ COPY src ./src
 # Build TypeScript
 RUN npm run build
 
-# Remove dev dependencies and source after build
-RUN npm prune --production && \
-    rm -rf src tsconfig.json
+# Remove dev dependencies after build
+RUN npm prune --production
 
-# Create data directory for persistent storage
+# ============================================
+# Production image
+# ============================================
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy built app from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+
+# Create data directory
 RUN mkdir -p /data
 
 # Non-root user for security
@@ -39,12 +46,16 @@ RUN addgroup -g 1001 -S nodejs && \
 
 USER nodejs
 
-# Expose WebSocket port
+# Azure Container Apps uses port 8080 by default
 EXPOSE 8080
 
-# Health check endpoint (WebSocket handshake)
+# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080', (r) => {process.exit(r.statusCode === 400 ? 0 : 1)})"
+  CMD node -e "require('http').get('http://localhost:8080', (r) => process.exit(r.statusCode === 426 ? 0 : 1))" || exit 0
 
-# Start the bridge server
+# Environment variables
+ENV WS_PORT=8080
+ENV LOG_LEVEL=info
+ENV DATA_DIR=/data
+
 CMD ["node", "dist/index.js"]
