@@ -79,6 +79,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Checkout the tag/ref that triggered the build (for correct Docker image content)
+          # fetch-depth: 0 ensures we have full history for switching to main later
+          fetch-depth: 0
 
       - name: Download bridge dist
         uses: actions/download-artifact@v4
@@ -112,26 +116,12 @@ jobs:
             echo "IS_RELEASE=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update config.yaml version
+      - name: Update config.yaml version for Docker build
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           echo "Setting add-on version to: ${VERSION}"
           sed -i "s/^version: .*/version: \"${VERSION}\"/" webex-bridge/config.yaml
           cat webex-bridge/config.yaml | grep "^version:"
-
-      - name: Commit version update to repo
-        if: steps.version.outputs.IS_RELEASE == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Fetch main and apply version update
-          git fetch origin main
-          git checkout main
-          sed -i "s/^version: .*/version: \"${VERSION}\"/" webex-bridge/config.yaml
-          git add webex-bridge/config.yaml
-          git diff --cached --quiet || git commit -m "chore: update addon version to ${VERSION}"
-          git push origin main
 
       - name: Extract metadata for Docker
         id: meta
@@ -164,6 +154,24 @@ jobs:
           if [[ "${{ steps.version.outputs.IS_RELEASE }}" == "true" ]]; then
             echo "  ${{ env.IMAGE_BASE }}-${{ env.ARCH }}:latest"
           fi
+
+      - name: Commit version update to repo
+        if: steps.version.outputs.IS_RELEASE == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Docker image is built from the tag. Now switch to main to commit version update.
+          # fetch-depth: 0 ensures main branch is available locally.
+          git checkout main
+          
+          # Apply the version update to main branch
+          sed -i "s/^version: .*/version: \"${VERSION}\"/" webex-bridge/config.yaml
+          
+          git add webex-bridge/config.yaml
+          git diff --cached --quiet || git commit -m "chore: update addon version to ${VERSION}"
+          git push origin main
 
   # ============================================================================
   # Summary
