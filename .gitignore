@@ -3,6 +3,7 @@
 **/.pio-home/
 **/.pioenvs/
 **/.piolibdeps/
+**/compile_commands.json
 
 # ESP32 Firmware specific
 firmware/.vscode/

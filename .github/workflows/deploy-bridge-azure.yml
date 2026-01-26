@@ -111,34 +111,34 @@ jobs:
             echo "✓ Resource group exists"
           fi
 
-      - name: Register Microsoft.App provider if needed
+      - name: Verify Azure resource providers are registered
         run: |
-          # Check if Microsoft.App provider is registered
-          STATE=$(az provider show -n Microsoft.App --query "registrationState" -o tsv 2>/dev/null || echo "NotRegistered")
+          # Container Apps requires these providers (should be pre-registered)
+          PROVIDERS=("Microsoft.App" "Microsoft.OperationalInsights")
+          ALL_REGISTERED=true
           
-          if [ "$STATE" != "Registered" ]; then
-            echo "Registering Microsoft.App resource provider (current state: $STATE)..."
-            az provider register -n Microsoft.App
+          for PROVIDER in "${PROVIDERS[@]}"; do
+            STATE=$(az provider show -n $PROVIDER --query "registrationState" -o tsv 2>/dev/null || echo "NotRegistered")
             
-            # Wait for registration with timeout (5 minutes max)
-            echo "Waiting for provider registration..."
-            for i in {1..30}; do
-              STATE=$(az provider show -n Microsoft.App --query "registrationState" -o tsv)
-              echo "  Attempt $i/30: $STATE"
-              
-              if [ "$STATE" == "Registered" ]; then
-                echo "✓ Microsoft.App provider registered"
-                break
-              fi
-              
-              if [ $i -eq 30 ]; then
-                echo "⚠ Provider still registering after 5 minutes, proceeding anyway..."
-              fi
-              
-              sleep 10
-            done
-          else
-            echo "✓ Microsoft.App provider already registered"
+            if [ "$STATE" == "Registered" ]; then
+              echo "✓ $PROVIDER registered"
+            else
+              echo "✗ $PROVIDER not registered (state: $STATE)"
+              ALL_REGISTERED=false
+            fi
+          done
+          
+          if [ "$ALL_REGISTERED" != "true" ]; then
+            echo ""
+            echo "ERROR: Required Azure resource providers are not registered."
+            echo "Run these commands to register them (one-time setup):"
+            echo "  az provider register -n Microsoft.App"
+            echo "  az provider register -n Microsoft.OperationalInsights"
+            echo ""
+            echo "Then wait for registration to complete:"
+            echo "  az provider show -n Microsoft.App --query registrationState"
+            echo "  az provider show -n Microsoft.OperationalInsights --query registrationState"
+            exit 1
           fi
 
       - name: Create Container Apps environment if needed
