@@ -77,11 +77,11 @@ public:
     void refreshBridgeDiscovery();
     
     /**
-     * @brief Refresh mDNS announcement to prevent TTL expiry
+     * @brief Refresh mDNS by forcing periodic restart
      * 
-     * ESP32's mDNS broadcasts with a 120-second TTL. This method
-     * re-announces the hostname and services periodically to keep
-     * the device discoverable on the network.
+     * ESP32's mDNS can become unresponsive without indication.
+     * This method forces a full restart every 2 minutes to ensure
+     * the device stays discoverable on the network.
      */
     void refresh();
     

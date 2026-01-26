@@ -1,6 +1,6 @@
 {
   "name": "led-matrix-webex-website",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Website for LED Matrix Webex Display project",
   "private": true,
   "scripts": {

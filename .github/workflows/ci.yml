@@ -95,12 +95,15 @@ jobs:
 
       - name: Create secrets.h for build
         run: |
-          cat > include/secrets.h << 'EOF'
+          cat > include/secrets.h << EOF
           #ifndef SECRETS_H
           #define SECRETS_H
-          // Placeholder secrets for CI build
+          // Secrets injected by CI build
           #define WIFI_SSID "ci-placeholder"
           #define WIFI_PASSWORD "ci-placeholder"
+          // Webex OAuth2 credentials from GitHub secrets
+          #define WEBEX_CLIENT_ID "${WEBEX_CLIENT_ID}"
+          #define WEBEX_CLIENT_SECRET "${WEBEX_CLIENT_SECRET}"
           #endif
           EOF
 
