@@ -590,6 +590,9 @@ void loop() {
                 
                 // Store display name from embedded app (Webex user's name)
                 if (!update.display_name.isEmpty()) {
+                    if (app_state.embedded_app_display_name != update.display_name) {
+                        Serial.printf("[MAIN] Display name updated: %s\n", update.display_name.c_str());
+                    }
                     app_state.embedded_app_display_name = update.display_name;
                 }
                 
@@ -785,6 +788,7 @@ void update_display() {
     last_update = millis();
     matrix_display.setBrightness(config_manager.getBrightness());
     matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
+    matrix_display.setPageIntervalMs(config_manager.getPageIntervalMs());
 
     // Show updating screen during OTA file upload
     if (web_server.isOTAUploadInProgress()) {
@@ -817,11 +821,14 @@ void update_display() {
     // Build display data
     DisplayData data;
     data.webex_status = app_state.webex_status;
-    // Prefer embedded app display name (from Webex SDK), fallback to config
+    // Prefer embedded app display name (from Webex SDK), fallback to config, then device name
     if (app_state.embedded_app_connected && !app_state.embedded_app_display_name.isEmpty()) {
         data.display_name = app_state.embedded_app_display_name;
-    } else {
+    } else if (!config_manager.getDisplayName().isEmpty()) {
         data.display_name = config_manager.getDisplayName();
+    } else {
+        // Fallback to device name if no display name is configured
+        data.display_name = config_manager.getDeviceName();
     }
     data.camera_on = app_state.camera_on;
     data.mic_muted = app_state.mic_muted;
@@ -838,6 +845,7 @@ void update_display() {
     data.ambient_noise = app_state.ambient_noise;
     data.right_metric = config_manager.getDisplayMetric();
     data.show_sensors = app_state.mqtt_connected;
+    data.sensor_page_enabled = config_manager.getSensorPageEnabled();
 
     // Connection indicators
     data.wifi_connected = app_state.wifi_connected;
@@ -961,6 +969,8 @@ String buildConfigJson() {
     doc["display_name"] = config_manager.getDisplayName();
     doc["brightness"] = config_manager.getBrightness();
     doc["scroll_speed_ms"] = config_manager.getScrollSpeedMs();
+    doc["page_interval_ms"] = config_manager.getPageIntervalMs();
+    doc["sensor_page_enabled"] = config_manager.getSensorPageEnabled();
     doc["poll_interval"] = config_manager.getWebexPollInterval();
     doc["time_zone"] = config_manager.getTimeZone();
     doc["time_format"] = config_manager.getTimeFormat();
@@ -1014,6 +1024,14 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
             uint16_t speed = doc["scroll_speed_ms"].as<uint16_t>();
             config_manager.setScrollSpeedMs(speed);
             matrix_display.setScrollSpeedMs(speed);
+        }
+        if (doc["page_interval_ms"].is<int>()) {
+            uint16_t interval = doc["page_interval_ms"].as<uint16_t>();
+            config_manager.setPageIntervalMs(interval);
+            matrix_display.setPageIntervalMs(interval);
+        }
+        if (doc["sensor_page_enabled"].is<bool>()) {
+            config_manager.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
         }
         if (doc["time_zone"].is<const char*>()) {
             config_manager.setTimeZone(doc["time_zone"].as<String>());

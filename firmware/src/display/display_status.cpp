@@ -252,8 +252,8 @@ void MatrixDisplay::update(const DisplayData& data) {
     // In-call overrides page rotation
     if (data.show_call_status && data.in_call) {
         target_page = DisplayPage::IN_CALL;
-    } else if (data.show_sensors) {
-        // Page rotation between status and sensors
+    } else if (data.show_sensors && data.sensor_page_enabled) {
+        // Page rotation between status and sensors (only if sensor page is enabled)
         if (now - last_page_change_ms >= page_interval_ms) {
             last_page_change_ms = now;
             current_page = (current_page == DisplayPage::STATUS)
@@ -262,7 +262,7 @@ void MatrixDisplay::update(const DisplayData& data) {
         }
         target_page = current_page;
     } else {
-        // No sensors, just show status
+        // No sensors or sensor page disabled, just show status
         target_page = DisplayPage::STATUS;
     }
 
@@ -271,6 +271,13 @@ void MatrixDisplay::update(const DisplayData& data) {
         dma_display->clearScreen();
         for (int i = 0; i < 4; i++) {
             last_line_keys[i].clear();
+        }
+        // Reset scroll states to force redraw of scrolling text on page change
+        status_scroll.text.clear();
+        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+            if (scroll_states[i].active) {
+                scroll_states[i].state.text.clear();
+            }
         }
         last_page = target_page;
     }

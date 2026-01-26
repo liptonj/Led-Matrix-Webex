@@ -19,6 +19,7 @@
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
       cached_brightness(DEFAULT_BRIGHTNESS), cached_scroll_speed_ms(DEFAULT_SCROLL_SPEED_MS),
+      cached_page_interval_ms(DEFAULT_PAGE_INTERVAL_MS), cached_sensor_page_enabled(true),
       cache_loaded(false) {
 }
 
@@ -104,6 +105,8 @@ void ConfigManager::loadCache() const {
     cached_poll_interval = loadUInt("poll_interval", DEFAULT_POLL_INTERVAL);
     cached_brightness = loadUInt("brightness", DEFAULT_BRIGHTNESS);
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
+    cached_page_interval_ms = loadUInt("page_interval", DEFAULT_PAGE_INTERVAL_MS);
+    cached_sensor_page_enabled = loadBool("sensor_page", true);
     
     // Load MQTT config using existing preferences handle
     cached_mqtt_broker = loadString("mqtt_broker");
@@ -206,6 +209,39 @@ uint16_t ConfigManager::getScrollSpeedMs() const {
 void ConfigManager::setScrollSpeedMs(uint16_t speed_ms) {
     saveUInt("scroll_speed_ms", speed_ms);
     cached_scroll_speed_ms = speed_ms;
+}
+
+uint16_t ConfigManager::getPageIntervalMs() const {
+    if (!cache_loaded) {
+        return loadUInt("page_interval", DEFAULT_PAGE_INTERVAL_MS);
+    }
+    return cached_page_interval_ms;
+}
+
+void ConfigManager::setPageIntervalMs(uint16_t interval_ms) {
+    // Enforce minimum of 3 seconds, maximum of 30 seconds
+    if (interval_ms < 3000) {
+        interval_ms = 3000;
+    }
+    if (interval_ms > 30000) {
+        interval_ms = 30000;
+    }
+    saveUInt("page_interval", interval_ms);
+    cached_page_interval_ms = interval_ms;
+    Serial.printf("[CONFIG] Page interval set to %d ms\n", interval_ms);
+}
+
+bool ConfigManager::getSensorPageEnabled() const {
+    if (!cache_loaded) {
+        return loadBool("sensor_page", true);
+    }
+    return cached_sensor_page_enabled;
+}
+
+void ConfigManager::setSensorPageEnabled(bool enabled) {
+    saveBool("sensor_page", enabled);
+    cached_sensor_page_enabled = enabled;
+    Serial.printf("[CONFIG] Sensor page %s\n", enabled ? "enabled" : "disabled");
 }
 
 // Webex Configuration
@@ -758,6 +794,8 @@ String ConfigManager::exportConfig() const {
     doc["display_name"] = getDisplayName();
     doc["brightness"] = getBrightness();
     doc["scroll_speed_ms"] = getScrollSpeedMs();
+    doc["page_interval_ms"] = getPageIntervalMs();
+    doc["sensor_page_enabled"] = getSensorPageEnabled();
     doc["poll_interval"] = getWebexPollInterval();
     doc["xapi_poll"] = getXAPIPollInterval();
     doc["mqtt_broker"] = getMQTTBroker();
@@ -803,6 +841,12 @@ bool ConfigManager::importConfig(const String& json) {
     }
     if (doc["scroll_speed_ms"].is<int>()) {
         setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
+    }
+    if (doc["page_interval_ms"].is<int>()) {
+        setPageIntervalMs(doc["page_interval_ms"].as<uint16_t>());
+    }
+    if (doc["sensor_page_enabled"].is<bool>()) {
+        setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
     }
     if (doc["poll_interval"].is<int>()) {
         setWebexPollInterval(doc["poll_interval"].as<uint16_t>());

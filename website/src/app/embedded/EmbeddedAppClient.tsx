@@ -279,6 +279,9 @@ export function EmbeddedAppClient() {
           if (config.device_name) {
             setDeviceName(config.device_name);
           }
+          if (config.display_name) {
+            setManualDisplayName(config.display_name);
+          }
         }
         break;
       case 'error':

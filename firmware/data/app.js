@@ -293,6 +293,13 @@ async function loadConfig() {
         document.getElementById('brightness-value').textContent = config.brightness || 128;
         document.getElementById('scroll-speed').value = config.scroll_speed_ms || 250;
         document.getElementById('scroll-speed-value').textContent = config.scroll_speed_ms || 250;
+        
+        // Sensor page settings
+        document.getElementById('sensor-page-enabled').checked = config.sensor_page_enabled !== false;
+        const pageIntervalSec = Math.round((config.page_interval_ms || 5000) / 1000);
+        document.getElementById('page-interval').value = pageIntervalSec;
+        document.getElementById('page-interval-value').textContent = pageIntervalSec;
+        
         document.getElementById('poll-interval').value = config.poll_interval || 30;
         document.getElementById('xapi-device-id').value = config.xapi_device_id || '';
         
@@ -382,6 +389,9 @@ function initEventListeners() {
     });
     document.getElementById('scroll-speed').addEventListener('input', (e) => {
         document.getElementById('scroll-speed-value').textContent = e.target.value;
+    });
+    document.getElementById('page-interval').addEventListener('input', (e) => {
+        document.getElementById('page-interval-value').textContent = e.target.value;
     });
 
     // WiFi scan
@@ -876,6 +886,8 @@ async function saveDisplaySettings(e) {
         brightness: parseInt(document.getElementById('brightness').value),
         poll_interval: parseInt(document.getElementById('poll-interval').value),
         scroll_speed_ms: parseInt(document.getElementById('scroll-speed').value),
+        sensor_page_enabled: document.getElementById('sensor-page-enabled').checked,
+        page_interval_ms: parseInt(document.getElementById('page-interval').value) * 1000,
         time_format: document.getElementById('time-format').value,
         date_format: document.getElementById('date-format').value,
         time_zone: document.getElementById('time-zone').value,

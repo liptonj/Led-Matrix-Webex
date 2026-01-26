@@ -190,6 +190,8 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["display_name"] = config_manager->getDisplayName();
     doc["brightness"] = config_manager->getBrightness();
     doc["scroll_speed_ms"] = config_manager->getScrollSpeedMs();
+    doc["page_interval_ms"] = config_manager->getPageIntervalMs();
+    doc["sensor_page_enabled"] = config_manager->getSensorPageEnabled();
     doc["poll_interval"] = config_manager->getWebexPollInterval();
     doc["xapi_poll_interval"] = config_manager->getXAPIPollInterval();
     // Boolean flags - always include as explicit booleans
@@ -312,6 +314,12 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
     if (doc["scroll_speed_ms"].is<int>()) {
         config_manager->setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
+    }
+    if (doc["page_interval_ms"].is<int>()) {
+        config_manager->setPageIntervalMs(doc["page_interval_ms"].as<uint16_t>());
+    }
+    if (doc["sensor_page_enabled"].is<bool>()) {
+        config_manager->setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
     }
     if (doc["poll_interval"].is<int>()) {
         config_manager->setWebexPollInterval(doc["poll_interval"].as<uint16_t>());

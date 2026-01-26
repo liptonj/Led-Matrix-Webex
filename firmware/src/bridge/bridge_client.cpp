@@ -470,6 +470,12 @@ void BridgeClient::parseMessage(const String& message) {
     
     if (type == "status") {
         // Status update from embedded app (pairing mode)
+        // If we receive a status, the peer must be connected
+        if (!peer_connected) {
+            peer_connected = true;
+            Serial.println("[BRIDGE] Peer (app) connected (inferred from status)");
+        }
+        
         last_update.status = doc["status"].as<String>();
         last_update.display_name = doc["display_name"].as<String>();
         last_update.camera_on = doc["camera_on"] | false;
@@ -478,15 +484,17 @@ void BridgeClient::parseMessage(const String& message) {
         last_update.timestamp = millis();
         last_update.valid = true;
         update_pending = true;
-        DEBUG_LOG("BRIDGE", "Status parsed: status=%s camera=%d mic=%d call=%d", 
+        DEBUG_LOG("BRIDGE", "Status parsed: status=%s camera=%d mic=%d call=%d name=%s", 
                   last_update.status.c_str(), last_update.camera_on, 
-                  last_update.mic_muted, last_update.in_call);
+                  last_update.mic_muted, last_update.in_call,
+                  last_update.display_name.isEmpty() ? "(none)" : last_update.display_name.c_str());
         
-        Serial.printf("[BRIDGE] Status from app: %s (in_call=%d, camera=%d, mic_muted=%d)\n", 
+        Serial.printf("[BRIDGE] Status from app: %s (in_call=%d, camera=%d, mic_muted=%d, name=%s)\n", 
                       last_update.status.c_str(), 
                       last_update.in_call,
                       last_update.camera_on,
-                      last_update.mic_muted);
+                      last_update.mic_muted,
+                      last_update.display_name.isEmpty() ? "(none)" : last_update.display_name.c_str());
                       
     } else if (type == "joined") {
         // Successfully joined pairing room

@@ -349,6 +349,18 @@
                         <input type="range" id="scroll-speed" name="scroll_speed_ms" min="80" max="600" value="250">
                         <span id="scroll-speed-value">250</span>
                     </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="sensor-page-enabled" name="sensor_page_enabled" checked>
+                            Show sensor page
+                        </label>
+                        <p class="help-text">When enabled, display will rotate between status and sensor pages</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="page-interval">Page Switch Interval (seconds):</label>
+                        <input type="range" id="page-interval" name="page_interval_ms" min="3" max="30" value="5">
+                        <span id="page-interval-value">5</span>s
+                    </div>
                     <button type="submit" class="btn btn-primary">Save Display Settings</button>
                 </form>
             </div>

@@ -18,6 +18,7 @@
 #define MAX_POLL_INTERVAL 120       // seconds
 #define DEFAULT_BRIGHTNESS 128      // 0-255
 #define DEFAULT_SCROLL_SPEED_MS 250 // ms per step
+#define DEFAULT_PAGE_INTERVAL_MS 5000 // ms between page switches
 #define DEFAULT_DEVICE_NAME "webex-display"
 
 /**
@@ -51,6 +52,10 @@ public:
     void setBrightness(uint8_t brightness);
     uint16_t getScrollSpeedMs() const;
     void setScrollSpeedMs(uint16_t speed_ms);
+    uint16_t getPageIntervalMs() const;
+    void setPageIntervalMs(uint16_t interval_ms);
+    bool getSensorPageEnabled() const;
+    void setSensorPageEnabled(bool enabled);
 
     // Webex Configuration
     String getWebexClientId() const;
@@ -161,6 +166,8 @@ private:
     mutable uint16_t cached_poll_interval;
     mutable uint8_t cached_brightness;
     mutable uint16_t cached_scroll_speed_ms;
+    mutable uint16_t cached_page_interval_ms;
+    mutable bool cached_sensor_page_enabled;
     mutable String cached_mqtt_broker;
     mutable uint16_t cached_mqtt_port;
     mutable String cached_mqtt_username;

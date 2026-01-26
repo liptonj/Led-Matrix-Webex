@@ -64,6 +64,7 @@ struct DisplayData {
     float ambient_noise = 0.0f;
     String right_metric = "tvoc";
     bool show_sensors = false;
+    bool sensor_page_enabled = true;  // Whether to show sensor page rotation
     bool wifi_connected = false;
     bool bridge_connected = false;
     // Time and date
