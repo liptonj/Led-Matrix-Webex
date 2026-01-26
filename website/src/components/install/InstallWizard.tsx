@@ -5,12 +5,10 @@ import { FirmwareInstallStep } from './FirmwareInstallStep';
 import { SuccessStep } from './SuccessStep';
 
 type WizardStep = 1 | 2;
-type InstallType = 'fresh' | 'update';
 
 export function InstallWizard() {
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
-  const [installType, setInstallType] = useState<InstallType>('fresh');
   const [showAdvanced, setShowAdvanced] = useState(false);
   
   // Firmware installation state
@@ -18,8 +16,8 @@ export function InstallWizard() {
 
   // Debug logging
   useEffect(() => {
-    console.log('Wizard State:', { currentStep, installType });
-  }, [currentStep, installType]);
+    console.log('Wizard State:', { currentStep });
+  }, [currentStep]);
 
   // Verify ESP Web Tools custom element is registered
   useEffect(() => {
@@ -96,11 +94,9 @@ export function InstallWizard() {
         </div>
       </div>
 
-      {/* Step 1: Firmware Installation (includes WiFi via Improv) */}
+      {/* Step 1: Firmware Installation */}
       {currentStep === 1 && (
         <FirmwareInstallStep
-          installType={installType}
-          onInstallTypeChange={setInstallType}
           flashStatus={flashStatus}
           showAdvanced={showAdvanced}
           onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}

@@ -4,20 +4,18 @@ import { Button, Alert } from '@/components/ui';
 import { EspWebInstallButton } from './EspWebInstallButton';
 
 interface FirmwareInstallStepProps {
-  installType: 'fresh' | 'update';
-  onInstallTypeChange: (type: 'fresh' | 'update') => void;
+  installType?: 'fresh' | 'update';  // Kept for backwards compatibility but unused
+  onInstallTypeChange?: (type: 'fresh' | 'update') => void;  // Kept for backwards compatibility
   flashStatus: { message: string; type: 'info' | 'success' | 'error' } | null;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
   onContinue: () => void;
 }
 
-const MANIFEST_FRESH = '/updates/manifest-firmware-esp32s3.json';
-const MANIFEST_UPDATE = '/updates/manifest-firmware-update.json';
+// Only use the full firmware manifest (includes bootloader, partitions, and firmware)
+const MANIFEST = '/updates/manifest-firmware-esp32s3.json';
 
 export function FirmwareInstallStep({
-  installType,
-  onInstallTypeChange,
   flashStatus,
   showAdvanced,
   onToggleAdvanced,
@@ -30,67 +28,20 @@ export function FirmwareInstallStep({
         Flash your ESP32-S3 device with the LED Matrix firmware
       </p>
 
-      {/* Info about WiFi setup */}
-      <Alert variant="success" className="mb-6">
-        <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
-        WiFi directly in the installation dialog. No separate setup required.
+      {/* Info about installation */}
+      <Alert variant="info" className="mb-6">
+        <strong>Note:</strong> This will install the complete firmware package. 
+        WiFi and device settings will need to be reconfigured after installation.
       </Alert>
-
-      {/* Install Type Selection */}
-      <div className="grid gap-3 mb-6">
-        <label 
-          className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-            installType === 'fresh' 
-              ? 'border-primary bg-[var(--color-surface-alt)]' 
-              : 'border-[var(--color-border)] hover:border-primary/50'
-          }`}
-        >
-          <input
-            type="radio"
-            name="installType"
-            value="fresh"
-            checked={installType === 'fresh'}
-            onChange={(e) => onInstallTypeChange(e.target.value as 'fresh' | 'update')}
-            className="mr-2"
-          />
-          <span className="font-medium">Fresh Install</span>
-          <p className="text-sm text-[var(--color-text-muted)] ml-6">
-            Install complete firmware on a new device (includes bootloader)
-          </p>
-        </label>
-
-        <label 
-          className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
-            installType === 'update' 
-              ? 'border-primary bg-[var(--color-surface-alt)]' 
-              : 'border-[var(--color-border)] hover:border-primary/50'
-          }`}
-        >
-          <input
-            type="radio"
-            name="installType"
-            value="update"
-            checked={installType === 'update'}
-            onChange={(e) => onInstallTypeChange(e.target.value as 'fresh' | 'update')}
-            className="mr-2"
-          />
-          <span className="font-medium">Firmware Update</span>
-          <p className="text-sm text-[var(--color-text-muted)] ml-6">
-            Update firmware only (for devices with existing bootloader)
-          </p>
-        </label>
-      </div>
 
       {/* Install Button */}
       <div className="flex justify-center mb-6">
-        <EspWebInstallButton 
-          manifest={installType === 'fresh' ? MANIFEST_FRESH : MANIFEST_UPDATE}
-        >
+        <EspWebInstallButton manifest={MANIFEST}>
           <button 
             slot="activate"
             className="bg-success text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-pointer transition-all hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
           >
-            {installType === 'fresh' ? 'Install Firmware' : 'Update Firmware'}
+            Install Firmware
           </button>
         </EspWebInstallButton>
       </div>
@@ -126,10 +77,10 @@ export function FirmwareInstallStep({
         <div className="bg-[var(--color-surface-alt)] p-4 rounded-lg mb-4">
           <h3 className="font-semibold mb-2">Installation Steps:</h3>
           <ol className="list-decimal list-inside text-sm text-[var(--color-text-muted)] space-y-1">
-            <li>Click &quot;{installType === 'fresh' ? 'Install' : 'Update'} Firmware&quot; above</li>
+            <li>Click &quot;Install Firmware&quot; above</li>
             <li>Select your ESP32-S3 device from the popup</li>
             <li>Wait for the firmware to upload (about 30-60 seconds)</li>
-            <li><strong>Configure WiFi</strong> when the dialog prompts you</li>
+            <li>Configure WiFi when prompted</li>
             <li>Close the dialog and click the button below</li>
           </ol>
         </div>
@@ -143,7 +94,7 @@ export function FirmwareInstallStep({
             Installation Complete →
           </Button>
           <p className="text-xs text-[var(--color-text-muted)]">
-            Click after you&apos;ve configured WiFi in the installation dialog
+            Click after installation is complete
           </p>
         </div>
       </div>
@@ -154,18 +105,23 @@ export function FirmwareInstallStep({
           onClick={onToggleAdvanced}
           className="text-sm text-primary hover:underline mb-2 cursor-pointer bg-transparent border-none"
         >
-          {showAdvanced ? '▼' : '▶'} Advanced Options
+          {showAdvanced ? '▼' : '▶'} Technical Details
         </button>
 
         {showAdvanced && (
           <div className="bg-[var(--color-surface-alt)] p-4 rounded-lg text-sm">
-            <h3 className="font-semibold mb-2">Installation Details:</h3>
+            <h3 className="font-semibold mb-2">What Gets Installed:</h3>
             <ul className="list-disc list-inside space-y-1 text-[var(--color-text-muted)]">
-              <li>Fresh Install: Includes bootloader, partition table, and firmware</li>
-              <li>Firmware Update: Application firmware only</li>
+              <li>ESP32-S3 bootloader</li>
+              <li>Partition table</li>
+              <li>LED Matrix Webex Display firmware</li>
               <li>Web Serial requires Chrome or Edge browser</li>
               <li>Device will reboot automatically after installation</li>
             </ul>
+            <p className="mt-3 text-[var(--color-text-muted)]">
+              <strong>For OTA updates:</strong> Once installed, the device can update itself 
+              over WiFi from the device&apos;s web interface (no need to reflash via USB).
+            </p>
           </div>
         )}
       </div>
