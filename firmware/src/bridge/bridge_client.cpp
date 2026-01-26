@@ -292,12 +292,9 @@ void BridgeClient::disconnect() {
 }
 
 void BridgeClient::reconnect() {
-    // The WebSockets library has its own auto-reconnect mechanism
-    // We should NOT call beginSslWithBundle again as it resets the connection state
-    // Just log that we're waiting for the library to reconnect
-    
+    // Only attempt reconnect every 30 seconds to reduce spam
     if (millis() - last_reconnect < 30000) {
-        return;  // Only log every 30 seconds to reduce spam
+        return;
     }
     
     last_reconnect = millis();
@@ -311,10 +308,44 @@ void BridgeClient::reconnect() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
         Serial.println("[BRIDGE] Warning: System time not synced - SSL may fail");
-    } else {
-        Serial.printf("[BRIDGE] Waiting for connection... (System time: %02d:%02d:%02d)\n", 
-                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        return;  // Don't attempt reconnect without valid time for SSL
     }
+    
+    Serial.printf("[BRIDGE] Attempting manual reconnect to %s:%d (System time: %02d:%02d:%02d)\n", 
+                  bridge_host.c_str(), bridge_port,
+                  timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    
+    // Force disconnect to reset state
+    ws_client.disconnect();
+    connected = false;
+    joined_room = false;
+    peer_connected = false;
+    
+    // Small delay to allow cleanup
+    delay(500);
+    
+    // Re-register event handler (in case it was lost)
+    ws_client.onEvent([](WStype_t type, uint8_t* payload, size_t length) {
+        if (g_bridge_instance) {
+            g_bridge_instance->onWebSocketEvent(type, payload, length);
+        }
+    });
+    
+    // Reinitialize connection with saved parameters
+    if (use_ssl) {
+        Serial.printf("[BRIDGE] Reconnecting with SSL to %s:%d%s\n", 
+                      bridge_host.c_str(), bridge_port, ws_path.c_str());
+        ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(), 
+                           CA_CERT_GTS_ROOT_R4);
+        ws_client.enableHeartbeat(15000, 3000, 2);
+    } else {
+        Serial.printf("[BRIDGE] Reconnecting to %s:%d%s\n", 
+                      bridge_host.c_str(), bridge_port, ws_path.c_str());
+        ws_client.begin(bridge_host, bridge_port, ws_path);
+    }
+    ws_client.setReconnectInterval(10000);
+    
+    Serial.println("[BRIDGE] Manual reconnect initiated");
 }
 
 void BridgeClient::setServer(const String& host, uint16_t port) {
@@ -336,24 +367,35 @@ void BridgeClient::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t leng
     
     switch (type) {
         case WStype_DISCONNECTED:
-            Serial.println("[BRIDGE] WebSocket disconnected");
+            Serial.println("[BRIDGE] ✗ WebSocket disconnected");
+            if (connected || joined_room) {
+                Serial.printf("[BRIDGE] Connection lost (was connected=%d, joined=%d)\n", 
+                              connected, joined_room);
+            }
             DEBUG_LOG("BRIDGE", "Disconnected - was connected=%d joined=%d", connected, joined_room);
             connected = false;
             joined_room = false;
             peer_connected = false;
+            Serial.println("[BRIDGE] Waiting for auto-reconnect (10s interval)...");
             break;
             
         case WStype_CONNECTED:
-            Serial.printf("[BRIDGE] Connected to %s\n", bridge_host.c_str());
+            Serial.printf("[BRIDGE] ✓ WebSocket connected to %s\n", bridge_host.c_str());
             DEBUG_LOG("BRIDGE", "Connected successfully to %s:%d", bridge_host.c_str(), bridge_port);
             connected = true;
+            
+            // Reset join state on new connection
+            joined_room = false;
+            peer_connected = false;
             
             // Send appropriate initial message based on mode
             if (!pairing_code.isEmpty()) {
                 DEBUG_LOG("BRIDGE", "Sending join room for code: %s", pairing_code.c_str());
+                Serial.printf("[BRIDGE] Joining room with pairing code: %s\n", pairing_code.c_str());
                 sendJoinRoom();
             } else {
                 DEBUG_LOG("BRIDGE", "Sending subscribe (legacy mode)");
+                Serial.println("[BRIDGE] Subscribing in legacy mode");
                 sendSubscribe();
             }
             break;
@@ -452,9 +494,12 @@ void BridgeClient::parseMessage(const String& message) {
         joined_room = true;
         peer_connected = data["appConnected"] | false;
         
-        Serial.printf("[BRIDGE] Joined room: %s (app connected: %d)\n", 
-                      data["code"].as<const char*>(),
-                      peer_connected);
+        String room_code = data["code"].as<String>();
+        Serial.println("[BRIDGE] ═══════════════════════════════════════");
+        Serial.printf("[BRIDGE] ✓ Joined room: %s\n", room_code.c_str());
+        Serial.printf("[BRIDGE] ✓ App connected: %s\n", peer_connected ? "YES" : "NO");
+        Serial.println("[BRIDGE] ═══════════════════════════════════════");
+        DEBUG_LOG("BRIDGE", "Joined room %s, peer=%d", room_code.c_str(), peer_connected);
                       
     } else if (type == "peer_connected") {
         // App connected to our room

@@ -548,6 +548,18 @@ void loop() {
         // the WebSocketsClient library to complete handshakes and process messages
         if (bridge_client.isInitialized()) {
             bridge_client.loop();
+            
+            // Check if we should be connected but aren't - trigger manual reconnect
+            // The WebSockets library has auto-reconnect, but we need to ensure it's working
+            static unsigned long last_connection_check = 0;
+            if (current_time - last_connection_check > 15000) {  // Check every 15 seconds
+                last_connection_check = current_time;
+                
+                if (!bridge_client.isConnected()) {
+                    Serial.println("[BRIDGE] Disconnected - waiting for auto-reconnect...");
+                    bridge_client.reconnect();  // Log reconnect status
+                }
+            }
         }
 
         // Update connection state
