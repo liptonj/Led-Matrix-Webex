@@ -18,7 +18,8 @@ test_mdns.js
 
 # Data
 data/
-*.json
+devices.json
+azure-credentials.json
 
 # Documentation
 *.md
