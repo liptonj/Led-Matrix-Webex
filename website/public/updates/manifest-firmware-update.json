@@ -1,5 +1,5 @@
 {
-  "name": "LED Matrix Webex Display",
+  "name": "LED Matrix Webex Display (Update)",
   "version": "1.4.2",
   "home_assistant_domain": "webex_display",
   "new_install_prompt_erase": false,
@@ -8,8 +8,8 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "/updates/firmware/firmware-merged-esp32s3.bin",
-          "offset": 0
+          "path": "/updates/firmware/firmware-esp32s3.bin",
+          "offset": 65536
         }
       ]
     }

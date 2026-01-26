@@ -262,12 +262,13 @@ async function generateManifest() {
     }
     console.log(`  Total versions: ${manifest.versions.length}`);
 
-    // Update ESP Web Tools manifest for web installer
-    const espWebToolsManifest = {
+    // Update ESP Web Tools manifests for web installer
+    // 1. Fresh install manifest - uses merged binary, erases everything
+    const freshInstallManifest = {
       name: "LED Matrix Webex Display",
       version: version,
       home_assistant_domain: "webex_display",
-      new_install_prompt_erase: true,
+      new_install_prompt_erase: false, // Don't prompt - fresh install always erases
       builds: [
         {
           chipFamily: "ESP32-S3",
@@ -281,9 +282,33 @@ async function generateManifest() {
       ]
     };
 
-    const espManifestFile = path.join(outputDir, "manifest-firmware-esp32s3.json");
-    fs.writeFileSync(espManifestFile, JSON.stringify(espWebToolsManifest, null, 2));
-    console.log(`✓ ESP Web Tools manifest updated: ${espManifestFile}`);
+    // 2. Update manifest - uses app-only binary at ota_0 offset, preserves settings
+    const updateManifest = {
+      name: "LED Matrix Webex Display (Update)",
+      version: version,
+      home_assistant_domain: "webex_display",
+      new_install_prompt_erase: false,
+      builds: [
+        {
+          chipFamily: "ESP32-S3",
+          parts: [
+            {
+              path: "/updates/firmware/firmware-esp32s3.bin",
+              offset: 65536  // 0x10000 - ota_0 partition start
+            }
+          ]
+        }
+      ]
+    };
+
+    const freshManifestFile = path.join(outputDir, "manifest-firmware-esp32s3.json");
+    const updateManifestFile = path.join(outputDir, "manifest-firmware-update.json");
+    
+    fs.writeFileSync(freshManifestFile, JSON.stringify(freshInstallManifest, null, 2));
+    fs.writeFileSync(updateManifestFile, JSON.stringify(updateManifest, null, 2));
+    
+    console.log(`✓ ESP Web Tools fresh install manifest: ${freshManifestFile}`);
+    console.log(`✓ ESP Web Tools update manifest: ${updateManifestFile}`);
   } catch (error) {
     console.error("Failed to generate manifest:", error.message);
     process.exit(1);
