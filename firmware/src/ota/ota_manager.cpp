@@ -396,13 +396,45 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
 #ifndef NATIVE_BUILD
     // Properly disable task watchdog during OTA
-    // First, delete the current task from WDT (if subscribed)
-    esp_task_wdt_delete(nullptr);  // nullptr = current task
+    // We need to unsubscribe ALL tasks from WDT before calling deinit
     
-    // Reconfigure WDT with longer timeout and no panic for OTA
-    esp_task_wdt_deinit();
-    esp_task_wdt_init(120, false);  // 120 second timeout, no panic during OTA
-    Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
+    // First, delete the current task from WDT (if subscribed)
+    esp_err_t err = esp_task_wdt_delete(nullptr);  // nullptr = current task
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(err));
+    }
+    
+    // Delete async_tcp task from WDT if it exists
+    // This task is created by the AsyncTCP library and may be subscribed to WDT
+    TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
+    if (async_tcp_task != nullptr) {
+        err = esp_task_wdt_delete(async_tcp_task);
+        if (err == ESP_OK) {
+            Serial.println("[OTA] Removed async_tcp task from watchdog");
+        } else if (err != ESP_ERR_NOT_FOUND) {
+            Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(err));
+        }
+    }
+    
+    // Delete IDLE tasks from WDT (they are subscribed by default)
+    TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
+    TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
+    if (idle0) esp_task_wdt_delete(idle0);
+    if (idle1) esp_task_wdt_delete(idle1);
+    
+    // Now we can safely reconfigure WDT with longer timeout
+    err = esp_task_wdt_deinit();
+    if (err != ESP_OK) {
+        Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(err));
+    }
+    
+    // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
+    err = esp_task_wdt_init(120, false);
+    if (err != ESP_OK) {
+        Serial.printf("[OTA] Warning: WDT init failed: %s\n", esp_err_to_name(err));
+    } else {
+        Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
+    }
 #endif
 
     WiFiClientSecure client;
@@ -594,10 +626,46 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 
 #ifndef NATIVE_BUILD
     // Properly disable task watchdog during OTA
-    esp_task_wdt_delete(nullptr);
-    esp_task_wdt_deinit();
-    esp_task_wdt_init(120, false);
-    Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
+    // We need to unsubscribe ALL tasks from WDT before calling deinit
+    {
+        // First, delete the current task from WDT (if subscribed)
+        esp_err_t wdt_err = esp_task_wdt_delete(nullptr);  // nullptr = current task
+        if (wdt_err != ESP_OK && wdt_err != ESP_ERR_NOT_FOUND) {
+            Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(wdt_err));
+        }
+        
+        // Delete async_tcp task from WDT if it exists
+        // This task is created by the AsyncTCP library and may be subscribed to WDT
+        TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
+        if (async_tcp_task != nullptr) {
+            wdt_err = esp_task_wdt_delete(async_tcp_task);
+            if (wdt_err == ESP_OK) {
+                Serial.println("[OTA] Removed async_tcp task from watchdog");
+            } else if (wdt_err != ESP_ERR_NOT_FOUND) {
+                Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(wdt_err));
+            }
+        }
+        
+        // Delete IDLE tasks from WDT (they are subscribed by default)
+        TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
+        TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
+        if (idle0) esp_task_wdt_delete(idle0);
+        if (idle1) esp_task_wdt_delete(idle1);
+        
+        // Now we can safely reconfigure WDT with longer timeout
+        wdt_err = esp_task_wdt_deinit();
+        if (wdt_err != ESP_OK) {
+            Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(wdt_err));
+        }
+        
+        // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
+        wdt_err = esp_task_wdt_init(120, false);
+        if (wdt_err != ESP_OK) {
+            Serial.printf("[OTA] Warning: WDT init failed: %s\n", esp_err_to_name(wdt_err));
+        } else {
+            Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
+        }
+    }
 #endif
 
     WiFiClientSecure client;

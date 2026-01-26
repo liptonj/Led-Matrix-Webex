@@ -178,6 +178,8 @@ function extractBuildId(release) {
  *
  * Note: Web assets are now embedded in firmware. Only firmware.bin is needed for OTA.
  * The "bundle" key is kept for backwards compatibility with older firmware versions.
+ * 
+ * Uses BUILD_ID in filename for cache busting to prevent CDN from serving stale firmware.
  */
 function buildOtaStructure(latestRelease) {
   if (!latestRelease || !latestRelease.assets) {
@@ -188,20 +190,23 @@ function buildOtaStructure(latestRelease) {
   const boardTypes = ["esp32s3"];
   const firmware = {};
   const bundle = {}; // Legacy key for backwards compatibility
+  
+  // Use BUILD_ID for cache busting (set by deploy workflow, or use current timestamp)
+  const buildId = process.env.BUILD_ID || Math.floor(Date.now() / 1000).toString();
 
   for (const boardType of boardTypes) {
     // Check if the firmware exists in the release
     const githubUrl = findFirmwareUrl(latestRelease.assets, boardType);
 
     if (githubUrl) {
-      // Use local URL instead of GitHub URL
-      // Files are downloaded to /updates/firmware/ during deploy
+      // Use versioned URL with build ID for cache busting
+      // Files are downloaded to /updates/firmware/ during deploy with BUILD_ID suffix
       firmware[boardType] = {
-        url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}.bin`,
+        url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}-${buildId}.bin`,
       };
       // Also provide as bundle for backwards compatibility with older firmware
       bundle[boardType] = {
-        url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}.bin`,
+        url: `${WEBSITE_FIRMWARE_BASE}/firmware-${boardType}-${buildId}.bin`,
       };
     }
   }

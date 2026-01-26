@@ -81,7 +81,10 @@ jobs:
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build
+          BUILD_ID: ${{ env.BUILD_ID }}
+        run: |
+          echo "Using BUILD_ID: $BUILD_ID for cache busting"
+          npm run build
 
       - name: Verify build output
         run: |
