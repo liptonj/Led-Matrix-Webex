@@ -9,7 +9,7 @@
 
 /updates/firmware/*
   Access-Control-Allow-Origin: *
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=300
 
 # Embedded App - Allow Webex to iframe and enable CORS for local display access
 /embedded/*

@@ -263,8 +263,8 @@ async function generateManifest() {
     console.log(`  Total versions: ${manifest.versions.length}`);
 
     // Update ESP Web Tools manifests for web installer
-    // Note: ESP Web Tools doesn't have a reliable way to skip erase via manifest
-    // Both options will erase flash - difference is what gets written
+    // Use GitHub release URLs directly to avoid Cloudflare caching issues
+    const githubReleaseBase = `https://github.com/liptonj/Led-Matrix-Webex/releases/download/${latestTag}`;
     
     // 1. Fresh install manifest - full firmware with bootloader
     const freshInstallManifest = {
@@ -277,7 +277,7 @@ async function generateManifest() {
           chipFamily: "ESP32-S3",
           parts: [
             {
-              path: "/updates/firmware/firmware-merged-esp32s3.bin",
+              path: `${githubReleaseBase}/firmware-merged-esp32s3.bin`,
               offset: 0
             }
           ]
@@ -297,7 +297,7 @@ async function generateManifest() {
           chipFamily: "ESP32-S3",
           parts: [
             {
-              path: "/updates/firmware/firmware-esp32s3.bin",
+              path: `${githubReleaseBase}/firmware-esp32s3.bin`,
               offset: 65536  // 0x10000 - ota_0 partition start
             }
           ]
