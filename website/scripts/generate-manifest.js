@@ -263,12 +263,14 @@ async function generateManifest() {
     console.log(`  Total versions: ${manifest.versions.length}`);
 
     // Update ESP Web Tools manifests for web installer
-    // 1. Fresh install manifest - uses merged binary, erases everything
+    // Note: ESP Web Tools doesn't have a reliable way to skip erase via manifest
+    // Both options will erase flash - difference is what gets written
+    
+    // 1. Fresh install manifest - full firmware with bootloader
     const freshInstallManifest = {
       name: "LED Matrix Webex Display",
       version: version,
       home_assistant_domain: "webex_display",
-      new_install_prompt_erase: false, // Don't prompt - fresh install always erases
       builds: [
         {
           chipFamily: "ESP32-S3",
@@ -282,12 +284,12 @@ async function generateManifest() {
       ]
     };
 
-    // 2. Update manifest - uses app-only binary at ota_0 offset, preserves settings
+    // 2. Update manifest - app only at ota_0 offset
+    // Note: This still erases flash but only writes to app partition
     const updateManifest = {
       name: "LED Matrix Webex Display (Update)",
       version: version,
       home_assistant_domain: "webex_display",
-      new_install_prompt_erase: false,
       builds: [
         {
           chipFamily: "ESP32-S3",

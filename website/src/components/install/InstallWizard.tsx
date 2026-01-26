@@ -191,8 +191,14 @@ export function InstallWizard() {
           <div className="card animate-fade-in">
             <h2 className="text-2xl font-semibold mb-2">Install Firmware</h2>
             <p className="text-[var(--color-text-muted)] mb-6">
-              Connect your ESP32-S3 via USB and choose an installation option.
+              Connect your ESP32-S3 via USB. For updates, use OTA instead (faster and safer).
             </p>
+
+            {/* Warning about web serial limitations */}
+            <Alert variant="info" className="mb-6">
+              <strong>Note:</strong> Web Serial installation may clear WiFi settings. 
+              For firmware updates on already-configured devices, use OTA updates from the device web interface instead.
+            </Alert>
 
             {/* Install Type Selection */}
             <div className="grid gap-3 mb-6">
@@ -212,9 +218,9 @@ export function InstallWizard() {
                   className="mt-1 accent-success"
                 />
                 <div className="flex-1">
-                  <div className="font-semibold">New Installation</div>
+                  <div className="font-semibold">New Device Installation</div>
                   <div className="text-sm text-[var(--color-text-muted)]">
-                    For new devices. Installs complete firmware with bootloader.
+                    Complete firmware with bootloader and partition table.
                   </div>
                 </div>
               </label>
@@ -235,9 +241,9 @@ export function InstallWizard() {
                   className="mt-1 accent-success"
                 />
                 <div className="flex-1">
-                  <div className="font-semibold">Update Firmware</div>
+                  <div className="font-semibold">Recovery Flash</div>
                   <div className="text-sm text-[var(--color-text-muted)]">
-                    For existing devices. Preserves WiFi and settings.
+                    Firmware only (for devices stuck in boot loops).
                   </div>
                 </div>
               </label>
