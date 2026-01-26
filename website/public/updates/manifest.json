@@ -1,7 +1,7 @@
 {
-  "version": "1.4.2",
-  "build_id": "1769394326",
-  "build_date": "2026-01-26T02:25:26Z",
+  "version": "1.4.4",
+  "build_id": "1769453306",
+  "build_date": "2026-01-26T18:48:26Z",
   "firmware": {
     "esp32s3": {
       "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
@@ -12,9 +12,51 @@
       "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
     }
   },
-  "generated": "2026-01-26T03:48:14.133Z",
-  "latest": "v1.4.2",
+  "generated": "2026-01-26T19:37:02.273Z",
+  "latest": "v1.4.4",
   "versions": [
+    {
+      "tag": "v1.4.4",
+      "version": "1.4.4",
+      "name": "Release v1.4.4",
+      "build_id": "1769453306",
+      "build_date": "2026-01-26T18:48:26Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.4.3...v1.4.4",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.4/firmware-esp32s3.bin",
+          "size": 1299776
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.4/firmware-merged-esp32s3.bin",
+          "size": 1365312
+        }
+      ]
+    },
+    {
+      "tag": "v1.4.3",
+      "version": "1.4.3",
+      "name": "Release v1.4.3",
+      "build_id": "1769450472",
+      "build_date": "2026-01-26T18:01:12Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.4.2...v1.4.3",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.3/firmware-esp32s3.bin",
+          "size": 1298480
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.3/firmware-merged-esp32s3.bin",
+          "size": 1364016
+        }
+      ]
+    },
     {
       "tag": "v1.4.2",
       "version": "1.4.2",
