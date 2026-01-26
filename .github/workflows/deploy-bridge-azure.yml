@@ -223,6 +223,8 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --name ${{ env.AZURE_CONTAINER_NAME }} \
             --image $IMAGE_TAG \
+            --os-type Linux \
+            --ip-address Public \
             --cpu 0.5 \
             --memory 0.5 \
             --ports 8080 \
