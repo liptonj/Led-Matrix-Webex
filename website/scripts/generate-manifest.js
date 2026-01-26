@@ -263,8 +263,11 @@ async function generateManifest() {
     console.log(`  Total versions: ${manifest.versions.length}`);
 
     // Update ESP Web Tools manifests for web installer
-    // Use GitHub release URLs directly to avoid Cloudflare caching issues
-    const githubReleaseBase = `https://github.com/liptonj/Led-Matrix-Webex/releases/download/${latestTag}`;
+    // Use build ID (epoch timestamp) for cache busting - unique per deployment
+    // CI creates files like firmware-merged-esp32s3-1769453306.bin
+    
+    // Use environment variable BUILD_ID if set (from CI), otherwise use current timestamp
+    const deployBuildId = process.env.BUILD_ID || Math.floor(Date.now() / 1000).toString();
     
     // 1. Fresh install manifest - full firmware with bootloader
     const freshInstallManifest = {
@@ -277,7 +280,7 @@ async function generateManifest() {
           chipFamily: "ESP32-S3",
           parts: [
             {
-              path: `${githubReleaseBase}/firmware-merged-esp32s3.bin`,
+              path: `/updates/firmware/firmware-merged-esp32s3-${deployBuildId}.bin`,
               offset: 0
             }
           ]
@@ -297,13 +300,15 @@ async function generateManifest() {
           chipFamily: "ESP32-S3",
           parts: [
             {
-              path: `${githubReleaseBase}/firmware-esp32s3.bin`,
+              path: `/updates/firmware/firmware-esp32s3-${deployBuildId}.bin`,
               offset: 65536  // 0x10000 - ota_0 partition start
             }
           ]
         }
       ]
     };
+    
+    console.log(`  Build ID for cache busting: ${deployBuildId}`);
 
     const freshManifestFile = path.join(outputDir, "manifest-firmware-esp32s3.json");
     const updateManifestFile = path.join(outputDir, "manifest-firmware-update.json");

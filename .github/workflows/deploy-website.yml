@@ -61,6 +61,19 @@ jobs:
           # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
           gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
 
+          # Create copies with build ID for cache busting (ESP Web Tools uses these)
+          BUILD_ID=$(date +%s)
+          echo "BUILD_ID=${BUILD_ID}" >> $GITHUB_ENV
+          
+          if [ -f "firmware-esp32s3.bin" ]; then
+            cp firmware-esp32s3.bin "firmware-esp32s3-${BUILD_ID}.bin"
+            echo "Created build copy: firmware-esp32s3-${BUILD_ID}.bin"
+          fi
+          if [ -f "firmware-merged-esp32s3.bin" ]; then
+            cp firmware-merged-esp32s3.bin "firmware-merged-esp32s3-${BUILD_ID}.bin"
+            echo "Created build copy: firmware-merged-esp32s3-${BUILD_ID}.bin"
+          fi
+
           echo "Downloaded firmware files:"
           ls -la
 

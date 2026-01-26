@@ -8,7 +8,7 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.4/firmware-esp32s3.bin",
+          "path": "/updates/firmware/firmware-esp32s3.bin",
           "offset": 65536
         }
       ]
