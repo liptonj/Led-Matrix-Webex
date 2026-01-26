@@ -1028,7 +1028,8 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
         if (doc["page_interval_ms"].is<int>()) {
             uint16_t interval = doc["page_interval_ms"].as<uint16_t>();
             config_manager.setPageIntervalMs(interval);
-            matrix_display.setPageIntervalMs(interval);
+            // Use the clamped value from config manager
+            matrix_display.setPageIntervalMs(config_manager.getPageIntervalMs());
         }
         if (doc["sensor_page_enabled"].is<bool>()) {
             config_manager.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
