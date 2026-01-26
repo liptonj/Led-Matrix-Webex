@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <time.h>
 #include "esp_task_wdt.h"
+#include "esp_ota_ops.h"
 
 #include "boot_validator.h"
 #include "config/config_manager.h"
