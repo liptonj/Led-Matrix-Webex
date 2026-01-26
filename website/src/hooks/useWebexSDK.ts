@@ -199,7 +199,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     // Wait for SDK to load with retry logic
     const sdkAvailable = await waitForWebexSDK(5000);
 
-    if (!sdkAvailable) {
+    if (!sdkAvailable || !window.Webex?.Application) {
       setError(
         "Webex SDK not available. Make sure you are running inside a Webex embedded app.",
       );
