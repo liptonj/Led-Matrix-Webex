@@ -190,6 +190,30 @@ npm test
 
 ## Deployment
 
+### Azure Container Instances (Cloud) ⭐ Recommended
+
+Deploy to Azure for global access with SSL:
+
+```bash
+cd bridge
+./azure-deploy.sh
+```
+
+- **Cost**: ~$8-10/month (or FREE with Azure credit)
+- **SSL**: Automatic via Cloudflare
+- **Uptime**: 99.9% SLA
+- **Access**: Global via `wss://bridge.5ls.us`
+
+See [AZURE.md](./AZURE.md) for quick start or [docs/azure_deployment.md](../docs/azure_deployment.md) for full guide.
+
+### Home Assistant Add-on (Local)
+
+See [../webex-bridge/](../webex-bridge/) for Home Assistant add-on deployment.
+
+- **Cost**: Free (self-hosted)
+- **Access**: Local network via mDNS
+- **Fallback**: Works when cloud is unavailable
+
 ### Standalone Server
 
 1. Build the project:
@@ -203,10 +227,6 @@ npm test
    ```bash
    npm start
    ```
-
-### Home Assistant Add-on
-
-See [../webex-bridge/](../webex-bridge/) for Home Assistant add-on deployment.
 
 ### Docker
 
@@ -227,6 +247,21 @@ docker run --net=host -e WS_PORT=8080 webex-bridge
 ```
 
 **Note**: Use `--net=host` to ensure mDNS works correctly.
+
+### Hybrid Setup (Best Practice)
+
+Run both Azure (cloud) and Home Assistant (local) for redundancy:
+
+```json
+{
+  "bridge": {
+    "url": "wss://bridge.5ls.us",
+    "fallback_url": "ws://homeassistant.local:8080"
+  }
+}
+```
+
+ESP32 devices will automatically fail over if cloud bridge is unavailable.
 
 ## Troubleshooting
 

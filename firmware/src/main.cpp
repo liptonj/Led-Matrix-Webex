@@ -246,7 +246,7 @@ void setup() {
 
     // Start web server
     Serial.println("[INIT] Starting web server...");
-    web_server.begin(&config_manager, &app_state);
+    web_server.begin(&config_manager, &app_state, nullptr, &mdns_manager);
 
     // Initialize Webex client
     if (config_manager.hasWebexCredentials()) {
@@ -443,6 +443,21 @@ void loop() {
     // Refresh mDNS periodically to prevent TTL expiry
     if (app_state.wifi_connected) {
         mdns_manager.refresh();
+    }
+
+    // Ensure mDNS stays active even if the responder stalls
+    if (app_state.wifi_connected) {
+        static unsigned long last_mdns_check = 0;
+        if (millis() - last_mdns_check >= 5000) {
+            last_mdns_check = millis();
+            if (!mdns_manager.isInitialized()) {
+                Serial.println("[MDNS] mDNS not running, restarting...");
+                mdns_manager.end();
+                if (mdns_manager.begin(config_manager.getDeviceName())) {
+                    mdns_manager.advertiseHTTP(80);
+                }
+            }
+        }
     }
 
     // Handle NTP time sync after reconnect

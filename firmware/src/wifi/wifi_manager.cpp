@@ -165,7 +165,8 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             mdns_manager->end();
         }
     } else if (WiFi.status() == WL_CONNECTED) {
-        if (!app_state->wifi_connected) {
+        const bool was_connected = app_state->wifi_connected;
+        if (!was_connected) {
             Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
         }
         app_state->wifi_connected = true;
@@ -179,8 +180,9 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             ap_mode_active = false;
         }
 
-        if (mdns_manager && !mdns_manager->isInitialized()) {
-            Serial.println("[MDNS] Starting mDNS after reconnect...");
+        if (mdns_manager && (!mdns_manager->isInitialized() || !was_connected)) {
+            Serial.println("[MDNS] (Re)starting mDNS after WiFi connect...");
+            mdns_manager->end();
             if (mdns_manager->begin(config_manager->getDeviceName())) {
                 mdns_manager->advertiseHTTP(80);
             }

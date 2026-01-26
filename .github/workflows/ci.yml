@@ -61,6 +61,9 @@ jobs:
   firmware-build-esp32s3:
     name: Main Firmware (ESP32-S3)
     runs-on: ubuntu-latest
+    env:
+      WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
+      WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
     defaults:
       run:
         working-directory: firmware

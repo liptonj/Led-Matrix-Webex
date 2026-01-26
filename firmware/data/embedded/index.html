@@ -293,24 +293,48 @@
             <section id="webex" class="tab-content">
                 <div class="card">
                     <h2>Webex OAuth Configuration</h2>
-                    <p class="help-text">Configure OAuth credentials from <a href="https://developer.webex.com/my-apps" target="_blank">developer.webex.com</a></p>
-                    <form id="webex-form">
-                        <div class="form-group">
-                            <label for="webex-client-id">Client ID:</label>
-                            <input type="text" id="webex-client-id" placeholder="Your Webex Integration Client ID">
-                        </div>
-                        <div class="form-group">
-                            <label for="webex-client-secret">Client Secret:</label>
-                            <input type="password" id="webex-client-secret" placeholder="Your Webex Integration Client Secret">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Save Credentials</button>
-                    </form>
+                    <p class="help-text">Authorization details are below. Credentials are in Advanced.</p>
                     <hr>
                     <div class="auth-section">
                         <h3>Authorization Status</h3>
                         <p>Status: <span id="webex-auth-status" class="value">Not connected</span></p>
                         <button id="webex-auth-btn" class="btn">Connect to Webex</button>
                     </div>
+                </div>
+
+                <div class="card">
+                    <details id="webex-advanced" class="advanced-details">
+                        <summary>Advanced</summary>
+                        <div class="advanced-content">
+                            <p class="help-text">Credentials are hidden by default. Enable edit to replace both values.</p>
+                            <div class="form-group">
+                                <label for="webex-client-id-mask">Saved Client ID</label>
+                                <input type="text" id="webex-client-id-mask" value="xxxxxxxx" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label for="webex-client-secret-mask">Saved Client Secret</label>
+                                <input type="text" id="webex-client-secret-mask" value="xxxxxxxx" readonly>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="webex-edit-toggle">
+                                    Update credentials
+                                </label>
+                                <p class="help-text">You must enter both values to change stored credentials.</p>
+                            </div>
+                            <form id="webex-form" style="display: none;">
+                                <div class="form-group">
+                                    <label for="webex-client-id">Client ID</label>
+                                    <input type="text" id="webex-client-id" placeholder="Your Webex Integration Client ID">
+                                </div>
+                                <div class="form-group">
+                                    <label for="webex-client-secret">Client Secret</label>
+                                    <input type="password" id="webex-client-secret" placeholder="Your Webex Integration Client Secret">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Save Credentials</button>
+                            </form>
+                        </div>
+                    </details>
                 </div>
 
                 <div class="card">

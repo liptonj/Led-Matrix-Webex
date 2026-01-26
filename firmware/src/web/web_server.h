@@ -15,6 +15,8 @@
 #include "../app_state.h"
 #include "../modules/module_manager.h"
 
+class MDNSManager;
+
 /**
  * @brief Web Server Manager Class
  */
@@ -29,7 +31,7 @@ public:
      * @param state Pointer to application state
      * @param modules Pointer to module manager (optional)
      */
-    void begin(ConfigManager* config, AppState* state, ModuleManager* modules = nullptr);
+    void begin(ConfigManager* config, AppState* state, ModuleManager* modules = nullptr, MDNSManager* mdns = nullptr);
     
     /**
      * @brief Process web server events (called in loop)
@@ -92,6 +94,7 @@ private:
     bool pending_reboot;
     unsigned long pending_reboot_time;
     const esp_partition_t* pending_boot_partition;
+    MDNSManager* mdns_manager;
 
     void setupCaptivePortal();
     String buildRedirectUri() const;
@@ -111,6 +114,7 @@ private:
     void handleBootToFactory(AsyncWebServerRequest* request);
     void handleReboot(AsyncWebServerRequest* request);
     void handleFactoryReset(AsyncWebServerRequest* request);
+    void handleMdnsRestart(AsyncWebServerRequest* request);
     void handleClearMQTT(AsyncWebServerRequest* request);
     void handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleRegeneratePairingCode(AsyncWebServerRequest* request);

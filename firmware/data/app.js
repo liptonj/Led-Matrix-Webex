@@ -330,16 +330,25 @@ async function loadConfig() {
         ensureSelectOption(timeZoneSelect, timeZoneValue);
         timeZoneSelect.value = timeZoneValue;
 
-        // Webex credentials - show placeholders if they exist
+        // Webex credentials - show masked values in Advanced
         const clientIdInput = document.getElementById('webex-client-id');
         const clientSecretInput = document.getElementById('webex-client-secret');
-        
-        if (config.has_webex_credentials) {
-            clientIdInput.placeholder = config.webex_client_id_masked || 'Client ID saved';
-            clientSecretInput.placeholder = config.webex_client_secret_masked || '••••••••';
-        } else {
-            clientIdInput.placeholder = 'Enter Webex Client ID';
-            clientSecretInput.placeholder = 'Enter Webex Client Secret';
+        const clientIdMask = document.getElementById('webex-client-id-mask');
+        const clientSecretMask = document.getElementById('webex-client-secret-mask');
+        const editToggle = document.getElementById('webex-edit-toggle');
+        const webexForm = document.getElementById('webex-form');
+
+        if (clientIdMask) {
+            clientIdMask.value = config.has_webex_credentials ? 'xxxxxxxx' : 'not set';
+        }
+        if (clientSecretMask) {
+            clientSecretMask.value = config.has_webex_credentials ? 'xxxxxxxx' : 'not set';
+        }
+        if (editToggle) {
+            editToggle.checked = false;
+        }
+        if (webexForm) {
+            webexForm.style.display = 'none';
         }
         // Never populate credential fields - leave empty for security
         clientIdInput.value = '';
@@ -389,6 +398,14 @@ function initEventListeners() {
 
     // Webex auth button
     document.getElementById('webex-auth-btn').addEventListener('click', startWebexAuth);
+
+    const webexEditToggle = document.getElementById('webex-edit-toggle');
+    const webexForm = document.getElementById('webex-form');
+    if (webexEditToggle && webexForm) {
+        webexEditToggle.addEventListener('change', () => {
+            webexForm.style.display = webexEditToggle.checked ? 'block' : 'none';
+        });
+    }
     
     // Regenerate pairing code button
     const regenerateBtn = document.getElementById('regenerate-code');
@@ -696,24 +713,22 @@ async function saveWifi(e) {
 async function saveWebexCredentials(e) {
     e.preventDefault();
 
-    const clientId = document.getElementById('webex-client-id').value.trim();
-    const clientSecret = document.getElementById('webex-client-secret').value.trim();
-
-    // If both fields are empty and credentials exist, warn user
-    if (!clientId && !clientSecret && config.has_webex_credentials) {
-        if (!confirm('Both fields are empty. Do you want to clear the saved credentials?')) {
-            return;
-        }
-    }
-
-    // If only one field is filled, require both
-    if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
-        alert('Both Client ID and Client Secret are required. Leave both empty to keep existing credentials.');
+    const editToggle = document.getElementById('webex-edit-toggle');
+    if (editToggle && !editToggle.checked) {
+        alert('No changes to Webex credentials.');
         return;
     }
 
-    // If both are empty and no credentials exist, require them
-    if (!clientId && !clientSecret && !config.has_webex_credentials) {
+    const clientId = document.getElementById('webex-client-id').value.trim();
+    const clientSecret = document.getElementById('webex-client-secret').value.trim();
+
+    // If only one field is filled, require both
+    if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+        alert('Both Client ID and Client Secret are required to update credentials.');
+        return;
+    }
+
+    if (!clientId && !clientSecret) {
         alert('Please enter both Client ID and Client Secret');
         return;
     }

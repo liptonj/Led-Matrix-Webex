@@ -480,6 +480,33 @@ body {
     font-size: 0.8rem;
 }
 
+/* Advanced */
+.advanced-details summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    font-weight: 600;
+    list-style: none;
+}
+
+.advanced-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.advanced-details summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: var(--spacing-sm);
+    transition: transform 0.2s ease;
+}
+
+.advanced-details[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.advanced-content {
+    margin-top: var(--spacing-sm);
+}
+
 input[type="checkbox"] {
     width: 16px;
     height: 16px;

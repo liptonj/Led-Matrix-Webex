@@ -1,0 +1,50 @@
+# Azure Container Instance Dockerfile
+# Optimized for ARM64 and AMD64 deployment
+
+FROM node:18-alpine
+
+# Install build dependencies
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy source code
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# Remove dev dependencies and source
+RUN npm prune --production && \
+    rm -rf src tsconfig.json
+
+# Create data directory for persistent storage
+RUN mkdir -p /data
+
+# Non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app /data
+
+USER nodejs
+
+# Expose WebSocket port
+EXPOSE 8080
+
+# Health check endpoint (WebSocket handshake)
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:8080', (r) => {process.exit(r.statusCode === 400 ? 0 : 1)})"
+
+# Start the bridge server
+CMD ["node", "dist/index.js"]

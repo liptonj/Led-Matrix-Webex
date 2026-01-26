@@ -1,0 +1,35 @@
+# Node
+node_modules
+npm-debug.log
+*.log
+
+# Build
+dist
+
+# Testing
+coverage
+*.test.ts
+test_mdns.js
+
+# Development
+.env
+.env.local
+*.env
+
+# Data
+data/
+*.json
+
+# Documentation
+*.md
+MDNS_*.md
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore

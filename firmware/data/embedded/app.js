@@ -432,6 +432,23 @@ async function loadDisplayConfig() {
             authStatus.textContent = 'Not configured';
             authStatus.style.color = '#ff5c5c';
         }
+
+        const clientIdMask = document.getElementById('webex-client-id-mask');
+        const clientSecretMask = document.getElementById('webex-client-secret-mask');
+        const editToggle = document.getElementById('webex-edit-toggle');
+        const webexForm = document.getElementById('webex-form');
+        if (clientIdMask) {
+            clientIdMask.value = state.displayConfig.has_webex_credentials ? 'xxxxxxxx' : 'not set';
+        }
+        if (clientSecretMask) {
+            clientSecretMask.value = state.displayConfig.has_webex_credentials ? 'xxxxxxxx' : 'not set';
+        }
+        if (editToggle) {
+            editToggle.checked = false;
+        }
+        if (webexForm) {
+            webexForm.style.display = 'none';
+        }
         
     } catch (error) {
         console.error('Failed to load config:', error);
@@ -470,14 +487,37 @@ function setupEventListeners() {
     // Webex credentials form
     document.getElementById('webex-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const editToggle = document.getElementById('webex-edit-toggle');
+        if (editToggle && !editToggle.checked) {
+            logActivity('info', 'No changes to Webex credentials.');
+            return;
+        }
+        const clientId = document.getElementById('webex-client-id').value.trim();
+        const clientSecret = document.getElementById('webex-client-secret').value.trim();
+        if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+            alert('Both Client ID and Client Secret are required to update credentials.');
+            return;
+        }
+        if (!clientId && !clientSecret) {
+            alert('Please enter both Client ID and Client Secret.');
+            return;
+        }
         await saveConfig({
-            webex_client_id: document.getElementById('webex-client-id').value,
-            webex_client_secret: document.getElementById('webex-client-secret').value
+            webex_client_id: clientId,
+            webex_client_secret: clientSecret
         });
     });
     
     // Webex auth button
     document.getElementById('webex-auth-btn').addEventListener('click', startWebexAuth);
+
+    const webexEditToggle = document.getElementById('webex-edit-toggle');
+    const webexForm = document.getElementById('webex-form');
+    if (webexEditToggle && webexForm) {
+        webexEditToggle.addEventListener('change', () => {
+            webexForm.style.display = webexEditToggle.checked ? 'block' : 'none';
+        });
+    }
     
     // xAPI form
     document.getElementById('xapi-form').addEventListener('submit', async (e) => {

@@ -23,6 +23,7 @@
 #include "embedded_assets.h"
 #include "../display/matrix_display.h"
 #include "../meraki/mqtt_client.h"
+#include "../discovery/mdns_manager.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <Update.h>
@@ -41,7 +42,8 @@ WebServerManager::WebServerManager()
       config_body_buffer(""), config_body_expected(0),
       embedded_body_buffer(""), embedded_body_expected(0),
       ota_upload_target(nullptr),
-      pending_reboot(false), pending_reboot_time(0), pending_boot_partition(nullptr) {
+      pending_reboot(false), pending_reboot_time(0), pending_boot_partition(nullptr),
+      mdns_manager(nullptr) {
     memset(ota_bundle_header, 0, sizeof(ota_bundle_header));
 }
 
@@ -76,10 +78,11 @@ void WebServerManager::stop() {
     Serial.println("[WEB] Web server stopped, LittleFS unmounted");
 }
 
-void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules) {
+void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules, MDNSManager* mdns) {
     config_manager = config;
     app_state = state;
     module_manager = modules;
+    mdns_manager = mdns;
 
     // Initialize LittleFS for dynamic user content (configs, downloads)
     // Static web assets are now embedded in firmware
@@ -130,12 +133,7 @@ void WebServerManager::setupCaptivePortal() {
 }
 
 String WebServerManager::buildRedirectUri() const {
-    String device_name = config_manager ? config_manager->getDeviceName() : "";
-    String host = device_name.isEmpty() ? WiFi.localIP().toString() : (device_name + ".local");
-    if (host.isEmpty()) {
-        host = WiFi.localIP().toString();
-    }
-    return "http://" + host + "/oauth/callback";
+    return "http://webex-display.local/oauth/callback";
 }
 
 void WebServerManager::setupRoutes() {
@@ -198,6 +196,10 @@ void WebServerManager::setupRoutes() {
 
     server->on("/api/ota/bootloader", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleBootToFactory(request);
+    });
+
+    server->on("/api/mdns/restart", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        handleMdnsRestart(request);
     });
 
     server->on("/api/ota/upload", HTTP_POST,
