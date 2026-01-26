@@ -21,6 +21,7 @@
 #include "web_server.h"
 #include "ota_bundle.h"
 #include "embedded_assets.h"
+#include "../display/matrix_display.h"
 #include "../meraki/mqtt_client.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -472,6 +473,12 @@ bool WebServerManager::checkPendingReboot() {
     }
     
     Serial.println("[WEB] Executing pending reboot...");
+    
+    // Clear display before reboot to prevent DMA corruption
+    // The display uses I2S DMA which can leave garbage on screen if not properly cleared
+    extern MatrixDisplay matrix_display;
+    matrix_display.clear();
+    delay(50);  // Allow display DMA to complete the clear operation
     
     // Set boot partition if specified
     if (pending_boot_partition) {

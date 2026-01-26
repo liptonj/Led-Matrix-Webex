@@ -1,7 +1,7 @@
 {
-  "version": "1.3.1",
-  "build_id": "1769372588",
-  "build_date": "2026-01-25T20:23:08Z",
+  "version": "1.4.2",
+  "build_id": "1769394326",
+  "build_date": "2026-01-26T02:25:26Z",
   "firmware": {
     "esp32s3": {
       "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
@@ -12,9 +12,114 @@
       "url": "https://display.5ls.us/updates/firmware/firmware-esp32s3.bin"
     }
   },
-  "generated": "2026-01-25T21:30:53.766Z",
-  "latest": "v1.3.1",
+  "generated": "2026-01-26T03:48:14.133Z",
+  "latest": "v1.4.2",
   "versions": [
+    {
+      "tag": "v1.4.2",
+      "version": "1.4.2",
+      "name": "Release v1.4.2",
+      "build_id": "1769394326",
+      "build_date": "2026-01-26T02:25:26Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.4.1...v1.4.2",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.2/firmware-esp32s3.bin",
+          "size": 1285376
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.2/firmware-merged-esp32s3.bin",
+          "size": 1350912
+        }
+      ]
+    },
+    {
+      "tag": "v1.4.1",
+      "version": "1.4.1",
+      "name": "Release v1.4.1",
+      "build_id": "1769393975",
+      "build_date": "2026-01-26T02:19:35Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.4.0...v1.4.1",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.1/firmware-esp32s3.bin",
+          "size": 1285376
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.1/firmware-merged-esp32s3.bin",
+          "size": 1350912
+        }
+      ]
+    },
+    {
+      "tag": "v1.4.0",
+      "version": "1.4.0",
+      "name": "Release v1.4.0",
+      "build_id": "1769385741",
+      "build_date": "2026-01-26T00:02:21Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.3.3...v1.4.0",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.0/firmware-esp32s3.bin",
+          "size": 1285376
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.4.0/firmware-merged-esp32s3.bin",
+          "size": 1350912
+        }
+      ]
+    },
+    {
+      "tag": "v1.3.3",
+      "version": "1.3.3",
+      "name": "Release v1.3.3",
+      "build_id": "1769377571",
+      "build_date": "2026-01-25T21:46:11Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.3.2...v1.3.3",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.3.3/firmware-esp32s3.bin",
+          "size": 1285872
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.3.3/firmware-merged-esp32s3.bin",
+          "size": 1351408
+        }
+      ]
+    },
+    {
+      "tag": "v1.3.2",
+      "version": "1.3.2",
+      "name": "Release v1.3.2",
+      "build_id": "1769376831",
+      "build_date": "2026-01-25T21:33:51Z",
+      "notes": "**Full Changelog**: https://github.com/liptonj/Led-Matrix-Webex/compare/v1.3.1...v1.3.2",
+      "prerelease": false,
+      "firmware": [
+        {
+          "name": "firmware-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.3.2/firmware-esp32s3.bin",
+          "size": 1285408
+        },
+        {
+          "name": "firmware-merged-esp32s3.bin",
+          "url": "https://github.com/liptonj/Led-Matrix-Webex/releases/download/v1.3.2/firmware-merged-esp32s3.bin",
+          "size": 1350944
+        }
+      ]
+    },
     {
       "tag": "v1.3.1",
       "version": "1.3.1",

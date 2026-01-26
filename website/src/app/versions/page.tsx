@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Header, Footer } from '@/components/layout';
+import { Header, Footer, Breadcrumbs } from '@/components/layout';
 import { VersionList } from './VersionList';
 
 export const metadata: Metadata = {
@@ -17,6 +17,7 @@ export default function VersionsPage() {
       />
       
       <main className="container mx-auto px-4 py-8" id="main-content">
+        <Breadcrumbs />
         {/* Latest Release */}
         <section className="section">
           <h2 className="text-primary mb-4">Latest Release</h2>

@@ -2,6 +2,7 @@
   "name": "LED Matrix Webex Display",
   "version": "1.4.3",
   "home_assistant_domain": "webex_display",
+  "improv": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",

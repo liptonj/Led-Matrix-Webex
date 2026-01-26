@@ -120,16 +120,16 @@ public:
     void showWifiDisconnected();
 
     /**
-     * @brief Show connecting screen
-     * @param ssid WiFi SSID
+     * @brief Show Improv provisioning screen (waiting for WiFi setup via Web Serial)
      */
-    void showConnecting(const String& ssid);
+    void showImprovProvisioning();
 
     /**
-     * @brief Show connected screen
+     * @brief Show connected screen with IP and hostname
      * @param ip_address Device IP address
+     * @param hostname Device mDNS hostname (optional)
      */
-    void showConnected(const String& ip_address);
+    void showConnected(const String& ip_address, const String& hostname = "");
 
     /**
      * @brief Show updating screen
@@ -228,11 +228,17 @@ private:
         unsigned long last_ms = 0;
     };
 
-    ScrollState ap_scroll;
-    ScrollState unconfig_scroll;
-    ScrollState connecting_scroll;
-    ScrollState connected_scroll;
-    ScrollState status_scroll;  // For scrolling status text
+    // Dynamic scroll states for different text elements
+    static const int MAX_SCROLL_STATES = 16;
+    struct ScrollEntry {
+        String key;
+        ScrollState state;
+        bool active = false;
+    };
+    ScrollEntry scroll_states[MAX_SCROLL_STATES];
+    ScrollState* getScrollState(const String& key);
+    
+    ScrollState status_scroll;  // For scrolling status text (used by drawScrollingStatusText)
     String last_static_key;
     unsigned long last_static_ms = 0;
     String last_line_keys[4];

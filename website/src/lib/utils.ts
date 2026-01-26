@@ -86,3 +86,8 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 export function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+/**
+ * Application version from package.json
+ */
+export { APP_VERSION } from './version';

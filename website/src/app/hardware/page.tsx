@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Header, Footer } from '@/components/layout';
+import { Header, Footer, Breadcrumbs } from '@/components/layout';
 import { Alert, AlertTitle, CodeBlock, Table, TableHead, TableBody, TableRow, TableHeader, TableCell, Card } from '@/components/ui';
 
 export const metadata: Metadata = {
@@ -67,6 +67,7 @@ export default function HardwarePage() {
       />
       
       <main className="container mx-auto px-4 py-8" id="main-content">
+        <Breadcrumbs />
         {/* Required Components */}
         <section className="section">
           <h2 className="text-primary mb-4">Required Components</h2>

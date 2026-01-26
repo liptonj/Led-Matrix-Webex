@@ -592,28 +592,71 @@ async function scanWifi() {
     listEl.innerHTML = '<div class="network-item">Scanning...</div>';
     
     try {
-        const response = await fetch(CONFIG.wifiScanEndpoint);
-        const data = await response.json();
+        // Start the scan
+        const startResponse = await fetch(CONFIG.wifiScanEndpoint);
+        const startData = await startResponse.json();
         
-        listEl.innerHTML = data.networks.map(n => `
-            <div class="network-item" data-ssid="${n.ssid}">
-                <span class="ssid">${n.ssid}</span>
-                <span class="signal">${n.rssi} dBm ${n.encrypted ? '🔒' : ''}</span>
-            </div>
-        `).join('');
+        // If scan is already complete (results available immediately)
+        if (startResponse.status === 200 && startData.networks) {
+            displayEmbeddedNetworks(startData.networks, listEl);
+            btn.disabled = false;
+            btn.textContent = 'Scan Networks';
+            return;
+        }
         
-        listEl.querySelectorAll('.network-item').forEach(item => {
-            item.addEventListener('click', () => {
-                document.getElementById('wifi-ssid').value = item.dataset.ssid;
-            });
-        });
-        
+        // If scan started or in progress, poll for results
+        if (startResponse.status === 202) {
+            // Poll every 500ms for up to 10 seconds
+            const maxAttempts = 20;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const pollResponse = await fetch(CONFIG.wifiScanEndpoint);
+                const pollData = await pollResponse.json();
+                
+                if (pollResponse.status === 200 && pollData.networks) {
+                    displayEmbeddedNetworks(pollData.networks, listEl);
+                    btn.disabled = false;
+                    btn.textContent = 'Scan Networks';
+                    return;
+                }
+            }
+            
+            // Timeout after 10 seconds
+            listEl.innerHTML = '<div class="network-item">Scan timeout - please try again</div>';
+        } else {
+            listEl.innerHTML = '<div class="network-item">Scan failed</div>';
+        }
     } catch (error) {
-        listEl.innerHTML = '<div class="network-item">Scan failed</div>';
+        console.error('WiFi scan error:', error);
+        listEl.innerHTML = '<div class="network-item">Scan failed - ' + error.message + '</div>';
     }
     
     btn.disabled = false;
     btn.textContent = 'Scan Networks';
+}
+
+function displayEmbeddedNetworks(networks, listEl) {
+    if (!networks || networks.length === 0) {
+        listEl.innerHTML = '<div class="network-item">No networks found</div>';
+        return;
+    }
+    
+    listEl.innerHTML = networks.map(n => `
+        <div class="network-item" data-ssid="${n.ssid || ''}">
+            <span class="ssid">${n.ssid || '(hidden)'}</span>
+            <span class="signal">${n.rssi} dBm ${n.encrypted ? '🔒' : ''}</span>
+        </div>
+    `).join('');
+    
+    listEl.querySelectorAll('.network-item').forEach(item => {
+        const ssid = item.dataset.ssid;
+        if (ssid) {
+            item.addEventListener('click', () => {
+                document.getElementById('wifi-ssid').value = ssid;
+            });
+        }
+    });
 }
 
 async function saveWifi() {

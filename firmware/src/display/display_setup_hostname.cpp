@@ -3,28 +3,30 @@
 void MatrixDisplay::showSetupHostname(const String& hostname) {
     if (!initialized) return;
 
-    dma_display->clearScreen();
+    const String screen_key = "setup:" + hostname;
+    const bool screen_changed = (last_static_key != screen_key);
 
-    // Title
-    drawCenteredText(getTextLineY(0, 9), "SETUP", COLOR_CYAN);
+    if (screen_changed) {
+        last_static_key = screen_key;
+        dma_display->clearScreen();
 
-    // Separator
-    dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
+        // Title
+        drawCenteredText(getTextLineY(0, 9), "SETUP", COLOR_CYAN);
 
-    // Instructions
-    drawCenteredText(getTextLineY(1, 9), "Open in Webex:", COLOR_WHITE);
+        // Separator
+        dma_display->drawFastHLine(0, 8, MATRIX_WIDTH, COLOR_GRAY);
 
-    // Hostname - may need to scroll if too long
-    String displayHost = hostname;
-    if (displayHost.length() > 10) {
-        // Truncate with ".local" visible
-        displayHost = hostname.substring(0, 7) + "...";
+        // Instructions
+        drawCenteredText(getTextLineY(1, 9), "Open in Webex:", COLOR_WHITE);
+
+        // Separator
+        dma_display->drawFastHLine(0, 25, MATRIX_WIDTH, COLOR_GRAY);
+
+        // Embedded app path hint
+        drawCenteredText(getTextLineY(3, 9), "/embedded", COLOR_YELLOW);
     }
-    drawCenteredText(getTextLineY(2, 9), displayHost, COLOR_GREEN);
-
-    // Separator
-    dma_display->drawFastHLine(0, 25, MATRIX_WIDTH, COLOR_GRAY);
-
-    // Embedded app path hint
-    drawCenteredText(getTextLineY(3, 9), "/embedded", COLOR_YELLOW);
+    
+    // Hostname scrolls if long
+    String displayHost = hostname + ".local";
+    drawScrollingText(getTextLineY(2, 9), displayHost, COLOR_GREEN, MATRIX_WIDTH - 4, "setup_host");
 }

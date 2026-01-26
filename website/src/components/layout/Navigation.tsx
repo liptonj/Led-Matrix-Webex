@@ -4,7 +4,7 @@ import { useNavigation } from '@/hooks/useNavigation';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { cn } from '@/lib/utils';
+import { cn, APP_VERSION } from '@/lib/utils';
 import { ThemeToggle } from './ThemeToggle';
 
 const navItems = [
@@ -138,7 +138,7 @@ export function Navigation() {
             <ThemeToggle />
           </div>
           <div className="text-xs text-[var(--color-text-muted)]">
-            <p className="mb-1">Version 1.2.0</p>
+            <p className="mb-1">Version {APP_VERSION}</p>
             <p className="opacity-75">MIT License</p>
           </div>
         </div>

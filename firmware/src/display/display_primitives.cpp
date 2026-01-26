@@ -69,26 +69,39 @@ void MatrixDisplay::drawTinyChar(int x, int y, char c, uint16_t color) {
     }
 }
 
+// Get or create a scroll state for a given key
+MatrixDisplay::ScrollState* MatrixDisplay::getScrollState(const String& key) {
+    // Look for existing entry
+    for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+        if (scroll_states[i].active && scroll_states[i].key == key) {
+            return &scroll_states[i].state;
+        }
+    }
+    // Find an empty slot
+    for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+        if (!scroll_states[i].active) {
+            scroll_states[i].key = key;
+            scroll_states[i].active = true;
+            scroll_states[i].state.text = "";
+            scroll_states[i].state.offset = 0;
+            scroll_states[i].state.last_ms = 0;
+            return &scroll_states[i].state;
+        }
+    }
+    // All slots full, reuse the first one (shouldn't happen with 16 slots)
+    scroll_states[0].key = key;
+    scroll_states[0].state.text = "";
+    scroll_states[0].state.offset = 0;
+    scroll_states[0].state.last_ms = 0;
+    return &scroll_states[0].state;
+}
+
 void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key) {
     String safe_text = sanitizeSingleLine(text);
     const int char_width = 6;
     const int max_chars = max_width / char_width;
 
-    ScrollState* state = nullptr;
-    if (key == "ap") {
-        state = &ap_scroll;
-    } else if (key == "unconfig") {
-        state = &unconfig_scroll;
-    } else if (key == "connecting") {
-        state = &connecting_scroll;
-    } else if (key == "connected") {
-        state = &connected_scroll;
-    }
-
-    if (!state) {
-        drawSmallText(2, y, safe_text, color);
-        return;
-    }
+    ScrollState* state = getScrollState(key);
 
     bool force_redraw = false;
     if (state->text != safe_text) {
@@ -98,19 +111,25 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
         force_redraw = true;
     }
 
-    if (safe_text.length() <= max_chars) {
+    // Text fits - draw centered, no scrolling needed
+    if ((int)safe_text.length() <= max_chars) {
         if (state->offset != 0) {
             state->offset = 0;
             force_redraw = true;
         }
         if (!force_redraw) {
-            return;
+            return;  // No change, skip redraw
         }
         dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
-        drawSmallText(2, y, safe_text, color);
+        // Center the text
+        int text_width = safe_text.length() * char_width;
+        int x = (MATRIX_WIDTH - text_width) / 2;
+        if (x < 2) x = 2;
+        drawSmallText(x, y, safe_text, color);
         return;
     }
 
+    // Text too long - scroll it
     const unsigned long now = millis();
     if (!force_redraw) {
         if (now - state->last_ms <= scroll_speed_ms) {
@@ -187,12 +206,6 @@ void MatrixDisplay::drawScrollingStatusText(int y, const String& text, uint16_t 
     const int max_chars = available_width / char_width;
     
     String safe_text = sanitizeSingleLine(text);
-    
-    if (safe_text.length() <= max_chars) {
-        drawSmallText(start_x, y, safe_text, color);
-        return;
-    }
-    
     ScrollState* state = &status_scroll;
     
     bool force_redraw = false;
@@ -203,6 +216,22 @@ void MatrixDisplay::drawScrollingStatusText(int y, const String& text, uint16_t 
         force_redraw = true;
     }
     
+    // Text fits - no scrolling needed
+    if ((int)safe_text.length() <= max_chars) {
+        if (state->offset != 0) {
+            state->offset = 0;
+            force_redraw = true;
+        }
+        if (!force_redraw) {
+            return;  // No change, skip redraw
+        }
+        // Clear area and draw static text
+        fillRect(start_x, y, available_width, 8, COLOR_BLACK);
+        drawSmallText(start_x, y, safe_text, color);
+        return;
+    }
+    
+    // Text too long - scroll it
     const unsigned long now = millis();
     if (!force_redraw) {
         if (now - state->last_ms <= scroll_speed_ms) {

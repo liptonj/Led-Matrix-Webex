@@ -3,23 +3,27 @@
 void MatrixDisplay::showWaitingForWebex(const String& hostname) {
     if (!initialized) return;
 
-    dma_display->clearScreen();
+    const String screen_key = "waiting:" + hostname;
+    const bool screen_changed = (last_static_key != screen_key);
 
-    // Status indicator - pulsing effect would be nice but static for now
-    drawStatusIcon(MATRIX_WIDTH / 2 - 4, 0, "pending");
+    if (screen_changed) {
+        last_static_key = screen_key;
+        dma_display->clearScreen();
 
-    // Message
-    drawCenteredText(getTextLineY(1, 8, 2), "WAITING", COLOR_YELLOW);
+        // Status indicator
+        drawStatusIcon(MATRIX_WIDTH / 2 - 4, 0, "pending");
 
-    // Separator
-    dma_display->drawFastHLine(0, 17, MATRIX_WIDTH, COLOR_GRAY);
+        // Message
+        drawCenteredText(getTextLineY(1, 8, 2), "WAITING", COLOR_YELLOW);
 
-    // Hostname info
-    drawCenteredText(getTextLineY(2, 8, 2), "Connect via:", COLOR_WHITE);
+        // Separator
+        dma_display->drawFastHLine(0, 17, MATRIX_WIDTH, COLOR_GRAY);
 
-    String displayHost = hostname;
-    if (displayHost.length() > 10) {
-        displayHost = hostname.substring(0, 10);
+        // Label
+        drawCenteredText(getTextLineY(2, 8, 2), "Connect via:", COLOR_WHITE);
     }
-    drawCenteredText(getTextLineY(3, 8, 2), displayHost, COLOR_CYAN);
+    
+    // Hostname scrolls if long
+    String displayHost = hostname + ".local";
+    drawScrollingText(getTextLineY(3, 8, 2), displayHost, COLOR_CYAN, MATRIX_WIDTH - 4, "wait_host");
 }

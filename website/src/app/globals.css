@@ -163,6 +163,23 @@
   .status-dot.dnd { background-color: var(--color-dnd); }
   .status-dot.away { background-color: var(--color-away); }
   .status-dot.offline { background-color: var(--color-offline); }
+
+  /* Status glow effects */
+  .status-glow-active {
+    filter: drop-shadow(0 0 6px rgba(108, 192, 74, 0.5));
+  }
+
+  .status-glow-meeting {
+    filter: drop-shadow(0 0 6px rgba(255, 92, 92, 0.5));
+  }
+
+  .status-glow-dnd {
+    filter: drop-shadow(0 0 6px rgba(255, 92, 92, 0.5));
+  }
+
+  .status-glow-away {
+    filter: drop-shadow(0 0 6px rgba(255, 204, 0, 0.5));
+  }
 }
 
 /* Focus styles for accessibility */

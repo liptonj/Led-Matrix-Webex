@@ -1,0 +1,125 @@
+/**
+ * @file improv_handler.cpp
+ * @brief Improv Wi-Fi Serial Protocol Handler Implementation
+ */
+
+#include "improv_handler.h"
+#include "../display/matrix_display.h"
+#include <WiFi.h>
+
+// Static instance for callbacks
+ImprovHandler* ImprovHandler::instance = nullptr;
+
+// Global instance
+ImprovHandler improv_handler;
+
+void ImprovHandler::begin(Stream* serial, ConfigManager* config, AppState* state, MatrixDisplay* display) {
+    config_manager = config;
+    app_state = state;
+    matrix_display = display;
+    provisioning_active = false;
+    configured_via_improv = false;
+    instance = this;
+    
+    Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
+    
+    // Create improv instance with serial stream
+    improv = new ImprovWiFi(serial);
+    
+    // Set device info for Improv
+    // ChipFamily, firmware name, firmware version, device name
+    String device_name = "webex-display";
+    if (config_manager) {
+        device_name = config_manager->getDeviceName();
+    }
+    
+    improv->setDeviceInfo(
+        ImprovTypes::ChipFamily::CF_ESP32_S3,
+        "LED Matrix Webex Display",
+        FIRMWARE_VERSION,
+        device_name.c_str()
+    );
+    
+    // Set callbacks - use library's built-in WiFi connection (no custom callback)
+    // The library's tryConnectToWifi uses vTaskDelay which allows other tasks to run
+    improv->onImprovConnected(onImprovConnected);
+    improv->onImprovError(onImprovError);
+    
+    // NOTE: We intentionally do NOT set a custom connect callback
+    // The library's built-in connection handler works better with ESP Web Tools
+    // because it uses proper FreeRTOS delays
+    
+    initialized = true;
+    Serial.println("[IMPROV] Improv Wi-Fi handler ready");
+    Serial.println("[IMPROV] Device will respond to Improv WiFi provisioning requests");
+}
+
+void ImprovHandler::loop() {
+    if (!initialized || !improv) return;
+    
+    // Process incoming Improv commands
+    improv->handleSerial();
+}
+
+bool ImprovHandler::isProvisioning() const {
+    return provisioning_active;
+}
+
+bool ImprovHandler::wasConfiguredViaImprov() const {
+    return configured_via_improv;
+}
+
+// Static callback: Handle successful Improv connection
+// This is called AFTER the library successfully connects to WiFi
+void ImprovHandler::onImprovConnected(const char* ssid, const char* password) {
+    if (!instance) return;
+    
+    Serial.printf("[IMPROV] Successfully connected to: %s\n", ssid);
+    Serial.printf("[IMPROV] IP Address: %s\n", WiFi.localIP().toString().c_str());
+    
+    // Disable WiFi power save (important for LED matrix timing)
+    WiFi.setSleep(WIFI_PS_NONE);
+    
+    // Save credentials to config for reconnection on reboot
+    if (instance->config_manager) {
+        instance->config_manager->setWiFiCredentials(String(ssid), String(password));
+        Serial.println("[IMPROV] WiFi credentials saved to config");
+    }
+    
+    // Update app state
+    if (instance->app_state) {
+        instance->app_state->wifi_connected = true;
+    }
+    
+    instance->configured_via_improv = true;
+    
+    // Show connected status on display (hostname shown later after mDNS init)
+    if (instance->matrix_display) {
+        instance->matrix_display->showConnected(WiFi.localIP().toString(), "");
+    }
+}
+
+// Static callback: Handle Improv errors
+void ImprovHandler::onImprovError(ImprovTypes::Error error) {
+    switch (error) {
+        case ImprovTypes::Error::ERROR_NONE:
+            break;
+        case ImprovTypes::Error::ERROR_INVALID_RPC:
+            Serial.println("[IMPROV] Error: Invalid RPC packet");
+            break;
+        case ImprovTypes::Error::ERROR_UNKNOWN_RPC:
+            Serial.println("[IMPROV] Error: Unknown RPC command");
+            break;
+        case ImprovTypes::Error::ERROR_UNABLE_TO_CONNECT:
+            Serial.println("[IMPROV] Error: Unable to connect to WiFi");
+            // Don't update display here - main loop will handle it
+            // (will show AP mode screen if in AP mode, or allow retry)
+            break;
+        case ImprovTypes::Error::ERROR_NOT_AUTHORIZED:
+            Serial.println("[IMPROV] Error: Not authorized");
+            break;
+        default:
+            Serial.printf("[IMPROV] Error: Unknown error code %d\n", (int)error);
+            break;
+    }
+}

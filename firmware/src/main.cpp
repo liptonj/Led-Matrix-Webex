@@ -16,6 +16,7 @@
 #include "debug.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
+#include "improv/improv_handler.h"
 #include "serial/serial_commands.h"
 #include "web/web_server.h"
 #include "webex/webex_client.h"
@@ -67,7 +68,7 @@ String buildConfigJson();
  */
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    delay(100);  // Reduced from 1000ms for faster Improv detection
 
     // CRITICAL: Configure watchdog timeout FIRST to prevent boot loops
     // during slow initialization (display, WiFi, etc.)
@@ -87,7 +88,7 @@ void setup() {
         Serial.println("[ERROR] Boot validation failed!");
     }
 
-    // Initialize configuration
+    // Initialize configuration EARLY - needed for Improv device name
     Serial.println("[INIT] Loading configuration...");
     if (!config_manager.begin()) {
         Serial.println("[ERROR] Failed to initialize configuration!");
@@ -101,21 +102,117 @@ void setup() {
         Serial.println("[INIT] Debug mode ENABLED - verbose logging active");
     }
 
-    // Initialize display
+    // =========================================================================
+    // Initialize display FIRST so we can show status during Improv provisioning
+    // =========================================================================
     Serial.println("[INIT] Initializing LED matrix...");
     Serial.flush();
+    delay(10);  // Feed watchdog before long operation
 
-    // CRITICAL: Feed watchdog before long operation
-    delay(10);
-
-    if (!matrix_display.begin()) {
+    bool display_ok = matrix_display.begin();
+    if (!display_ok) {
         Serial.println("[WARN] Display initialization failed - continuing without display");
-        // Don't fail boot - continue without display
     } else {
         Serial.println("[INIT] Display ready!");
         matrix_display.setBrightness(config_manager.getBrightness());
         matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
         matrix_display.showStartupScreen(FIRMWARE_VERSION);
+    }
+
+    // =========================================================================
+    // IMPROV WiFi - Initialize for ESP Web Tools WiFi provisioning
+    // =========================================================================
+    
+    // Initialize WiFi in STA mode (required for scanning)
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(WIFI_PS_NONE);  // Disable power save (prevents display interference)
+    Serial.println("[INIT] WiFi initialized in STA mode");
+    
+    Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
+    improv_handler.begin(&Serial, &config_manager, &app_state, display_ok ? &matrix_display : nullptr);
+    
+    // Check if WiFi is already configured - if so, skip the Improv window
+    bool wifi_configured = config_manager.hasWiFiCredentials();
+    
+    if (wifi_configured) {
+        Serial.println("[IMPROV] WiFi already configured, skipping provisioning window");
+    } else {
+        // Two-phase Improv detection:
+        // Phase 1: Quick detection (3 seconds) - check if anyone is sending Improv packets
+        // Phase 2: If activity detected, extend to 60 seconds for full provisioning
+        
+        Serial.println("[IMPROV] No WiFi configured - detecting serial activity (3 seconds)...");
+        
+        unsigned long detect_start = millis();
+        const unsigned long DETECT_TIMEOUT = 3000;   // 3 seconds detection window
+        const unsigned long PROVISION_TIMEOUT = 60000;  // 60 seconds for provisioning
+        bool improv_activity_detected = false;
+        
+        // Phase 1: Detection
+        while (millis() - detect_start < DETECT_TIMEOUT) {
+            improv_handler.loop();
+            
+            // Check if we received any serial data (Improv packets)
+            if (Serial.available() > 0) {
+                improv_activity_detected = true;
+                Serial.println("[IMPROV] Serial activity detected! Extending window for provisioning...");
+                
+                // Show provisioning screen on display
+                if (display_ok) {
+                    matrix_display.showImprovProvisioning();
+                }
+                break;
+            }
+            
+            // Check if WiFi was configured
+            if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
+                Serial.println("[IMPROV] WiFi configured successfully!");
+                break;
+            }
+            
+            delay(10);
+        }
+        
+        // Phase 2: Extended provisioning if activity was detected
+        if (improv_activity_detected && WiFi.status() != WL_CONNECTED) {
+            Serial.println("[IMPROV] Waiting for WiFi provisioning (60 seconds)...");
+            
+            unsigned long provision_start = millis();
+            unsigned long last_status = 0;
+            
+            while (millis() - provision_start < PROVISION_TIMEOUT) {
+                improv_handler.loop();
+                
+                // Check if WiFi was configured via Improv
+                if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
+                    Serial.println("[IMPROV] WiFi configured successfully!");
+                    break;
+                }
+                
+                // Print countdown every 5 seconds
+                unsigned long elapsed = millis() - provision_start;
+                if (elapsed - last_status >= 5000) {
+                    last_status = elapsed;
+                    Serial.printf("[IMPROV] Waiting... %lu seconds remaining\n", 
+                                  (PROVISION_TIMEOUT - elapsed) / 1000);
+                }
+                
+                delay(10);
+            }
+        }
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("[IMPROV] Provisioning complete, continuing boot...");
+            if (display_ok) {
+                // Show IP only for now - hostname shown after mDNS init
+                matrix_display.showConnected(WiFi.localIP().toString(), "");
+                delay(2000);  // Show connected screen briefly
+            }
+        } else if (!improv_activity_detected) {
+            Serial.println("[IMPROV] No serial activity detected, continuing boot...");
+        } else {
+            Serial.println("[IMPROV] Provisioning window closed, continuing to AP mode...");
+        }
     }
 
     // Setup WiFi (includes AP mode fallback if connection fails)
@@ -267,7 +364,7 @@ void setup() {
     // Show connection info briefly on display
     if (app_state.wifi_connected) {
         String hostname = mdns_manager.getHostname();
-        matrix_display.showConnected(WiFi.localIP().toString());
+        matrix_display.showConnected(WiFi.localIP().toString(), hostname);
         delay(3000);  // Show for 3 seconds
         Serial.printf("[INIT] Device ready at http://%s or http://%s.local\n",
                       WiFi.localIP().toString().c_str(), hostname.c_str());
@@ -280,6 +377,10 @@ void setup() {
 void loop() {
     unsigned long current_time = millis();
 
+    // Process Improv Wi-Fi commands (for ESP Web Tools WiFi provisioning)
+    // This must be called frequently to respond to Improv requests
+    improv_handler.loop();
+
     // Process serial commands (for web installer WiFi setup)
     serial_commands_loop();
 
@@ -290,7 +391,6 @@ void loop() {
         serial_wifi_clear_pending();
 
         Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
-        matrix_display.showConnecting(ssid);
 
         WiFi.disconnect();
         WiFi.begin(ssid.c_str(), password.c_str());
@@ -317,7 +417,7 @@ void loop() {
             // Sync time
             setup_time();
 
-            matrix_display.showConnected(WiFi.localIP().toString());
+            matrix_display.showConnected(WiFi.localIP().toString(), mdns_manager.getHostname());
         } else {
             Serial.println("[WIFI] Connection failed!");
             app_state.wifi_connected = false;
@@ -652,9 +752,15 @@ void update_display() {
         return;
     }
 
-    // If Webex is unavailable, keep showing a generic screen with IP
+    // If WiFi is not connected, show appropriate screen
     if (!app_state.wifi_connected) {
-        matrix_display.showWifiDisconnected();
+        if (wifi_manager.isAPModeActive()) {
+            // In AP mode for setup - show AP mode screen
+            matrix_display.showAPMode(WiFi.softAPIP().toString());
+        } else {
+            // WiFi was configured but connection dropped
+            matrix_display.showWifiDisconnected();
+        }
         return;
     }
 

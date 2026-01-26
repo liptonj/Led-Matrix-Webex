@@ -1,5 +1,8 @@
 #include "matrix_display.h"
 
+// AP Mode SSID - must match the SSID in wifi_manager.cpp
+#define AP_MODE_SSID "Webex-Display-Setup"
+
 void MatrixDisplay::showAPMode(const String& ip_address) {
     if (!initialized) return;
 
@@ -10,9 +13,11 @@ void MatrixDisplay::showAPMode(const String& ip_address) {
 
     if (screen_changed) {
         dma_display->clearScreen();
-        drawText(2, getTextLineY(0, 8, 2), "WEBEX", COLOR_CYAN);
-        drawText(2, getTextLineY(1, 8, 2), "DISPLAY", COLOR_WHITE);
-        drawSmallText(2, getTextLineY(2, 8, 2), "Open WiFi AP", COLOR_YELLOW);
+        drawText(2, getTextLineY(0, 8, 2), "WIFI SETUP", COLOR_CYAN);
+        drawSmallText(2, getTextLineY(1, 8, 2), "Connect to WiFi:", COLOR_WHITE);
     }
-    drawScrollingText(getTextLineY(3, 8, 2), ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "ap");
+    // Show the SSID as scrolling text (it's too long for static display)
+    drawScrollingText(getTextLineY(2, 8, 2), AP_MODE_SSID, COLOR_YELLOW, MATRIX_WIDTH - 4, "ap_ssid");
+    // Show the IP address
+    drawScrollingText(getTextLineY(3, 8, 2), ip_text, COLOR_GREEN, MATRIX_WIDTH - 4, "ap_ip");
 }

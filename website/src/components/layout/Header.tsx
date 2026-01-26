@@ -51,7 +51,7 @@ export function Header({
 
       {/* Hero Section */}
       {showBrand && (
-        <header className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-12 shadow-lg">
+        <header className="py-12 shadow-lg text-white" style={{ background: 'var(--header-gradient)' }}>
           <div className="container mx-auto px-4 text-center">
             <h1 className="text-3xl md:text-4xl font-bold mb-3">
               {title}

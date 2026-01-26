@@ -95,6 +95,7 @@ private:
     
     unsigned long last_connection_check;
     bool ap_mode_active;
+    uint8_t reconnect_attempts = 0;  // Counter for failed reconnection attempts
     
     static const unsigned long CONNECTION_CHECK_INTERVAL = 10000;  // 10 seconds
 };

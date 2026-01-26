@@ -8,26 +8,76 @@
 #include <WiFi.h>
 
 void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
-    int n = WiFi.scanNetworks();
-
-    JsonDocument doc;
-    JsonArray networks = doc["networks"].to<JsonArray>();
-
-    for (int i = 0; i < n; i++) {
-        JsonObject network = networks.add<JsonObject>();
-        network["ssid"] = WiFi.SSID(i);
-        network["rssi"] = WiFi.RSSI(i);
-        network["encrypted"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+    // Check if a scan is already in progress
+    int16_t scan_status = WiFi.scanComplete();
+    
+    if (scan_status == WIFI_SCAN_RUNNING) {
+        // Scan already in progress, return 202 Accepted
+        AsyncWebServerResponse* response = request->beginResponse(202, "application/json", 
+            "{\"status\":\"scanning\",\"message\":\"Scan in progress\"}");
+        addCorsHeaders(response);
+        request->send(response);
+        return;
     }
-
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
+    
+    if (scan_status == WIFI_SCAN_FAILED) {
+        // Previous scan failed, clean up
+        WiFi.scanDelete();
+        scan_status = -1;
+    }
+    
+    // If scan results are available (scan_status >= 0), return them
+    if (scan_status >= 0) {
+        JsonDocument doc;
+        JsonArray networks = doc["networks"].to<JsonArray>();
+        
+        for (int i = 0; i < scan_status; i++) {
+            JsonObject network = networks.add<JsonObject>();
+            network["ssid"] = WiFi.SSID(i);
+            network["rssi"] = WiFi.RSSI(i);
+            network["encrypted"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+        }
+        
+        // Clean up scan results after sending
+        WiFi.scanDelete();
+        
+        String responseStr;
+        serializeJson(doc, responseStr);
+        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
+        addCorsHeaders(response);
+        request->send(response);
+        return;
+    }
+    
+    // No scan in progress and no results available - start a new async scan
+    int16_t result = WiFi.scanNetworks(true, false);  // Async scan, no hidden networks
+    
+    if (result == WIFI_SCAN_RUNNING) {
+        // Scan started successfully
+        AsyncWebServerResponse* response = request->beginResponse(202, "application/json", 
+            "{\"status\":\"scanning\",\"message\":\"Scan started\"}");
+        addCorsHeaders(response);
+        request->send(response);
+    } else {
+        // Scan failed to start
+        AsyncWebServerResponse* response = request->beginResponse(500, "application/json", 
+            "{\"error\":\"Failed to start WiFi scan\"}");
+        addCorsHeaders(response);
+        request->send(response);
+    }
 }
 
 void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     String ssid;
     String password;
+    
+    // CRITICAL: Clean up any pending async WiFi scan before saving and rebooting
+    // This prevents scan interference during reboot
+    int16_t scan_status = WiFi.scanComplete();
+    if (scan_status == WIFI_SCAN_RUNNING) {
+        Serial.println("[WEB] Cleaning up pending WiFi scan before reboot...");
+        WiFi.scanDelete();
+    }
 
     // Helper to URL-decode form values
     auto urlDecode = [](const String& input) -> String {
@@ -88,16 +138,22 @@ void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* d
     }
 
     if (ssid.isEmpty()) {
-        request->send(400, "application/json", "{\"error\":\"Missing ssid\"}");
+        AsyncWebServerResponse* response = request->beginResponse(400, "application/json", "{\"error\":\"Missing ssid\"}");
+        addCorsHeaders(response);
+        request->send(response);
         return;
     }
 
     config_manager->setWiFiCredentials(ssid, password);
 
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"WiFi saved. Rebooting...\"}");
+    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", 
+        "{\"success\":true,\"message\":\"WiFi saved. Rebooting...\"}");
+    addCorsHeaders(response);
+    request->send(response);
 
-    // Schedule reboot
+    // Schedule reboot with longer delay to allow display DMA to complete
+    // This helps prevent display corruption on reboot
     pending_reboot = true;
-    pending_reboot_time = millis() + 500;
+    pending_reboot_time = millis() + 1000;
     pending_boot_partition = nullptr;
 }

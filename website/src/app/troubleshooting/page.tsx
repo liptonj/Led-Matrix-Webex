@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Header, Footer } from '@/components/layout';
+import { Header, Footer, Breadcrumbs } from '@/components/layout';
 import { Alert, AlertTitle, Card } from '@/components/ui';
 
 export const metadata: Metadata = {
@@ -115,6 +115,7 @@ export default function TroubleshootingPage() {
       />
       
       <main className="container mx-auto px-4 py-8" id="main-content">
+        <Breadcrumbs />
         {/* Quick Diagnostics */}
         <section className="section">
           <h2 className="text-primary mb-4">Quick Diagnostics</h2>

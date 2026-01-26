@@ -49,3 +49,7 @@ next-env.d.ts
 
 # Wrangler
 .wrangler/
+
+# Firmware binaries (built by CI)
+*.bin
+public/updates/firmware/
