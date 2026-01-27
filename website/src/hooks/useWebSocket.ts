@@ -90,9 +90,11 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Don't create new connection if one is already open or connecting
+    if (wsRef.current?.readyState === WebSocket.OPEN || 
+        wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
-    // Close existing connection if any
+    // Close existing connection if any (e.g., in CLOSING state)
     if (wsRef.current) {
       wsRef.current.close();
     }
