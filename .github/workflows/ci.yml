@@ -492,15 +492,45 @@ jobs:
             fi
           else
             # Compare current tag with previous tag
+            # Get list of changed files in website/ directory
             CHANGED_FILES=$(git diff --name-only $PREV_TAG HEAD | grep -E '^(website/|\.github/workflows/ci\.yml|\.github/workflows/deploy-website\.yml)' || true)
             
-            if [ -n "$CHANGED_FILES" ]; then
-              echo "Website-related files changed since $PREV_TAG:"
-              echo "$CHANGED_FILES"
-              echo "changed=true" >> $GITHUB_OUTPUT
-            else
-              echo "No website changes detected since $PREV_TAG - skipping deploy"
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "No website-related files changed since $PREV_TAG - skipping deploy"
               echo "changed=false" >> $GITHUB_OUTPUT
+            else
+              # Check if only package.json version changed (exclude version-only changes)
+              # If only package.json changed, check if it's just the version field
+              if echo "$CHANGED_FILES" | grep -q "^website/package.json$" && [ "$(echo "$CHANGED_FILES" | wc -l)" -eq 1 ]; then
+                # Get the actual diff content for package.json
+                PACKAGE_JSON_DIFF=$(git diff $PREV_TAG HEAD -- website/package.json 2>/dev/null || echo "")
+                
+                if [ -n "$PACKAGE_JSON_DIFF" ]; then
+                  # Extract lines that show actual content changes (not just context/metadata)
+                  # Remove diff headers, context lines, and check if only version line changed
+                  CONTENT_CHANGES=$(echo "$PACKAGE_JSON_DIFF" | grep -E "^[+-]" | grep -v "^[+-][+-][+-]" | grep -v "\"version\"" || echo "")
+                  
+                  if [ -z "$CONTENT_CHANGES" ]; then
+                    echo "Only version number changed in website/package.json - skipping deploy"
+                    echo "Changed files: $CHANGED_FILES"
+                    echo "changed=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "Website package.json changed (not just version) - deploying"
+                    echo "Changed files: $CHANGED_FILES"
+                    echo "changed=true" >> $GITHUB_OUTPUT
+                  fi
+                else
+                  # No diff found (shouldn't happen if file is in CHANGED_FILES)
+                  echo "Website files changed since $PREV_TAG:"
+                  echo "$CHANGED_FILES"
+                  echo "changed=true" >> $GITHUB_OUTPUT
+                fi
+              else
+                # Multiple files changed or package.json changed with other files
+                echo "Website files changed since $PREV_TAG:"
+                echo "$CHANGED_FILES"
+                echo "changed=true" >> $GITHUB_OUTPUT
+              fi
             fi
           fi
 
