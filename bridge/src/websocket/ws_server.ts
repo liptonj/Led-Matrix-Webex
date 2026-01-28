@@ -76,6 +76,8 @@ export class WebSocketServer {
   private deviceStore: DeviceStore | null = null;
   private supabaseStore: SupabaseStore | null = null;
   private debugSubscribers: Map<string, Set<WebSocket>> = new Map();
+  // Rate limiting for debug logs: track log count per device per second
+  private logRateLimiter: Map<string, { count: number; resetAt: number }> = new Map();
 
   constructor(
     port: number,
@@ -807,9 +809,37 @@ export class WebSocketServer {
     const logMessage = message.log_message || message.message || "";
     const metadata = message.log_metadata;
 
-    // Apply rate limiting for high-volume logs
-    // Always persist warn/error; throttle info/debug when debug_enabled
-    const shouldPersist = level === "warn" || level === "error" || client.debugEnabled;
+    // Rate limiting configuration (logs per second per device)
+    const MAX_LOGS_PER_SECOND = parseInt(process.env.DEBUG_LOG_RATE_LIMIT || "10", 10);
+    const now = Date.now();
+    const rateLimitKey = serialNumber || deviceId;
+
+    // Always persist warn/error regardless of rate limit
+    const isHighPriority = level === "warn" || level === "error";
+    
+    // Check rate limit for info/debug logs when debug is enabled
+    let shouldPersist = isHighPriority;
+    if (!isHighPriority && client.debugEnabled) {
+      const limiter = this.logRateLimiter.get(rateLimitKey);
+      if (!limiter || now >= limiter.resetAt) {
+        // Reset or initialize rate limiter
+        this.logRateLimiter.set(rateLimitKey, {
+          count: 1,
+          resetAt: now + 1000, // Reset after 1 second
+        });
+        shouldPersist = true;
+      } else if (limiter.count < MAX_LOGS_PER_SECOND) {
+        // Within rate limit
+        limiter.count++;
+        shouldPersist = true;
+      } else {
+        // Rate limited - skip this log
+        shouldPersist = false;
+        this.logger.debug(
+          `[${serialNumber || deviceId}] Rate limit exceeded for ${level} logs (${limiter.count}/${MAX_LOGS_PER_SECOND} per second)`,
+        );
+      }
+    }
 
     // Store in Supabase if enabled and should persist
     if (this.supabaseStore?.isEnabled() && shouldPersist) {
