@@ -18,7 +18,8 @@ import { useEffect, useRef, useState } from 'react';
 export default function DeviceDetailPage() {
     const params = useParams();
     const router = useRouter();
-    const serial = params.serial as string;
+    // Handle catch-all route: serial is an array, get first element
+    const serial = Array.isArray(params.serial) ? params.serial[0] : (params.serial as string);
 
     const [device, setDevice] = useState<Device | null>(null);
     const [logs, setLogs] = useState<DeviceLog[]>([]);
@@ -99,11 +100,10 @@ export default function DeviceDetailPage() {
             setDevice(deviceData);
             setReleases(releasesData);
 
-            // Load logs if debug is enabled (using serial_number)
-            if (deviceData.debug_enabled) {
-                const logsData = await getDeviceLogsBySerial(deviceData.serial_number);
-                setLogs(logsData);
-            }
+            // Always load logs (warn/error are persisted even when debug is disabled)
+            // Only realtime streaming requires debug_enabled
+            const logsData = await getDeviceLogsBySerial(deviceData.serial_number);
+            setLogs(logsData);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load device');
         }
