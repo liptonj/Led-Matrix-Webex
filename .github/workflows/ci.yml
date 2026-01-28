@@ -458,7 +458,7 @@ jobs:
           fi
 
   # ============================================================================
-  # Deploy Website (only on version tags, after release)
+  # Deploy Website (only on version tags, after release, if website changed)
   # ============================================================================
   deploy-website:
     name: Deploy Website
@@ -472,8 +472,40 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for website changes
+        id: website-changes
+        run: |
+          # Get the previous tag (if exists)
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            # No previous tag, check if website directory exists and has files
+            if [ -d "website" ] && [ "$(git ls-tree -r HEAD --name-only | grep -c '^website/')" -gt 0 ]; then
+              echo "No previous tag found, but website directory exists - will deploy"
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No previous tag and no website files - skipping deploy"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # Compare current tag with previous tag
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG HEAD | grep -E '^(website/|\.github/workflows/ci\.yml|\.github/workflows/deploy-website\.yml)' || true)
+            
+            if [ -n "$CHANGED_FILES" ]; then
+              echo "Website-related files changed since $PREV_TAG:"
+              echo "$CHANGED_FILES"
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No website changes detected since $PREV_TAG - skipping deploy"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          fi
 
       - name: Update versions from tag
+        if: steps.website-changes.outputs.changed == 'true'
         working-directory: ${{ github.workspace }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
@@ -481,6 +513,7 @@ jobs:
           python3 scripts/update_version.py "${VERSION}"
 
       - name: Setup Node.js
+        if: steps.website-changes.outputs.changed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -488,6 +521,7 @@ jobs:
           cache-dependency-path: website/package-lock.json
 
       - name: Install dependencies
+        if: steps.website-changes.outputs.changed == 'true'
         working-directory: website
         run: npm ci
 
@@ -497,6 +531,7 @@ jobs:
       # ESP Web Tools and OTA updates now use the Edge Function endpoint.
 
       - name: Build website (Next.js)
+        if: steps.website-changes.outputs.changed == 'true'
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -505,6 +540,7 @@ jobs:
         run: npm run build
 
       - name: Verify build output
+        if: steps.website-changes.outputs.changed == 'true'
         run: |
           echo "Build output contents:"
           ls -la website/out/
@@ -513,7 +549,13 @@ jobs:
           find website/out -name "index.html" | head -20
 
       - name: Publish to Cloudflare Pages
+        if: steps.website-changes.outputs.changed == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler pages deploy website/out --project-name led-matrix-webex --branch main
+
+      - name: Skip deployment message
+        if: steps.website-changes.outputs.changed != 'true'
+        run: |
+          echo "⏭️ Skipping website deployment - no website changes detected in this release"
