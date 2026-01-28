@@ -274,7 +274,15 @@ jobs:
           TAG_VERSION="${{ steps.version.outputs.VERSION }}"
 
           # Check firmware version (should match after update)
-          FIRMWARE_VERSION=$(grep "firmware_version" firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
+          # Extract version from [version] section only, ignoring variable references
+          # Use awk to find the [version] section and extract firmware_version = value
+          FIRMWARE_VERSION=$(awk '/^\[version\]/{flag=1} flag && /firmware_version = /{print; exit} /^\[/ && !/^\[version\]/{flag=0}' firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
+          
+          if [ -z "$FIRMWARE_VERSION" ]; then
+            echo "::error::Could not extract firmware_version from platformio.ini"
+            exit 1
+          fi
+          
           if [ "$TAG_VERSION" != "$FIRMWARE_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) does not match firmware version ($FIRMWARE_VERSION) after update"
             exit 1
