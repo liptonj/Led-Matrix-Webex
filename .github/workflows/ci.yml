@@ -28,6 +28,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -73,6 +80,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -241,18 +255,26 @@ jobs:
 
       - name: Get version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Update versions from tag
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
 
       - name: Validate version matches platformio.ini
         run: |
           TAG_VERSION="${{ steps.version.outputs.VERSION }}"
-          # Strip 'v' prefix if present
-          TAG_VERSION="${TAG_VERSION#v}"
 
-          # Check firmware version
+          # Check firmware version (should match after update)
           FIRMWARE_VERSION=$(grep "firmware_version" firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
           if [ "$TAG_VERSION" != "$FIRMWARE_VERSION" ]; then
-            echo "::warning::Tag version ($TAG_VERSION) does not match firmware version ($FIRMWARE_VERSION)"
+            echo "::error::Tag version ($TAG_VERSION) does not match firmware version ($FIRMWARE_VERSION) after update"
+            exit 1
           else
             echo "✓ Firmware version matches: $FIRMWARE_VERSION"
           fi
@@ -447,6 +469,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Update versions from tag
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

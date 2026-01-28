@@ -1,0 +1,67 @@
+{
+  "$schema": "https://cursor.sh/schemas/environment.json",
+  "description": "LED Matrix Webex Display - Cloud Development Environment",
+  "snapshot": "snapshot-20260128-4d86958d-419b-4ac4-a53f-e884991fff28",
+  
+  "start": [
+    "source .venv/bin/activate",
+    "export DENO_INSTALL=\"$HOME/.deno\"",
+    "export PATH=\"$DENO_INSTALL/bin:$PATH\""
+  ],
+  
+  "terminals": [
+    {
+      "name": "Bridge Server",
+      "command": "cd bridge && npm run dev",
+      "ports": [8080]
+    },
+    {
+      "name": "Website Dev Server",
+      "command": "cd website && npm run dev",
+      "ports": [3000]
+    },
+    {
+      "name": "Supabase Local",
+      "command": "cd supabase && supabase start",
+      "ports": [54321, 54322, 54323]
+    }
+  ],
+  
+  "env": {
+    "NODE_ENV": "development",
+    "PYTHON_VERSION": "3.10",
+    "LOG_LEVEL": "info"
+  },
+  
+  "persistedDirectories": [
+    ".venv",
+    "bridge/node_modules",
+    "website/node_modules",
+    "bridge/dist",
+    "website/.next",
+    ".pio"
+  ],
+  
+  "ports": [
+    {
+      "port": 3000,
+      "description": "Next.js website dev server"
+    },
+    {
+      "port": 8080,
+      "description": "Webex bridge WebSocket server"
+    },
+    {
+      "port": 54321,
+      "description": "Supabase API"
+    },
+    {
+      "port": 54322,
+      "description": "Supabase PostgreSQL"
+    },
+    {
+      "port": 54323,
+      "description": "Supabase Studio"
+    }
+  ]
+}
