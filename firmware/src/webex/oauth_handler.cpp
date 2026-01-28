@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
+#include "../common/secure_client_config.h"
 
 OAuthHandler::OAuthHandler()
     : config_manager(nullptr), token_expiry(0) {
@@ -60,6 +61,7 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     }
     
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager->getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_WEBEX);
     } else {
@@ -120,6 +122,7 @@ bool OAuthHandler::refreshAccessToken() {
     }
     
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager->getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_WEBEX);
     } else {

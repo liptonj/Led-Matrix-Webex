@@ -6,10 +6,19 @@
 #include "wifi_manager.h"
 #include "../display/matrix_display.h"
 #include "../discovery/mdns_manager.h"
+#include <esp_heap_caps.h>
+
+namespace {
+bool mdnsMemoryOk() {
+    const size_t free_heap = ESP.getFreeHeap();
+    const size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    return free_heap >= 60000 && largest_block >= 20000;
+}
+}  // namespace
 
 WiFiManager::WiFiManager()
     : config_manager(nullptr), app_state(nullptr), matrix_display(nullptr),
-      last_connection_check(0), ap_mode_active(false) {
+      last_connection_check(0), last_mdns_start_attempt(0), ap_mode_active(false) {
 }
 
 void WiFiManager::begin(ConfigManager* config, AppState* state, MatrixDisplay* display) {
@@ -181,6 +190,19 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
         }
 
         if (mdns_manager && (!mdns_manager->isInitialized() || !was_connected)) {
+            const unsigned long now = millis();
+            if (now - last_mdns_start_attempt < MDNS_RETRY_INTERVAL) {
+                return;
+            }
+            last_mdns_start_attempt = now;
+
+            if (!mdnsMemoryOk()) {
+                Serial.printf("[MDNS] Skipping start (heap=%lu, largest=%lu)\n",
+                              ESP.getFreeHeap(),
+                              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                return;
+            }
+
             Serial.println("[MDNS] (Re)starting mDNS after WiFi connect...");
             mdns_manager->end();
             if (mdns_manager->begin(config_manager->getDeviceName())) {

@@ -8,6 +8,7 @@
 #include "../common/ca_certs.h"
 #include "../display/matrix_display.h"
 #include "../config/config_manager.h"
+#include "../common/secure_client_config.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
@@ -95,6 +96,7 @@ bool OTAManager::checkUpdateFromManifest() {
                   config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     } else {
@@ -198,6 +200,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
                   config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     } else {
@@ -477,6 +480,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
                   config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     } else {
@@ -716,6 +720,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                   config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
     } else {

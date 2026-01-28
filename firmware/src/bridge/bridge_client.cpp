@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <time.h>
 #include "../common/ca_certs.h"
+#include "../common/ws_client_compat.h"
 #include "../config/config_manager.h"
 #include "../debug.h"
 #include "../auth/device_credentials.h"
@@ -125,7 +126,7 @@ void BridgeClient::beginWithUrl(const String& url, const String& code) {
             ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
                                CA_CERT_DIGICERT_GLOBAL_G2);
         } else {
-            ws_client.setInsecure();
+            wsSetInsecure(ws_client, 0);
             ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(), nullptr);
         }
         ws_client.enableHeartbeat(15000, 3000, 2);  // Keep connection alive
@@ -347,7 +348,7 @@ void BridgeClient::reconnect() {
             ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
                                CA_CERT_DIGICERT_GLOBAL_G2);
         } else {
-            ws_client.setInsecure();
+            wsSetInsecure(ws_client, 0);
             ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(), nullptr);
         }
         ws_client.enableHeartbeat(15000, 3000, 2);

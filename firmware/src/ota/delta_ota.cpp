@@ -7,6 +7,7 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
+#include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
 #include <time.h>
 
@@ -42,6 +43,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                                        OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);
     } else {
@@ -149,6 +151,7 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
                                      OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);
     } else {
@@ -291,6 +294,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
                                             void (*progress)(int)) {
     HTTPClient http;
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);
     } else {

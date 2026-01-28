@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include "../common/ca_certs.h"
+#include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
 
 extern ConfigManager config_manager;
@@ -35,6 +36,7 @@ bool BridgeDiscovery::fetchConfig(bool force) {
     Serial.printf("[DISCOVERY] Fetching bridge configuration from %s\n", BRIDGE_CONFIG_URL);
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_OTA);  // GTS Root R4 for display.5ls.us
     } else {

@@ -94,10 +94,12 @@ private:
     MatrixDisplay* matrix_display;
     
     unsigned long last_connection_check;
+    unsigned long last_mdns_start_attempt;
     bool ap_mode_active;
     uint8_t reconnect_attempts = 0;  // Counter for failed reconnection attempts
     
     static const unsigned long CONNECTION_CHECK_INTERVAL = 10000;  // 10 seconds
+    static const unsigned long MDNS_RETRY_INTERVAL = 30000;  // 30 seconds
 };
 
 #endif // WIFI_MANAGER_H

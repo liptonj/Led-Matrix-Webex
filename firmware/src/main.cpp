@@ -33,6 +33,7 @@
 #include "supabase/supabase_client.h"
 #include "supabase/supabase_realtime.h"
 #include "common/ca_certs.h"
+#include "common/secure_client_config.h"
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
 #include "time/time_manager.h"
@@ -1094,6 +1095,7 @@ bool provisionDeviceWithSupabase() {
     Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
 
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_SUPABASE);
     } else {

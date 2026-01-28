@@ -10,6 +10,7 @@
 #include <time.h>
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
+#include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
 
 extern ConfigManager config_manager;
@@ -416,6 +417,7 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_SUPABASE);
     } else {

@@ -11,6 +11,7 @@
 
 #include "supabase_realtime.h"
 #include "../common/ca_certs.h"
+#include "../common/ws_client_compat.h"
 #include "../config/config_manager.h"
 
 extern ConfigManager config_manager;
@@ -74,7 +75,7 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     if (config_manager.getTlsVerify()) {
         _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
     } else {
-        _wsClient.setInsecure();
+        wsSetInsecure(_wsClient, 0);
         _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
     }
     _wsClient.setReconnectInterval(0);  // We handle reconnection manually
@@ -415,7 +416,7 @@ void SupabaseRealtime::attemptReconnect() {
     if (config_manager.getTlsVerify()) {
         _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
     } else {
-        _wsClient.setInsecure();
+        wsSetInsecure(_wsClient, 0);
         _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
     }
 }

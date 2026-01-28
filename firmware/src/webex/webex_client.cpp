@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
+#include "../common/secure_client_config.h"
 
 WebexClient::WebexClient()
     : config_manager(nullptr), last_request_time(0), rate_limit_backoff(0) {
@@ -103,6 +104,7 @@ String WebexClient::makeApiRequest(const String& endpoint) {
     }
     
     WiFiClientSecure client;
+    configureSecureClient(client);
     if (config_manager && config_manager->getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_WEBEX);
     } else {
