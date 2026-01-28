@@ -73,6 +73,7 @@ async function createSupabaseClient() {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      detectSessionInUrl: true,
     },
   });
 }
@@ -395,6 +396,211 @@ export async function onAuthStateChange(
   return supabase.auth.onAuthStateChange(callback);
 }
 
+export async function isAdmin(): Promise<boolean> {
+  const supabase = await getSupabase();
+  const { data, error } = await supabase.schema("display").rpc("is_admin");
+  if (error) throw error;
+  return Boolean(data);
+}
+
+export interface UserProfile {
+  user_id: string;
+  email: string;
+  role: "admin" | "user";
+  first_name: string | null;
+  last_name: string | null;
+  disabled: boolean;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface UserDeviceAssignment {
+  id: string;
+  user_id: string;
+  serial_number: string;
+  created_at: string;
+  created_by: string | null;
+}
+
+export async function getUserProfiles(): Promise<UserProfile[]> {
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .schema("display")
+    .from("user_profiles")
+    .select(
+      "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+    )
+    .order("email", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getUserDeviceAssignments(): Promise<
+  UserDeviceAssignment[]
+> {
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .select("id, user_id, serial_number, created_at, created_by")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function assignDeviceToUser(
+  userId: string,
+  serialNumber: string,
+): Promise<void> {
+  const supabase = await getSupabase();
+  const user = await getUser();
+  const { error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .insert({
+      user_id: userId,
+      serial_number: serialNumber,
+      created_by: user?.id ?? null,
+    });
+
+  if (error) throw error;
+}
+
+export async function removeUserDeviceAssignment(assignmentId: string) {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .delete()
+    .eq("id", assignmentId);
+
+  if (error) throw error;
+}
+
+export async function createUserWithRole(
+  email: string,
+  password: string,
+  role: "admin" | "user",
+): Promise<{ userId: string; existing: boolean }> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-create-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      role,
+    }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to create user.");
+  }
+
+  return { userId: body.user_id, existing: Boolean(body.existing) };
+}
+
+export async function getCurrentUserProfile(): Promise<UserProfile | null> {
+  const user = await getUser();
+  if (!user) return null;
+
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .schema("display")
+    .from("user_profiles")
+    .select(
+      "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+    )
+    .eq("user_id", user.id)
+    .single();
+
+  if (error && error.code !== "PGRST116") throw error;
+  return data || null;
+}
+
+export async function updateAdminUser(params: {
+  userId: string;
+  email?: string;
+  password?: string;
+  role?: "admin" | "user";
+  firstName?: string | null;
+  lastName?: string | null;
+  disabled?: boolean;
+}): Promise<void> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-update-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      user_id: params.userId,
+      email: params.email,
+      password: params.password,
+      role: params.role,
+      first_name: params.firstName,
+      last_name: params.lastName,
+      disabled: params.disabled,
+    }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to update user.");
+  }
+}
+
+export async function deleteAdminUser(userId: string): Promise<void> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-delete-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ user_id: userId }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to delete user.");
+  }
+}
+
 // ============================================================================
 // Pairing Types and Subscriptions
 // ============================================================================
@@ -416,6 +622,9 @@ export interface Pairing {
   free_heap: number | null;
   uptime: number | null;
   temperature: number | null;
+  firmware_version: string | null;
+  ssid: string | null;
+  ota_partition: string | null;
   config: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -569,6 +778,9 @@ const PAIRING_COLUMNS = `
   free_heap,
   uptime,
   temperature,
+  firmware_version,
+  ssid,
+  ota_partition,
   config,
   created_at,
   updated_at
@@ -622,4 +834,37 @@ export async function getPendingCommands(
 
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * Insert a command for a device (admin only).
+ */
+export async function insertCommand(
+  pairingCode: string,
+  serialNumber: string,
+  command: string,
+  payload: Record<string, unknown> = {},
+): Promise<Command> {
+  const supabase = await getSupabase();
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const { data, error } = await supabase
+    .schema("display")
+    .from("commands")
+    .insert({
+      pairing_code: pairingCode,
+      serial_number: serialNumber,
+      command,
+      payload,
+    })
+    .select(COMMAND_COLUMNS)
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error("Failed to insert command.");
+  return data;
 }

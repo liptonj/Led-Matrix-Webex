@@ -336,12 +336,18 @@ Deno.test("post-device-state: validates telemetry fields are numbers", () => {
     free_heap: 180000,
     uptime: 3600,
     temperature: 42.5,
+    firmware_version: "1.2.3",
+    ssid: "Office-WiFi",
+    ota_partition: "ota_0",
   };
 
   assertEquals(typeof validRequest.rssi, "number");
   assertEquals(typeof validRequest.free_heap, "number");
   assertEquals(typeof validRequest.uptime, "number");
   assertEquals(typeof validRequest.temperature, "number");
+  assertEquals(typeof validRequest.firmware_version, "string");
+  assertEquals(typeof validRequest.ssid, "string");
+  assertEquals(typeof validRequest.ota_partition, "string");
 });
 
 Deno.test("post-device-state: handles empty body as heartbeat", () => {
@@ -350,23 +356,26 @@ Deno.test("post-device-state: handles empty body as heartbeat", () => {
   // Function should accept empty body as simple heartbeat
 });
 
-Deno.test("post-device-state: response contains app state", () => {
+Deno.test("post-device-state: response contains telemetry echo", () => {
   const mockResponse = {
     success: true,
-    app_connected: true,
-    webex_status: "active",
-    display_name: "John Doe",
-    camera_on: true,
-    mic_muted: false,
-    in_call: false,
+    rssi: -55,
+    free_heap: 190000,
+    uptime: 1200,
+    temperature: 41.2,
+    firmware_version: "1.2.3",
+    ssid: "Office-WiFi",
+    ota_partition: "ota_0",
   };
 
   assertEquals(mockResponse.success, true);
-  assertEquals(typeof mockResponse.app_connected, "boolean");
-  assertEquals(typeof mockResponse.webex_status, "string");
-  assertEquals(typeof mockResponse.camera_on, "boolean");
-  assertEquals(typeof mockResponse.mic_muted, "boolean");
-  assertEquals(typeof mockResponse.in_call, "boolean");
+  assertEquals(typeof mockResponse.rssi, "number");
+  assertEquals(typeof mockResponse.free_heap, "number");
+  assertEquals(typeof mockResponse.uptime, "number");
+  assertEquals(typeof mockResponse.temperature, "number");
+  assertEquals(typeof mockResponse.firmware_version, "string");
+  assertEquals(typeof mockResponse.ssid, "string");
+  assertEquals(typeof mockResponse.ota_partition, "string");
 });
 
 Deno.test("post-device-state: rate limit is 12 requests per minute", () => {
@@ -688,6 +697,8 @@ Deno.test("insert-command: validates command whitelist", () => {
     "set_config",
     "get_config",
     "get_status",
+    "get_telemetry",
+    "get_troubleshooting_status",
     "reboot",
     "factory_reset",
     "ota_update",
@@ -698,7 +709,7 @@ Deno.test("insert-command: validates command whitelist", () => {
     "ping",
   ];
 
-  assertEquals(VALID_COMMANDS.length, 12);
+  assertEquals(VALID_COMMANDS.length, 14);
 
   for (const cmd of VALID_COMMANDS) {
     assertEquals(VALID_COMMANDS.includes(cmd), true);

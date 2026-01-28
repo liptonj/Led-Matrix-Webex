@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { signIn, isSupabaseConfigured } from '@/lib/supabase';
+import { signIn, isSupabaseConfigured, getCurrentUserProfile, signOut } from '@/lib/supabase';
 import { Header } from '@/components/layout';
 
 export default function AdminLoginPage() {
@@ -29,6 +29,12 @@ export default function AdminLoginPage() {
             if (authError) {
                 setError(authError.message);
             } else {
+                const profile = await getCurrentUserProfile();
+                if (profile?.disabled) {
+                    await signOut();
+                    setError('This account is disabled. Contact an administrator.');
+                    return;
+                }
                 router.push('/admin');
             }
         } catch (err) {

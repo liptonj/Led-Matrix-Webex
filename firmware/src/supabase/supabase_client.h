@@ -17,6 +17,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
 
 // Token configuration
 #define SUPABASE_TOKEN_REFRESH_MARGIN 600  // Refresh 10 minutes before expiry (in seconds)
@@ -145,6 +146,7 @@ public:
      * @return true if inserted successfully
      */
     bool insertDeviceLog(const String& level, const String& message, const String& metadata = "");
+    bool isRequestInFlight() const { return _requestInFlight; }
 
     /**
      * @brief Set command handler callback
@@ -233,7 +235,8 @@ private:
      * @return HTTP status code (0 on connection failure)
      */
     int makeRequest(const String& endpoint, const String& method,
-                    const String& body, String& response, bool useHmac = false);
+                    const String& body, String& response, bool useHmac = false, bool allowImmediate = false);
+    bool beginRequestSlot(bool allowImmediate);
 
     /**
      * @brief Add HMAC authentication headers
@@ -254,6 +257,11 @@ private:
     String _hmacSerial;
     String _hmacTimestamp;
     String _hmacSignature;
+
+    WiFiClientSecure _client;
+    bool _requestInFlight = false;
+    unsigned long _lastRequestMs = 0;
+    unsigned long _minRequestIntervalMs = 1500;
 };
 
 // Global instance

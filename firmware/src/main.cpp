@@ -75,6 +75,7 @@ void handleRealtimeMessage(const RealtimeMessage& msg);
 void syncWithSupabase();
 void initSupabaseRealtime();
 String buildStatusJson();
+String buildTelemetryJson();
 String buildConfigJson();
 bool provisionDeviceWithSupabase();
 
@@ -764,9 +765,17 @@ void loop() {
             !anonKey.isEmpty() && !supabaseRealtime.isConnected()) {
             // Retry every 60 seconds
             if (millis() - lastRealtimeInit > 60000) {
-                lastRealtimeInit = millis();
-                Serial.println("[REALTIME] Attempting to reconnect...");
-                initSupabaseRealtime();
+                if (!supabaseClient.isRequestInFlight()) {
+                    lastRealtimeInit = millis();
+                    Serial.println("[REALTIME] Attempting to reconnect...");
+                    initSupabaseRealtime();
+                } else {
+                    static unsigned long last_skip_log = 0;
+                    if (millis() - last_skip_log > 10000) {
+                        last_skip_log = millis();
+                        Serial.println("[REALTIME] Reconnect skipped (HTTP request in flight)");
+                    }
+                }
             }
         }
         
@@ -1231,6 +1240,67 @@ String buildStatusJson() {
 }
 
 /**
+ * @brief Build JSON string with telemetry-only fields
+ */
+String buildTelemetryJson() {
+    JsonDocument doc;
+
+    doc["rssi"] = WiFi.RSSI();
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["uptime"] = millis() / 1000;
+    doc["firmware_version"] = FIRMWARE_VERSION;
+    doc["temperature"] = app_state.temperature;
+    doc["ssid"] = WiFi.SSID();
+
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        doc["ota_partition"] = running->label;
+    }
+
+    String result;
+    serializeJson(doc, result);
+    return result;
+}
+
+/**
+ * @brief Apply Supabase app state response to local app_state
+ */
+void applySupabaseAppState(const SupabaseAppState& appState) {
+    if (!appState.valid) {
+        return;
+    }
+
+    app_state.last_supabase_sync = millis();
+    app_state.supabase_connected = true;
+    app_state.supabase_app_connected = appState.app_connected;
+
+    // If Supabase reports app connected, use it as source of truth
+    if (appState.app_connected) {
+        app_state.embedded_app_connected = true;
+        app_state.webex_status = appState.webex_status;
+
+        if (!appState.display_name.isEmpty()) {
+            app_state.embedded_app_display_name = appState.display_name;
+        }
+
+        // Only update camera/mic/call state if not using xAPI (more accurate)
+        if (!app_state.xapi_connected) {
+            app_state.camera_on = appState.camera_on;
+            app_state.mic_muted = appState.mic_muted;
+            app_state.in_call = appState.in_call;
+
+            // Fallback: derive in_call from status if not explicitly set
+            if (!appState.in_call && (appState.webex_status == "meeting" || 
+                                       appState.webex_status == "busy" ||
+                                       appState.webex_status == "call" || 
+                                       appState.webex_status == "presenting")) {
+                app_state.in_call = true;
+            }
+        }
+    }
+}
+
+/**
  * @brief Build JSON string with current device config
  */
 String buildConfigJson() {
@@ -1266,8 +1336,8 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
     Serial.printf("[CMD] Processing command: %s\n", cmd.command.c_str());
 
     if (cmd.command == "get_status") {
-        // Send current status as command response
-        bridge_client.sendCommandResponse(cmd.requestId, true, buildStatusJson(), "");
+        // Send telemetry-only status as command response
+        bridge_client.sendCommandResponse(cmd.requestId, true, buildTelemetryJson(), "");
 
     } else if (cmd.command == "get_config") {
         // Send current config as command response
@@ -1384,10 +1454,11 @@ void syncWithSupabase() {
         return;
     }
     
-    // Determine sync interval based on app connection state
-    // More frequent syncing when app is connected (5s), less when not (30s)
-    unsigned long syncInterval = app_state.supabase_app_connected ? 5000 : 30000;
-    unsigned long commandPollInterval = app_state.supabase_app_connected ? 5000 : 15000;
+    // Telemetry cadence: every 5 minutes (or on-demand via realtime command)
+    const unsigned long syncInterval = 300000;
+    const bool realtime_connected = supabaseRealtime.isConnected();
+    unsigned long commandPollInterval = realtime_connected ? 0 :
+        (app_state.supabase_app_connected ? 5000 : 15000);
     
     // Handle authentication retry
     if (retryAuth && now - lastSync > 60000) {
@@ -1436,42 +1507,14 @@ void syncWithSupabase() {
         
         // Post state and get app status back (include firmware version)
         SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
-        
         if (appState.valid) {
             app_state.last_supabase_sync = now;
             app_state.supabase_connected = true;
-            app_state.supabase_app_connected = appState.app_connected;
-            
-            // If Supabase reports app connected, use it as source of truth
-            // (overrides bridge if both are connected)
-            if (appState.app_connected) {
-                app_state.embedded_app_connected = true;
-                app_state.webex_status = appState.webex_status;
-                
-                if (!appState.display_name.isEmpty()) {
-                    app_state.embedded_app_display_name = appState.display_name;
-                }
-                
-                // Only update camera/mic/call state if not using xAPI (which has more accurate data)
-                if (!app_state.xapi_connected) {
-                    app_state.camera_on = appState.camera_on;
-                    app_state.mic_muted = appState.mic_muted;
-                    app_state.in_call = appState.in_call;
-                    
-                    // Fallback: derive in_call from status if not explicitly set
-                    if (!appState.in_call && (appState.webex_status == "meeting" || 
-                                               appState.webex_status == "busy" ||
-                                               appState.webex_status == "call" || 
-                                               appState.webex_status == "presenting")) {
-                        app_state.in_call = true;
-                    }
-                }
-            }
         }
     }
     
     // Poll for commands (can be more frequent than state sync)
-    if (now - lastCommandPoll >= commandPollInterval) {
+    if (commandPollInterval > 0 && now - lastCommandPoll >= commandPollInterval) {
         lastCommandPoll = now;
         
         SupabaseCommand commands[10];
@@ -1500,8 +1543,25 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
     String error = "";
     
     if (cmd.command == "get_status") {
-        response = buildStatusJson();
+        response = buildTelemetryJson();
         
+    } else if (cmd.command == "get_telemetry") {
+        int rssi = WiFi.RSSI();
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t uptime = millis() / 1000;
+        float temp = app_state.temperature;
+        SupabaseAppState appState = supabaseClient.postDeviceState(
+            rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+        if (!appState.valid) {
+            success = false;
+            error = "get_telemetry failed";
+        } else {
+            response = buildTelemetryJson();
+        }
+
+    } else if (cmd.command == "get_troubleshooting_status") {
+        response = buildStatusJson();
+
     } else if (cmd.command == "get_config") {
         response = buildConfigJson();
         
@@ -1598,6 +1658,7 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
  * This reduces latency and server load but requires the Supabase anon key.
  */
 void initSupabaseRealtime() {
+    static unsigned long last_realtime_error_log = 0;
     String anonKey = config_manager.getSupabaseAnonKey();
     
     // Skip if anon key not configured (Phase A polling will continue to work)
@@ -1646,6 +1707,17 @@ void initSupabaseRealtime() {
                           pairingCode.c_str());
         } else {
             Serial.println("[REALTIME] Connection timeout - will retry");
+            unsigned long now = millis();
+            if (now - last_realtime_error_log > 600000) {  // 10 minutes
+                last_realtime_error_log = now;
+                JsonDocument meta;
+                meta["reason"] = "connection_timeout";
+                meta["heap"] = ESP.getFreeHeap();
+                meta["time"] = (unsigned long)time(nullptr);
+                String metaStr;
+                serializeJson(meta, metaStr);
+                supabaseClient.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
+            }
         }
     }
 }

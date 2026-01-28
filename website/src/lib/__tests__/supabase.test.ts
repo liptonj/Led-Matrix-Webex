@@ -569,6 +569,9 @@ describe("Pairing Type Definitions", () => {
       free_heap: 180000,
       uptime: 3600,
       temperature: 42.5,
+      firmware_version: "1.2.3",
+      ssid: "Office-WiFi",
+      ota_partition: "ota_0",
       config: {},
       created_at: "2026-01-27T00:00:00Z",
       updated_at: "2026-01-28T12:00:00Z",
@@ -580,6 +583,7 @@ describe("Pairing Type Definitions", () => {
     expect(pairing.device_connected).toBe(true);
     expect(pairing.webex_status).toBe("active");
     expect(pairing.rssi).toBe(-65);
+    expect(pairing.firmware_version).toBe("1.2.3");
   });
 
   it("should accept valid webex status values", () => {

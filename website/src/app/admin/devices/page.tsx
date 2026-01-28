@@ -1,15 +1,23 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import DeviceDetailPanel from './DeviceDetailPanel';
 import { getDevices, setDeviceDebugMode, subscribeToDevices, Device, DeviceChangeEvent } from '@/lib/supabase';
 
 export default function DevicesPage() {
+    const router = useRouter();
+    const searchParams = useSearchParams();
     const [devices, setDevices] = useState<Device[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
     const [now, setNow] = useState(Date.now());
+
+    const serialParam = useMemo(() => {
+        const raw = searchParams.get('serial');
+        return raw ? decodeURIComponent(raw) : '';
+    }, [searchParams]);
 
     useEffect(() => {
         loadDevices();
@@ -134,6 +142,13 @@ export default function DevicesPage() {
                 </div>
             )}
 
+            {serialParam && (
+                <DeviceDetailPanel
+                    serialNumber={serialParam}
+                    onClose={() => router.push('/admin/devices')}
+                />
+            )}
+
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
@@ -179,7 +194,7 @@ export default function DevicesPage() {
                                         <tr key={device.id}>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div>
-                                                    <span className="text-sm font-mono text-gray-900 dark:text-white">
+                                                    <span className="text-sm font-mono text-gray-900 dark:text-gray-100">
                                                         {device.serial_number}
                                                     </span>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -236,9 +251,17 @@ export default function DevicesPage() {
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <span className="text-sm text-gray-500 dark:text-gray-400">
-                                                    -
-                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        router.push(
+                                                            `/admin/devices?serial=${encodeURIComponent(device.serial_number)}`,
+                                                        )
+                                                    }
+                                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                                                >
+                                                    View details
+                                                </button>
                                                 {device.debug_enabled && (
                                                     <span className="ml-2 text-xs text-green-600 dark:text-green-400">
                                                         (logs enabled)

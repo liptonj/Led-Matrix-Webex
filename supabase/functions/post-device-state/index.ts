@@ -1,9 +1,9 @@
 /**
  * Post Device State Edge Function
  *
- * Devices post their current state (telemetry) and receive the app's
- * current status in response. This enables bidirectional state sync
- * via polling (Phase A before full Supabase Realtime on device).
+ * Devices post their current state (telemetry) and receive an echo
+ * of the telemetry in response. App status is handled via realtime
+ * or explicit troubleshooting commands.
  *
  * Authentication: Bearer token (from device-auth) OR HMAC headers
  *
@@ -13,17 +13,21 @@
  *     free_heap: number,     // Free memory in bytes
  *     uptime: number,        // Uptime in seconds
  *     temperature?: number   // Optional temperature reading
+ *     firmware_version?: string
+ *     ssid?: string
+ *     ota_partition?: string
  *   }
  *
  * Response:
  *   {
  *     success: true,
- *     app_connected: boolean,
- *     webex_status: string,
- *     display_name: string | null,
- *     camera_on: boolean,
- *     mic_muted: boolean,
- *     in_call: boolean
+ *     rssi?: number,
+ *     free_heap?: number,
+ *     uptime?: number,
+ *     temperature?: number,
+ *     firmware_version?: string,
+ *     ssid?: string,
+ *     ota_partition?: string
  *   }
  *
  * Rate limited: 12 requests per minute per device
@@ -44,16 +48,19 @@ interface DeviceStateRequest {
   uptime?: number;
   temperature?: number;
   firmware_version?: string;
+  ssid?: string;
+  ota_partition?: string;
 }
 
 interface DeviceStateResponse {
   success: boolean;
-  app_connected: boolean;
-  webex_status: string;
-  display_name: string | null;
-  camera_on: boolean;
-  mic_muted: boolean;
-  in_call: boolean;
+  rssi?: number;
+  free_heap?: number;
+  uptime?: number;
+  temperature?: number;
+  firmware_version?: string;
+  ssid?: string;
+  ota_partition?: string;
 }
 
 interface TokenPayload {
@@ -248,6 +255,12 @@ Deno.serve(async (req) => {
     if (typeof stateData.firmware_version === "string" && stateData.firmware_version) {
       updateData.firmware_version = stateData.firmware_version;
     }
+    if (typeof stateData.ssid === "string" && stateData.ssid) {
+      updateData.ssid = stateData.ssid;
+    }
+    if (typeof stateData.ota_partition === "string" && stateData.ota_partition) {
+      updateData.ota_partition = stateData.ota_partition;
+    }
 
     // Update pairings and get current app state
     const { data: pairing, error: updateError } = await supabase
@@ -255,9 +268,7 @@ Deno.serve(async (req) => {
       .from("pairings")
       .update(updateData)
       .eq("pairing_code", deviceInfo.pairing_code)
-      .select(
-        "app_connected, webex_status, display_name, camera_on, mic_muted, in_call",
-      )
+      .select("pairing_code")
       .single();
 
     if (updateError) {
@@ -279,15 +290,16 @@ Deno.serve(async (req) => {
           console.error("Failed to create pairing:", insertError);
         }
 
-        // Return default app state
+        // Return telemetry echo (no app state)
         const response: DeviceStateResponse = {
           success: true,
-          app_connected: false,
-          webex_status: "offline",
-          display_name: null,
-          camera_on: false,
-          mic_muted: false,
-          in_call: false,
+          rssi: stateData.rssi,
+          free_heap: stateData.free_heap,
+          uptime: stateData.uptime,
+          temperature: stateData.temperature,
+          firmware_version: stateData.firmware_version,
+          ssid: stateData.ssid,
+          ota_partition: stateData.ota_partition,
         };
 
         return new Response(JSON.stringify(response), {
@@ -306,18 +318,16 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Check if app connection is stale (no heartbeat in 60s)
-    const appConnected = pairing?.app_connected ?? false;
-
-    // Return current app state
+    // Return telemetry echo (no app state)
     const response: DeviceStateResponse = {
       success: true,
-      app_connected: appConnected,
-      webex_status: pairing?.webex_status ?? "offline",
-      display_name: pairing?.display_name ?? null,
-      camera_on: pairing?.camera_on ?? false,
-      mic_muted: pairing?.mic_muted ?? false,
-      in_call: pairing?.in_call ?? false,
+      rssi: stateData.rssi,
+      free_heap: stateData.free_heap,
+      uptime: stateData.uptime,
+      temperature: stateData.temperature,
+      firmware_version: stateData.firmware_version,
+      ssid: stateData.ssid,
+      ota_partition: stateData.ota_partition,
     };
 
     return new Response(JSON.stringify(response), {

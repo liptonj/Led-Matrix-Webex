@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <esp_ota_ops.h>
 #include <time.h>
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
@@ -92,7 +93,10 @@ bool SupabaseClient::authenticate() {
     String body = "";
     String response;
     
-    int httpCode = makeRequest("device-auth", "POST", body, response, true);
+    int httpCode = makeRequest("device-auth", "POST", body, response, true, true);
+    if (httpCode == -2) {
+        return false;
+    }
     
     if (httpCode != 200) {
         Serial.printf("[SUPABASE] Auth failed: HTTP %d\n", httpCode);
@@ -207,12 +211,20 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     if (temperature != 0) {
         doc["temperature"] = temperature;
     }
+    doc["ssid"] = WiFi.SSID();
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        doc["ota_partition"] = running->label;
+    }
     
     String body;
     serializeJson(doc, body);
     
     String response;
     int httpCode = makeRequest("post-device-state", "POST", body, response, false);
+    if (httpCode == -2) {
+        return state;
+    }
     
     if (httpCode == 401) {
         // Token expired - re-authenticate and retry
@@ -243,18 +255,21 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
         return state;
     }
     
-    // Extract app state
+    // Mark request as successful; app state is handled via realtime/commands.
     state.valid = true;
-    state.app_connected = respDoc["app_connected"] | false;
-    state.webex_status = respDoc["webex_status"] | "offline";
-    state.display_name = respDoc["display_name"] | "";
-    state.camera_on = respDoc["camera_on"] | false;
-    state.mic_muted = respDoc["mic_muted"] | false;
-    state.in_call = respDoc["in_call"] | false;
-    
-    // Update cached state
-    _appConnected = state.app_connected;
-    _lastAppState = state;
+
+    if (respDoc["app_connected"].is<bool>()) {
+        state.app_connected = respDoc["app_connected"] | false;
+        state.webex_status = respDoc["webex_status"] | "offline";
+        state.display_name = respDoc["display_name"] | "";
+        state.camera_on = respDoc["camera_on"] | false;
+        state.mic_muted = respDoc["mic_muted"] | false;
+        state.in_call = respDoc["in_call"] | false;
+
+        // Update cached state only when app fields are present
+        _appConnected = state.app_connected;
+        _lastAppState = state;
+    }
     
     return state;
 }
@@ -267,6 +282,9 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     
     String response;
     int httpCode = makeRequest("poll-commands", "GET", "", response, false);
+    if (httpCode == -2) {
+        return 0;
+    }
     
     if (httpCode == 401) {
         // Token expired - re-authenticate and retry
@@ -355,6 +373,9 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     
     String response;
     int httpCode = makeRequest("ack-command", "POST", body, response, false);
+    if (httpCode == -2) {
+        return false;
+    }
     
     if (httpCode == 401) {
         // Token expired - re-authenticate and retry
@@ -396,6 +417,9 @@ bool SupabaseClient::insertDeviceLog(const String& level, const String& message,
 
     String response;
     int httpCode = makeRequest("insert-device-log", "POST", body, response, false);
+    if (httpCode == -2) {
+        return false;
+    }
 
     if (httpCode == 401) {
         invalidateToken();
@@ -407,25 +431,41 @@ bool SupabaseClient::insertDeviceLog(const String& level, const String& message,
     return httpCode == 200;
 }
 
+bool SupabaseClient::beginRequestSlot(bool allowImmediate) {
+    if (_requestInFlight) {
+        return false;
+    }
+    unsigned long now = millis();
+    if (!allowImmediate && (now - _lastRequestMs) < _minRequestIntervalMs) {
+        return false;
+    }
+    _requestInFlight = true;
+    _lastRequestMs = now;
+    return true;
+}
+
 int SupabaseClient::makeRequest(const String& endpoint, const String& method,
-                                 const String& body, String& response, bool useHmac) {
+                                 const String& body, String& response, bool useHmac, bool allowImmediate) {
     if (_supabaseUrl.isEmpty()) {
         return 0;
+    }
+    if (!beginRequestSlot(allowImmediate)) {
+        return -2;
     }
     
     // Build full URL
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
-    WiFiClientSecure client;
-    configureSecureClient(client);
+    _client.stop();
+    configureSecureClient(_client);
     if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+        _client.setCACert(CA_CERT_BUNDLE_SUPABASE);
     } else {
-        client.setInsecure();
+        _client.setInsecure();
     }
     
     HTTPClient http;
-    http.begin(client, url);
+    http.begin(_client, url);
     http.setTimeout(15000);  // 15 second timeout
     
     // Set headers
@@ -461,6 +501,7 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     } else {
         Serial.printf("[SUPABASE] Unsupported method: %s\n", method.c_str());
         http.end();
+        _requestInFlight = false;
         return 0;
     }
     
@@ -474,5 +515,6 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     }
     
     http.end();
+    _requestInFlight = false;
     return httpCode;
 }

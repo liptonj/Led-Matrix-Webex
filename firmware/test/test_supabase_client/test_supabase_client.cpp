@@ -68,37 +68,31 @@ const char* mockAuthFailure404 = R"({
     "error": "Device not found"
 })";
 
-// Successful state response with app connected
+// Successful state response with telemetry echo
 const char* mockStateResponse = R"({
     "success": true,
-    "app_connected": true,
-    "webex_status": "active",
-    "display_name": "John Doe",
-    "camera_on": true,
-    "mic_muted": false,
-    "in_call": false
+    "rssi": -55,
+    "free_heap": 190000,
+    "uptime": 1200,
+    "temperature": 41.2,
+    "firmware_version": "1.2.3",
+    "ssid": "Office-WiFi",
+    "ota_partition": "ota_0"
 })";
 
-// State response with app disconnected
+// State response with partial telemetry
 const char* mockStateResponseOffline = R"({
     "success": true,
-    "app_connected": false,
-    "webex_status": "offline",
-    "display_name": null,
-    "camera_on": false,
-    "mic_muted": false,
-    "in_call": false
+    "rssi": -60,
+    "free_heap": 150000
 })";
 
-// State response - in a meeting
+// State response with different telemetry values
 const char* mockStateResponseMeeting = R"({
     "success": true,
-    "app_connected": true,
-    "webex_status": "meeting",
-    "display_name": "Jane Smith",
-    "camera_on": false,
-    "mic_muted": true,
-    "in_call": true
+    "rssi": -70,
+    "free_heap": 120000,
+    "uptime": 3600
 })";
 
 // Commands response with multiple commands
@@ -283,44 +277,42 @@ void test_parse_auth_expiry_format() {
 // ============================================================================
 
 void test_parse_state_response_app_connected() {
-    // Test: Parse post-device-state response with app connected
+    // Test: Parse post-device-state response with telemetry echo
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, mockStateResponse);
 
     TEST_ASSERT_FALSE(error);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
-    TEST_ASSERT_TRUE(doc["app_connected"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING("active", doc["webex_status"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("John Doe", doc["display_name"].as<const char*>());
-    TEST_ASSERT_TRUE(doc["camera_on"].as<bool>());
-    TEST_ASSERT_FALSE(doc["mic_muted"].as<bool>());
-    TEST_ASSERT_FALSE(doc["in_call"].as<bool>());
+    TEST_ASSERT_EQUAL(-55, doc["rssi"].as<int>());
+    TEST_ASSERT_EQUAL(190000, doc["free_heap"].as<uint32_t>());
+    TEST_ASSERT_EQUAL(1200, doc["uptime"].as<uint32_t>());
+    TEST_ASSERT_FLOAT_WITHIN(0.1, 41.2, doc["temperature"].as<float>());
+    TEST_ASSERT_EQUAL_STRING("1.2.3", doc["firmware_version"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("Office-WiFi", doc["ssid"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("ota_0", doc["ota_partition"].as<const char*>());
 }
 
 void test_parse_state_response_app_disconnected() {
-    // Test: Parse post-device-state response with app disconnected
+    // Test: Parse post-device-state response with partial telemetry
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, mockStateResponseOffline);
 
     TEST_ASSERT_FALSE(error);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
-    TEST_ASSERT_FALSE(doc["app_connected"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING("offline", doc["webex_status"].as<const char*>());
-    TEST_ASSERT_FALSE(doc["camera_on"].as<bool>());
+    TEST_ASSERT_EQUAL(-60, doc["rssi"].as<int>());
+    TEST_ASSERT_EQUAL(150000, doc["free_heap"].as<uint32_t>());
 }
 
 void test_parse_state_response_in_meeting() {
-    // Test: Parse state response during meeting
+    // Test: Parse state response with different telemetry values
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, mockStateResponseMeeting);
 
     TEST_ASSERT_FALSE(error);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
-    TEST_ASSERT_TRUE(doc["app_connected"].as<bool>());
-    TEST_ASSERT_EQUAL_STRING("meeting", doc["webex_status"].as<const char*>());
-    TEST_ASSERT_TRUE(doc["in_call"].as<bool>());
-    TEST_ASSERT_TRUE(doc["mic_muted"].as<bool>());
-    TEST_ASSERT_FALSE(doc["camera_on"].as<bool>());
+    TEST_ASSERT_EQUAL(-70, doc["rssi"].as<int>());
+    TEST_ASSERT_EQUAL(120000, doc["free_heap"].as<uint32_t>());
+    TEST_ASSERT_EQUAL(3600, doc["uptime"].as<uint32_t>());
 }
 
 void test_state_request_body_format() {
@@ -330,6 +322,9 @@ void test_state_request_body_format() {
     doc["free_heap"] = 180000;
     doc["uptime"] = 3600;
     doc["temperature"] = 42.5;
+    doc["firmware_version"] = "1.2.3";
+    doc["ssid"] = "Office-WiFi";
+    doc["ota_partition"] = "ota_0";
 
     String body;
     serializeJson(doc, body);
@@ -343,6 +338,9 @@ void test_state_request_body_format() {
     TEST_ASSERT_EQUAL(180000, parsed["free_heap"].as<uint32_t>());
     TEST_ASSERT_EQUAL(3600, parsed["uptime"].as<uint32_t>());
     TEST_ASSERT_FLOAT_WITHIN(0.1, 42.5, parsed["temperature"].as<float>());
+    TEST_ASSERT_EQUAL_STRING("1.2.3", parsed["firmware_version"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("Office-WiFi", parsed["ssid"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("ota_0", parsed["ota_partition"].as<const char*>());
 }
 
 void test_state_request_without_temperature() {

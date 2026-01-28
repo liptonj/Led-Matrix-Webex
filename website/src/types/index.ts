@@ -70,18 +70,17 @@ export interface StatusData {
 
 // Device status types
 export interface DeviceStatus {
-  webex_status: WebexStatus;
-  camera_on: boolean;
-  mic_muted: boolean;
-  in_call: boolean;
-  firmware_version: string;
+  firmware_version?: string;
   firmware_build_id?: string;
-  ip_address: string;
+  ip_address?: string;
   mac_address?: string;
   serial_number?: string;
-  free_heap: number;
-  uptime: number;
-  rssi: number;
+  free_heap?: number;
+  uptime?: number;
+  rssi?: number;
+  temperature?: number;
+  ssid?: string;
+  ota_partition?: string;
 }
 
 // Device config types

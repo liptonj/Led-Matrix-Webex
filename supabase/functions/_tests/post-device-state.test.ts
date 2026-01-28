@@ -2,7 +2,7 @@
  * post-device-state Edge Function Tests
  *
  * Tests for the device state posting endpoint that handles telemetry
- * and returns app state.
+ * and returns telemetry echo.
  *
  * Run: deno test --allow-net --allow-env _tests/post-device-state.test.ts
  */
@@ -72,12 +72,18 @@ Deno.test("post-device-state: accepts telemetry fields", () => {
     free_heap: 180000,
     uptime: 3600,
     temperature: 42.5,
+    firmware_version: "1.2.3",
+    ssid: "Office-WiFi",
+    ota_partition: "ota_0",
   };
 
   assertEquals(typeof requestBody.rssi, "number");
   assertEquals(typeof requestBody.free_heap, "number");
   assertEquals(typeof requestBody.uptime, "number");
   assertEquals(typeof requestBody.temperature, "number");
+  assertEquals(typeof requestBody.firmware_version, "string");
+  assertEquals(typeof requestBody.ssid, "string");
+  assertEquals(typeof requestBody.ota_partition, "string");
 });
 
 Deno.test("post-device-state: all fields are optional (heartbeat)", () => {
@@ -122,63 +128,26 @@ Deno.test("post-device-state: uptime is non-negative", () => {
 // Response Format Tests
 // ============================================================================
 
-Deno.test("post-device-state: success response contains app state", () => {
+Deno.test("post-device-state: success response contains telemetry echo", () => {
   const mockResponse = {
     success: true,
-    app_connected: true,
-    webex_status: "active",
-    display_name: "John Doe",
-    camera_on: true,
-    mic_muted: false,
-    in_call: false,
+    rssi: -55,
+    free_heap: 190000,
+    uptime: 1200,
+    temperature: 41.2,
+    firmware_version: "1.2.3",
+    ssid: "Office-WiFi",
+    ota_partition: "ota_0",
   };
 
   assertEquals(mockResponse.success, true);
-  assertEquals(typeof mockResponse.app_connected, "boolean");
-  assertExists(mockResponse.webex_status);
-  assertEquals(typeof mockResponse.camera_on, "boolean");
-  assertEquals(typeof mockResponse.mic_muted, "boolean");
-  assertEquals(typeof mockResponse.in_call, "boolean");
-});
-
-Deno.test("post-device-state: webex_status has valid values", () => {
-  const validStatuses = ["active", "away", "dnd", "meeting", "offline", "call", "presenting"];
-
-  for (const status of validStatuses) {
-    assertEquals(typeof status, "string");
-    assertEquals(status.length > 0, true);
-  }
-});
-
-Deno.test("post-device-state: display_name can be null", () => {
-  const mockResponse = {
-    success: true,
-    app_connected: false,
-    webex_status: "offline",
-    display_name: null,
-    camera_on: false,
-    mic_muted: false,
-    in_call: false,
-  };
-
-  assertEquals(mockResponse.display_name, null);
-});
-
-Deno.test("post-device-state: default values when app not connected", () => {
-  const defaultResponse = {
-    success: true,
-    app_connected: false,
-    webex_status: "offline",
-    display_name: null,
-    camera_on: false,
-    mic_muted: false,
-    in_call: false,
-  };
-
-  assertEquals(defaultResponse.app_connected, false);
-  assertEquals(defaultResponse.webex_status, "offline");
-  assertEquals(defaultResponse.display_name, null);
-  assertEquals(defaultResponse.camera_on, false);
+  assertEquals(typeof mockResponse.rssi, "number");
+  assertEquals(typeof mockResponse.free_heap, "number");
+  assertEquals(typeof mockResponse.uptime, "number");
+  assertEquals(typeof mockResponse.temperature, "number");
+  assertEquals(typeof mockResponse.firmware_version, "string");
+  assertEquals(typeof mockResponse.ssid, "string");
+  assertEquals(typeof mockResponse.ota_partition, "string");
 });
 
 // ============================================================================

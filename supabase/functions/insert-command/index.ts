@@ -52,6 +52,8 @@ const VALID_COMMANDS = [
   "set_config",
   "get_config",
   "get_status",
+  "get_telemetry",
+  "get_troubleshooting_status",
   "reboot",
   "factory_reset",
   "ota_update",

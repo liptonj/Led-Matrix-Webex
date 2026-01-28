@@ -20,6 +20,8 @@ const VALID_COMMANDS = [
   "set_config",
   "get_config",
   "get_status",
+  "get_telemetry",
+  "get_troubleshooting_status",
   "reboot",
   "factory_reset",
   "ota_update",
@@ -52,7 +54,7 @@ Deno.test("insert-command: requires token_type 'app'", () => {
 // ============================================================================
 
 Deno.test("insert-command: has 12 valid commands", () => {
-  assertEquals(VALID_COMMANDS.length, 12);
+  assertEquals(VALID_COMMANDS.length, 14);
 });
 
 Deno.test("insert-command: accepts set_brightness command", () => {
@@ -69,6 +71,8 @@ Deno.test("insert-command: accepts get_config command", () => {
 
 Deno.test("insert-command: accepts get_status command", () => {
   assertEquals(VALID_COMMANDS.includes("get_status"), true);
+  assertEquals(VALID_COMMANDS.includes("get_telemetry"), true);
+  assertEquals(VALID_COMMANDS.includes("get_troubleshooting_status"), true);
 });
 
 Deno.test("insert-command: accepts reboot command", () => {
@@ -287,7 +291,8 @@ Deno.test("insert-command: 400 for missing command", () => {
 Deno.test("insert-command: 400 for invalid command (not in whitelist)", () => {
   const errorResponse = {
     success: false,
-    error: "Invalid command. Valid commands: set_brightness, set_config, get_config, get_status, reboot, factory_reset, ota_update, set_display_name, set_time_zone, clear_wifi, test_display, ping",
+    error:
+      "Invalid command. Valid commands: set_brightness, set_config, get_config, get_status, get_telemetry, get_troubleshooting_status, reboot, factory_reset, ota_update, set_display_name, set_time_zone, clear_wifi, test_display, ping",
   };
 
   assertEquals(errorResponse.success, false);
