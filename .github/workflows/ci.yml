@@ -509,7 +509,8 @@ jobs:
             else
               # Check if only package.json version changed (exclude version-only changes)
               # If only package.json changed, check if it's just the version field
-              if echo "$CHANGED_FILES" | grep -q "^website/package.json$" && [ "$(echo "$CHANGED_FILES" | wc -l)" -eq 1 ]; then
+              CHANGED_COUNT=$(echo "$CHANGED_FILES" | grep -c "^website/package.json$" || echo "0")
+              if [ "$CHANGED_COUNT" -eq 1 ] && [ "$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')" -eq 1 ]; then
                 # Get the actual diff content for package.json
                 PACKAGE_JSON_DIFF=$(git diff $PREV_TAG HEAD -- website/package.json 2>/dev/null || echo "")
                 
