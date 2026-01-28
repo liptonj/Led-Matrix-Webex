@@ -286,7 +286,7 @@ Deno.test("device-auth: response contains device token with 24h TTL", () => {
     device_id: "webex-display-C3D4",
     token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     expires_at: new Date(Date.now() + 86400 * 1000).toISOString(),
-    target_firmware_version: "1.5.0",
+    target_firmware_version: "1.5.1",
   };
 
   assertEquals(mockResponse.success, true);
@@ -945,7 +945,7 @@ Deno.test("get-manifest: supports format=ota (default)", () => {
 Deno.test("get-manifest: esp-web-tools manifest format", () => {
   const manifest = {
     name: "Webex LED Matrix Display",
-    version: "1.5.0",
+    version: "1.5.1",
     new_install_prompt_erase: true,
     builds: [
       {
@@ -965,7 +965,7 @@ Deno.test("get-manifest: esp-web-tools manifest format", () => {
 Deno.test("get-manifest: legacy OTA manifest format", () => {
   const manifest = {
     name: "Webex LED Matrix Display",
-    version: "1.5.0",
+    version: "1.5.1",
     build_id: "abc123",
     build_date: "2026-01-28T12:00:00Z",
     firmware: {
@@ -1007,14 +1007,14 @@ Deno.test("get-manifest: respects rollout percentage", () => {
   }
 
   // 100% rollout includes all devices
-  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.0", 100), true);
+  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.1", 100), true);
 
   // 0% rollout includes no devices
-  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.0", 0), false);
+  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.1", 0), false);
 
   // Deterministic: same device+version always gives same result
-  const result1 = isDeviceInRollout("A1B2C3D4", "1.5.0", 50);
-  const result2 = isDeviceInRollout("A1B2C3D4", "1.5.0", 50);
+  const result1 = isDeviceInRollout("A1B2C3D4", "1.5.1", 50);
+  const result2 = isDeviceInRollout("A1B2C3D4", "1.5.1", 50);
   assertEquals(result1, result2);
 });
 
@@ -1046,15 +1046,15 @@ Deno.test("get-firmware: requires HMAC authentication", async () => {
 });
 
 Deno.test("get-firmware: supports version query parameter", () => {
-  const url = new URL("http://localhost?version=1.5.0");
-  assertEquals(url.searchParams.get("version"), "1.5.0");
+  const url = new URL("http://localhost?version=1.5.1");
+  assertEquals(url.searchParams.get("version"), "1.5.1");
 });
 
 Deno.test("get-firmware: response contains signed download URL", () => {
   const mockResponse = {
     success: true,
-    version: "1.5.0",
-    download_url: "https://storage.supabase.co/firmware/1.5.0/firmware.bin?token=xxx",
+    version: "1.5.1",
+    download_url: "https://storage.supabase.co/firmware/1.5.1/firmware.bin?token=xxx",
     size: 1234567,
     expires_in: 600,
   };
@@ -1415,7 +1415,7 @@ Deno.test("Rollout: deterministic results for same input", () => {
   // Same device + version + percentage should always give same result
   const results: boolean[] = [];
   for (let i = 0; i < 10; i++) {
-    results.push(isDeviceInRollout("A1B2C3D4", "1.5.0", 50));
+    results.push(isDeviceInRollout("A1B2C3D4", "1.5.1", 50));
   }
 
   // All results should be the same
@@ -1440,7 +1440,7 @@ Deno.test("Rollout: increasing percentage doesn't remove devices", () => {
   }
 
   // If a device is in 25% rollout, it should also be in 50%, 75%, and 100%
-  const version = "1.5.0";
+  const version = "1.5.1";
 
   // Find a device that's in the 10% rollout
   let testSerial = "";

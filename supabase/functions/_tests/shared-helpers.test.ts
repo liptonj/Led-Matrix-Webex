@@ -209,23 +209,23 @@ function isDeviceInRollout(
 // --- Edge Cases ---
 
 Deno.test("rollout: 100% includes all devices", () => {
-  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.0", 100), true);
-  assertEquals(isDeviceInRollout("XYZ78901", "1.5.0", 100), true);
-  assertEquals(isDeviceInRollout("00000000", "1.5.0", 100), true);
+  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.1", 100), true);
+  assertEquals(isDeviceInRollout("XYZ78901", "1.5.1", 100), true);
+  assertEquals(isDeviceInRollout("00000000", "1.5.1", 100), true);
 });
 
 Deno.test("rollout: 0% excludes all devices", () => {
-  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.0", 0), false);
-  assertEquals(isDeviceInRollout("XYZ78901", "1.5.0", 0), false);
-  assertEquals(isDeviceInRollout("00000000", "1.5.0", 0), false);
+  assertEquals(isDeviceInRollout("A1B2C3D4", "1.5.1", 0), false);
+  assertEquals(isDeviceInRollout("XYZ78901", "1.5.1", 0), false);
+  assertEquals(isDeviceInRollout("00000000", "1.5.1", 0), false);
 });
 
 // --- Determinism Tests ---
 
 Deno.test("rollout: same input always produces same result", () => {
-  const result1 = isDeviceInRollout("A1B2C3D4", "1.5.0", 50);
-  const result2 = isDeviceInRollout("A1B2C3D4", "1.5.0", 50);
-  const result3 = isDeviceInRollout("A1B2C3D4", "1.5.0", 50);
+  const result1 = isDeviceInRollout("A1B2C3D4", "1.5.1", 50);
+  const result2 = isDeviceInRollout("A1B2C3D4", "1.5.1", 50);
+  const result3 = isDeviceInRollout("A1B2C3D4", "1.5.1", 50);
   assertEquals(result1, result2);
   assertEquals(result2, result3);
 });
@@ -252,7 +252,7 @@ Deno.test("rollout: different version produces potentially different result", ()
 
 Deno.test("rollout: increasing percentage never removes devices", () => {
   const serial = "A1B2C3D4";
-  const version = "1.5.0";
+  const version = "1.5.1";
 
   // Once a device is in rollout, higher percentages should include it
   const at10 = isDeviceInRollout(serial, version, 10);
@@ -277,7 +277,7 @@ Deno.test("rollout: roughly correct distribution for 50%", () => {
   // Generate many serial numbers and check roughly 50% pass
   let passCount = 0;
   const totalDevices = 1000;
-  const version = "1.5.0";
+  const version = "1.5.1";
   const percentage = 50;
 
   for (let i = 0; i < totalDevices; i++) {
@@ -398,7 +398,7 @@ Deno.test("ValidationResult: success structure", () => {
       device_id: "webex-display-C3D4",
       pairing_code: "ABC123",
       debug_enabled: false,
-      target_firmware_version: "1.5.0",
+      target_firmware_version: "1.5.1",
     },
   };
 

@@ -225,7 +225,7 @@ Deno.test("device-auth: success response has all required fields", () => {
     device_id: "webex-display-C3D4",
     token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     expires_at: "2026-01-29T12:00:00Z",
-    target_firmware_version: "1.5.0",
+    target_firmware_version: "1.5.1",
     debug_enabled: false,
   };
 

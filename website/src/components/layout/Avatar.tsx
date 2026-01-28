@@ -56,8 +56,8 @@ export function Avatar() {
       onAuthStateChange(async () => {
         await checkAuth();
       }).then((result) => {
-        if (result?.data) {
-          subscription = result.data;
+        if (result?.data?.subscription) {
+          subscription = result.data.subscription;
         }
       }).catch((err) => {
         console.error('Failed to set up auth listener:', err);

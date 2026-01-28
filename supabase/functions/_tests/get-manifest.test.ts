@@ -50,7 +50,7 @@ Deno.test("get-manifest: supports ota format", () => {
 Deno.test("get-manifest: esp-web-tools format has required fields", () => {
   const manifest = {
     name: DEVICE_NAME,
-    version: "1.5.0",
+    version: "1.5.1",
     new_install_prompt_erase: true,
     builds: [
       {
@@ -83,7 +83,7 @@ Deno.test("get-manifest: esp-web-tools chipFamily is ESP32-S3", () => {
 Deno.test("get-manifest: esp-web-tools uses merged firmware", () => {
   const parts = [
     {
-      path: "https://example.com/1.5.0/firmware-merged.bin",
+      path: "https://example.com/1.5.1/firmware-merged.bin",
       offset: 0,
     },
   ];
@@ -104,7 +104,7 @@ Deno.test("get-manifest: esp-web-tools prompts for erase on new install", () => 
 Deno.test("get-manifest: ota format has required fields", () => {
   const manifest = {
     name: DEVICE_NAME,
-    version: "1.5.0",
+    version: "1.5.1",
     build_id: "abc123",
     build_date: "2026-01-28T12:00:00Z",
     firmware: {
@@ -131,7 +131,7 @@ Deno.test("get-manifest: ota includes firmware for all board types", () => {
 Deno.test("get-manifest: ota optionally includes bundle", () => {
   const manifest = {
     name: DEVICE_NAME,
-    version: "1.5.0",
+    version: "1.5.1",
     firmware: {
       esp32s3: { url: "https://example.com/firmware.bin" },
     },
@@ -165,8 +165,8 @@ Deno.test("get-manifest: works without authentication (public access)", () => {
 });
 
 Deno.test("get-manifest: authenticated requests get signed URLs", () => {
-  const publicUrl = "https://example.com/firmware/1.5.0/firmware.bin";
-  const signedUrl = "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.0/firmware.bin?token=abc123";
+  const publicUrl = "https://example.com/firmware/1.5.1/firmware.bin";
+  const signedUrl = "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.1/firmware.bin?token=abc123";
 
   assertStringIncludes(signedUrl, "sign");
   assertStringIncludes(signedUrl, "token=");
@@ -187,7 +187,7 @@ Deno.test("get-manifest: uses target_firmware_version for authenticated device",
   };
 
   const releases = [
-    { version: "1.5.0", is_latest: true },
+    { version: "1.5.1", is_latest: true },
     { version: "1.4.5", is_latest: false },
   ];
 
@@ -201,7 +201,7 @@ Deno.test("get-manifest: falls back to latest if target not found", () => {
   };
 
   const releases = [
-    { version: "1.5.0", is_latest: true },
+    { version: "1.5.1", is_latest: true },
     { version: "1.3.0", is_latest: false },
     // 1.4.5 not in releases
   ];
@@ -211,7 +211,7 @@ Deno.test("get-manifest: falls back to latest if target not found", () => {
     selectedRelease = releases.find((r) => r.is_latest);
   }
 
-  assertEquals(selectedRelease?.version, "1.5.0");
+  assertEquals(selectedRelease?.version, "1.5.1");
 });
 
 // ============================================================================
@@ -219,7 +219,7 @@ Deno.test("get-manifest: falls back to latest if target not found", () => {
 // ============================================================================
 
 Deno.test("get-manifest: respects rollout for authenticated OTA requests", () => {
-  const release = { version: "1.5.0", rollout_percentage: 50 };
+  const release = { version: "1.5.1", rollout_percentage: 50 };
   const devicePercentile = 25;
 
   const isEligible = devicePercentile < release.rollout_percentage;
@@ -253,15 +253,15 @@ Deno.test("get-manifest: skips rollout check for unauthenticated requests", () =
 // ============================================================================
 
 Deno.test("get-manifest: OTA firmware path format", () => {
-  const version = "1.5.0";
+  const version = "1.5.1";
   const filePath = `${version}/firmware.bin`;
-  assertEquals(filePath, "1.5.0/firmware.bin");
+  assertEquals(filePath, "1.5.1/firmware.bin");
 });
 
 Deno.test("get-manifest: merged firmware path format", () => {
-  const version = "1.5.0";
+  const version = "1.5.1";
   const mergedPath = `${version}/firmware-merged.bin`;
-  assertEquals(mergedPath, "1.5.0/firmware-merged.bin");
+  assertEquals(mergedPath, "1.5.1/firmware-merged.bin");
 });
 
 // ============================================================================

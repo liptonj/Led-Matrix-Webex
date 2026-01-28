@@ -248,7 +248,7 @@ Deno.test("provision-device: updates firmware_version for existing device", () =
   // When existing device provisions again with new firmware version,
   // the version should be updated
   const updateData = {
-    firmware_version: "1.5.0",
+    firmware_version: "1.5.1",
     last_seen: new Date().toISOString(),
     ip_address: "192.168.1.100",
   };
