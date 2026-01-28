@@ -329,6 +329,7 @@ async function loadConfig() {
         document.getElementById('ota-url').value = config.ota_url || '';
         document.getElementById('auto-update').checked = config.auto_update || false;
         document.getElementById('debug-mode').checked = config.debug_mode || false;
+        document.getElementById('tls-verify').checked = config.tls_verify !== false;
         document.getElementById('time-format').value = config.time_format || '24h';
         document.getElementById('date-format').value = config.date_format || 'mdy';
         document.getElementById('ntp-server').value = config.ntp_server || 'pool.ntp.org';
@@ -666,7 +667,8 @@ async function scanWifi() {
             // Timeout after 10 seconds
             listEl.innerHTML = '<p>Scan timeout - please try again</p>';
         } else {
-            listEl.innerHTML = '<p>Scan failed</p>';
+            const message = (startData && (startData.error || startData.message)) || 'Scan failed';
+            listEl.innerHTML = '<p>' + message + '</p>';
         }
     } catch (error) {
         console.error('WiFi scan error:', error);
@@ -964,7 +966,8 @@ async function saveDebugSettings(e) {
     e.preventDefault();
 
     const data = {
-        debug_mode: document.getElementById('debug-mode').checked
+        debug_mode: document.getElementById('debug-mode').checked,
+        tls_verify: document.getElementById('tls-verify').checked
     };
 
     try {

@@ -103,7 +103,11 @@ String WebexClient::makeApiRequest(const String& endpoint) {
     }
     
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    if (config_manager && config_manager->getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    } else {
+        client.setInsecure();
+    }
     
     HTTPClient http;
     String url = String(WEBEX_API_BASE) + endpoint;

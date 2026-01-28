@@ -8,6 +8,20 @@
 #include <WiFi.h>
 
 void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
+    // Avoid scans while connected; scans can disrupt connectivity even in AP+STA mode.
+    const bool wifi_connected = (WiFi.status() == WL_CONNECTED) ||
+        (app_state && app_state->wifi_connected);
+    if (wifi_connected) {
+        AsyncWebServerResponse* response = request->beginResponse(
+            409,
+            "application/json",
+            "{\"error\":\"WiFi scan disabled while connected. Disconnect first to scan.\"}"
+        );
+        addCorsHeaders(response);
+        request->send(response);
+        return;
+    }
+
     // Check if a scan is already in progress
     int16_t scan_status = WiFi.scanComplete();
     

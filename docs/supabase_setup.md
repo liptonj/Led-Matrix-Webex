@@ -100,6 +100,34 @@ Go to **Settings > API** in the Supabase Dashboard:
 - **anon (public) key**: For client-side (website)
 - **service_role key**: For server-side (bridge, CI/CD) - **KEEP SECRET**
 
+### Step 7: Configure Edge Function Secrets
+
+Edge Functions require the `DEVICE_JWT_SECRET` environment variable to sign device tokens. This secret must be set for all Edge Functions to work properly. The Supabase CLI blocks custom secrets prefixed with `SUPABASE_`, so use `DEVICE_JWT_SECRET` instead.
+
+**Generate a secure secret:**
+```bash
+openssl rand -base64 32
+```
+
+**Set the secret using Supabase CLI:**
+```bash
+cd supabase
+supabase secrets set DEVICE_JWT_SECRET=your_generated_secret_here
+```
+
+**Or set via Dashboard:**
+1. Go to **Supabase Dashboard > Project Settings > Edge Functions**
+2. Click **Secrets** tab
+3. Add secret: `DEVICE_JWT_SECRET` = `your_generated_secret_here`
+4. Click **Save**
+
+**Important:** This same secret value should also be set as `BRIDGE_APP_TOKEN_SECRET` in your bridge server environment variables (if using the bridge) to ensure token validation works correctly.
+
+**Verify secrets are set:**
+```bash
+supabase secrets list
+```
+
 ## Configure Secrets
 
 ### GitHub Repository Secrets
@@ -145,6 +173,8 @@ In Cloudflare Dashboard > **Workers & Pages > led-matrix-webex > Settings > Envi
 |----------|-------|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://YOUR_PROJECT.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your anon key |
+
+**Note:** Firmware now points directly to Supabase Edge Functions. No proxy function is needed.
 
 ### Local Development
 
@@ -200,6 +230,7 @@ After setup, verify:
 
 - [ ] Database migration applied (check tables in SQL Editor)
 - [ ] Edge Functions deployed (check in Functions section)
+- [ ] Edge Function secrets configured (`DEVICE_JWT_SECRET` set)
 - [ ] Admin user created (test login at `/admin`)
 - [ ] GitHub secrets configured (check Actions > Secrets)
 - [ ] Local `.env` files created (for development)
@@ -230,9 +261,18 @@ Then run `supabase db push` again.
 
 ### Edge Functions Not Working
 
-Check function logs:
+**If you see "Server configuration error" (HTTP 500):**
+
+This usually means `DEVICE_JWT_SECRET` is not set. Set it using:
 
 ```bash
+cd supabase
+supabase secrets set DEVICE_JWT_SECRET=$(openssl rand -base64 32)
+```
+
+**Check function logs:**
+```bash
+supabase functions logs device-auth
 supabase functions logs provision-device
 ```
 

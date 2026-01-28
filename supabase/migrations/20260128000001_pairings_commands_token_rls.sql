@@ -3,7 +3,7 @@
 -- Goal: enable Supabase Realtime + PostgREST access for embedded app (and later device)
 -- without granting broad authenticated access to devices/logs.
 --
--- Tokens are minted by Edge Functions and are signed with SUPABASE_JWT_SECRET.
+-- Tokens are minted by Edge Functions and are signed with DEVICE_JWT_SECRET.
 -- They include:
 --   pairing_code: TEXT
 --   serial_number: TEXT
@@ -102,4 +102,3 @@ CREATE POLICY "commands_device_update" ON display.commands
     AND (auth.jwt() ->> 'token_type') = 'device'
     AND (auth.jwt() ->> 'pairing_code') = pairing_code
   );
-

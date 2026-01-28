@@ -54,10 +54,11 @@ export class SupabaseStore {
     this.logger = logger;
     this.supabaseUrl = process.env.SUPABASE_URL || "";
     this.supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-    // Support both BRIDGE_APP_TOKEN_SECRET and SUPABASE_JWT_SECRET
+    // Support BRIDGE_APP_TOKEN_SECRET and legacy SUPABASE_JWT_SECRET
     // They should be set to the same value for consistency
     this.appTokenSecret =
       process.env.BRIDGE_APP_TOKEN_SECRET ||
+      process.env.DEVICE_JWT_SECRET ||
       process.env.SUPABASE_JWT_SECRET ||
       "";
     this.enabled = !!(this.supabaseUrl && this.supabaseKey);
@@ -70,16 +71,27 @@ export class SupabaseStore {
       this.logger.info("Supabase integration enabled");
       if (!this.appTokenSecret) {
         this.logger.warn(
-          "BRIDGE_APP_TOKEN_SECRET/SUPABASE_JWT_SECRET not set - app token validation disabled",
+          "BRIDGE_APP_TOKEN_SECRET/DEVICE_JWT_SECRET/SUPABASE_JWT_SECRET not set - app token validation disabled",
         );
-      } else if (
-        process.env.BRIDGE_APP_TOKEN_SECRET &&
-        process.env.SUPABASE_JWT_SECRET &&
-        process.env.BRIDGE_APP_TOKEN_SECRET !== process.env.SUPABASE_JWT_SECRET
-      ) {
-        this.logger.warn(
-          "BRIDGE_APP_TOKEN_SECRET and SUPABASE_JWT_SECRET differ - bridge validation may fail",
-        );
+      } else {
+        if (
+          process.env.BRIDGE_APP_TOKEN_SECRET &&
+          process.env.DEVICE_JWT_SECRET &&
+          process.env.BRIDGE_APP_TOKEN_SECRET !== process.env.DEVICE_JWT_SECRET
+        ) {
+          this.logger.warn(
+            "BRIDGE_APP_TOKEN_SECRET and DEVICE_JWT_SECRET differ - bridge validation may fail",
+          );
+        }
+        if (
+          process.env.BRIDGE_APP_TOKEN_SECRET &&
+          process.env.SUPABASE_JWT_SECRET &&
+          process.env.BRIDGE_APP_TOKEN_SECRET !== process.env.SUPABASE_JWT_SECRET
+        ) {
+          this.logger.warn(
+            "BRIDGE_APP_TOKEN_SECRET and SUPABASE_JWT_SECRET differ - bridge validation may fail",
+          );
+        }
       }
     } else {
       this.logger.warn("Supabase not configured - device auth disabled");

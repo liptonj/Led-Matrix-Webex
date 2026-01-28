@@ -260,6 +260,7 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
 
     // Debug configuration
     doc["debug_mode"] = config_manager->getDebugMode();
+    doc["tls_verify"] = config_manager->getTlsVerify();
 
     String responseStr;
     serializeJson(doc, responseStr);
@@ -521,6 +522,11 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         extern bool g_debug_mode;
         g_debug_mode = debug_mode;
         Serial.printf("[WEB] Debug mode %s\n", debug_mode ? "enabled" : "disabled");
+    }
+    if (doc["tls_verify"].is<bool>()) {
+        bool tls_verify = doc["tls_verify"].as<bool>();
+        config_manager->setTlsVerify(tls_verify);
+        Serial.printf("[WEB] TLS verify %s\n", tls_verify ? "enabled" : "disabled");
     }
 
     if (time_config_updated) {

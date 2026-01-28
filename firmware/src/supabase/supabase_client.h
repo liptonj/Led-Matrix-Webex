@@ -57,6 +57,7 @@ struct SupabaseAuthResult {
     String device_id;
     String target_firmware_version;
     bool debug_enabled;
+    String anon_key;
     unsigned long expires_at;  // Unix timestamp in seconds
 };
 
@@ -193,6 +194,12 @@ public:
     String getAccessToken() const { return _token; }
 
     /**
+     * @brief Get the latest Supabase anon key from device-auth response
+     * @return Anon key string, or empty if not provided
+     */
+    String getAnonKey() const { return _supabaseAnonKey; }
+
+    /**
      * @brief Get the Supabase URL
      * @return Base Supabase URL
      */
@@ -204,6 +211,7 @@ private:
     String _token;
     unsigned long _tokenExpiresAt;  // Unix timestamp
     String _targetFirmwareVersion;
+    String _supabaseAnonKey;
     bool _remoteDebugEnabled = false;
     bool _appConnected;
     SupabaseAppState _lastAppState;

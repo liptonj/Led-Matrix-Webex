@@ -7,9 +7,11 @@
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
 #include "../display/matrix_display.h"
+#include "../config/config_manager.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include <time.h>
 #include <Update.h>
 #include <LittleFS.h>
 #ifndef NATIVE_BUILD
@@ -22,6 +24,7 @@
 
 // External reference to display for progress updates
 extern MatrixDisplay matrix_display;
+extern ConfigManager config_manager;
 
 namespace {
 void configureHttpClient(HTTPClient& http) {
@@ -87,9 +90,16 @@ bool OTAManager::checkUpdateFromManifest() {
     }
 
     Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
+    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    } else {
+        client.setInsecure();
+    }
 
     HTTPClient http;
     http.begin(client, manifest_url);
@@ -183,9 +193,16 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     }
 
     Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
+    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  update_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    } else {
+        client.setInsecure();
+    }
 
     HTTPClient http;
     http.begin(client, update_url);
@@ -455,8 +472,16 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     }
 #endif
 
+    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
+
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    } else {
+        client.setInsecure();
+    }
 
     HTTPClient http;
     http.begin(client, url);
@@ -686,8 +711,16 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
 #endif
 
+    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
+
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
+    } else {
+        client.setInsecure();
+    }
 
     HTTPClient http;
     http.begin(client, url);

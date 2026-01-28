@@ -11,6 +11,9 @@
 
 #include "supabase_realtime.h"
 #include "../common/ca_certs.h"
+#include "../config/config_manager.h"
+
+extern ConfigManager config_manager;
 
 // Global instance
 SupabaseRealtime supabaseRealtime;
@@ -57,6 +60,8 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     String wsPath = "/realtime/v1/websocket?apikey=" + _anonKey + "&vsn=1.0.0";
     
     Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), wsPath.c_str());
+    Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
+                  (unsigned long)time(nullptr), ESP.getFreeHeap());
     
     // Set up WebSocket event handler
     _wsClient.onEvent([](WStype_t type, uint8_t* payload, size_t length) {
@@ -66,7 +71,12 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     });
     
     // Connect with SSL
-    _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
+    if (config_manager.getTlsVerify()) {
+        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
+    } else {
+        _wsClient.setInsecure();
+        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
+    }
     _wsClient.setReconnectInterval(0);  // We handle reconnection manually
     _wsClient.enableHeartbeat(0, 0, 0);  // We handle heartbeat via Phoenix protocol
 }
@@ -400,5 +410,12 @@ void SupabaseRealtime::attemptReconnect() {
     }
     
     String wsPath = "/realtime/v1/websocket?apikey=" + _anonKey + "&vsn=1.0.0";
-    _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
+    Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
+                  (unsigned long)time(nullptr), ESP.getFreeHeap());
+    if (config_manager.getTlsVerify()) {
+        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
+    } else {
+        _wsClient.setInsecure();
+        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
+    }
 }

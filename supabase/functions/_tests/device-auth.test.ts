@@ -227,6 +227,7 @@ Deno.test("device-auth: success response has all required fields", () => {
     expires_at: "2026-01-29T12:00:00Z",
     target_firmware_version: "1.5.2",
     debug_enabled: false,
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   };
 
   assertEquals(mockResponse.success, true);
@@ -236,6 +237,7 @@ Deno.test("device-auth: success response has all required fields", () => {
   assertExists(mockResponse.token);
   assertExists(mockResponse.expires_at);
   assertEquals(typeof mockResponse.debug_enabled, "boolean");
+  assertExists(mockResponse.anon_key);
   // target_firmware_version can be null
 });
 

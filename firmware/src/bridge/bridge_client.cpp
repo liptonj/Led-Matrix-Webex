@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <time.h>
 #include "../common/ca_certs.h"
+#include "../config/config_manager.h"
 #include "../debug.h"
 #include "../auth/device_credentials.h"
 
@@ -20,6 +21,7 @@
 
 // Global instance for callback
 BridgeClient* g_bridge_instance = nullptr;
+extern ConfigManager config_manager;
 
 BridgeClient::BridgeClient()
     : bridge_port(8080), connected(false), joined_room(false),
@@ -119,8 +121,13 @@ void BridgeClient::beginWithUrl(const String& url, const String& code) {
                       bridge_host.c_str(), bridge_port, ws_path.c_str());
 
         // Use DigiCert Global Root G2 for bridge.5ls.us (Cloudflared tunnel)
-        ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
-                           CA_CERT_DIGICERT_GLOBAL_G2);
+        if (config_manager.getTlsVerify()) {
+            ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
+                               CA_CERT_DIGICERT_GLOBAL_G2);
+        } else {
+            ws_client.setInsecure();
+            ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(), nullptr);
+        }
         ws_client.enableHeartbeat(15000, 3000, 2);  // Keep connection alive
     } else {
         ws_client.begin(bridge_host, bridge_port, ws_path);
@@ -336,8 +343,13 @@ void BridgeClient::reconnect() {
     if (use_ssl) {
         Serial.printf("[BRIDGE] Reconnecting with SSL to %s:%d%s\n",
                       bridge_host.c_str(), bridge_port, ws_path.c_str());
-        ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
-                           CA_CERT_DIGICERT_GLOBAL_G2);
+        if (config_manager.getTlsVerify()) {
+            ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(),
+                               CA_CERT_DIGICERT_GLOBAL_G2);
+        } else {
+            ws_client.setInsecure();
+            ws_client.beginSSL(bridge_host.c_str(), bridge_port, ws_path.c_str(), nullptr);
+        }
         ws_client.enableHeartbeat(15000, 3000, 2);
     } else {
         Serial.printf("[BRIDGE] Reconnecting to %s:%d%s\n",

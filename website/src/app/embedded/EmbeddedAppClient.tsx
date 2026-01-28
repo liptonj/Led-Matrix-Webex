@@ -8,6 +8,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import Image from 'next/image';
 import Script from 'next/script';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import pkg from '../../../package.json';
 
 // Configuration
 const CONFIG = {
@@ -17,6 +18,8 @@ const CONFIG = {
   // Feature flag: use Edge Functions instead of direct DB updates for better security
   useEdgeFunctions: process.env.NEXT_PUBLIC_USE_SUPABASE_EDGE_FUNCTIONS === 'true',
 };
+
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || pkg.version || 'unknown';
 
 // Token exchange types
 interface AppToken {
@@ -1045,7 +1048,7 @@ export function EmbeddedAppClient() {
                       </div>
                       <div>
                         <span className="text-[var(--color-text-muted)]">App Version:</span>
-                        <span className="ml-2">v1.4.5</span>
+                        <span className="ml-2">v{APP_VERSION}</span>
                       </div>
                       <div>
                         <span className="text-[var(--color-text-muted)]">Connection:</span>

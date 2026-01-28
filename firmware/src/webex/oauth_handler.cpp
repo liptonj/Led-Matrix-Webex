@@ -60,7 +60,11 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     }
     
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    if (config_manager->getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    } else {
+        client.setInsecure();
+    }
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);
@@ -116,7 +120,11 @@ bool OAuthHandler::refreshAccessToken() {
     }
     
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    if (config_manager->getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_WEBEX);
+    } else {
+        client.setInsecure();
+    }
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);

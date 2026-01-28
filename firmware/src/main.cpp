@@ -298,9 +298,17 @@ void setup() {
         supabaseClient.begin(supabase_url, pairing_manager.getCode());
         
         // Attempt initial authentication
-        if (supabaseClient.authenticate()) {
+        if (!app_state.time_synced) {
+            Serial.println("[SUPABASE] Waiting for NTP sync before authenticating");
+        } else if (supabaseClient.authenticate()) {
             app_state.supabase_connected = true;
             Serial.println("[INIT] Supabase client authenticated successfully");
+
+            String authAnonKey = supabaseClient.getAnonKey();
+            if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
+                config_manager.setSupabaseAnonKey(authAnonKey);
+                Serial.println("[SUPABASE] Anon key updated from device-auth");
+            }
             
             // Check for target firmware version
             String targetVersion = supabaseClient.getTargetFirmwareVersion();
@@ -1046,12 +1054,21 @@ void setup_time() {
 bool provisionDeviceWithSupabase() {
     static bool provisioned = false;
     static unsigned long last_attempt = 0;
+    static unsigned long last_time_warn = 0;
     const unsigned long retry_interval_ms = 60000;  // 60 seconds
 
     if (provisioned) {
         return true;
     }
     if (!app_state.wifi_connected) {
+        return false;
+    }
+    if (!app_state.time_synced) {
+        unsigned long now = millis();
+        if (now - last_time_warn > 60000) {
+            last_time_warn = now;
+            Serial.println("[SUPABASE] Waiting for NTP sync before provisioning");
+        }
         return false;
     }
     if (!deviceCredentials.isProvisioned()) {
@@ -1077,7 +1094,11 @@ bool provisionDeviceWithSupabase() {
     Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
 
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+    } else {
+        client.setInsecure();
+    }
 
     HTTPClient http;
     http.begin(client, endpoint);
@@ -1229,6 +1250,7 @@ String buildConfigJson() {
     doc["ota_url"] = config_manager.getOTAUrl();
     doc["auto_update"] = config_manager.getAutoUpdate();
     doc["pairing_code"] = pairing_manager.getCode();
+    doc["tls_verify"] = config_manager.getTlsVerify();
 
     String result;
     serializeJson(doc, result);
@@ -1292,6 +1314,12 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
         if (doc["date_format"].is<const char*>()) {
             config_manager.setDateFormat(doc["date_format"].as<String>());
         }
+        if (doc["tls_verify"].is<bool>()) {
+            config_manager.setTlsVerify(doc["tls_verify"].as<bool>());
+        }
+        if (doc["tls_verify"].is<bool>()) {
+            config_manager.setTlsVerify(doc["tls_verify"].as<bool>());
+        }
 
         bridge_client.sendCommandResponse(cmd.requestId, true, buildConfigJson(), "");
         Serial.println("[CMD] Config updated");
@@ -1342,8 +1370,17 @@ void syncWithSupabase() {
     static unsigned long lastSync = 0;
     static unsigned long lastCommandPoll = 0;
     static bool retryAuth = false;
+    static unsigned long last_time_warn = 0;
     
     unsigned long now = millis();
+
+    if (!app_state.time_synced) {
+        if (now - last_time_warn > 60000) {
+            last_time_warn = now;
+            Serial.println("[SUPABASE] Waiting for NTP sync before contacting server");
+        }
+        return;
+    }
     
     // Determine sync interval based on app connection state
     // More frequent syncing when app is connected (5s), less when not (30s)
@@ -1356,6 +1393,12 @@ void syncWithSupabase() {
             app_state.supabase_connected = true;
             retryAuth = false;
             Serial.println("[SUPABASE] Re-authentication successful");
+
+            String authAnonKey = supabaseClient.getAnonKey();
+            if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
+                config_manager.setSupabaseAnonKey(authAnonKey);
+                Serial.println("[SUPABASE] Anon key updated from device-auth");
+            }
             
             // Update realtime token if realtime is initialized
             String anonKey = config_manager.getSupabaseAnonKey();
@@ -1500,6 +1543,9 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
             if (doc["date_format"].is<const char*>()) {
                 config_manager.setDateFormat(doc["date_format"].as<String>());
             }
+            if (doc["tls_verify"].is<bool>()) {
+                config_manager.setTlsVerify(doc["tls_verify"].as<bool>());
+            }
             
             response = buildConfigJson();
             Serial.println("[CMD-SB] Config updated");
@@ -1555,6 +1601,11 @@ void initSupabaseRealtime() {
     // Skip if anon key not configured (Phase A polling will continue to work)
     if (anonKey.isEmpty()) {
         Serial.println("[REALTIME] Skipping - no anon key configured (Phase A polling active)");
+        return;
+    }
+
+    if (!app_state.time_synced) {
+        Serial.println("[REALTIME] Skipping - time not synced yet");
         return;
     }
     

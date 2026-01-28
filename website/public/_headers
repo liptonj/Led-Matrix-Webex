@@ -3,8 +3,8 @@
   X-XSS-Protection: 1; mode=block
   Referrer-Policy: strict-origin-when-cross-origin
 
-# Note: Firmware manifests and binaries are now served by Supabase Edge Functions
-# The old /updates/* paths have been removed - configure Supabase for firmware distribution
+# Note: Firmware manifests and binaries are served directly by Supabase Edge Functions
+# Firmware now points directly to Supabase: https://YOUR_PROJECT.supabase.co/functions/v1/get-manifest
 
 # Embedded App - Allow Webex to iframe and enable CORS for local display access
 /embedded/*

@@ -10,6 +10,9 @@
 #include <time.h>
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
+#include "../config/config_manager.h"
+
+extern ConfigManager config_manager;
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "1.0.0"
@@ -111,6 +114,7 @@ bool SupabaseClient::authenticate() {
     _pairingCode = result.pairing_code;
     _targetFirmwareVersion = result.target_firmware_version;
     _remoteDebugEnabled = result.debug_enabled;
+    _supabaseAnonKey = result.anon_key;
     
     Serial.printf("[SUPABASE] Authenticated successfully (expires in %lu seconds)\n",
                   _tokenExpiresAt - (unsigned long)(time(nullptr)));
@@ -132,6 +136,7 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     result.success = false;
     result.expires_at = 0;
     result.debug_enabled = false;
+    result.anon_key = "";
     
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, json);
@@ -153,6 +158,7 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     result.device_id = doc["device_id"].as<String>();
     result.target_firmware_version = doc["target_firmware_version"] | "";
     result.debug_enabled = doc["debug_enabled"] | false;
+    result.anon_key = doc["anon_key"] | "";
     
     // Parse expires_at ISO string to Unix timestamp
     String expiresAtStr = doc["expires_at"] | "";
@@ -410,7 +416,11 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+    } else {
+        client.setInsecure();
+    }
     
     HTTPClient http;
     http.begin(client, url);
@@ -456,6 +466,8 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
         response = http.getString();
     } else {
         Serial.printf("[SUPABASE] Request failed: %s\n", http.errorToString(httpCode).c_str());
+        Serial.printf("[SUPABASE] TLS context: url=%s time=%lu heap=%lu\n",
+                      url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap());
         response = "";
     }
     

@@ -7,6 +7,10 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
+#include "../config/config_manager.h"
+#include <time.h>
+
+extern ConfigManager config_manager;
 
 // Module size estimates in KB (for patch size calculation)
 const size_t MODULE_SIZES[] = {
@@ -38,12 +42,19 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                                        OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);
+    } else {
+        client.setInsecure();
+    }
     
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
     
     Serial.printf("[DELTA-OTA] Checking: %s\n", manifest_url.c_str());
+    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect to OTA server");
@@ -138,9 +149,16 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
                                      OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);
+    } else {
+        client.setInsecure();
+    }
     
     String manifest_url = base_url + "/ota-manifest.json";
+    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect");
@@ -273,7 +291,14 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
                                             void (*progress)(int)) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setCACert(CA_CERT_BUNDLE_OTA);
+    if (config_manager.getTlsVerify()) {
+        client.setCACert(CA_CERT_BUNDLE_OTA);
+    } else {
+        client.setInsecure();
+    }
+    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+                  config_manager.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, url)) {
         setError("Connection failed");

@@ -287,11 +287,13 @@ Deno.test("device-auth: response contains device token with 24h TTL", () => {
     token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     expires_at: new Date(Date.now() + 86400 * 1000).toISOString(),
     target_firmware_version: "1.5.2",
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   };
 
   assertEquals(mockResponse.success, true);
   assertExists(mockResponse.token);
   assertExists(mockResponse.target_firmware_version);
+  assertExists(mockResponse.anon_key);
 });
 
 Deno.test("device-auth: replay protection rejects old timestamp", () => {

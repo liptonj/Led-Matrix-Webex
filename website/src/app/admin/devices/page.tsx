@@ -2,22 +2,72 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getDevices, setDeviceDebugMode, Device } from '@/lib/supabase';
+import { getDevices, setDeviceDebugMode, subscribeToDevices, Device, DeviceChangeEvent } from '@/lib/supabase';
 
 export default function DevicesPage() {
     const [devices, setDevices] = useState<Device[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
+    const [now, setNow] = useState(Date.now());
 
     useEffect(() => {
         loadDevices();
     }, []);
 
+    useEffect(() => {
+        let unsubscribe: (() => void) | null = null;
+        let isMounted = true;
+
+        (async () => {
+            try {
+                unsubscribe = await subscribeToDevices((event: DeviceChangeEvent) => {
+                    setDevices((prev) => {
+                        if (event.event === 'DELETE') {
+                            const removedId = event.old?.id;
+                            if (!removedId) return prev;
+                            return prev.filter((device) => device.id !== removedId);
+                        }
+
+                        const updated = event.new;
+                        if (!updated) return prev;
+
+                        const existingIndex = prev.findIndex((device) => device.id === updated.id);
+                        if (existingIndex === -1) {
+                            return sortDevices([...prev, updated]);
+                        }
+
+                        const next = [...prev];
+                        next[existingIndex] = updated;
+                        return sortDevices(next);
+                    });
+                });
+            } catch (err) {
+                if (isMounted) {
+                    setError(err instanceof Error ? err.message : 'Failed to subscribe to device updates');
+                }
+            }
+        })();
+
+        return () => {
+            isMounted = false;
+            if (unsubscribe) {
+                unsubscribe();
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setNow(Date.now());
+        }, 30_000);
+        return () => clearInterval(interval);
+    }, []);
+
     async function loadDevices() {
         try {
             const data = await getDevices();
-            setDevices(data);
+            setDevices(sortDevices(data));
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load devices');
         }
@@ -35,7 +85,7 @@ export default function DevicesPage() {
     }
 
     const filteredDevices = devices.filter((device) => {
-        const isOnline = new Date(device.last_seen) > new Date(Date.now() - 5 * 60 * 1000);
+        const isOnline = new Date(device.last_seen).getTime() > now - 5 * 60 * 1000;
         if (filter === 'online') return isOnline;
         if (filter === 'offline') return !isOnline;
         return true;
@@ -63,10 +113,10 @@ export default function DevicesPage() {
                     >
                         <option value="all">All Devices ({devices.length})</option>
                         <option value="online">
-                            Online ({devices.filter((d) => new Date(d.last_seen) > new Date(Date.now() - 5 * 60 * 1000)).length})
+                            Online ({devices.filter((d) => new Date(d.last_seen).getTime() > now - 5 * 60 * 1000).length})
                         </option>
                         <option value="offline">
-                            Offline ({devices.filter((d) => new Date(d.last_seen) <= new Date(Date.now() - 5 * 60 * 1000)).length})
+                            Offline ({devices.filter((d) => new Date(d.last_seen).getTime() <= now - 5 * 60 * 1000).length})
                         </option>
                     </select>
                     <button
@@ -124,7 +174,7 @@ export default function DevicesPage() {
                                 </tr>
                             ) : (
                                 filteredDevices.map((device) => {
-                                    const isOnline = new Date(device.last_seen) > new Date(Date.now() - 5 * 60 * 1000);
+                                    const isOnline = new Date(device.last_seen).getTime() > now - 5 * 60 * 1000;
                                     return (
                                         <tr key={device.id}>
                                             <td className="px-6 py-4 whitespace-nowrap">
@@ -204,5 +254,11 @@ export default function DevicesPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+function sortDevices(list: Device[]) {
+    return [...list].sort(
+        (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
     );
 }

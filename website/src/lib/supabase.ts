@@ -62,6 +62,9 @@ export interface Release {
 
 // Supabase client type (we'll create it dynamically)
 let supabaseClient: Awaited<ReturnType<typeof createSupabaseClient>> | null = null;
+let supabaseClientPromise: Promise<
+  Awaited<ReturnType<typeof createSupabaseClient>>
+> | null = null;
 
 // Dynamic import to avoid bundling issues
 async function createSupabaseClient() {
@@ -82,7 +85,11 @@ export async function getSupabase() {
   }
 
   if (!supabaseClient) {
-    supabaseClient = await createSupabaseClient();
+    if (!supabaseClientPromise) {
+      supabaseClientPromise = createSupabaseClient();
+    }
+    supabaseClient = await supabaseClientPromise;
+    supabaseClientPromise = null;
   }
 
   return supabaseClient;
@@ -224,6 +231,49 @@ export async function subscribeToDeviceLogs(
     });
 
   // Return unsubscribe function
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+export interface DeviceChangeEvent {
+  event: "INSERT" | "UPDATE" | "DELETE";
+  new: Device | null;
+  old: Device | null;
+}
+
+// Subscribe to realtime device updates via Supabase Realtime (postgres_changes)
+export async function subscribeToDevices(
+  onChange: (event: DeviceChangeEvent) => void,
+  onStatusChange?: (subscribed: boolean) => void,
+  onError?: (error: string) => void,
+): Promise<() => void> {
+  const supabase = await getSupabase();
+
+  const channel = supabase
+    .channel("admin-devices")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "display", table: "devices" },
+      (payload) => {
+        const event = payload.eventType as DeviceChangeEvent["event"];
+        const recordNew = (payload.new || null) as Device | null;
+        const recordOld = (payload.old || null) as Device | null;
+        onChange({ event, new: recordNew, old: recordOld });
+      },
+    )
+    .subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        onStatusChange?.(true);
+      } else if (status === "CHANNEL_ERROR") {
+        onError?.("Failed to subscribe to realtime device updates");
+        onStatusChange?.(false);
+      } else if (status === "TIMED_OUT") {
+        onError?.("Realtime device updates timed out");
+        onStatusChange?.(false);
+      }
+    });
+
   return () => {
     supabase.removeChannel(channel);
   };

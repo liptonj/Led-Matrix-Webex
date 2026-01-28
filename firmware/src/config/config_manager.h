@@ -136,6 +136,10 @@ public:
     bool getDebugMode() const;
     void setDebugMode(bool enabled);
 
+    // TLS Configuration
+    bool getTlsVerify() const;
+    void setTlsVerify(bool enabled);
+
     // Time Configuration
     String getTimeZone() const;
     void setTimeZone(const String& time_zone);
@@ -192,6 +196,7 @@ private:
     mutable bool cached_bridge_use_ssl;
     mutable String cached_supabase_url;
     mutable String cached_supabase_anon_key;
+    mutable bool cached_tls_verify;
     mutable bool cache_loaded;
 
     void loadCache() const;

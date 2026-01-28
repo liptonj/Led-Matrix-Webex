@@ -60,6 +60,12 @@ def add_supabase_build_flags():
     if supabase_url:
         build_flags.append(f'-DDEFAULT_SUPABASE_URL=\\"{supabase_url}\\"')
         print("[load_env] Added build flag: DEFAULT_SUPABASE_URL")
+
+        # Set OTA manifest URL to point directly to Supabase Edge Function
+        manifest_url = f"{supabase_url}/functions/v1/get-manifest"
+        build_flags.append(f'-DDEFAULT_OTA_URL=\\"{manifest_url}\\"')
+        build_flags.append(f'-DDEFAULT_OTA_MANIFEST_URL=\\"{manifest_url}\\"')
+        print(f"[load_env] Added build flag: DEFAULT_OTA_URL={manifest_url}")
     else:
         print("[load_env] Warning: SUPABASE_URL not set")
 

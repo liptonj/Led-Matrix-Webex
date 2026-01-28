@@ -133,6 +133,7 @@ void ConfigManager::loadCache() const {
     // Load Supabase config
     cached_supabase_url = loadString("supabase_url", "");
     cached_supabase_anon_key = loadString("supabase_anon", "");
+    cached_tls_verify = loadBool("tls_verify", true);
 
     cache_loaded = true;
 }
@@ -563,6 +564,13 @@ void ConfigManager::clearBridgeConfig() {
 String ConfigManager::getOTAUrl() const {
     String url = loadString("ota_url", "");
     if (url.isEmpty()) {
+        // If Supabase URL is configured, use Supabase Edge Function for manifest
+        // This allows firmware to point directly to Supabase instead of using a proxy
+        String supabaseUrl = getSupabaseUrl();
+        if (!supabaseUrl.isEmpty()) {
+            return supabaseUrl + "/functions/v1/get-manifest";
+        }
+        // Fall back to build-time default (may also be Supabase URL if set during build)
         #ifdef DEFAULT_OTA_URL
         return DEFAULT_OTA_URL;
         #endif
@@ -671,6 +679,21 @@ bool ConfigManager::getDebugMode() const {
 void ConfigManager::setDebugMode(bool enabled) {
     saveBool("debug_mode", enabled);
     Serial.printf("[CONFIG] Debug mode %s\n", enabled ? "enabled" : "disabled");
+}
+
+// TLS Configuration
+
+bool ConfigManager::getTlsVerify() const {
+    if (!cache_loaded) {
+        return loadBool("tls_verify", true);
+    }
+    return cached_tls_verify;
+}
+
+void ConfigManager::setTlsVerify(bool enabled) {
+    saveBool("tls_verify", enabled);
+    cached_tls_verify = enabled;
+    Serial.printf("[CONFIG] TLS verify %s\n", enabled ? "enabled" : "disabled");
 }
 
 // Time Configuration
@@ -871,6 +894,7 @@ String ConfigManager::exportConfig() const {
     doc["bridge_host"] = getBridgeHost();
     doc["bridge_port"] = getBridgePort();
     doc["bridge_use_ssl"] = getBridgeUseSSL();
+    doc["tls_verify"] = getTlsVerify();
 
     String output;
     serializeJson(doc, output);
@@ -966,6 +990,9 @@ bool ConfigManager::importConfig(const String& json) {
     if (doc["bridge_use_ssl"].is<bool>()) {
         setBridgeUseSSL(doc["bridge_use_ssl"].as<bool>());
     }
+    if (doc["tls_verify"].is<bool>()) {
+        setTlsVerify(doc["tls_verify"].as<bool>());
+    }
 
     Serial.println("[CONFIG] Configuration imported successfully");
     return true;
@@ -980,6 +1007,9 @@ void ConfigManager::saveString(const char* key, const String& value) {
 
 String ConfigManager::loadString(const char* key, const String& default_value) const {
     if (!initialized) return default_value;
+    if (!preferences.isKey(key)) {
+        return default_value;
+    }
     return preferences.getString(key, default_value);
 }
 

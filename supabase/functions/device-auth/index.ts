@@ -18,6 +18,7 @@
  *     token: string,
  *     expires_at: string,
  *     target_firmware_version: string | null
+ *     anon_key: string | null
  *   }
  */
 
@@ -39,6 +40,7 @@ interface DeviceAuthResponse {
   expires_at: string;
   target_firmware_version: string | null;
   debug_enabled: boolean;
+  anon_key: string | null;
 }
 
 Deno.serve(async (req) => {
@@ -60,9 +62,9 @@ Deno.serve(async (req) => {
     }
 
     // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET");
+    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
     if (!tokenSecret) {
-      console.error("SUPABASE_JWT_SECRET not configured");
+      console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
       return new Response(
         JSON.stringify({ success: false, error: "Server configuration error" }),
         {
@@ -159,6 +161,8 @@ Deno.serve(async (req) => {
       `Device token issued for ${device.serial_number} (expires ${expiresAtISO})`,
     );
 
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? null;
+
     const response: DeviceAuthResponse = {
       success: true,
       serial_number: device.serial_number,
@@ -168,6 +172,7 @@ Deno.serve(async (req) => {
       expires_at: expiresAtISO,
       target_firmware_version: device.target_firmware_version,
       debug_enabled: device.debug_enabled,
+      anon_key: anonKey,
     };
 
     return new Response(JSON.stringify(response), {

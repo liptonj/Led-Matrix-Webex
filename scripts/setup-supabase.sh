@@ -219,7 +219,74 @@ deploy_functions() {
     done
 }
 
-# Step 5: Create admin user
+# Step 5: Configure Edge Function secrets
+configure_edge_secrets() {
+    log_info "Step 5: Configuring Edge Function secrets..."
+
+    cd "$PROJECT_ROOT/supabase"
+
+    echo ""
+    echo "Edge Functions require DEVICE_JWT_SECRET to sign device tokens."
+    echo "Note: Supabase CLI blocks secrets prefixed with SUPABASE_,"
+    echo "so use DEVICE_JWT_SECRET instead."
+    echo "This secret is used by device-auth, exchange-pairing-code, and other functions."
+    echo ""
+
+    # Check if secret already exists
+    if supabase secrets list 2>/dev/null | grep -q "DEVICE_JWT_SECRET"; then
+        log_warn "DEVICE_JWT_SECRET already exists"
+        echo ""
+        read -p "Do you want to update it? (y/n): " UPDATE_SECRET
+        if [ "$UPDATE_SECRET" != "y" ]; then
+            log_info "Keeping existing DEVICE_JWT_SECRET"
+            return 0
+        fi
+    fi
+
+    echo "Generate a new secret? (recommended)"
+    read -p "(y/n): " GENERATE_SECRET
+
+    if [ "$GENERATE_SECRET" = "y" ]; then
+        if command -v openssl &> /dev/null; then
+            JWT_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+            log_info "Generated new secret (32 bytes, base64)"
+        else
+            log_error "openssl not found. Please install it or generate a secret manually."
+            echo ""
+            read -s -p "Enter DEVICE_JWT_SECRET manually: " JWT_SECRET
+            echo ""
+        fi
+    else
+        read -s -p "Enter DEVICE_JWT_SECRET: " JWT_SECRET
+        echo ""
+    fi
+
+    if [ -z "$JWT_SECRET" ]; then
+        log_error "DEVICE_JWT_SECRET cannot be empty"
+        exit 1
+    fi
+
+    log_info "Setting DEVICE_JWT_SECRET..."
+    if supabase secrets set "DEVICE_JWT_SECRET=$JWT_SECRET"; then
+        log_success "DEVICE_JWT_SECRET configured"
+        echo ""
+        log_warn "IMPORTANT: Save this secret value securely!"
+        echo "  DEVICE_JWT_SECRET=$JWT_SECRET"
+        echo ""
+        echo "This same value should be set as BRIDGE_APP_TOKEN_SECRET"
+        echo "in your bridge server environment variables (if using bridge)."
+        echo ""
+    else
+        log_error "Failed to set DEVICE_JWT_SECRET"
+        echo ""
+        echo "You can set it manually using:"
+        echo "  supabase secrets set DEVICE_JWT_SECRET=your_secret_here"
+        echo ""
+        read -p "Press Enter to continue anyway..."
+    fi
+}
+
+# Step 6: Create admin user
 create_admin_user() {
     log_info "Step 5: Creating admin user..."
 
@@ -247,7 +314,7 @@ create_admin_user() {
     log_success "Admin user setup complete"
 }
 
-# Step 6: Output configuration
+# Step 7: Output configuration
 output_config() {
     log_info "Step 6: Retrieving project configuration..."
 
@@ -292,6 +359,7 @@ main() {
     link_project
     push_migration
     deploy_functions
+    configure_edge_secrets
     create_admin_user
     output_config
 }
