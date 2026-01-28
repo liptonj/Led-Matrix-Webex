@@ -332,6 +332,12 @@ export async function getSession() {
   return supabase.auth.getSession();
 }
 
+export async function getUser() {
+  const supabase = await getSupabase();
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+}
+
 export async function onAuthStateChange(
   callback: (event: string, session: unknown) => void,
 ) {

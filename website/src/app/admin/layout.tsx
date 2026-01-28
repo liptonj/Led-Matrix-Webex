@@ -18,6 +18,12 @@ export default function AdminLayout({
 
     useEffect(() => {
         async function checkAuth() {
+            // Allow login page to render even if Supabase is not configured
+            if (pathname === '/admin/login') {
+                setLoading(false);
+                return;
+            }
+
             if (!isSupabaseConfigured()) {
                 setError('Supabase is not configured. Admin features are disabled.');
                 setLoading(false);
@@ -28,14 +34,12 @@ export default function AdminLayout({
                 const { data } = await getSession();
                 if (data?.session) {
                     setAuthenticated(true);
-                } else if (pathname !== '/admin/login') {
+                } else {
                     router.push('/admin/login');
                 }
             } catch (err) {
                 console.error('Auth check failed:', err);
-                if (pathname !== '/admin/login') {
-                    router.push('/admin/login');
-                }
+                router.push('/admin/login');
             }
             setLoading(false);
         }
@@ -53,6 +57,11 @@ export default function AdminLayout({
         { href: '/admin/devices', label: 'Devices' },
         { href: '/admin/releases', label: 'Releases' },
     ];
+
+    // Login page doesn't need the admin layout - render it immediately
+    if (pathname === '/admin/login') {
+        return <>{children}</>;
+    }
 
     if (loading) {
         return (
@@ -79,11 +88,6 @@ export default function AdminLayout({
                 </div>
             </div>
         );
-    }
-
-    // Login page doesn't need the admin layout
-    if (pathname === '/admin/login') {
-        return <>{children}</>;
     }
 
     // Not authenticated - will redirect

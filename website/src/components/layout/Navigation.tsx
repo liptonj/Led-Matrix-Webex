@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { cn, APP_VERSION } from '@/lib/utils';
 import { ThemeToggle } from './ThemeToggle';
+import { Avatar } from './Avatar';
 
 const navItems = [
   { href: '/', label: 'Home', icon: '🏠' },
@@ -131,11 +132,15 @@ export function Navigation() {
           })}
         </div>
 
-        {/* Theme Toggle - Mobile Only */}
+        {/* Theme Toggle and Avatar - Mobile Only */}
         <div className="p-4 px-6 border-t border-[var(--color-border)] lg:hidden">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium">Theme</span>
             <ThemeToggle />
+          </div>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-medium">Account</span>
+            <Avatar />
           </div>
           <div className="text-xs text-[var(--color-text-muted)]">
             <p className="mb-1">Version {APP_VERSION}</p>

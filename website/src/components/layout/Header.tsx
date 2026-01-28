@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ThemeToggle } from './ThemeToggle';
 import { Navigation } from './Navigation';
+import { Avatar } from './Avatar';
 
 interface HeaderProps {
   title?: string;
@@ -42,9 +43,10 @@ export function Header({
           {/* Navigation - includes hamburger on mobile, desktop nav on large screens */}
           <Navigation />
 
-          {/* Theme Toggle - Desktop only */}
-          <div className="hidden lg:block">
+          {/* Theme Toggle and Avatar - Desktop only */}
+          <div className="hidden lg:flex items-center gap-3">
             <ThemeToggle />
+            <Avatar />
           </div>
         </div>
       </div>
