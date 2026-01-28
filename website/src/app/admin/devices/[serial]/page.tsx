@@ -18,8 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 export default function DeviceDetailPage() {
     const params = useParams();
     const router = useRouter();
-    // Handle catch-all route: serial is an array, get first element
-    const serial = Array.isArray(params.serial) ? params.serial[0] : (params.serial as string);
+    const serial = params.serial as string;
 
     const [device, setDevice] = useState<Device | null>(null);
     const [logs, setLogs] = useState<DeviceLog[]>([]);
