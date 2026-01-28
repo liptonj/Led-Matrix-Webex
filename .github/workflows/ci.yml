@@ -314,29 +314,54 @@ jobs:
           TAG="${{ steps.version.outputs.TAG }}"
 
           echo "Uploading firmware version $VERSION to Supabase Storage..."
+          echo "Supabase URL: ${SUPABASE_URL}"
+          echo "Service role key: ${SUPABASE_SERVICE_ROLE_KEY:0:20}..."
 
           # Upload OTA firmware
           if [ -f "firmware/firmware-esp32s3.bin" ]; then
             FIRMWARE_SIZE=$(stat -f%z "firmware/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware/firmware-esp32s3.bin")
+            echo "Uploading firmware.bin ($FIRMWARE_SIZE bytes)..."
 
-            curl -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin" \
+            HTTP_CODE=$(curl -s -o /tmp/firmware_upload_response.txt -w "%{http_code}" \
+              -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/octet-stream" \
               -H "Content-Profile: display" \
-              --data-binary @firmware/firmware-esp32s3.bin
+              --data-binary @firmware/firmware-esp32s3.bin)
 
-            echo "✓ Uploaded firmware.bin ($FIRMWARE_SIZE bytes)"
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded firmware.bin ($FIRMWARE_SIZE bytes) - HTTP $HTTP_CODE"
+            else
+              echo "::error::Failed to upload firmware.bin - HTTP $HTTP_CODE"
+              cat /tmp/firmware_upload_response.txt
+              exit 1
+            fi
+          else
+            echo "::error::firmware/firmware-esp32s3.bin not found"
+            exit 1
           fi
 
           # Upload merged firmware for web installer
           if [ -f "firmware/firmware-merged-esp32s3.bin" ]; then
-            curl -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin" \
+            echo "Uploading firmware-merged.bin..."
+
+            HTTP_CODE=$(curl -s -o /tmp/merged_upload_response.txt -w "%{http_code}" \
+              -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/octet-stream" \
               -H "Content-Profile: display" \
-              --data-binary @firmware/firmware-merged-esp32s3.bin
+              --data-binary @firmware/firmware-merged-esp32s3.bin)
 
-            echo "✓ Uploaded firmware-merged.bin"
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded firmware-merged.bin - HTTP $HTTP_CODE"
+            else
+              echo "::error::Failed to upload firmware-merged.bin - HTTP $HTTP_CODE"
+              cat /tmp/merged_upload_response.txt
+              exit 1
+            fi
+          else
+            echo "::error::firmware/firmware-merged-esp32s3.bin not found"
+            exit 1
           fi
 
       - name: Create/Update release record in Supabase
@@ -367,8 +392,17 @@ jobs:
             echo "Stable release detected - will be set as latest"
           fi
 
+          echo "Creating/updating release record for version ${VERSION}..."
+          echo "  Tag: ${TAG}"
+          echo "  Firmware URL: ${FIRMWARE_URL}"
+          echo "  Merged URL: ${MERGED_URL}"
+          echo "  Size: ${FIRMWARE_SIZE} bytes"
+          echo "  Is Latest: ${IS_LATEST}"
+          echo "  Is Prerelease: ${IS_PRERELEASE}"
+
           # Upsert release record
-          curl -X POST "${SUPABASE_URL}/rest/v1/releases" \
+          HTTP_CODE=$(curl -s -o /tmp/release_response.txt -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/releases" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "Content-Type: application/json" \
@@ -387,9 +421,16 @@ jobs:
               \"is_latest\": ${IS_LATEST},
               \"is_prerelease\": ${IS_PRERELEASE},
               \"rollout_percentage\": 100
-            }"
+            }")
 
-          echo "✓ Created/updated release record for ${VERSION} (is_latest: ${IS_LATEST})"
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✓ Created/updated release record for ${VERSION} (is_latest: ${IS_LATEST}) - HTTP $HTTP_CODE"
+            cat /tmp/release_response.txt | jq '.' || cat /tmp/release_response.txt
+          else
+            echo "::error::Failed to create/update release record - HTTP $HTTP_CODE"
+            cat /tmp/release_response.txt
+            exit 1
+          fi
 
   # ============================================================================
   # Deploy Website (only on version tags, after release)
