@@ -28,6 +28,7 @@ Thumbs.db
 
 # Secrets (never commit these!)
 firmware/include/secrets.h
+firmware/.env
 
 # Auto-generated embedded assets (created by pre-build script)
 firmware/src/web/embedded_assets.h
@@ -55,6 +56,12 @@ __pycache__/
 # Temporary files
 tmp/
 temp/
+
+# Supabase CLI temp files
+supabase/.temp/
+
+# Website environment (contains API keys)
+website/.env
 
 # Archived code (not actively used)
 archive/

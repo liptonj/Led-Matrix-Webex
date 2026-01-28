@@ -6,6 +6,7 @@
 #include "delta_ota.h"
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include "../common/ca_certs.h"
 
 // Module size estimates in KB (for patch size calculation)
 const size_t MODULE_SIZES[] = {
@@ -37,7 +38,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                                        OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setInsecure();  // For GitHub - in production use proper certs
+    client.setCACert(CA_CERT_BUNDLE_OTA);
     
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
@@ -137,7 +138,7 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
                                      OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setCACert(CA_CERT_BUNDLE_OTA);
     
     String manifest_url = base_url + "/ota-manifest.json";
     
@@ -272,7 +273,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
                                             void (*progress)(int)) {
     HTTPClient http;
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setCACert(CA_CERT_BUNDLE_OTA);
     
     if (!http.begin(client, url)) {
         setError("Connection failed");

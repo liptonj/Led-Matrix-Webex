@@ -11,10 +11,15 @@
 #include <time.h>
 #include "esp_task_wdt.h"
 #include "esp_ota_ops.h"
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
+#include "auth/device_credentials.h"
 #include "boot_validator.h"
 #include "config/config_manager.h"
 #include "debug.h"
+#include "debug/remote_logger.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
 #include "improv/improv_handler.h"
@@ -25,6 +30,9 @@
 #include "bridge/bridge_client.h"
 #include "bridge/bridge_discovery.h"
 #include "bridge/pairing_manager.h"
+#include "supabase/supabase_client.h"
+#include "supabase/supabase_realtime.h"
+#include "common/ca_certs.h"
 #include "meraki/mqtt_client.h"
 #include "ota/ota_manager.h"
 #include "time/time_manager.h"
@@ -61,8 +69,13 @@ void setup_time();
 void update_display();
 void check_for_updates();
 void handleBridgeCommand(const BridgeCommand& cmd);
+void handleSupabaseCommand(const SupabaseCommand& cmd);
+void handleRealtimeMessage(const RealtimeMessage& msg);
+void syncWithSupabase();
+void initSupabaseRealtime();
 String buildStatusJson();
 String buildConfigJson();
+bool provisionDeviceWithSupabase();
 
 /**
  * @brief Arduino setup function
@@ -96,7 +109,7 @@ void setup() {
         boot_validator.onCriticalFailure("Config", "Failed to load configuration");
         // Won't return - device reboots to bootloader
     }
-    
+
     // Store version for the currently running partition (for OTA version tracking)
     // This ensures we can always display the correct version even after updates
     #ifndef NATIVE_BUILD
@@ -113,6 +126,15 @@ void setup() {
     g_debug_mode = config_manager.getDebugMode();
     if (g_debug_mode) {
         Serial.println("[INIT] Debug mode ENABLED - verbose logging active");
+    }
+
+    // Initialize device credentials (serial number, authentication key)
+    Serial.println("[INIT] Initializing device credentials...");
+    if (!deviceCredentials.begin()) {
+        Serial.println("[WARN] Failed to initialize device credentials - authentication disabled");
+    } else {
+        Serial.printf("[INIT] Device serial: %s\n", deviceCredentials.getSerialNumber().c_str());
+        Serial.printf("[INIT] Device ID: %s\n", deviceCredentials.getDeviceId().c_str());
     }
 
     // =========================================================================
@@ -135,85 +157,85 @@ void setup() {
     // =========================================================================
     // IMPROV WiFi - Initialize for ESP Web Tools WiFi provisioning
     // =========================================================================
-    
+
     // Initialize WiFi in STA mode (required for scanning)
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(WIFI_PS_NONE);  // Disable power save (prevents display interference)
     Serial.println("[INIT] WiFi initialized in STA mode");
-    
+
     Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
     improv_handler.begin(&Serial, &config_manager, &app_state, display_ok ? &matrix_display : nullptr);
-    
+
     // Check if WiFi is already configured - if so, skip the Improv window
     bool wifi_configured = config_manager.hasWiFiCredentials();
-    
+
     if (wifi_configured) {
         Serial.println("[IMPROV] WiFi already configured, skipping provisioning window");
     } else {
         // Two-phase Improv detection:
         // Phase 1: Quick detection (3 seconds) - check if anyone is sending Improv packets
         // Phase 2: If activity detected, extend to 60 seconds for full provisioning
-        
+
         Serial.println("[IMPROV] No WiFi configured - detecting serial activity (3 seconds)...");
-        
+
         unsigned long detect_start = millis();
         const unsigned long DETECT_TIMEOUT = 3000;   // 3 seconds detection window
         const unsigned long PROVISION_TIMEOUT = 60000;  // 60 seconds for provisioning
         bool improv_activity_detected = false;
-        
+
         // Phase 1: Detection
         while (millis() - detect_start < DETECT_TIMEOUT) {
             improv_handler.loop();
-            
+
             // Check if we received any serial data (Improv packets)
             if (Serial.available() > 0) {
                 improv_activity_detected = true;
                 Serial.println("[IMPROV] Serial activity detected! Extending window for provisioning...");
-                
+
                 // Show provisioning screen on display
                 if (display_ok) {
                     matrix_display.showImprovProvisioning();
                 }
                 break;
             }
-            
+
             // Check if WiFi was configured
             if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
                 Serial.println("[IMPROV] WiFi configured successfully!");
                 break;
             }
-            
+
             delay(10);
         }
-        
+
         // Phase 2: Extended provisioning if activity was detected
         if (improv_activity_detected && WiFi.status() != WL_CONNECTED) {
             Serial.println("[IMPROV] Waiting for WiFi provisioning (60 seconds)...");
-            
+
             unsigned long provision_start = millis();
             unsigned long last_status = 0;
-            
+
             while (millis() - provision_start < PROVISION_TIMEOUT) {
                 improv_handler.loop();
-                
+
                 // Check if WiFi was configured via Improv
                 if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
                     Serial.println("[IMPROV] WiFi configured successfully!");
                     break;
                 }
-                
+
                 // Print countdown every 5 seconds
                 unsigned long elapsed = millis() - provision_start;
                 if (elapsed - last_status >= 5000) {
                     last_status = elapsed;
-                    Serial.printf("[IMPROV] Waiting... %lu seconds remaining\n", 
+                    Serial.printf("[IMPROV] Waiting... %lu seconds remaining\n",
                                   (PROVISION_TIMEOUT - elapsed) / 1000);
                 }
-                
+
                 delay(10);
             }
         }
-        
+
         if (WiFi.status() == WL_CONNECTED) {
             Serial.println("[IMPROV] Provisioning complete, continuing boot...");
             if (display_ok) {
@@ -264,11 +286,60 @@ void setup() {
     pairing_manager.begin();
     Serial.printf("[INIT] Pairing code: %s\n", pairing_manager.getCode().c_str());
 
-    // Set command handler before connecting
-    bridge_client.setCommandHandler(handleBridgeCommand);
-
-    // Look for bridge server
+    // Register device with Supabase on first boot (requires WiFi + Supabase URL)
     if (app_state.wifi_connected) {
+        provisionDeviceWithSupabase();
+    }
+
+    // Initialize Supabase client for Phase A state sync
+    String supabase_url = config_manager.getSupabaseUrl();
+    if (!supabase_url.isEmpty() && app_state.wifi_connected) {
+        Serial.println("[INIT] Initializing Supabase client...");
+        supabaseClient.begin(supabase_url, pairing_manager.getCode());
+        
+        // Attempt initial authentication
+        if (supabaseClient.authenticate()) {
+            app_state.supabase_connected = true;
+            Serial.println("[INIT] Supabase client authenticated successfully");
+            
+            // Check for target firmware version
+            String targetVersion = supabaseClient.getTargetFirmwareVersion();
+            if (!targetVersion.isEmpty()) {
+                Serial.printf("[INIT] Target firmware version from Supabase: %s\n", 
+                              targetVersion.c_str());
+            }
+            
+            // Phase B: Initialize Supabase Realtime (optional, for low-latency commands)
+            initSupabaseRealtime();
+        } else {
+            Serial.println("[INIT] Supabase authentication failed - will retry in loop");
+        }
+    }
+
+    // If Supabase is configured, it is the realtime hub. The bridge becomes optional.
+    // For Supabase-only mode, we skip bridge setup entirely to reduce moving parts.
+    const bool use_supabase_realtime_hub = !config_manager.getSupabaseUrl().isEmpty();
+
+    if (!use_supabase_realtime_hub) {
+        // Set command handler before connecting
+        bridge_client.setCommandHandler(handleBridgeCommand);
+
+        // Initialize remote debug logger (connects to bridge for remote log streaming)
+        remoteLogger.begin(&bridge_client, nullptr);
+        // Enable remote logging if debug mode is on
+        if (g_debug_mode) {
+            remoteLogger.setRemoteEnabled(true);
+        }
+    } else {
+        // Supabase-only mode: send remote logs to Supabase device_logs
+        remoteLogger.begin(nullptr, &supabaseClient);
+        if (g_debug_mode) {
+            remoteLogger.setRemoteEnabled(true);
+        }
+    }
+
+    // Look for bridge server (only when not using Supabase as hub)
+    if (app_state.wifi_connected && !use_supabase_realtime_hub) {
         Serial.println("[INIT] Searching for bridge server...");
         String bridge_host;
         uint16_t bridge_port;
@@ -317,6 +388,15 @@ void setup() {
                 Serial.printf("[INIT] Using cloud bridge: %s\n", bridge_url.c_str());
                 bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
                 bridge_found = true;
+
+                // Save Supabase URL from discovery config if not already set
+                // This allows existing devices to get the Supabase URL dynamically
+                String discovery_supabase_url = bridge_discovery.getSupabaseUrl();
+                String current_supabase_url = config_manager.getSupabaseUrl();
+                if (!discovery_supabase_url.isEmpty() && current_supabase_url.isEmpty()) {
+                    config_manager.setSupabaseUrl(discovery_supabase_url);
+                    Serial.printf("[INIT] Supabase URL set from discovery: %s\n", discovery_supabase_url.c_str());
+                }
             } else {
                 // Use hardcoded fallback
                 Serial.println("[INIT] Discovery failed, using default cloud bridge");
@@ -361,6 +441,15 @@ void setup() {
     // Enable manifest mode for non-GitHub API URLs (e.g., display.5ls.us)
     if (!ota_url.isEmpty() && ota_url.indexOf("api.github.com") < 0) {
         ota_manager.setManifestUrl(ota_url);
+    }
+
+    // Perform immediate OTA check when WiFi is connected
+    // This fixes the issue where the first OTA check was delayed by 1 hour after boot
+    // because last_ota_check starts at 0 and millis() takes an hour to exceed the threshold
+    if (app_state.wifi_connected) {
+        Serial.println("[OTA] Performing immediate update check on boot...");
+        check_for_updates();
+        app_state.last_ota_check = millis();  // Reset timer after check
     }
 
     // Initialize serial command handler (for web installer WiFi setup)
@@ -440,6 +529,17 @@ void loop() {
     // Handle WiFi connection
     wifi_manager.handleConnection(&mdns_manager);
 
+    // Track WiFi state transitions to trigger OTA check on reconnect
+    static bool was_wifi_connected = false;
+    if (app_state.wifi_connected && !was_wifi_connected) {
+        // WiFi just connected (either first time or after disconnect)
+        // Trigger immediate OTA check so we don't wait 1 hour after reconnect
+        Serial.println("[OTA] WiFi connected - checking for updates...");
+        check_for_updates();
+        app_state.last_ota_check = millis();  // Reset timer after check
+    }
+    was_wifi_connected = app_state.wifi_connected;
+
     // Refresh mDNS periodically to prevent TTL expiry
     if (app_state.wifi_connected) {
         mdns_manager.refresh();
@@ -493,7 +593,7 @@ void loop() {
         last_check_log = now;
     }
 
-    if (app_state.bridge_config_changed && app_state.wifi_connected) {
+    if (app_state.bridge_config_changed && app_state.wifi_connected && config_manager.getSupabaseUrl().isEmpty()) {
         Serial.println("[MAIN] Bridge configuration changed - reconnecting...");
         app_state.bridge_config_changed = false;
 
@@ -524,7 +624,7 @@ void loop() {
     // Process bridge client (skip during OTA to save resources)
     if (matrix_display.isOTALocked()) {
         // Skip bridge processing during OTA update
-    } else if (app_state.wifi_connected) {
+    } else if (app_state.wifi_connected && config_manager.getSupabaseUrl().isEmpty()) {
         // Initialize bridge if not yet done
         if (!bridge_client.isInitialized()) {
             Serial.println("[BRIDGE] WiFi connected, initializing bridge connection...");
@@ -550,6 +650,14 @@ void loop() {
                         String bridge_url = bridge_discovery.getBridgeUrl();
                         Serial.printf("[BRIDGE] Using cloud bridge: %s\n", bridge_url.c_str());
                         bridge_client.beginWithUrl(bridge_url, pairing_manager.getCode());
+
+                        // Save Supabase URL from discovery config if not already set
+                        String discovery_supabase_url = bridge_discovery.getSupabaseUrl();
+                        String current_supabase_url = config_manager.getSupabaseUrl();
+                        if (!discovery_supabase_url.isEmpty() && current_supabase_url.isEmpty()) {
+                            config_manager.setSupabaseUrl(discovery_supabase_url);
+                            Serial.printf("[BRIDGE] Supabase URL set from discovery: %s\n", discovery_supabase_url.c_str());
+                        }
                     } else {
                         // Use hardcoded fallback
                         Serial.println("[BRIDGE] Discovery failed, using default cloud bridge");
@@ -563,13 +671,13 @@ void loop() {
         // the WebSocketsClient library to complete handshakes and process messages
         if (bridge_client.isInitialized()) {
             bridge_client.loop();
-            
+
             // Check if we should be connected but aren't - trigger manual reconnect
             // The WebSockets library has auto-reconnect, but we need to ensure it's working
             static unsigned long last_connection_check = 0;
             if (current_time - last_connection_check > 15000) {  // Check every 15 seconds
                 last_connection_check = current_time;
-                
+
                 if (!bridge_client.isConnected()) {
                     Serial.println("[BRIDGE] Disconnected - waiting for auto-reconnect...");
                     bridge_client.reconnect();  // Log reconnect status
@@ -587,7 +695,7 @@ void loop() {
                 BridgeUpdate update = bridge_client.getUpdate();
                 app_state.webex_status = update.status;
                 app_state.last_bridge_status_time = millis();  // Track when we received status
-                
+
                 // Store display name from embedded app (Webex user's name)
                 if (!update.display_name.isEmpty()) {
                     if (app_state.embedded_app_display_name != update.display_name) {
@@ -595,14 +703,14 @@ void loop() {
                     }
                     app_state.embedded_app_display_name = update.display_name;
                 }
-                
+
                 // Apply camera/mic/call state from embedded app
                 // Only update if not connected to xAPI (xAPI has more accurate data)
                 if (!app_state.xapi_connected) {
                     app_state.camera_on = update.camera_on;
                     app_state.mic_muted = update.mic_muted;
                     app_state.in_call = update.in_call;
-                    
+
                     // Fallback: derive in_call from status if not explicitly set
                     if (!update.in_call && (update.status == "meeting" || update.status == "busy" ||
                                             update.status == "call" || update.status == "presenting")) {
@@ -617,11 +725,52 @@ void loop() {
             app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
         }
     } else {
-        // WiFi not connected
+        // Bridge disabled or WiFi not connected
         app_state.bridge_connected = false;
         app_state.embedded_app_connected = false;
         app_state.embedded_app_display_name = "";  // Clear when disconnected
         app_state.last_bridge_status_time = 0;  // Reset so we don't use stale threshold
+    }
+
+    // =========================================================================
+    // Supabase Phase A: State sync via Edge Functions (replaces bridge for pairing)
+    // =========================================================================
+    if (app_state.wifi_connected && supabaseClient.isInitialized()) {
+        syncWithSupabase();
+        // Keep remote logger in sync with server-side debug toggle
+        if (supabaseClient.isRemoteDebugEnabled()) {
+            remoteLogger.setRemoteEnabled(true);
+        }
+    }
+    
+    // =========================================================================
+    // Supabase Phase B: Realtime WebSocket for instant command delivery
+    // =========================================================================
+    {
+        static unsigned long lastRealtimeInit = 0;
+        String anonKey = config_manager.getSupabaseAnonKey();
+        
+        // Try to initialize realtime if we have credentials but aren't connected
+        if (app_state.wifi_connected && app_state.supabase_connected && 
+            !anonKey.isEmpty() && !supabaseRealtime.isConnected()) {
+            // Retry every 60 seconds
+            if (millis() - lastRealtimeInit > 60000) {
+                lastRealtimeInit = millis();
+                Serial.println("[REALTIME] Attempting to reconnect...");
+                initSupabaseRealtime();
+            }
+        }
+        
+        // Process realtime events if connected
+        if (app_state.wifi_connected && supabaseRealtime.isConnected()) {
+            supabaseRealtime.loop();
+            
+            // Process any pending realtime messages
+            if (supabaseRealtime.hasMessage()) {
+                RealtimeMessage msg = supabaseRealtime.getMessage();
+                handleRealtimeMessage(msg);
+            }
+        }
     }
 
     // Process xAPI WebSocket
@@ -730,6 +879,11 @@ void loop() {
         }
     } else {
         app_state.mqtt_connected = false;
+    }
+
+    // Attempt Supabase provisioning (retry until successful)
+    if (app_state.wifi_connected) {
+        provisionDeviceWithSupabase();
     }
 
     // Check for OTA updates (hourly)
@@ -884,6 +1038,100 @@ void update_display() {
  */
 void setup_time() {
     applyTimeConfig(config_manager, &app_state);
+}
+
+/**
+ * @brief Register device with Supabase (called on first boot + retries)
+ */
+bool provisionDeviceWithSupabase() {
+    static bool provisioned = false;
+    static unsigned long last_attempt = 0;
+    const unsigned long retry_interval_ms = 60000;  // 60 seconds
+
+    if (provisioned) {
+        return true;
+    }
+    if (!app_state.wifi_connected) {
+        return false;
+    }
+    if (!deviceCredentials.isProvisioned()) {
+        Serial.println("[SUPABASE] Credentials not ready - cannot provision");
+        return false;
+    }
+    String supabase_url = config_manager.getSupabaseUrl();
+    supabase_url.trim();
+    if (supabase_url.isEmpty()) {
+        Serial.println("[SUPABASE] No Supabase URL configured");
+        return false;
+    }
+    if (millis() - last_attempt < retry_interval_ms) {
+        return false;
+    }
+    last_attempt = millis();
+
+    if (supabase_url.endsWith("/")) {
+        supabase_url.remove(supabase_url.length() - 1);
+    }
+    String endpoint = supabase_url + "/functions/v1/provision-device";
+
+    Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
+
+    WiFiClientSecure client;
+    client.setCACert(CA_CERT_BUNDLE_SUPABASE);
+
+    HTTPClient http;
+    http.begin(client, endpoint);
+    http.setTimeout(15000);
+    http.addHeader("Content-Type", "application/json");
+
+    JsonDocument payload;
+    payload["serial_number"] = deviceCredentials.getSerialNumber();
+    payload["key_hash"] = deviceCredentials.getKeyHash();
+    payload["firmware_version"] = FIRMWARE_VERSION;
+    if (WiFi.isConnected()) {
+        payload["ip_address"] = WiFi.localIP().toString();
+    }
+    // Send existing pairing code for migration (preserves user's pairing during HMAC migration)
+    String existing_code = pairing_manager.getCode();
+    if (!existing_code.isEmpty()) {
+        payload["existing_pairing_code"] = existing_code;
+    }
+
+    String body;
+    serializeJson(payload, body);
+
+    int http_code = http.POST(body);
+    String response = http.getString();
+    http.end();
+
+    if (http_code < 200 || http_code >= 300) {
+        Serial.printf("[SUPABASE] Provision failed: HTTP %d\n", http_code);
+        Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
+        return false;
+    }
+
+    JsonDocument result;
+    DeserializationError error = deserializeJson(result, response);
+    if (error) {
+        Serial.printf("[SUPABASE] Invalid JSON response: %s\n", error.c_str());
+        return false;
+    }
+
+    if (!result["success"].as<bool>()) {
+        const char* err = result["error"] | "Unknown error";
+        Serial.printf("[SUPABASE] Provision error: %s\n", err);
+        return false;
+    }
+
+    String pairing_code = result["pairing_code"] | "";
+    if (!pairing_code.isEmpty()) {
+        pairing_manager.setCode(pairing_code, true);
+        Serial.printf("[SUPABASE] Pairing code set to %s\n", pairing_code.c_str());
+    }
+
+    provisioned = true;
+    Serial.println("[SUPABASE] Device provisioned successfully");
+    return true;
 }
 
 /**
@@ -1078,5 +1326,367 @@ void handleBridgeCommand(const BridgeCommand& cmd) {
     } else {
         bridge_client.sendCommandResponse(cmd.requestId, false, "",
             "Unknown command: " + cmd.command);
+    }
+}
+
+/**
+ * @brief Sync device state with Supabase Edge Functions
+ *
+ * Phase A implementation: HTTP polling for state sync.
+ * - Posts device telemetry to Supabase
+ * - Receives app status back
+ * - Polls for pending commands
+ * - Executes and acknowledges commands
+ */
+void syncWithSupabase() {
+    static unsigned long lastSync = 0;
+    static unsigned long lastCommandPoll = 0;
+    static bool retryAuth = false;
+    
+    unsigned long now = millis();
+    
+    // Determine sync interval based on app connection state
+    // More frequent syncing when app is connected (5s), less when not (30s)
+    unsigned long syncInterval = app_state.supabase_app_connected ? 5000 : 30000;
+    unsigned long commandPollInterval = app_state.supabase_app_connected ? 5000 : 15000;
+    
+    // Handle authentication retry
+    if (retryAuth && now - lastSync > 60000) {
+        if (supabaseClient.authenticate()) {
+            app_state.supabase_connected = true;
+            retryAuth = false;
+            Serial.println("[SUPABASE] Re-authentication successful");
+            
+            // Update realtime token if realtime is initialized
+            String anonKey = config_manager.getSupabaseAnonKey();
+            if (!anonKey.isEmpty()) {
+                String newToken = supabaseClient.getAccessToken();
+                supabaseRealtime.setAccessToken(newToken);
+                Serial.println("[REALTIME] Token updated after re-authentication");
+            }
+        } else {
+            lastSync = now;  // Prevent rapid retry
+            return;
+        }
+    }
+    
+    // Skip if not authenticated
+    if (!supabaseClient.isAuthenticated()) {
+        if (!retryAuth) {
+            retryAuth = true;
+            Serial.println("[SUPABASE] Not authenticated - will retry");
+        }
+        return;
+    }
+    
+    // Post device state periodically
+    if (now - lastSync >= syncInterval) {
+        lastSync = now;
+        
+        // Gather device telemetry
+        int rssi = WiFi.RSSI();
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t uptime = millis() / 1000;
+        float temp = app_state.temperature;  // From sensor if available
+        
+        // Post state and get app status back (include firmware version)
+        SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+        
+        if (appState.valid) {
+            app_state.last_supabase_sync = now;
+            app_state.supabase_connected = true;
+            app_state.supabase_app_connected = appState.app_connected;
+            
+            // If Supabase reports app connected, use it as source of truth
+            // (overrides bridge if both are connected)
+            if (appState.app_connected) {
+                app_state.embedded_app_connected = true;
+                app_state.webex_status = appState.webex_status;
+                
+                if (!appState.display_name.isEmpty()) {
+                    app_state.embedded_app_display_name = appState.display_name;
+                }
+                
+                // Only update camera/mic/call state if not using xAPI (which has more accurate data)
+                if (!app_state.xapi_connected) {
+                    app_state.camera_on = appState.camera_on;
+                    app_state.mic_muted = appState.mic_muted;
+                    app_state.in_call = appState.in_call;
+                    
+                    // Fallback: derive in_call from status if not explicitly set
+                    if (!appState.in_call && (appState.webex_status == "meeting" || 
+                                               appState.webex_status == "busy" ||
+                                               appState.webex_status == "call" || 
+                                               appState.webex_status == "presenting")) {
+                        app_state.in_call = true;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Poll for commands (can be more frequent than state sync)
+    if (now - lastCommandPoll >= commandPollInterval) {
+        lastCommandPoll = now;
+        
+        SupabaseCommand commands[10];
+        int count = supabaseClient.pollCommands(commands, 10);
+        
+        for (int i = 0; i < count; i++) {
+            if (commands[i].valid) {
+                Serial.printf("[SUPABASE] Processing command: %s (id=%s)\n",
+                              commands[i].command.c_str(), commands[i].id.c_str());
+                
+                // Handle the command
+                handleSupabaseCommand(commands[i]);
+            }
+        }
+    }
+}
+
+/**
+ * @brief Handle commands received from Supabase
+ */
+void handleSupabaseCommand(const SupabaseCommand& cmd) {
+    Serial.printf("[CMD-SB] Processing command: %s\n", cmd.command.c_str());
+    
+    bool success = true;
+    String response = "";
+    String error = "";
+    
+    if (cmd.command == "get_status") {
+        response = buildStatusJson();
+        
+    } else if (cmd.command == "get_config") {
+        response = buildConfigJson();
+        
+    } else if (cmd.command == "set_config") {
+        JsonDocument doc;
+        DeserializationError parseError = deserializeJson(doc, cmd.payload);
+        
+        if (parseError) {
+            success = false;
+            error = "Invalid JSON";
+        } else {
+            // Apply settings
+            if (doc["display_name"].is<const char*>()) {
+                config_manager.setDisplayName(doc["display_name"].as<String>());
+            }
+            if (doc["brightness"].is<int>()) {
+                uint8_t brightness = doc["brightness"].as<uint8_t>();
+                config_manager.setBrightness(brightness);
+                matrix_display.setBrightness(brightness);
+            }
+            if (doc["scroll_speed_ms"].is<int>()) {
+                uint16_t speed = doc["scroll_speed_ms"].as<uint16_t>();
+                config_manager.setScrollSpeedMs(speed);
+                matrix_display.setScrollSpeedMs(speed);
+            }
+            if (doc["page_interval_ms"].is<int>()) {
+                uint16_t interval = doc["page_interval_ms"].as<uint16_t>();
+                config_manager.setPageIntervalMs(interval);
+                matrix_display.setPageIntervalMs(config_manager.getPageIntervalMs());
+            }
+            if (doc["sensor_page_enabled"].is<bool>()) {
+                config_manager.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
+            }
+            if (doc["time_zone"].is<const char*>()) {
+                config_manager.setTimeZone(doc["time_zone"].as<String>());
+                applyTimeConfig(config_manager, &app_state);
+            }
+            if (doc["time_format"].is<const char*>()) {
+                config_manager.setTimeFormat(doc["time_format"].as<String>());
+            }
+            if (doc["date_format"].is<const char*>()) {
+                config_manager.setDateFormat(doc["date_format"].as<String>());
+            }
+            
+            response = buildConfigJson();
+            Serial.println("[CMD-SB] Config updated");
+        }
+        
+    } else if (cmd.command == "set_brightness") {
+        JsonDocument doc;
+        deserializeJson(doc, cmd.payload);
+        uint8_t brightness = doc["value"] | 128;
+        config_manager.setBrightness(brightness);
+        matrix_display.setBrightness(brightness);
+        
+    } else if (cmd.command == "regenerate_pairing") {
+        String newCode = pairing_manager.generateCode(true);
+        supabaseClient.setPairingCode(newCode);  // Update Supabase client
+        JsonDocument resp;
+        resp["code"] = newCode;
+        serializeJson(resp, response);
+        
+    } else if (cmd.command == "reboot") {
+        // Ack first, then reboot
+        supabaseClient.ackCommand(cmd.id, true, "", "");
+        delay(500);
+        ESP.restart();
+        return;  // Won't reach here
+        
+    } else if (cmd.command == "factory_reset") {
+        // Ack first, then reset
+        supabaseClient.ackCommand(cmd.id, true, "", "");
+        config_manager.factoryReset();
+        delay(500);
+        ESP.restart();
+        return;  // Won't reach here
+        
+    } else {
+        success = false;
+        error = "Unknown command: " + cmd.command;
+    }
+    
+    // Send acknowledgment
+    supabaseClient.ackCommand(cmd.id, success, response, error);
+}
+
+/**
+ * @brief Initialize Supabase Realtime for Phase B (optional, low-latency commands)
+ *
+ * Phase B provides real-time command delivery via WebSocket instead of polling.
+ * This reduces latency and server load but requires the Supabase anon key.
+ */
+void initSupabaseRealtime() {
+    String anonKey = config_manager.getSupabaseAnonKey();
+    
+    // Skip if anon key not configured (Phase A polling will continue to work)
+    if (anonKey.isEmpty()) {
+        Serial.println("[REALTIME] Skipping - no anon key configured (Phase A polling active)");
+        return;
+    }
+    
+    String supabaseUrl = config_manager.getSupabaseUrl();
+    String accessToken = supabaseClient.getAccessToken();
+    
+    if (supabaseUrl.isEmpty() || accessToken.isEmpty()) {
+        Serial.println("[REALTIME] Cannot initialize - missing URL or token");
+        return;
+    }
+    
+    Serial.println("[REALTIME] Initializing Phase B realtime connection...");
+    
+    // Set message handler for realtime events
+    supabaseRealtime.setMessageHandler(handleRealtimeMessage);
+    
+    // Initialize WebSocket connection
+    supabaseRealtime.begin(supabaseUrl, anonKey, accessToken);
+    
+    // Subscribe to commands for this device's pairing code
+    String pairingCode = pairing_manager.getCode();
+    if (!pairingCode.isEmpty()) {
+        // Wait briefly for connection to establish
+        unsigned long waitStart = millis();
+        while (!supabaseRealtime.isConnected() && millis() - waitStart < 5000) {
+            supabaseRealtime.loop();
+            delay(100);
+        }
+        
+        if (supabaseRealtime.isConnected()) {
+            // Subscribe to both commands and pairings tables for this device
+            String filter = "pairing_code=eq." + pairingCode;
+            const String tables[] = { "commands", "pairings" };
+            supabaseRealtime.subscribeMultiple("display", tables, 2, filter);
+            Serial.printf("[REALTIME] Subscribed to commands + pairings for pairing code: %s\n", 
+                          pairingCode.c_str());
+        } else {
+            Serial.println("[REALTIME] Connection timeout - will retry");
+        }
+    }
+}
+
+/**
+ * @brief Handle realtime messages from Supabase
+ *
+ * Called when a postgres_changes event is received via WebSocket.
+ * For INSERT events on the commands table, immediately process the command.
+ */
+void handleRealtimeMessage(const RealtimeMessage& msg) {
+    if (!msg.valid) {
+        return;
+    }
+    
+    Serial.printf("[REALTIME] Received %s on %s.%s\n", 
+                  msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
+    
+    // Handle command insertions (immediate command delivery)
+    if (msg.table == "commands" && msg.event == "INSERT") {
+        // Extract command data from payload
+        JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
+        JsonObject data = payload["data"]["record"];
+        
+        if (data.isNull()) {
+            Serial.println("[REALTIME] No record in command payload");
+            return;
+        }
+        
+        // Build SupabaseCommand from realtime data
+        SupabaseCommand cmd;
+        cmd.valid = true;
+        cmd.id = data["id"].as<String>();
+        cmd.command = data["command"].as<String>();
+        cmd.created_at = data["created_at"].as<String>();
+        
+        // Serialize payload to string
+        JsonObject cmdPayload = data["payload"];
+        if (!cmdPayload.isNull()) {
+            serializeJson(cmdPayload, cmd.payload);
+        } else {
+            cmd.payload = "{}";
+        }
+        
+        // Verify this command is pending (not already processed via polling)
+        String status = data["status"].as<String>();
+        if (status != "pending") {
+            Serial.printf("[REALTIME] Command %s already %s, skipping\n", 
+                          cmd.id.c_str(), status.c_str());
+            return;
+        }
+        
+        Serial.printf("[REALTIME] Processing command via realtime: %s (id=%s)\n",
+                      cmd.command.c_str(), cmd.id.c_str());
+        
+        // Handle the command (same handler as polling)
+        handleSupabaseCommand(cmd);
+    }
+    
+    // Handle pairing updates (app connection state changes)
+    if (msg.table == "pairings" && msg.event == "UPDATE") {
+        JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
+        JsonObject data = payload["data"]["record"];
+        
+        if (!data.isNull()) {
+            // Update app state from pairing record
+            bool appConnected = data["app_connected"] | false;
+            String webexStatus = data["webex_status"] | "offline";
+            String displayName = data["display_name"] | "";
+            bool cameraOn = data["camera_on"] | false;
+            bool micMuted = data["mic_muted"] | false;
+            bool inCall = data["in_call"] | false;
+            
+            // Update app state
+            app_state.supabase_app_connected = appConnected;
+            if (appConnected) {
+                app_state.embedded_app_connected = true;
+                app_state.webex_status = webexStatus;
+                
+                if (!displayName.isEmpty()) {
+                    app_state.embedded_app_display_name = displayName;
+                }
+                
+                // Only update if not using xAPI
+                if (!app_state.xapi_connected) {
+                    app_state.camera_on = cameraOn;
+                    app_state.mic_muted = micMuted;
+                    app_state.in_call = inCall;
+                }
+            }
+            
+            Serial.printf("[REALTIME] Pairing updated - app=%s, status=%s\n",
+                          appConnected ? "connected" : "disconnected", 
+                          webexStatus.c_str());
+        }
     }
 }

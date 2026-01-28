@@ -27,7 +27,6 @@ export function EspWebInstallButton({
     const button = buttonRef.current;
     if (!button) return;
 
-    console.log('🔌 ESP Web Install Button initialized with manifest:', manifest);
     button.setAttribute('manifest', manifest);
   }, [manifest]);
 

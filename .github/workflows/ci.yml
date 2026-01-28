@@ -64,6 +64,8 @@ jobs:
     env:
       WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
       WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
     defaults:
       run:
         working-directory: firmware
@@ -109,7 +111,11 @@ jobs:
 
       - name: Build firmware (ESP32-S3)
         # Web assets are now embedded in firmware via pre-build script
-        run: pio run -e esp32s3
+        # Supabase config is loaded from environment by scripts/load_env.py
+        run: |
+          echo "Building with Supabase URL: ${SUPABASE_URL:-not set}"
+          echo "Building with Supabase anon key: ${SUPABASE_ANON_KEY:+set}"
+          pio run -e esp32s3
 
       - name: Collect artifacts
         run: |
@@ -273,12 +279,125 @@ jobs:
             release/firmware/firmware-merged-esp32s3.bin
 
   # ============================================================================
+  # Upload to Supabase Storage (only on version tags, after release)
+  # ============================================================================
+  supabase-upload:
+    name: Upload to Supabase
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download ESP32-S3 firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: firmware/
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to Supabase Storage
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="${{ steps.version.outputs.TAG }}"
+
+          echo "Uploading firmware version $VERSION to Supabase Storage..."
+
+          # Upload OTA firmware
+          if [ -f "firmware/firmware-esp32s3.bin" ]; then
+            FIRMWARE_SIZE=$(stat -f%z "firmware/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware/firmware-esp32s3.bin")
+
+            curl -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "Content-Profile: display" \
+              --data-binary @firmware/firmware-esp32s3.bin
+
+            echo "✓ Uploaded firmware.bin ($FIRMWARE_SIZE bytes)"
+          fi
+
+          # Upload merged firmware for web installer
+          if [ -f "firmware/firmware-merged-esp32s3.bin" ]; then
+            curl -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "Content-Profile: display" \
+              --data-binary @firmware/firmware-merged-esp32s3.bin
+
+            echo "✓ Uploaded firmware-merged.bin"
+          fi
+
+      - name: Create/Update release record in Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="${{ steps.version.outputs.TAG }}"
+          IS_PRERELEASE=${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+
+          # Get firmware size
+          FIRMWARE_SIZE=0
+          if [ -f "firmware/firmware-esp32s3.bin" ]; then
+            FIRMWARE_SIZE=$(stat -f%z "firmware/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware/firmware-esp32s3.bin")
+          fi
+
+          # Build URLs
+          FIRMWARE_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin"
+          MERGED_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Only auto-set is_latest for stable releases (not pre-releases)
+          # Pre-releases require manual promotion via admin dashboard
+          if [ "${IS_PRERELEASE}" = "true" ]; then
+            IS_LATEST="false"
+            echo "Pre-release detected - is_latest will remain unchanged"
+          else
+            IS_LATEST="true"
+            echo "Stable release detected - will be set as latest"
+          fi
+
+          # Upsert release record
+          curl -X POST "${SUPABASE_URL}/rest/v1/releases" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: display" \
+            -H "Accept-Profile: display" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "{
+              \"version\": \"${VERSION}\",
+              \"tag\": \"${TAG}\",
+              \"name\": \"Release ${TAG}\",
+              \"firmware_url\": \"${FIRMWARE_URL}\",
+              \"firmware_merged_url\": \"${MERGED_URL}\",
+              \"firmware_size\": ${FIRMWARE_SIZE},
+              \"build_id\": \"${GITHUB_SHA}\",
+              \"build_date\": \"${BUILD_DATE}\",
+              \"is_latest\": ${IS_LATEST},
+              \"is_prerelease\": ${IS_PRERELEASE},
+              \"rollout_percentage\": 100
+            }"
+
+          echo "✓ Created/updated release record for ${VERSION} (is_latest: ${IS_LATEST})"
+
+  # ============================================================================
   # Deploy Website (only on version tags, after release)
   # ============================================================================
   deploy-website:
     name: Deploy Website
     runs-on: ubuntu-latest
-    needs: [release]
+    needs: [release, supabase-upload]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
@@ -299,52 +418,16 @@ jobs:
         working-directory: website
         run: npm ci
 
-      - name: Create firmware directory
-        run: mkdir -p website/public/updates/firmware
-
-      - name: Download firmware from latest release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Downloading firmware binaries from latest release..."
-
-          # Get latest release tag (use current tag since we just created the release)
-          LATEST_TAG="${GITHUB_REF#refs/tags/}"
-          echo "Release tag: $LATEST_TAG"
-
-          # Download firmware binaries
-          cd website/public/updates/firmware
-
-          # Main firmware for OTA updates (ESP32-S3 only, web assets embedded)
-          gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
-
-          # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
-          gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
-
-          # Create copies with build ID for cache busting (ESP Web Tools uses these)
-          BUILD_ID=$(date +%s)
-          echo "BUILD_ID=${BUILD_ID}" >> $GITHUB_ENV
-          
-          if [ -f "firmware-esp32s3.bin" ]; then
-            cp firmware-esp32s3.bin "firmware-esp32s3-${BUILD_ID}.bin"
-            echo "Created build copy: firmware-esp32s3-${BUILD_ID}.bin"
-          fi
-          if [ -f "firmware-merged-esp32s3.bin" ]; then
-            cp firmware-merged-esp32s3.bin "firmware-merged-esp32s3-${BUILD_ID}.bin"
-            echo "Created build copy: firmware-merged-esp32s3-${BUILD_ID}.bin"
-          fi
-
-          echo "Downloaded firmware files:"
-          ls -la
+      # Note: Firmware binaries are no longer downloaded here.
+      # Firmware is stored in Supabase Storage and manifests are generated
+      # dynamically by the get-manifest Edge Function.
+      # ESP Web Tools and OTA updates now use the Edge Function endpoint.
 
       - name: Build website (Next.js)
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_ID: ${{ env.BUILD_ID }}
-        run: |
-          echo "Using BUILD_ID: $BUILD_ID for cache busting"
-          npm run build
+        run: npm run build
 
       - name: Verify build output
         run: |

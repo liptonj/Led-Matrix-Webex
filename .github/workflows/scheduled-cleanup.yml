@@ -1,0 +1,40 @@
+name: Scheduled Log Cleanup
+
+on:
+  schedule:
+    # Run daily at 3:00 AM UTC (matches pg_cron schedule if available)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    # Allow manual trigger for testing
+
+jobs:
+  cleanup-logs:
+    runs-on: ubuntu-latest
+    # Only run if Supabase is configured
+    if: ${{ vars.SUPABASE_URL != '' }}
+    
+    steps:
+      - name: Trigger log cleanup
+        run: |
+          response=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            "${{ vars.SUPABASE_URL }}/functions/v1/cleanup-logs")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "Response: $body"
+          echo "HTTP Code: $http_code"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Cleanup failed with status $http_code"
+            exit 1
+          fi
+          
+          # Extract deleted count from response
+          deleted=$(echo "$body" | jq -r '.deleted_count // 0')
+          echo "Successfully deleted $deleted old log entries"
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}

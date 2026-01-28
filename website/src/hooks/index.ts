@@ -1,22 +1,17 @@
-export { useTheme } from "./useTheme";
-export { useNavigation } from "./useNavigation";
 export { useManifest } from "./useManifest";
-export { useWebSocket } from "./useWebSocket";
+export { useNavigation } from "./useNavigation";
+export { useTheme } from "./useTheme";
 export { useWebexSDK } from "./useWebexSDK";
-export { useSerial } from "./useSerial";
+export { useWebSocket } from "./useWebSocket";
 
 export type {
-  WebSocketStatus,
-  WebSocketMessage,
-  CommandResponse,
-  UseWebSocketOptions,
-  UseWebSocketReturn,
-} from "./useWebSocket";
-export type {
-  WebexStatus,
-  WebexUser,
-  WebexMeeting,
-  WebexState,
-  UseWebexSDKReturn,
+    UseWebexSDKReturn, WebexMeeting,
+    WebexState, WebexStatus,
+    WebexUser
 } from "./useWebexSDK";
-export type { SerialStatus, SerialConfig, UseSerialReturn } from "./useSerial";
+export type {
+    CommandResponse,
+    UseWebSocketOptions,
+    UseWebSocketReturn, WebSocketMessage, WebSocketStatus
+} from "./useWebSocket";
+

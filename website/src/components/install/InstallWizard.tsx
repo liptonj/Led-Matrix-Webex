@@ -14,24 +14,17 @@ export function InstallWizard() {
   // Firmware installation state
   const [flashStatus, setFlashStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
 
-  // Debug logging
-  useEffect(() => {
-    console.log('Wizard State:', { currentStep });
-  }, [currentStep]);
-
   // Verify ESP Web Tools custom element is registered
   useEffect(() => {
     let isMounted = true;
     
     if (customElements.get('esp-web-install-button')) {
-      console.log('esp-web-install-button already defined');
       return;
     }
 
     customElements.whenDefined('esp-web-install-button')
       .then(() => {
         if (!isMounted) return;
-        console.log('esp-web-install-button is now defined');
         setFlashStatus((prev) => (prev?.type === 'error' ? null : prev));
       })
       .catch(() => {
@@ -60,7 +53,6 @@ export function InstallWizard() {
 
   // Navigation handler
   const handleContinueToSuccess = () => {
-    console.log('Advancing to success step');
     setCurrentStep(2);
   };
 

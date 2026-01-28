@@ -150,10 +150,23 @@ export default function ApiDocsPage() {
         {/* Firmware Version API */}
         <section className="section">
           <h2 className="text-primary mb-4">Firmware Version API</h2>
-          <p className="mb-4">Check for firmware updates programmatically:</p>
-          <h3 className="text-lg font-semibold mb-4">GET /updates/manifest.json</h3>
-          <p className="mb-4">Returns list of available firmware versions.</p>
-          <CodeBlock code="curl https://display.5ls.us/updates/manifest.json" />
+          <p className="mb-4">Check for firmware updates programmatically via Supabase Edge Functions:</p>
+          
+          <h3 className="text-lg font-semibold mb-4">GET /functions/v1/get-manifest</h3>
+          <p className="mb-4">Returns the latest firmware manifest with available versions.</p>
+          <CodeBlock code="curl https://your-project.supabase.co/functions/v1/get-manifest" />
+          
+          <h4 className="font-medium mt-4 mb-2">Query Parameters:</h4>
+          <ul className="space-y-2 list-disc list-inside text-[var(--color-text-muted)] mb-4">
+            <li><code>format=esp-web-tools</code> - Returns manifest in ESP Web Tools format for web flashing</li>
+          </ul>
+          
+          <h3 className="text-lg font-semibold mt-6 mb-4">GET /functions/v1/get-firmware</h3>
+          <p className="mb-4">Returns a signed URL for firmware download (requires HMAC authentication for devices).</p>
+          <CodeBlock code={`curl https://your-project.supabase.co/functions/v1/get-firmware \\
+  -H "X-Device-Serial: A1B2C3D4" \\
+  -H "X-Timestamp: 1706367600" \\
+  -H "X-Signature: base64-hmac-signature"`} />
         </section>
       </main>
 

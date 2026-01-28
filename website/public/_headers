@@ -3,13 +3,8 @@
   X-XSS-Protection: 1; mode=block
   Referrer-Policy: strict-origin-when-cross-origin
 
-/updates/manifest.json
-  Access-Control-Allow-Origin: *
-  Cache-Control: public, max-age=300
-
-/updates/firmware/*
-  Access-Control-Allow-Origin: *
-  Cache-Control: public, max-age=300
+# Note: Firmware manifests and binaries are now served by Supabase Edge Functions
+# The old /updates/* paths have been removed - configure Supabase for firmware distribution
 
 # Embedded App - Allow Webex to iframe and enable CORS for local display access
 /embedded/*

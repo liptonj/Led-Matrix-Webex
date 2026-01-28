@@ -12,7 +12,16 @@ interface UseManifestResult {
   refetch: () => Promise<void>;
 }
 
-const MANIFEST_URL = '/updates/manifest.json';
+// Use Supabase Edge Function for dynamic manifest generation
+// Returns null if Supabase is not configured (caller must handle this)
+function getManifestUrl(): string | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/get-manifest`;
+  }
+  // Supabase URL is required - no fallback available
+  return null;
+}
 
 export function useManifest(): UseManifestResult {
   const [manifest, setManifest] = useState<FirmwareManifest | null>(null);
@@ -23,8 +32,18 @@ export function useManifest(): UseManifestResult {
     setLoading(true);
     setError(null);
 
+    const manifestUrl = getManifestUrl();
+    
+    if (!manifestUrl) {
+      setError(
+        'Supabase configuration missing. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.'
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch(MANIFEST_URL);
+      const response = await fetch(manifestUrl);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

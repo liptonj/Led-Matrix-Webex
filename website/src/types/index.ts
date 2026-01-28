@@ -2,7 +2,7 @@
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      'esp-web-install-button': React.DetailedHTMLProps<
+      "esp-web-install-button": React.DetailedHTMLProps<
         React.HTMLAttributes<HTMLElement> & {
           manifest?: string;
         },
@@ -50,7 +50,14 @@ export interface BridgeConfig {
 }
 
 // Status types
-export type WebexStatus = 'active' | 'meeting' | 'dnd' | 'away' | 'ooo' | 'offline' | 'unknown';
+export type WebexStatus =
+  | "active"
+  | "meeting"
+  | "dnd"
+  | "away"
+  | "ooo"
+  | "offline"
+  | "unknown";
 
 export interface StatusData {
   status: WebexStatus;
@@ -70,6 +77,8 @@ export interface DeviceStatus {
   firmware_version: string;
   firmware_build_id?: string;
   ip_address: string;
+  mac_address?: string;
+  serial_number?: string;
   free_heap: number;
   uptime: number;
   rssi: number;
@@ -95,6 +104,6 @@ export interface NavItem {
 }
 
 // Theme types
-export type Theme = 'light' | 'dark';
+export type Theme = "light" | "dark";
 
-export {}
+export {};

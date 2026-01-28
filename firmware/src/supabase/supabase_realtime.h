@@ -1,0 +1,191 @@
+/**
+ * @file supabase_realtime.h
+ * @brief Supabase Realtime Client (Phoenix Protocol) for ESP32
+ *
+ * Phase B implementation: WebSocket-based realtime updates from Supabase.
+ * Uses Phoenix Channels protocol for bidirectional communication.
+ *
+ * Features:
+ * - Phoenix protocol WebSocket connection
+ * - Automatic heartbeat handling
+ * - Channel subscription (postgres_changes)
+ * - Reconnection with exponential backoff
+ *
+ * Note: This is optional - Phase A polling works well for most use cases.
+ * Enable realtime for lower latency command delivery.
+ */
+
+#ifndef SUPABASE_REALTIME_H
+#define SUPABASE_REALTIME_H
+
+#include <Arduino.h>
+#include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+
+// Phoenix protocol constants
+#define PHOENIX_HEARTBEAT_INTERVAL_MS 30000
+#define PHOENIX_HEARTBEAT_TIMEOUT_MS 10000
+#define PHOENIX_RECONNECT_MIN_MS 1000
+#define PHOENIX_RECONNECT_MAX_MS 60000
+
+/**
+ * @brief Realtime message received from Supabase
+ */
+struct RealtimeMessage {
+    String event;          // insert, update, delete
+    String table;          // Table name
+    String schema;         // Schema name (display)
+    JsonDocument payload;  // Full payload
+    bool valid;
+};
+
+// Message handler callback type
+typedef void (*RealtimeMessageHandler)(const RealtimeMessage& msg);
+
+/**
+ * @brief Supabase Realtime Client (Phoenix Protocol)
+ *
+ * Connects to Supabase Realtime for instant updates.
+ */
+class SupabaseRealtime {
+public:
+    SupabaseRealtime();
+    ~SupabaseRealtime();
+
+    /**
+     * @brief Initialize and connect to Supabase Realtime
+     * @param supabase_url Base Supabase URL
+     * @param anon_key Supabase anon/public key
+     * @param access_token Device JWT token (from device-auth)
+     */
+    void begin(const String& supabase_url, const String& anon_key, 
+               const String& access_token);
+
+    /**
+     * @brief Update access token (after refresh)
+     * @param access_token New JWT token
+     */
+    void setAccessToken(const String& access_token);
+
+    /**
+     * @brief Process WebSocket events (call in loop)
+     */
+    void loop();
+
+    /**
+     * @brief Check if connected to realtime
+     * @return true if connected and subscribed
+     */
+    bool isConnected() const { return _connected && _subscribed; }
+
+    /**
+     * @brief Subscribe to a single table channel
+     * @param schema Database schema
+     * @param table Table name
+     * @param filter Optional filter (e.g., "pairing_code=eq.ABC123")
+     * @return true if subscription request sent
+     */
+    bool subscribe(const String& schema, const String& table, 
+                   const String& filter = "");
+    
+    /**
+     * @brief Subscribe to multiple tables on a single channel
+     * @param schema Database schema
+     * @param tables Array of table names
+     * @param tableCount Number of tables
+     * @param filter Filter to apply to all tables (e.g., "pairing_code=eq.ABC123")
+     * @return true if subscription request sent
+     */
+    bool subscribeMultiple(const String& schema, const String tables[], 
+                           int tableCount, const String& filter = "");
+
+    /**
+     * @brief Unsubscribe from current channel
+     */
+    void unsubscribe();
+
+    /**
+     * @brief Disconnect from realtime
+     */
+    void disconnect();
+
+    /**
+     * @brief Set message handler callback
+     * @param handler Function to call when message received
+     */
+    void setMessageHandler(RealtimeMessageHandler handler) { _messageHandler = handler; }
+
+    /**
+     * @brief Check if there's a pending message
+     * @return true if message available
+     */
+    bool hasMessage() const { return _messagePending; }
+
+    /**
+     * @brief Get the latest message
+     * @return RealtimeMessage structure
+     */
+    RealtimeMessage getMessage();
+
+private:
+    WebSocketsClient _wsClient;
+    String _supabaseUrl;
+    String _anonKey;
+    String _accessToken;
+    String _channelTopic;
+    bool _connected;
+    bool _subscribed;
+    bool _messagePending;
+    int _joinRef;
+    int _msgRef;
+    unsigned long _lastHeartbeat;
+    unsigned long _lastHeartbeatResponse;
+    unsigned long _reconnectDelay;
+    unsigned long _lastReconnectAttempt;
+    RealtimeMessage _lastMessage;
+    RealtimeMessageHandler _messageHandler;
+
+    /**
+     * @brief Build Phoenix message
+     */
+    String buildPhoenixMessage(const String& topic, const String& event, 
+                                const JsonDocument& payload, int ref = 0);
+
+    /**
+     * @brief Parse Phoenix message
+     */
+    bool parsePhoenixMessage(const String& message, String& topic, 
+                              String& event, JsonDocument& payload, 
+                              int& ref, int& joinRef);
+
+    /**
+     * @brief Send heartbeat
+     */
+    void sendHeartbeat();
+
+    /**
+     * @brief Handle WebSocket events
+     */
+    void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);
+
+    /**
+     * @brief Handle Phoenix message
+     */
+    void handlePhoenixMessage(const String& topic, const String& event, 
+                               const JsonDocument& payload);
+
+    /**
+     * @brief Attempt reconnection
+     */
+    void attemptReconnect();
+
+    /**
+     * @brief Static callback for WebSocket events
+     */
+    static void webSocketCallback(WStype_t type, uint8_t* payload, size_t length);
+};
+
+// Global instance
+extern SupabaseRealtime supabaseRealtime;
+
+#endif // SUPABASE_REALTIME_H

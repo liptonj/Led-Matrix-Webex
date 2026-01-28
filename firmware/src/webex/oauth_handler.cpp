@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include "../common/ca_certs.h"
 
 OAuthHandler::OAuthHandler()
     : config_manager(nullptr), token_expiry(0) {
@@ -59,7 +60,7 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     }
     
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_WEBEX);
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);
@@ -115,7 +116,7 @@ bool OAuthHandler::refreshAccessToken() {
     }
     
     WiFiClientSecure client;
-    client.setInsecure(); // TODO: Add proper certificate validation
+    client.setCACert(CA_CERT_BUNDLE_WEBEX);
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);

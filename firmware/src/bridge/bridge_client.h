@@ -1,9 +1,9 @@
 /**
  * @file bridge_client.h
  * @brief Bridge WebSocket Client Header
- * 
+ *
  * Uses Links2004 WebSockets library with SSL certificate bundle.
- * 
+ *
  * Supports two modes:
  * 1. Legacy mode: Direct presence subscription (original behavior)
  * 2. Pairing mode: Join a pairing room to receive status from embedded app
@@ -44,21 +44,21 @@ typedef void (*BridgeCommandHandler)(const BridgeCommand& cmd);
 
 /**
  * @brief Bridge WebSocket Client Class
- * 
+ *
  * Connects to the Node.js bridge server for real-time presence updates.
  */
 class BridgeClient {
 public:
     BridgeClient();
     ~BridgeClient();
-    
+
     /**
      * @brief Initialize and connect to bridge (legacy mode)
      * @param host Bridge server hostname or IP
      * @param port Bridge server port
      */
     void begin(const String& host, uint16_t port);
-    
+
     /**
      * @brief Initialize and connect to bridge with pairing code
      * @param host Bridge server hostname or IP
@@ -66,7 +66,7 @@ public:
      * @param pairing_code 6-character pairing code
      */
     void beginWithPairing(const String& host, uint16_t port, const String& pairing_code);
-    
+
     /**
      * @brief Initialize and connect to bridge using a URL
      * Supports ws:// and wss:// URLs
@@ -74,101 +74,101 @@ public:
      * @param pairing_code 6-character pairing code
      */
     void beginWithUrl(const String& url, const String& pairing_code);
-    
+
     /**
      * @brief Process WebSocket events
      */
     void loop();
-    
+
     /**
      * @brief Check if connected to bridge
      * @return true if connected
      */
     bool isConnected() const { return connected; }
-    
+
     /**
      * @brief Check if joined to pairing room
      * @return true if joined
      */
     bool isJoined() const { return joined_room; }
-    
+
     /**
      * @brief Check if peer (app) is connected
      * @return true if app is connected
      */
     bool isPeerConnected() const { return peer_connected; }
-    
+
     /**
      * @brief Check if there's a pending update
      * @return true if update available
      */
     bool hasUpdate() const { return update_pending; }
-    
+
     /**
      * @brief Get the latest update
      * @return BridgeUpdate structure
      */
     BridgeUpdate getUpdate();
-    
+
     /**
      * @brief Disconnect from bridge
      */
     void disconnect();
-    
+
     /**
      * @brief Attempt to reconnect
      */
     void reconnect();
-    
+
     /**
      * @brief Set bridge server address
      * @param host Bridge hostname
      * @param port Bridge port
      */
     void setServer(const String& host, uint16_t port);
-    
+
     /**
      * @brief Set pairing code for connection
      * @param code Pairing code
      */
     void setPairingCode(const String& code);
-    
+
     /**
      * @brief Get current pairing code
      * @return Pairing code
      */
     String getPairingCode() const { return pairing_code; }
-    
+
     /**
      * @brief Check if using pairing mode
      * @return true if pairing mode enabled
      */
     bool isPairingMode() const { return !pairing_code.isEmpty(); }
-    
+
     /**
      * @brief Check if bridge client has been initialized (begin called)
      * @return true if initialized with a host
      */
     bool isInitialized() const { return !bridge_host.isEmpty(); }
-    
+
     /**
      * @brief Set command handler callback
      * @param handler Function to call when command received
      */
     void setCommandHandler(BridgeCommandHandler handler) { command_handler = handler; }
-    
+
     /**
      * @brief Check if there's a pending command
      * @return true if command available
      */
     bool hasCommand() const { return command_pending; }
-    
+
     /**
      * @brief Get the latest command
      * @return BridgeCommand structure
      */
     BridgeCommand getCommand();
-    
+
     /**
      * @brief Send command response back to app
      * @param requestId Request ID from the command
@@ -176,20 +176,28 @@ public:
      * @param data Response data (JSON object as string)
      * @param error Error message if failed
      */
-    void sendCommandResponse(const String& requestId, bool success, 
+    void sendCommandResponse(const String& requestId, bool success,
                             const String& data = "", const String& error = "");
-    
+
     /**
      * @brief Send current config to app
      * @param config JSON config object as string
      */
     void sendConfig(const String& config);
-    
+
     /**
      * @brief Send current status to app
      * @param status JSON status object as string
      */
     void sendStatus(const String& status);
+
+    /**
+     * @brief Send debug log to bridge
+     * @param level Log level (debug, info, warn, error)
+     * @param message Log message
+     * @param metadata Optional JSON metadata
+     */
+    void sendDebugLog(const String& level, const String& message, const String& metadata = "");
 
 private:
     WebSocketsClient ws_client;
@@ -207,7 +215,7 @@ private:
     BridgeCommand last_command;
     BridgeCommandHandler command_handler;
     unsigned long last_reconnect;
-    
+
     /**
      * @brief Parse a WebSocket URL into host, port, SSL flag, and path
      * @param url Full URL (ws:// or wss://)
@@ -218,7 +226,7 @@ private:
      * @return true if parsing succeeded
      */
     bool parseUrl(const String& url, String& host, uint16_t& port, bool& ssl, String& path);
-    
+
     void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);
     void parseMessage(const String& message);
     void sendSubscribe();

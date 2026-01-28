@@ -40,6 +40,10 @@ struct AppState {
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
     unsigned long last_bridge_status_time = 0;  // Track when last status received from bridge
+    // Supabase state sync (Phase A)
+    bool supabase_connected = false;           // Successfully authenticated with Supabase
+    bool supabase_app_connected = false;       // App connected via Supabase (redundant with embedded_app_connected but explicit)
+    unsigned long last_supabase_sync = 0;      // Last successful state sync with Supabase
     // Time tracking
     bool time_synced = false;
 };

@@ -16,20 +16,8 @@ const nextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
       },
-      {
-        source: '/updates/manifest.json',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Cache-Control', value: 'public, max-age=300' },
-        ],
-      },
-      {
-        source: '/updates/firmware/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Cache-Control', value: 'public, max-age=86400' },
-        ],
-      },
+      // Note: Firmware manifests are now served by Supabase Edge Functions (get-manifest)
+      // The old /updates/* paths have been removed - use Supabase configuration instead
       {
         source: '/embedded/:path*',
         headers: [

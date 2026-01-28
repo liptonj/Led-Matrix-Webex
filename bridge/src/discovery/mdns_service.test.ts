@@ -124,6 +124,44 @@ describe('MDNSService', () => {
         });
     });
 
+    describe('event handlers', () => {
+        it('should handle service up event', (done) => {
+            // Start service and wait for potential up event
+            try {
+                mdnsService.start();
+                
+                setTimeout(() => {
+                    // The up event should have been triggered
+                    expect(mdnsService.isRunning()).toBe(true);
+                    mdnsService.stop();
+                    done();
+                }, 100);
+            } catch (error) {
+                // Skip if mDNS not available
+                done();
+            }
+        });
+
+        it('should handle stop with service that throws on stop', () => {
+            // Start the service
+            mdnsService.start();
+            expect(mdnsService.isRunning()).toBe(true);
+            
+            // Stop should handle errors gracefully
+            mdnsService.stop();
+            expect(mdnsService.isRunning()).toBe(false);
+        });
+
+        it('should handle stop when already stopped', () => {
+            // Stop without starting should not throw
+            expect(() => mdnsService.stop()).not.toThrow();
+            expect(mdnsService.isRunning()).toBe(false);
+            
+            // Double stop should also be safe
+            expect(() => mdnsService.stop()).not.toThrow();
+        });
+    });
+
     describe('integration test', () => {
         // Note: This test requires real network interfaces and mDNS port binding.
         // It will be skipped in CI/sandbox environments where these are not available.

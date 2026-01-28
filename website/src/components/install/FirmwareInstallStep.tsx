@@ -12,8 +12,19 @@ interface FirmwareInstallStepProps {
   onContinue: () => void;
 }
 
-// Only use the full firmware manifest (includes bootloader, partitions, and firmware)
-const MANIFEST = '/updates/manifest-firmware-esp32s3.json';
+// Use Supabase Edge Function for ESP Web Tools manifest
+// Returns null if Supabase is not configured
+function getEspWebToolsManifestUrl(): string | null {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1/get-manifest?format=esp-web-tools`;
+  }
+  // Supabase URL is required - no fallback available
+  return null;
+}
+
+const MANIFEST = getEspWebToolsManifestUrl();
+const SUPABASE_CONFIGURED = MANIFEST !== null;
 
 export function FirmwareInstallStep({
   flashStatus,
@@ -28,22 +39,43 @@ export function FirmwareInstallStep({
         Flash your ESP32-S3 device with the LED Matrix firmware
       </p>
 
+      {/* Configuration Error */}
+      {!SUPABASE_CONFIGURED && (
+        <Alert variant="danger" className="mb-6">
+          <strong>Configuration Required:</strong> Supabase is not configured. 
+          Please set the <code>NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
+          <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> environment variables to enable 
+          firmware downloads.
+        </Alert>
+      )}
+
       {/* Info about WiFi setup */}
-      <Alert variant="success" className="mb-6">
-        <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
-        WiFi directly in the installation dialog. No separate setup required.
-      </Alert>
+      {SUPABASE_CONFIGURED && (
+        <Alert variant="success" className="mb-6">
+          <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
+          WiFi directly in the installation dialog. No separate setup required.
+        </Alert>
+      )}
 
       {/* Install Button */}
       <div className="flex justify-center mb-6">
-        <EspWebInstallButton manifest={MANIFEST}>
+        {SUPABASE_CONFIGURED && MANIFEST ? (
+          <EspWebInstallButton manifest={MANIFEST}>
+            <button 
+              slot="activate"
+              className="bg-success text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-pointer transition-all hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
+            >
+              Install Firmware
+            </button>
+          </EspWebInstallButton>
+        ) : (
           <button 
-            slot="activate"
-            className="bg-success text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-pointer transition-all hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
+            disabled
+            className="bg-gray-400 text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-not-allowed opacity-50"
           >
-            Install Firmware
+            Install Firmware (Unavailable)
           </button>
-        </EspWebInstallButton>
+        )}
       </div>
 
       {/* Status */}

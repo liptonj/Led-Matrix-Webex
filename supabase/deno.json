@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom"]
+  },
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "djwt": "https://deno.land/x/djwt@v3.0.1/mod.ts",
+    "std/crypto": "https://deno.land/std@0.208.0/crypto/mod.ts",
+    "std/encoding/base64": "https://deno.land/std@0.208.0/encoding/base64.ts"
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-import-prefix"]
+    }
+  }
+}

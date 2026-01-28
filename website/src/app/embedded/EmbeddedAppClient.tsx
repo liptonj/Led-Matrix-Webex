@@ -1,19 +1,30 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import Script from 'next/script';
-import Image from 'next/image';
-import { Button, Card, Alert } from '@/components/ui';
-import { formatStatus } from '@/lib/utils';
-import { useWebSocket, useWebexSDK } from '@/hooks';
+import { Alert, Button, Card } from '@/components/ui';
+import { useWebexSDK } from '@/hooks';
 import type { WebexStatus } from '@/hooks/useWebexSDK';
+import { formatStatus } from '@/lib/utils';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import Image from 'next/image';
+import Script from 'next/script';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Configuration
 const CONFIG = {
-  storageKeyBridgeUrl: 'led_matrix_bridge_url',
   storageKeyPairingCode: 'led_matrix_pairing_code',
-  bridgeConfigUrl: '/api/bridge-config.json',
+  tokenRefreshThresholdMs: 5 * 60 * 1000, // Refresh token 5 minutes before expiry
+  heartbeatIntervalMs: 30 * 1000, // Update app_last_seen every 30 seconds
+  // Feature flag: use Edge Functions instead of direct DB updates for better security
+  useEdgeFunctions: process.env.NEXT_PUBLIC_USE_SUPABASE_EDGE_FUNCTIONS === 'true',
 };
+
+// Token exchange types
+interface AppToken {
+  serial_number: string;
+  device_id: string;
+  token: string;
+  expires_at: string;
+}
 
 type TabId = 'status' | 'display' | 'webex' | 'system';
 
@@ -41,6 +52,8 @@ interface DeviceStatus {
   in_call?: boolean;
   pairing_code?: string;
   ip_address?: string;
+  mac_address?: string;
+  serial_number?: string;
   firmware_version?: string;
   free_heap?: number;
   uptime?: number;
@@ -60,8 +73,6 @@ export function EmbeddedAppClient() {
   const [showSetup, setShowSetup] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('status');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [discoveredBridgeUrl, setDiscoveredBridgeUrl] = useState('');
-  const [bridgeUrl, setBridgeUrl] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [manualStatus, setManualStatus] = useState<WebexStatus>('active');
   const [manualDisplayName, setManualDisplayName] = useState('User');
@@ -73,7 +84,7 @@ export function EmbeddedAppClient() {
   const [activityLog, setActivityLog] = useState<{ time: string; message: string }[]>([
     { time: new Date().toLocaleTimeString('en-US', { hour12: false }), message: 'Initializing...' },
   ]);
-  
+
   // Device settings state
   const [deviceConfig, setDeviceConfig] = useState<DeviceConfig>({});
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({});
@@ -83,30 +94,287 @@ export function EmbeddedAppClient() {
   const [isRebooting, setIsRebooting] = useState(false);
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
+  // App authentication token state
+  const [appToken, setAppToken] = useState<AppToken | null>(null);
+  const tokenRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Supabase realtime client state
+  const supabaseRef = useRef<SupabaseClient | null>(null);
+  const pairingChannelRef = useRef<ReturnType<SupabaseClient['channel']> | null>(null);
+  const [rtStatus, setRtStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const addLog = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     setActivityLog(prev => [{ time, message }, ...prev.slice(0, 29)]);
   }, []);
 
-  const bridgeUrlToUse = bridgeUrl || discoveredBridgeUrl;
+  // Exchange pairing code for app token
+  const exchangePairingCode = useCallback(async (code: string): Promise<AppToken | null> => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      console.warn('Supabase URL not configured, skipping token exchange');
+      return null;
+    }
 
-  const {
-    status: wsStatus,
-    lastMessage,
-    connect,
-    disconnect,
-    send,
-    sendCommand,
-  } = useWebSocket({
-    url: bridgeUrlToUse,
-    onError: () => setConnectionError('WebSocket connection error. Check the bridge URL and network.'),
-    onClose: () => {
-      setIsPaired(false);
-      setIsPeerConnected(false);
-      setDeviceConfig({});
-      setDeviceStatus({});
-    },
-  });
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/exchange-pairing-code`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pairing_code: code }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('Token exchange failed:', error);
+        addLog(`Token exchange failed: ${error.error || 'Unknown error'}`);
+        return null;
+      }
+
+      const token: AppToken = await response.json();
+      setAppToken(token);
+      addLog('Authentication token obtained');
+      return token;
+    } catch (err) {
+      console.error('Token exchange error:', err);
+      addLog('Failed to obtain auth token');
+      return null;
+    }
+  }, [addLog]);
+
+  // Check if token needs refresh
+  const shouldRefreshToken = useCallback((token: AppToken): boolean => {
+    const expiresAt = new Date(token.expires_at).getTime();
+    const now = Date.now();
+    return (expiresAt - now) < CONFIG.tokenRefreshThresholdMs;
+  }, []);
+
+  // Update app state via Edge Function (more secure than direct DB update)
+  const updateAppStateViaEdge = useCallback(async (stateData: {
+    webex_status?: string;
+    camera_on?: boolean;
+    mic_muted?: boolean;
+    in_call?: boolean;
+    display_name?: string;
+  }): Promise<boolean> => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl || !appToken) {
+      return false;
+    }
+
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/update-app-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${appToken.token}`,
+        },
+        body: JSON.stringify(stateData),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('update-app-state failed:', error);
+        return false;
+      }
+
+      const result = await response.json();
+      // Update peer connection status from Edge Function response
+      if (typeof result.device_connected === 'boolean') {
+        setIsPeerConnected(result.device_connected);
+      }
+      return true;
+    } catch (err) {
+      console.error('update-app-state error:', err);
+      return false;
+    }
+  }, [appToken]);
+
+  // Insert command via Edge Function (more secure than direct DB insert)
+  const insertCommandViaEdge = useCallback(async (
+    command: string,
+    payload: Record<string, unknown> = {}
+  ): Promise<{ success: boolean; command_id?: string; error?: string }> => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl || !appToken) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/insert-command`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${appToken.token}`,
+        },
+        body: JSON.stringify({ command, payload }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+        return { success: false, error: error.error || 'Command insert failed' };
+      }
+
+      const result = await response.json();
+      return { success: true, command_id: result.command_id };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+    }
+  }, [appToken]);
+
+  // Refresh token if needed
+  const refreshTokenIfNeeded = useCallback(async () => {
+    if (!appToken || !pairingCode) return;
+
+    if (shouldRefreshToken(appToken)) {
+      addLog('Refreshing authentication token...');
+      await exchangePairingCode(pairingCode);
+    }
+  }, [appToken, pairingCode, shouldRefreshToken, exchangePairingCode, addLog]);
+
+  // Setup token refresh interval
+  useEffect(() => {
+    if (appToken && isPaired) {
+      // Check every minute if token needs refresh
+      tokenRefreshIntervalRef.current = setInterval(refreshTokenIfNeeded, 60 * 1000);
+
+      return () => {
+        if (tokenRefreshIntervalRef.current) {
+          clearInterval(tokenRefreshIntervalRef.current);
+          tokenRefreshIntervalRef.current = null;
+        }
+      };
+    }
+  }, [appToken, isPaired, refreshTokenIfNeeded]);
+
+  const getSupabaseClient = useCallback((token: string): SupabaseClient => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    if (!supabaseUrl || !supabaseAnonKey) {
+      throw new Error('Supabase not configured (missing NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY)');
+    }
+    return createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+  }, []);
+
+  const subscribeToPairing = useCallback(async (code: string, token: string) => {
+    const supabase = getSupabaseClient(token);
+    supabaseRef.current = supabase;
+
+    if (pairingChannelRef.current) {
+      supabase.removeChannel(pairingChannelRef.current);
+      pairingChannelRef.current = null;
+    }
+
+    // Fetch initial pairing row
+    const { data: pairing } = await supabase
+      .schema('display')
+      .from('pairings')
+      .select('*')
+      .eq('pairing_code', code)
+      .single();
+
+    if (pairing) {
+      const lastSeen = pairing.device_last_seen ? new Date(pairing.device_last_seen).getTime() : 0;
+      setIsPeerConnected(!!pairing.device_connected && Date.now() - lastSeen < 60_000);
+    }
+
+    const channel = supabase
+      .channel(`pairing:${code}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'display', table: 'pairings', filter: `pairing_code=eq.${code}` },
+        (evt) => {
+          const row = (evt as { new: Record<string, unknown> }).new;
+          const lastSeen = row?.device_last_seen ? new Date(String(row.device_last_seen)).getTime() : 0;
+          if (typeof row?.device_connected === 'boolean') {
+            setIsPeerConnected(!!row.device_connected && Date.now() - lastSeen < 60_000);
+          }
+        },
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setRtStatus('connected');
+        } else if (status === 'CHANNEL_ERROR') {
+          setRtStatus('error');
+          setConnectionError('Realtime subscription error');
+        }
+      });
+
+    pairingChannelRef.current = channel;
+  }, [getSupabaseClient]);
+
+  const sendCommand = useCallback(async (command: string, payload: Record<string, unknown> = {}) => {
+    if (!supabaseRef.current || !appToken) {
+      throw new Error('Not connected');
+    }
+    const supabase = supabaseRef.current;
+    let commandId: string;
+
+    // Insert command - use Edge Function or direct DB based on feature flag
+    if (CONFIG.useEdgeFunctions) {
+      const result = await insertCommandViaEdge(command, payload);
+      if (!result.success || !result.command_id) {
+        throw new Error(result.error || 'Failed to queue command');
+      }
+      commandId = result.command_id;
+    } else {
+      // Direct database insert
+      const code = pairingCode.trim().toUpperCase();
+      const { data: inserted, error } = await supabase
+        .schema('display')
+        .from('commands')
+        .insert({
+          pairing_code: code,
+          serial_number: appToken.serial_number,
+          command,
+          payload,
+          status: 'pending',
+        })
+        .select('id')
+        .single();
+
+      if (error || !inserted?.id) {
+        throw new Error(error?.message || 'Failed to queue command');
+      }
+      commandId = inserted.id as string;
+    }
+
+    // Subscribe to command updates (same for both modes)
+    return await new Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error(`Command "${command}" timed out`)), 10_000);
+
+      const channel = supabase
+        .channel(`cmd:${commandId}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'display', table: 'commands', filter: `id=eq.${commandId}` },
+          (evt) => {
+            const row = (evt as { new: Record<string, unknown> }).new;
+            if (row?.status === 'acked') {
+              clearTimeout(timeout);
+              supabase.removeChannel(channel);
+              resolve({ success: true, data: (row.response as Record<string, unknown>) || undefined });
+            } else if (row?.status === 'failed' || row?.status === 'expired') {
+              clearTimeout(timeout);
+              supabase.removeChannel(channel);
+              resolve({ success: false, error: String(row.error || `Command ${row.status}`) });
+            }
+          },
+        )
+        .subscribe((status) => {
+          if (status === 'CHANNEL_ERROR') {
+            clearTimeout(timeout);
+            supabase.removeChannel(channel);
+            reject(new Error('Failed to subscribe to command updates'));
+          }
+        });
+    });
+  }, [appToken, pairingCode, insertCommandViaEdge]);
 
   const {
     isReady: webexReady,
@@ -129,42 +397,23 @@ export function EmbeddedAppClient() {
   }, [initialize, sdkLoaded]);
 
   useEffect(() => {
-    async function fetchBridgeConfig() {
-      try {
-        const response = await fetch(CONFIG.bridgeConfigUrl);
-        if (response.ok) {
-          const config = await response.json();
-          if (config.bridge?.url) {
-            setDiscoveredBridgeUrl(config.bridge.url);
-            addLog(`Bridge discovered: ${config.bridge.url}`);
-          }
-        }
-      } catch {
-        setDiscoveredBridgeUrl('wss://bridge.5ls.us');
-      }
-    }
-
-    fetchBridgeConfig();
-
-    const savedBridgeUrl = localStorage.getItem(CONFIG.storageKeyBridgeUrl);
     const savedPairingCode = localStorage.getItem(CONFIG.storageKeyPairingCode);
-    if (savedBridgeUrl && savedPairingCode) {
-      setBridgeUrl(savedBridgeUrl);
+    if (savedPairingCode) {
       setPairingCode(savedPairingCode);
       autoConnectRef.current = true;
     }
   }, [addLog]);
 
   useEffect(() => {
-    if (autoConnectRef.current && bridgeUrlToUse && pairingCode && wsStatus === 'disconnected') {
+    if (autoConnectRef.current && pairingCode && rtStatus === 'disconnected') {
       addLog('Found saved connection, reconnecting...');
-      connect();
+      // connect happens via handleConnect (below)
       autoConnectRef.current = false;
     }
-  }, [addLog, bridgeUrlToUse, pairingCode, wsStatus, connect]);
+  }, [addLog, pairingCode, rtStatus]);
 
   useEffect(() => {
-    if (wsStatus !== 'connected') {
+    if (rtStatus !== 'connected') {
       joinRequestedRef.current = false;
       return;
     }
@@ -172,22 +421,21 @@ export function EmbeddedAppClient() {
 
     const code = pairingCode.toUpperCase();
     const displayName = user?.displayName || manualDisplayName;
-
-    send({
-      type: 'join',
-      code,
-      clientType: 'app',
-      deviceId: user?.id || 'webex-app',
+    // Mark app connected + set initial state
+    supabaseRef.current?.schema('display').from('pairings').update({
+      app_connected: true,
+      app_last_seen: new Date().toISOString(),
       display_name: displayName,
-    });
+    }).eq('pairing_code', code).then(() => {}, () => {});
+
     joinRequestedRef.current = true;
-    addLog(`Joining room ${code}...`);
-  }, [wsStatus, pairingCode, send, user, manualDisplayName, addLog]);
+    addLog(`Joined pairing ${code}`);
+  }, [rtStatus, pairingCode, user, manualDisplayName, addLog]);
 
   // Fetch device config when peer connects
   const fetchDeviceConfig = useCallback(async () => {
     if (!isPeerConnected) return;
-    
+
     try {
       addLog('Fetching device config...');
       const response = await sendCommand('get_config');
@@ -213,7 +461,7 @@ export function EmbeddedAppClient() {
   // Fetch device status
   const fetchDeviceStatus = useCallback(async () => {
     if (!isPeerConnected) return;
-    
+
     try {
       const response = await sendCommand('get_status');
       if (response.success && response.data) {
@@ -224,75 +472,8 @@ export function EmbeddedAppClient() {
     }
   }, [isPeerConnected, sendCommand]);
 
-  useEffect(() => {
-    if (!lastMessage) return;
+  // Bridge websocket message handling removed (Supabase Realtime is the transport)
 
-    switch (lastMessage.type) {
-      case 'connection':
-        addLog('Bridge connection established');
-        break;
-      case 'joined': {
-        const data = lastMessage.data as { code?: string; displayConnected?: boolean };
-        setIsPaired(true);
-        setShowSetup(false);
-        setConnectionError(null);
-        if (typeof data?.displayConnected === 'boolean') {
-          setIsPeerConnected(data.displayConnected);
-        }
-        if (data?.code) {
-          addLog(`Joined room ${data.code}`);
-        }
-        break;
-      }
-      case 'peer_connected':
-        setIsPeerConnected(true);
-        addLog('Display connected');
-        break;
-      case 'peer_disconnected':
-        setIsPeerConnected(false);
-        addLog('Display disconnected');
-        break;
-      case 'status':
-        if (!webexReady) {
-          if (typeof lastMessage.status === 'string') {
-            setManualStatus(lastMessage.status as WebexStatus);
-          }
-          if (typeof lastMessage.camera_on === 'boolean') {
-            setManualCameraOn(lastMessage.camera_on);
-          }
-          if (typeof lastMessage.mic_muted === 'boolean') {
-            setManualMicMuted(lastMessage.mic_muted);
-          }
-          if (typeof lastMessage.in_call === 'boolean') {
-            setManualInCall(lastMessage.in_call);
-          }
-        }
-        break;
-      case 'config':
-        // Config response from display
-        if (lastMessage.data) {
-          const config = lastMessage.data as unknown as DeviceConfig;
-          setDeviceConfig(config);
-          if (config.brightness !== undefined) {
-            setBrightness(config.brightness);
-          }
-          if (config.device_name) {
-            setDeviceName(config.device_name);
-          }
-          if (config.display_name) {
-            setManualDisplayName(config.display_name);
-          }
-        }
-        break;
-      case 'error':
-        setConnectionError(lastMessage.message as string || 'Bridge error');
-        addLog(`Bridge error: ${lastMessage.message || 'Unknown error'}`);
-        break;
-      default:
-        break;
-    }
-  }, [lastMessage, addLog, webexReady]);
-  
   // Fetch config when display connects
   useEffect(() => {
     if (isPeerConnected) {
@@ -302,12 +483,12 @@ export function EmbeddedAppClient() {
   }, [isPeerConnected, fetchDeviceConfig, fetchDeviceStatus]);
 
   useEffect(() => {
-    if (wsStatus === 'disconnected') {
+    if (rtStatus === 'disconnected') {
       setShowSetup(true);
       setIsPaired(false);
       setIsPeerConnected(false);
     }
-  }, [wsStatus]);
+  }, [rtStatus]);
 
   const statusToDisplay = webexReady ? webexStatus : manualStatus;
   const displayName = user?.displayName || manualDisplayName;
@@ -328,47 +509,114 @@ export function EmbeddedAppClient() {
       ? normalizedStatus
       : 'offline';
 
+  // Push current status into display.pairings (cached + realtime)
+  // Uses Edge Function when feature flag is enabled for better security/rate limiting
   useEffect(() => {
-    if (wsStatus !== 'connected' || !isPaired) return;
-
-    send({
-      type: 'status',
-      status: statusToDisplay,
-      camera_on: cameraOn,
-      mic_muted: micMuted,
-      in_call: inCall,
-      display_name: displayName,
-    });
-  }, [wsStatus, isPaired, statusToDisplay, cameraOn, micMuted, inCall, displayName, send]);
-
-  const handleConnect = () => {
-    const url = bridgeUrlToUse.trim();
+    if (rtStatus !== 'connected' || !isPaired) return;
     const code = pairingCode.trim().toUpperCase();
-    if (!url || !code) {
-      setConnectionError('Please enter both bridge URL and pairing code');
+    if (!code) return;
+
+    if (CONFIG.useEdgeFunctions) {
+      // Use Edge Function for status update (includes rate limiting)
+      updateAppStateViaEdge({
+        webex_status: statusToDisplay,
+        camera_on: cameraOn,
+        mic_muted: micMuted,
+        in_call: inCall,
+        display_name: displayName,
+      }).catch(() => {});
+    } else {
+      // Direct database update (fallback)
+      const supabase = supabaseRef.current;
+      if (!supabase) return;
+      supabase
+        .schema('display')
+        .from('pairings')
+        .update({
+          app_connected: true,
+          app_last_seen: new Date().toISOString(),
+          webex_status: statusToDisplay,
+          camera_on: cameraOn,
+          mic_muted: micMuted,
+          in_call: inCall,
+          display_name: displayName,
+        })
+        .eq('pairing_code', code)
+        .then(() => {}, () => {});
+    }
+  }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, updateAppStateViaEdge]);
+
+  const handleConnect = useCallback(async () => {
+    const code = pairingCode.trim().toUpperCase();
+    if (!code) {
+      setConnectionError('Please enter a pairing code');
       return;
     }
 
-    if (!bridgeUrl) {
-      setBridgeUrl(url);
-    }
     setPairingCode(code);
-    localStorage.setItem(CONFIG.storageKeyBridgeUrl, url);
     localStorage.setItem(CONFIG.storageKeyPairingCode, code);
     setConnectionError(null);
-    addLog(`Connecting to ${url}...`);
-    connect();
-  };
+    setRtStatus('connecting');
+    addLog('Connecting to Supabase...');
 
-  const handleDisconnect = () => {
-    disconnect();
-    localStorage.removeItem(CONFIG.storageKeyBridgeUrl);
+    let token = appToken;
+    if (!token || shouldRefreshToken(token)) {
+      token = await exchangePairingCode(code);
+    }
+    if (!token) {
+      setRtStatus('error');
+      setConnectionError('Failed to obtain auth token');
+      return;
+    }
+
+    try {
+      await subscribeToPairing(code, token.token);
+      setIsPaired(true);
+      setShowSetup(false);
+      setRtStatus('connected');
+      addLog(`Connected (pairing ${code})`);
+
+      // Heartbeat: keep app_connected and app_last_seen fresh
+      // Uses Edge Function when feature flag is enabled for consistent rate limiting
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
+      heartbeatIntervalRef.current = setInterval(() => {
+        if (CONFIG.useEdgeFunctions) {
+          // Edge Function heartbeat - just send empty update to refresh app_last_seen
+          updateAppStateViaEdge({}).catch(() => {});
+        } else {
+          // Direct database heartbeat
+          supabaseRef.current?.schema('display').from('pairings').update({
+            app_connected: true,
+            app_last_seen: new Date().toISOString(),
+          }).eq('pairing_code', code).then(() => {}, () => {});
+        }
+      }, CONFIG.heartbeatIntervalMs);
+    } catch (err) {
+      setRtStatus('error');
+      setConnectionError(err instanceof Error ? err.message : 'Failed to connect');
+    }
+  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge]);
+
+  const handleDisconnect = useCallback(() => {
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+    if (pairingChannelRef.current && supabaseRef.current) {
+      supabaseRef.current.removeChannel(pairingChannelRef.current);
+      pairingChannelRef.current = null;
+    }
+    supabaseRef.current = null;
+
     localStorage.removeItem(CONFIG.storageKeyPairingCode);
     setShowSetup(true);
     setIsPaired(false);
     setIsPeerConnected(false);
+    setRtStatus('disconnected');
     addLog('Disconnected');
-  };
+  }, [addLog]);
 
   const handleStatusChange = (status: WebexStatus) => {
     if (webexReady) {
@@ -401,18 +649,18 @@ export function EmbeddedAppClient() {
 
   // Debounced brightness sender
   const brightnessTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Handle brightness change (debounced - sends after slider stops moving)
   const handleBrightnessChange = useCallback((value: number) => {
     setBrightness(value);
-    
+
     if (!isPeerConnected) return;
-    
+
     // Clear previous timeout
     if (brightnessTimeoutRef.current) {
       clearTimeout(brightnessTimeoutRef.current);
     }
-    
+
     // Debounce - send after 150ms of no changes
     brightnessTimeoutRef.current = setTimeout(async () => {
       try {
@@ -422,7 +670,7 @@ export function EmbeddedAppClient() {
       }
     }, 150);
   }, [isPeerConnected, sendCommand]);
-  
+
   // Cleanup brightness timeout on unmount
   useEffect(() => {
     return () => {
@@ -438,16 +686,16 @@ export function EmbeddedAppClient() {
       addLog('Cannot save - display not connected');
       return;
     }
-    
+
     setIsSaving(true);
     addLog('Saving display settings...');
-    
+
     try {
       const response = await sendCommand('set_config', {
         display_name: manualDisplayName,
         brightness,
       });
-      
+
       if (response.success) {
         addLog('Settings saved successfully');
         // Update local config from response
@@ -470,10 +718,10 @@ export function EmbeddedAppClient() {
       addLog('Cannot reboot - display not connected');
       return;
     }
-    
+
     setIsRebooting(true);
     addLog('Sending reboot command...');
-    
+
     try {
       await sendCommand('reboot');
       addLog('Reboot command sent - device will restart');
@@ -484,12 +732,12 @@ export function EmbeddedAppClient() {
     }
   }, [isPeerConnected, sendCommand, addLog]);
 
-  const isBridgeConnected = wsStatus === 'connected';
+  const isBridgeConnected = rtStatus === 'connected';
   const connectionLabel = isBridgeConnected
     ? isPeerConnected
       ? 'Connected'
       : 'Waiting for display'
-    : wsStatus === 'connecting'
+    : rtStatus === 'connecting'
       ? 'Connecting...'
       : 'Disconnected';
   const connectionTextColor = isBridgeConnected
@@ -506,7 +754,7 @@ export function EmbeddedAppClient() {
   return (
     <>
       {/* Webex SDK Script */}
-      <Script 
+      <Script
         src="https://binaries.webex.com/static-content-pipeline/webex-embedded-app/v1/webex-embedded-app-sdk.js"
         strategy="afterInteractive"
         onLoad={() => setSdkLoaded(true)}
@@ -535,24 +783,10 @@ export function EmbeddedAppClient() {
             <Card className="mb-6">
               <h2 className="text-lg font-semibold mb-4">Connect to Your Display</h2>
               <p className="text-sm text-[var(--color-text-muted)] mb-6">
-                Connect via WebSocket bridge for real-time status sync.
+                Connect using Supabase Realtime for status sync and configuration commands.
               </p>
 
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Bridge URL</label>
-                  <input
-                    type="text"
-                    placeholder={discoveredBridgeUrl || 'wss://bridge.example.com'}
-                    value={bridgeUrl}
-                    onChange={(event) => setBridgeUrl(event.target.value)}
-                    className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                  />
-                  <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                    {discoveredBridgeUrl && `Auto-discovered: ${discoveredBridgeUrl}`}
-                  </p>
-                </div>
-
                 <div>
                   <label className="block text-sm font-medium mb-2">Pairing Code</label>
                   <input
@@ -573,17 +807,16 @@ export function EmbeddedAppClient() {
                 )}
 
                 <Button variant="primary" block onClick={handleConnect}>
-                  Connect via Bridge
+                  Connect
                 </Button>
               </div>
 
               <div className="mt-6 p-4 bg-[var(--color-surface-alt)] rounded-lg">
-                <h3 className="font-medium mb-2">Bridge Connection (Recommended):</h3>
+                <h3 className="font-medium mb-2">How it works:</h3>
                 <ol className="text-sm text-[var(--color-text-muted)] list-decimal list-inside space-y-1">
-                  <li>Install the Webex Bridge add-on in Home Assistant</li>
-                  <li>Expose via Cloudflare Tunnel</li>
                   <li>Your LED display will show a 6-character pairing code</li>
-                  <li>Enter the bridge URL and pairing code above</li>
+                  <li>Enter the pairing code above</li>
+                  <li>Status and commands are synced via Supabase (cached in the database)</li>
                 </ol>
               </div>
             </Card>
@@ -739,8 +972,8 @@ export function EmbeddedAppClient() {
                         <span>Bright</span>
                       </div>
                     </div>
-                    <Button 
-                      variant="primary" 
+                    <Button
+                      variant="primary"
                       onClick={handleSaveSettings}
                       disabled={!isPeerConnected || isSaving}
                     >
@@ -753,12 +986,16 @@ export function EmbeddedAppClient() {
                   <h3 className="font-medium mb-4">Connected Display</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-[var(--color-text-muted)]">IP Address:</span>
-                      <span className="ml-2">{deviceStatus.ip_address || 'Unknown'}</span>
+                      <span className="text-[var(--color-text-muted)]">Serial Number:</span>
+                      <span className="ml-2 font-mono">{deviceStatus.serial_number || 'Unknown'}</span>
                     </div>
                     <div>
                       <span className="text-[var(--color-text-muted)]">Pairing Code:</span>
                       <span className="ml-2 font-mono">{pairingCode}</span>
+                    </div>
+                    <div>
+                      <span className="text-[var(--color-text-muted)]">IP Address:</span>
+                      <span className="ml-2">{deviceStatus.ip_address || 'Unknown'}</span>
                     </div>
                     <div>
                       <span className="text-[var(--color-text-muted)]">Firmware:</span>
@@ -803,6 +1040,10 @@ export function EmbeddedAppClient() {
                     <h2 className="text-lg font-semibold mb-4">System Information</h2>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
+                        <span className="text-[var(--color-text-muted)]">Serial Number:</span>
+                        <span className="ml-2 font-mono">{deviceStatus.serial_number || 'Unknown'}</span>
+                      </div>
+                      <div>
                         <span className="text-[var(--color-text-muted)]">App Version:</span>
                         <span className="ml-2">v1.4.5</span>
                       </div>
@@ -821,21 +1062,21 @@ export function EmbeddedAppClient() {
                       <div>
                         <span className="text-[var(--color-text-muted)]">Free Memory:</span>
                         <span className="ml-2">
-                          {deviceStatus.free_heap 
-                            ? `${Math.round(deviceStatus.free_heap / 1024)} KB` 
+                          {deviceStatus.free_heap
+                            ? `${Math.round(deviceStatus.free_heap / 1024)} KB`
                             : 'Unknown'}
                         </span>
                       </div>
                       <div>
                         <span className="text-[var(--color-text-muted)]">Uptime:</span>
                         <span className="ml-2">
-                          {deviceStatus.uptime 
-                            ? `${Math.floor(deviceStatus.uptime / 3600)}h ${Math.floor((deviceStatus.uptime % 3600) / 60)}m` 
+                          {deviceStatus.uptime
+                            ? `${Math.floor(deviceStatus.uptime / 3600)}h ${Math.floor((deviceStatus.uptime % 3600) / 60)}m`
                             : 'Unknown'}
                         </span>
                       </div>
                     </div>
-                    
+
                     {deviceStatus.temperature !== undefined && deviceStatus.temperature > 0 && (
                       <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
                         <h3 className="font-medium mb-2">Sensor Data</h3>
@@ -860,15 +1101,15 @@ export function EmbeddedAppClient() {
                     <p className="text-sm text-[var(--color-text-muted)] mb-4">
                       Restart the display device if it&apos;s not responding correctly.
                     </p>
-                    
-                    <Button 
-                      variant="warning" 
+
+                    <Button
+                      variant="warning"
                       onClick={handleReboot}
                       disabled={isRebooting || !isPeerConnected}
                     >
                       {isRebooting ? 'Rebooting...' : 'Reboot Device'}
                     </Button>
-                    
+
                     {!isPeerConnected && (
                       <p className="text-xs text-[var(--color-text-muted)] mt-2">
                         Connect to a display to use this function.

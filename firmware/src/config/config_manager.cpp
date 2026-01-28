@@ -107,7 +107,7 @@ void ConfigManager::loadCache() const {
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
     cached_page_interval_ms = loadUInt("page_interval", DEFAULT_PAGE_INTERVAL_MS);
     cached_sensor_page_enabled = loadBool("sensor_page", true);
-    
+
     // Load MQTT config using existing preferences handle
     cached_mqtt_broker = loadString("mqtt_broker");
     cached_mqtt_port = loadUInt("mqtt_port", 1883);
@@ -117,19 +117,23 @@ void ConfigManager::loadCache() const {
     cached_sensor_macs = loadString("sensor_macs");
     cached_display_sensor_mac = loadString("display_sensor_mac");
     cached_display_metric = loadString("display_metric", "tvoc");
-    
+
     // Load time config
     cached_time_zone = loadString("time_zone", "UTC");
     cached_ntp_server = loadString("ntp_server", "pool.ntp.org");
     cached_time_format = loadString("time_format", "24h");
     cached_date_format = loadString("date_format", "mdy");
-    
+
     // Load bridge config
     cached_bridge_url = loadString("bridge_url", "");
     cached_bridge_host = loadString("bridge_host", "");
     cached_bridge_port = loadUInt("bridge_port", 443);
     cached_bridge_use_ssl = loadBool("bridge_ssl", true);
-    
+
+    // Load Supabase config
+    cached_supabase_url = loadString("supabase_url", "");
+    cached_supabase_anon_key = loadString("supabase_anon", "");
+
     cache_loaded = true;
 }
 
@@ -570,6 +574,56 @@ void ConfigManager::setOTAUrl(const String& url) {
     saveString("ota_url", url);
 }
 
+// Supabase Configuration
+
+String ConfigManager::getSupabaseUrl() const {
+    String url;
+    if (!cache_loaded) {
+        url = loadString("supabase_url", "");
+    } else {
+        url = cached_supabase_url;
+    }
+    
+    // Fall back to build-time default if not configured
+    #ifdef DEFAULT_SUPABASE_URL
+    if (url.isEmpty()) {
+        return DEFAULT_SUPABASE_URL;
+    }
+    #endif
+    
+    return url;
+}
+
+void ConfigManager::setSupabaseUrl(const String& url) {
+    saveString("supabase_url", url);
+    cached_supabase_url = url;
+    Serial.printf("[CONFIG] Supabase URL saved: %s\n", url.isEmpty() ? "(empty)" : url.c_str());
+}
+
+String ConfigManager::getSupabaseAnonKey() const {
+    String key;
+    if (!cache_loaded) {
+        key = loadString("supabase_anon", "");
+    } else {
+        key = cached_supabase_anon_key;
+    }
+    
+    // Fall back to build-time default if not configured
+    #ifdef DEFAULT_SUPABASE_ANON_KEY
+    if (key.isEmpty()) {
+        return DEFAULT_SUPABASE_ANON_KEY;
+    }
+    #endif
+    
+    return key;
+}
+
+void ConfigManager::setSupabaseAnonKey(const String& key) {
+    saveString("supabase_anon", key);
+    cached_supabase_anon_key = key;
+    Serial.printf("[CONFIG] Supabase anon key saved: %s\n", key.isEmpty() ? "(empty)" : "(set)");
+}
+
 bool ConfigManager::getAutoUpdate() const {
     return loadBool("auto_update", false);
 }
@@ -698,17 +752,17 @@ void ConfigManager::factoryReset() {
     Serial.println("[CONFIG] =========================================");
     Serial.println("[CONFIG] PERFORMING FULL FACTORY RESET");
     Serial.println("[CONFIG] =========================================");
-    
+
     // Step 1: Clear all NVS configuration
     Serial.println("[CONFIG] Step 1: Clearing NVS configuration...");
     preferences.clear();
     cache_loaded = false;
     loadCache();
     Serial.println("[CONFIG] ✓ NVS cleared");
-    
+
 #ifndef NATIVE_BUILD
     // ESP32-specific partition operations (not available in simulation)
-    
+
     // Step 2: Erase OTA data partition (forces boot to factory partition)
     Serial.println("[CONFIG] Step 2: Erasing OTA data partition...");
     const esp_partition_t* otadata_partition = esp_partition_find_first(
@@ -716,7 +770,7 @@ void ConfigManager::factoryReset() {
         ESP_PARTITION_SUBTYPE_DATA_OTA,
         NULL
     );
-    
+
     if (otadata_partition != NULL) {
         esp_err_t err = esp_partition_erase_range(otadata_partition, 0, otadata_partition->size);
         if (err == ESP_OK) {
@@ -725,7 +779,7 @@ void ConfigManager::factoryReset() {
             Serial.printf("[CONFIG] ⚠ Failed to erase OTA data: %s\n", esp_err_to_name(err));
         }
     }
-    
+
     // Step 3: Erase filesystem partition
     Serial.println("[CONFIG] Step 3: Erasing filesystem partition...");
     const esp_partition_t* spiffs_partition = esp_partition_find_first(
@@ -733,7 +787,7 @@ void ConfigManager::factoryReset() {
         ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
         NULL
     );
-    
+
     if (spiffs_partition != NULL) {
         esp_err_t err = esp_partition_erase_range(spiffs_partition, 0, spiffs_partition->size);
         if (err == ESP_OK) {
@@ -742,16 +796,16 @@ void ConfigManager::factoryReset() {
             Serial.printf("[CONFIG] ⚠ Failed to erase filesystem: %s\n", esp_err_to_name(err));
         }
     }
-    
+
     // Step 4: Optionally erase OTA partitions (free up space)
     Serial.println("[CONFIG] Step 4: Erasing OTA partitions...");
-    
+
     const esp_partition_t* ota_0 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP,
         ESP_PARTITION_SUBTYPE_APP_OTA_0,
         NULL
     );
-    
+
     if (ota_0 != NULL) {
         esp_err_t err = esp_partition_erase_range(ota_0, 0, ota_0->size);
         if (err == ESP_OK) {
@@ -760,13 +814,13 @@ void ConfigManager::factoryReset() {
             Serial.printf("[CONFIG] ⚠ Failed to erase OTA_0: %s\n", esp_err_to_name(err));
         }
     }
-    
+
     const esp_partition_t* ota_1 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP,
         ESP_PARTITION_SUBTYPE_APP_OTA_1,
         NULL
     );
-    
+
     if (ota_1 != NULL) {
         esp_err_t err = esp_partition_erase_range(ota_1, 0, ota_1->size);
         if (err == ESP_OK) {
@@ -778,7 +832,7 @@ void ConfigManager::factoryReset() {
 #else
     Serial.println("[CONFIG] Note: Partition erase skipped in simulation build");
 #endif
-    
+
     Serial.println("[CONFIG] =========================================");
     Serial.println("[CONFIG] FACTORY RESET COMPLETE");
     Serial.println("[CONFIG] Device will reboot to bootstrap firmware");
@@ -807,6 +861,8 @@ String ConfigManager::exportConfig() const {
     doc["display_metric"] = getDisplayMetric();
     doc["ota_url"] = getOTAUrl();
     doc["auto_update"] = getAutoUpdate();
+    doc["supabase_url"] = getSupabaseUrl();
+    doc["supabase_anon_key"] = getSupabaseAnonKey();
     doc["time_zone"] = getTimeZone();
     doc["ntp_server"] = getNtpServer();
     doc["time_format"] = getTimeFormat();
@@ -879,6 +935,12 @@ bool ConfigManager::importConfig(const String& json) {
     }
     if (doc["auto_update"].is<bool>()) {
         setAutoUpdate(doc["auto_update"].as<bool>());
+    }
+    if (doc["supabase_url"].is<const char*>()) {
+        setSupabaseUrl(doc["supabase_url"].as<const char*>());
+    }
+    if (doc["supabase_anon_key"].is<const char*>()) {
+        setSupabaseAnonKey(doc["supabase_anon_key"].as<const char*>());
     }
     if (doc["time_zone"].is<const char*>()) {
         setTimeZone(doc["time_zone"].as<const char*>());

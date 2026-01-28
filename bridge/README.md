@@ -312,6 +312,47 @@ ESP32 devices will automatically fail over if cloud bridge is unavailable.
 | `MDNS_SERVICE_NAME` | `webex-bridge` | mDNS service name |
 | `LOG_LEVEL` | `info` | Logging level (error, warn, info, debug) |
 | `DATA_DIR` | `./data` | Directory for persistent storage |
+| `SUPABASE_URL` | - | Supabase project URL (required for cloud mode) |
+| `SUPABASE_SERVICE_ROLE_KEY` | - | Supabase service role key (required for cloud mode) |
+| `REQUIRE_DEVICE_AUTH` | `true` | Require authentication for device/app connections |
+| `BRIDGE_APP_TOKEN_SECRET` | - | Secret for signing app JWT tokens (HS256) |
+| `ENABLE_BRIDGE_DEBUG_SUBSCRIBE` | `false` | Enable legacy bridge-based debug streaming |
+
+## Authentication Configuration
+
+When Supabase is enabled, the bridge supports authenticated connections for enhanced security.
+
+### Device Authentication (HMAC)
+
+ESP32 displays authenticate using HMAC signatures based on their device key:
+
+1. Device generates HMAC-SHA256 signature of `device_id + timestamp` using its secret key
+2. Signature is included in the `join` message
+3. Bridge validates signature against stored key hash
+
+### App Authentication (JWT)
+
+Webex Embedded Apps authenticate using short-lived JWT tokens:
+
+1. App calls `exchange-pairing-code` Edge Function with the pairing code
+2. Function returns a signed JWT token with the device's serial number
+3. App includes token in the `join` message under `app_auth.token`
+4. Bridge validates the JWT signature using `BRIDGE_APP_TOKEN_SECRET`
+
+### Configuration
+
+Set `REQUIRE_DEVICE_AUTH=true` (default when Supabase is enabled) to enforce authentication:
+
+```bash
+# Require authentication for all connections
+REQUIRE_DEVICE_AUTH=true
+
+# Secret for signing app tokens (must match Supabase Edge Function secret)
+# Generate with: openssl rand -base64 32
+BRIDGE_APP_TOKEN_SECRET=your_32_char_secret_here
+```
+
+**Important**: The `BRIDGE_APP_TOKEN_SECRET` must match the secret configured in your Supabase Edge Function secrets for the `exchange-pairing-code` function.
 
 ## License
 

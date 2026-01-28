@@ -1,0 +1,279 @@
+/**
+ * Insert Command Edge Function
+ *
+ * Embedded app calls this to queue a command for the device.
+ * The device polls for commands via poll-commands or receives them via realtime.
+ *
+ * Authentication: Bearer token (from exchange-pairing-code)
+ *
+ * Request body:
+ *   {
+ *     command: string,           // Command name (e.g., "set_brightness", "reboot")
+ *     payload?: object           // Optional command parameters
+ *   }
+ *
+ * Response:
+ *   {
+ *     success: true,
+ *     command_id: string,
+ *     expires_at: string
+ *   }
+ */
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+
+// Command expiry (5 minutes)
+const COMMAND_EXPIRY_SECONDS = 300;
+
+interface InsertCommandRequest {
+  command: string;
+  payload?: Record<string, unknown>;
+}
+
+interface InsertCommandResponse {
+  success: boolean;
+  command_id: string;
+  expires_at: string;
+}
+
+interface TokenPayload {
+  sub: string;
+  pairing_code: string;
+  serial_number: string;
+  token_type: string;
+  exp: number;
+}
+
+// Valid command names (whitelist for security)
+const VALID_COMMANDS = [
+  "set_brightness",
+  "set_config",
+  "get_config",
+  "get_status",
+  "reboot",
+  "factory_reset",
+  "ota_update",
+  "set_display_name",
+  "set_time_zone",
+  "clear_wifi",
+  "test_display",
+  "ping",
+];
+
+/**
+ * Validate bearer token and return app info
+ */
+async function validateAppToken(
+  authHeader: string | null,
+  tokenSecret: string,
+): Promise<{ valid: boolean; error?: string; token?: TokenPayload }> {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return { valid: false, error: "Missing or invalid Authorization header" };
+  }
+
+  const token = authHeader.substring(7);
+
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(tokenSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign", "verify"],
+    );
+
+    const payload = (await verify(token, key)) as unknown as TokenPayload;
+
+    // Verify token type - app tokens have type "app_auth"
+    if (payload.token_type !== "app") {
+      return { valid: false, error: "Invalid token type" };
+    }
+
+    return { valid: true, token: payload };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("expired")) {
+      return { valid: false, error: "Token expired" };
+    }
+    return { valid: false, error: "Invalid token" };
+  }
+}
+
+Deno.serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    // Only allow POST requests
+    if (req.method !== "POST") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Method not allowed" }),
+        {
+          status: 405,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
+    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET");
+    if (!tokenSecret) {
+      console.error("SUPABASE_JWT_SECRET not configured");
+      return new Response(
+        JSON.stringify({ success: false, error: "Server configuration error" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Validate app token
+    const authHeader = req.headers.get("Authorization");
+    const tokenResult = await validateAppToken(authHeader, tokenSecret);
+
+    if (!tokenResult.valid || !tokenResult.token) {
+      return new Response(
+        JSON.stringify({ success: false, error: tokenResult.error }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const appInfo = tokenResult.token;
+
+    // Parse request body
+    let commandData: InsertCommandRequest;
+    try {
+      commandData = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid JSON body" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Validate command name
+    if (!commandData.command || typeof commandData.command !== "string") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing or invalid command" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Validate command is in whitelist
+    if (!VALID_COMMANDS.includes(commandData.command)) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Invalid command. Valid commands: ${VALID_COMMANDS.join(", ")}`,
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Validate payload if provided
+    if (commandData.payload && typeof commandData.payload !== "object") {
+      return new Response(
+        JSON.stringify({ success: false, error: "Payload must be an object" }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Create Supabase client with service role
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    // Calculate expiry
+    const expiresAt = new Date(Date.now() + COMMAND_EXPIRY_SECONDS * 1000);
+
+    // Insert command
+    const { data: command, error: insertError } = await supabase
+      .schema("display")
+      .from("commands")
+      .insert({
+        pairing_code: appInfo.pairing_code,
+        serial_number: appInfo.serial_number,
+        command: commandData.command,
+        payload: commandData.payload || {},
+        status: "pending",
+        expires_at: expiresAt.toISOString(),
+      })
+      .select("id")
+      .single();
+
+    if (insertError) {
+      console.error("Failed to insert command:", insertError);
+
+      // Check if it's a foreign key error (pairing doesn't exist)
+      if (insertError.code === "23503") {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Pairing not found. Device may not be connected.",
+          }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: false, error: "Failed to queue command" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    console.log(
+      `Command ${commandData.command} queued for ${appInfo.pairing_code} (id: ${command.id})`,
+    );
+
+    const response: InsertCommandResponse = {
+      success: true,
+      command_id: command.id,
+      expires_at: expiresAt.toISOString(),
+    };
+
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("Unexpected error:", err);
+    return new Response(
+      JSON.stringify({ success: false, error: "Internal server error" }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      },
+    );
+  }
+});

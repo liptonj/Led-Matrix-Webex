@@ -6,6 +6,7 @@
 #include "web_server.h"
 #include "../time/time_manager.h"
 #include "../meraki/mqtt_client.h"
+#include "../auth/device_credentials.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
@@ -46,6 +47,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     // System info
     doc["ip_address"] = WiFi.localIP().toString();
     doc["mac_address"] = WiFi.macAddress();
+    doc["serial_number"] = deviceCredentials.getSerialNumber();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["uptime"] = millis() / 1000;
 
@@ -53,20 +55,20 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     const esp_partition_t* boot = esp_ota_get_boot_partition();
     doc["running_partition"] = running ? String(running->label) : "unknown";
     doc["boot_partition"] = boot ? String(boot->label) : "unknown";
-    
+
     // Partition storage info
     JsonObject partitions = doc["partitions"].to<JsonObject>();
-    
+
     // OTA_0 partition info
     const esp_partition_t* ota0 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, nullptr);
     if (ota0) {
         JsonObject ota0_info = partitions["ota_0"].to<JsonObject>();
         ota0_info["size"] = ota0->size;
-        
+
         // Check if this is the currently running partition
         bool is_running = (running && ota0->address == running->address);
-        
+
         if (is_running) {
             // For the currently running partition, use the compile-time version
             // because Arduino framework doesn't populate esp_app_desc_t correctly
@@ -90,7 +92,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
                     if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
                         version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
                         String project_name = String(ota0_desc.project_name);
-                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") && 
+                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") &&
                             !project_name.startsWith("arduino-lib")) {
                             version_str = project_name;
                         } else {
@@ -104,17 +106,17 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
             }
         }
     }
-    
+
     // OTA_1 partition info
     const esp_partition_t* ota1 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
     if (ota1) {
         JsonObject ota1_info = partitions["ota_1"].to<JsonObject>();
         ota1_info["size"] = ota1->size;
-        
+
         // Check if this is the currently running partition
         bool is_running = (running && ota1->address == running->address);
-        
+
         if (is_running) {
             // For the currently running partition, use the compile-time version
             #ifdef FIRMWARE_VERSION
@@ -136,7 +138,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
                     if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
                         version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
                         String project_name = String(ota1_desc.project_name);
-                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") && 
+                        if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") &&
                             !project_name.startsWith("arduino-lib")) {
                             version_str = project_name;
                         } else {
@@ -150,7 +152,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
             }
         }
     }
-    
+
     // SPIFFS/LittleFS partition info
     const esp_partition_t* spiffs = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
@@ -176,7 +178,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
 
     String responseStr;
     serializeJson(doc, responseStr);
-    
+
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);
@@ -199,7 +201,7 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["has_webex_tokens"] = config_manager->hasWebexTokens();
     doc["has_xapi_device"] = config_manager->hasXAPIDevice();
     doc["xapi_device_id"] = config_manager->getXAPIDeviceId().isEmpty() ? "" : config_manager->getXAPIDeviceId();
-    
+
     // Webex credentials - show masked versions if present
     String clientId = config_manager->getWebexClientId();
     String clientSecret = config_manager->getWebexClientSecret();
@@ -218,13 +220,13 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     } else {
         doc["webex_client_secret_masked"] = "";
     }
-    
+
     // MQTT configuration
     doc["mqtt_broker"] = config_manager->getMQTTBroker();
     doc["mqtt_port"] = config_manager->getMQTTPort();
     doc["mqtt_topic"] = config_manager->getMQTTTopic();
     doc["mqtt_username"] = config_manager->getMQTTUsername();
-    
+
     // MQTT password - show indicator if present
     String mqttPassword = config_manager->getMQTTPassword();
     if (!mqttPassword.isEmpty()) {
@@ -234,33 +236,34 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
         doc["mqtt_password_masked"] = "";
         doc["has_mqtt_password"] = false;
     }
-    
+
     // Sensor and display configuration - ensure empty strings are sent as empty, not null
     doc["sensor_serial"] = config_manager->getSensorSerial().isEmpty() ? "" : config_manager->getSensorSerial();
     doc["sensor_macs"] = config_manager->getSensorMacsRaw().isEmpty() ? "" : config_manager->getSensorMacsRaw();
     doc["display_sensor_mac"] = config_manager->getDisplaySensorMac().isEmpty() ? "" : config_manager->getDisplaySensorMac();
     doc["display_metric"] = config_manager->getDisplayMetric().isEmpty() ? "tvoc" : config_manager->getDisplayMetric();
     doc["ota_url"] = config_manager->getOTAUrl().isEmpty() ? "" : config_manager->getOTAUrl();
+    doc["supabase_url"] = config_manager->getSupabaseUrl().isEmpty() ? "" : config_manager->getSupabaseUrl();
     // Boolean flag - always include as explicit boolean
     doc["auto_update"] = config_manager->getAutoUpdate();
     doc["time_zone"] = config_manager->getTimeZone().isEmpty() ? "UTC" : config_manager->getTimeZone();
     doc["ntp_server"] = config_manager->getNtpServer().isEmpty() ? "pool.ntp.org" : config_manager->getNtpServer();
     doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
     doc["date_format"] = config_manager->getDateFormat().isEmpty() ? "mdy" : config_manager->getDateFormat();
-    
+
     // Bridge configuration
     doc["bridge_url"] = config_manager->getBridgeUrl().isEmpty() ? "" : config_manager->getBridgeUrl();
     doc["bridge_host"] = config_manager->getBridgeHost().isEmpty() ? "" : config_manager->getBridgeHost();
     doc["bridge_port"] = config_manager->getBridgePort();
     doc["bridge_use_ssl"] = config_manager->getBridgeUseSSL();
     doc["has_bridge_config"] = config_manager->hasBridgeConfig();
-    
+
     // Debug configuration
     doc["debug_mode"] = config_manager->getDebugMode();
 
     String responseStr;
     serializeJson(doc, responseStr);
-    
+
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);
@@ -334,7 +337,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (doc["webex_client_id"].is<const char*>() && doc["webex_client_secret"].is<const char*>()) {
         String client_id = doc["webex_client_id"].as<String>();
         String client_secret = doc["webex_client_secret"].as<String>();
-        
+
         if (!client_id.isEmpty() && !client_secret.isEmpty()) {
             config_manager->setWebexCredentials(client_id, client_secret);
             Serial.printf("[WEB] Webex credentials saved - Client ID: %s***\n", client_id.substring(0, 8).c_str());
@@ -344,14 +347,14 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             Serial.println("[WEB] Warning: Only one Webex credential field provided");
         }
     }
-    
+
     // MQTT configuration
     if (doc["mqtt_broker"].is<const char*>()) {
         String broker = doc["mqtt_broker"].as<String>();
         uint16_t port = doc["mqtt_port"].is<int>() ? doc["mqtt_port"].as<uint16_t>() : 1883;
         String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : "";
         String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : "meraki/v1/mt/#";
-        
+
         // Handle password - only overwrite if non-empty password provided
         String password;
         if (doc["mqtt_password"].is<const char*>()) {
@@ -369,13 +372,13 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             password = config_manager->getMQTTPassword();
             Serial.println("[WEB] MQTT password not provided - keeping existing");
         }
-        
+
         config_manager->setMQTTConfig(broker, port, username, password, topic);
         mqtt_client.invalidateConfig();  // Force reconnect with new settings
-        Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n", 
+        Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n",
                      broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
     }
-    
+
     // Sensor MAC filter list (comma/semicolon separated)
     if (doc["sensor_macs"].is<const char*>()) {
         String macs = doc["sensor_macs"].as<String>();
@@ -403,6 +406,9 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
     if (doc["auto_update"].is<bool>()) {
         config_manager->setAutoUpdate(doc["auto_update"].as<bool>());
+    }
+    if (doc["supabase_url"].is<const char*>()) {
+        config_manager->setSupabaseUrl(doc["supabase_url"].as<const char*>());
     }
     if (!doc["time_zone"].isNull()) {
         String time_zone = doc["time_zone"].as<String>();
@@ -437,7 +443,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             time_config_updated = true;
         }
     }
-    
+
     // Bridge configuration
     // Always trigger reconnection if ANY bridge config is provided in the request
     // This ensures reconnection even if going from cloud discovery to manual config
@@ -445,14 +451,14 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     bool bridge_host_provided = doc["bridge_host"].is<const char*>();
     bool bridge_port_provided = doc["bridge_port"].is<int>();
     bool bridge_ssl_provided = doc["bridge_use_ssl"].is<bool>();
-    bool bridge_config_provided = bridge_url_provided || bridge_host_provided || 
+    bool bridge_config_provided = bridge_url_provided || bridge_host_provided ||
                                    bridge_port_provided || bridge_ssl_provided;
     bool bridge_config_changed = false;
-    
+
     Serial.printf("[WEB] Bridge config detection: url=%d host=%d port=%d ssl=%d total=%d\n",
-                  bridge_url_provided, bridge_host_provided, bridge_port_provided, 
+                  bridge_url_provided, bridge_host_provided, bridge_port_provided,
                   bridge_ssl_provided, bridge_config_provided);
-    
+
     if (doc["bridge_url"].is<const char*>()) {
         String bridge_url = doc["bridge_url"].as<String>();
         bridge_url.trim();
@@ -492,16 +498,16 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         config_manager->setBridgeUseSSL(bridge_use_ssl);
         Serial.printf("[WEB] Bridge SSL saved: %s\n", bridge_use_ssl ? "true" : "false");
     }
-    
+
     // Trigger bridge reconnection if config changed OR if config was provided
     // (handles switching from auto-discovery to manual config)
     Serial.printf("[WEB] Bridge trigger check: provided=%d changed=%d condition=%d\n",
-                  bridge_config_provided, bridge_config_changed, 
+                  bridge_config_provided, bridge_config_changed,
                   (bridge_config_provided || bridge_config_changed));
     if (bridge_config_provided || bridge_config_changed) {
         Serial.println("[WEB] Bridge configuration updated - triggering reconnection");
         app_state->bridge_config_changed = true;
-        Serial.printf("[WEB] app_state->bridge_config_changed set to: %d\n", 
+        Serial.printf("[WEB] app_state->bridge_config_changed set to: %d\n",
                       app_state->bridge_config_changed);
     } else {
         Serial.println("[WEB] Bridge reconnection NOT triggered");
@@ -522,7 +528,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
 
     Serial.println("[WEB] Configuration save complete");
-    
+
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true}");
     addCorsHeaders(response);
     request->send(response);
@@ -563,27 +569,27 @@ void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
 void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, data, len);
-    
+
     if (error) {
-        AsyncWebServerResponse* response = request->beginResponse(400, "application/json", 
+        AsyncWebServerResponse* response = request->beginResponse(400, "application/json",
             "{\"success\":false,\"message\":\"Invalid JSON\"}");
         addCorsHeaders(response);
         request->send(response);
         return;
     }
-    
+
     bool enabled = doc["enabled"] | false;
     mqtt_client.setDebugEnabled(enabled);
-    
+
     Serial.printf("[WEB] MQTT debug logging %s\n", enabled ? "enabled" : "disabled");
-    
+
     JsonDocument resp;
     resp["success"] = true;
     resp["debug_enabled"] = mqtt_client.isDebugEnabled();
-    
+
     String responseStr;
     serializeJson(resp, responseStr);
-    
+
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);
@@ -592,14 +598,14 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
 void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* request) {
     String newCode = pairing_manager.generateCode(true);
     Serial.printf("[WEB] New pairing code generated: %s\n", newCode.c_str());
-    
+
     JsonDocument doc;
     doc["success"] = true;
     doc["code"] = newCode;
-    
+
     String responseStr;
     serializeJson(doc, responseStr);
-    
+
     AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
     addCorsHeaders(response);
     request->send(response);

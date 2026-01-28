@@ -121,6 +121,12 @@ public:
     void setFailedOTAVersion(const String& version);
     void clearFailedOTAVersion();
 
+    // Supabase Configuration
+    String getSupabaseUrl() const;
+    void setSupabaseUrl(const String& url);
+    String getSupabaseAnonKey() const;
+    void setSupabaseAnonKey(const String& key);
+
     // Partition Version Tracking (for OTA version display)
     String getPartitionVersion(const String& partition_label) const;
     void setPartitionVersion(const String& partition_label, const String& version);
@@ -184,6 +190,8 @@ private:
     mutable String cached_bridge_host;
     mutable uint16_t cached_bridge_port;
     mutable bool cached_bridge_use_ssl;
+    mutable String cached_supabase_url;
+    mutable String cached_supabase_anon_key;
     mutable bool cache_loaded;
 
     void loadCache() const;

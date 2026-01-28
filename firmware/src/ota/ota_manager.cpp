@@ -4,6 +4,7 @@
  */
 
 #include "ota_manager.h"
+#include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
 #include "../display/matrix_display.h"
 #include <HTTPClient.h>
@@ -29,6 +30,20 @@ void configureHttpClient(HTTPClient& http) {
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(30000);  // 30 second timeout for large downloads
 }
+
+// Add HMAC authentication headers if device is provisioned
+void addAuthHeaders(HTTPClient& http) {
+    if (deviceCredentials.isProvisioned()) {
+        uint32_t timestamp = DeviceCredentials::getTimestamp();
+        String signature = deviceCredentials.signRequest(timestamp, "");
+
+        http.addHeader("X-Device-Serial", deviceCredentials.getSerialNumber());
+        http.addHeader("X-Timestamp", String(timestamp));
+        http.addHeader("X-Signature", signature);
+
+        Serial.println("[OTA] Added HMAC authentication headers");
+    }
+}
 }  // namespace
 
 OTAManager::OTAManager()
@@ -41,7 +56,7 @@ OTAManager::~OTAManager() {
 void OTAManager::begin(const String& url, const String& version) {
     update_url = url;
     current_version = version;
-    
+
     Serial.printf("[OTA] Initialized with version %s\n", current_version.c_str());
 }
 
@@ -61,7 +76,7 @@ bool OTAManager::checkForUpdate() {
         // Fall through to GitHub API on failure
         Serial.println("[OTA] Manifest mode failed, falling back to GitHub API");
     }
-    
+
     // Fallback to GitHub API
     return checkUpdateFromGithubAPI();
 }
@@ -70,81 +85,84 @@ bool OTAManager::checkUpdateFromManifest() {
     if (manifest_url.isEmpty()) {
         return false;
     }
-    
+
     Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
-    
+
     WiFiClientSecure client;
     client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    
+
     HTTPClient http;
     http.begin(client, manifest_url);
     configureHttpClient(http);
     http.addHeader("User-Agent", "ESP32-Webex-Display");
-    
+
+    // Add HMAC authentication for authenticated manifest access
+    addAuthHeaders(http);
+
     int httpCode = http.GET();
-    
+
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] Manifest fetch failed: %d\n", httpCode);
         http.end();
         return false;
     }
-    
+
     String response = http.getString();
     http.end();
-    
+
     // Parse manifest JSON
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
-    
+
     if (error) {
         Serial.printf("[OTA] Failed to parse manifest: %s\n", error.c_str());
         return false;
     }
-    
+
     // Extract version and build info
     latest_version = doc["version"].as<String>();
     latest_build_id = doc["build_id"].as<String>();
     latest_build_date = doc["build_date"].as<String>();
-    
+
     if (latest_version.isEmpty()) {
         Serial.println("[OTA] No version in manifest");
         return false;
     }
-    
+
     Serial.printf("[OTA] Manifest: version=%s, build_id=%s, build_date=%s\n",
                   latest_version.c_str(),
                   latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
                   latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
-    
+
     // Extract URLs for this board - prefer firmware-only (web assets embedded)
     #if defined(ESP32_S3_BOARD)
     const char* board_type = "esp32s3";
     #else
     const char* board_type = "esp32";
     #endif
-    
+
     // Try firmware-only first (preferred - web assets now embedded in firmware)
     firmware_url = doc["firmware"][board_type]["url"].as<String>();
-    
+
     // Legacy fallback: bundle (for transition period)
     bundle_url = doc["bundle"][board_type]["url"].as<String>();
-    
+
     // Clear filesystem URL - no longer needed
     littlefs_url = "";
-    
+
     bool has_firmware = !firmware_url.isEmpty();
     bool has_bundle = !bundle_url.isEmpty();
-    
+
     if (!has_firmware && !has_bundle) {
         Serial.printf("[OTA] Missing %s firmware in manifest\n", board_type);
         return false;
     }
-    
+
     // Compare versions
     update_available = compareVersions(latest_version, current_version);
-    
+
     if (update_available) {
-        Serial.printf("[OTA] Update available: %s -> %s\n", 
+        Serial.printf("[OTA] Update available: %s -> %s\n",
                       current_version.c_str(), latest_version.c_str());
         if (has_firmware) {
             Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
@@ -154,7 +172,7 @@ bool OTAManager::checkUpdateFromManifest() {
     } else {
         Serial.println("[OTA] Already on latest version");
     }
-    
+
     return true;  // Successfully checked manifest
 }
 
@@ -163,42 +181,42 @@ bool OTAManager::checkUpdateFromGithubAPI() {
         Serial.println("[OTA] No update URL configured");
         return false;
     }
-    
+
     Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
-    
+
     WiFiClientSecure client;
     client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    
+
     HTTPClient http;
     http.begin(client, update_url);
     configureHttpClient(http);
     http.addHeader("User-Agent", "ESP32-Webex-Display");
     http.addHeader("Accept", "application/vnd.github.v3+json");
-    
+
     int httpCode = http.GET();
-    
+
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] Failed to check for updates: %d\n", httpCode);
         http.end();
         return false;
     }
-    
+
     String response = http.getString();
     http.end();
-    
+
     // Parse GitHub releases response
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, response);
-    
+
     if (error) {
         Serial.printf("[OTA] Failed to parse response: %s\n", error.c_str());
         return false;
     }
-    
+
     // Extract version from tag_name
     String tag = doc["tag_name"].as<String>();
     latest_version = extractVersion(tag);
-    
+
     firmware_url = "";
     littlefs_url = "";
 
@@ -208,17 +226,17 @@ bool OTAManager::checkUpdateFromGithubAPI() {
         Serial.println("[OTA] Missing firmware or LittleFS asset in release");
         return false;
     }
-    
+
     // Compare versions
     update_available = compareVersions(latest_version, current_version);
-    
+
     if (update_available) {
-        Serial.printf("[OTA] Update available: %s -> %s\n", 
+        Serial.printf("[OTA] Update available: %s -> %s\n",
                       current_version.c_str(), latest_version.c_str());
     } else {
         Serial.println("[OTA] Already on latest version");
     }
-    
+
     return true;  // Successfully checked (even if no update available)
 }
 
@@ -227,7 +245,7 @@ bool OTAManager::performUpdate() {
         Serial.println("[OTA] No update available");
         return false;
     }
-    
+
     // Web assets are now embedded in firmware - only need to download firmware.bin
     // No more LMWB bundles or separate LittleFS downloads needed
     if (!firmware_url.isEmpty()) {
@@ -248,32 +266,32 @@ bool OTAManager::performUpdate() {
 
     Serial.println("[OTA] Firmware update successful!");
     Serial.println("[OTA] Rebooting...");
-    
+
     // Show complete status
     matrix_display.showUpdatingProgress(latest_version, 100, "Rebooting...");
-    
+
     delay(1000);
     ESP.restart();
-    
+
     return true; // Won't reach here due to restart
 }
 
 bool OTAManager::compareVersions(const String& v1, const String& v2) {
     // Simple semantic version comparison
     // Returns true if v1 > v2
-    
+
     int v1_major = 0, v1_minor = 0, v1_patch = 0;
     int v2_major = 0, v2_minor = 0, v2_patch = 0;
-    
+
     sscanf(v1.c_str(), "%d.%d.%d", &v1_major, &v1_minor, &v1_patch);
     sscanf(v2.c_str(), "%d.%d.%d", &v2_major, &v2_minor, &v2_patch);
-    
+
     if (v1_major > v2_major) return true;
     if (v1_major < v2_major) return false;
-    
+
     if (v1_minor > v2_minor) return true;
     if (v1_minor < v2_minor) return false;
-    
+
     return v1_patch > v2_patch;
 }
 
@@ -381,13 +399,13 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
         littlefs_url = "";  // Clear - no longer needed
         return true;
     }
-    
+
     // Legacy fallback: use bundle if firmware-only not available
     if (bundle_priority > 0) {
         Serial.printf("[OTA] Using legacy bundle: %s\n", bundle_url.c_str());
         return true;
     }
-    
+
     return false;
 }
 
@@ -397,13 +415,13 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 #ifndef NATIVE_BUILD
     // Properly disable task watchdog during OTA
     // We need to unsubscribe ALL tasks from WDT before calling deinit
-    
+
     // First, delete the current task from WDT (if subscribed)
     esp_err_t err = esp_task_wdt_delete(nullptr);  // nullptr = current task
     if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
         Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(err));
     }
-    
+
     // Delete async_tcp task from WDT if it exists
     // This task is created by the AsyncTCP library and may be subscribed to WDT
     TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
@@ -415,19 +433,19 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(err));
         }
     }
-    
+
     // Delete IDLE tasks from WDT (they are subscribed by default)
     TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
     TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
     if (idle0) esp_task_wdt_delete(idle0);
     if (idle1) esp_task_wdt_delete(idle1);
-    
+
     // Now we can safely reconfigure WDT with longer timeout
     err = esp_task_wdt_deinit();
     if (err != ESP_OK) {
         Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(err));
     }
-    
+
     // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
     err = esp_task_wdt_init(120, false);
     if (err != ESP_OK) {
@@ -513,7 +531,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 #endif
 
     Serial.printf("[OTA] Flashing %s...\n", label);
-    
+
     // Show initial progress on display
     // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
     int initialProgress = (update_type == U_FLASH) ? 0 : 85;
@@ -525,7 +543,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     size_t written = 0;
     uint8_t buffer[4096];
     int lastProgress = -1;
-    
+
     while (written < static_cast<size_t>(contentLength)) {
         // Yield to other FreeRTOS tasks - use proper delay to allow async_tcp task to run
 #ifndef NATIVE_BUILD
@@ -533,7 +551,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 #else
         yield();
 #endif
-        
+
         size_t available = stream->available();
         if (available == 0) {
             // Wait for more data with timeout
@@ -553,14 +571,14 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             }
             available = stream->available();
         }
-        
+
         if (available == 0 && !stream->connected()) {
             break;  // Connection closed
         }
-        
+
         size_t toRead = min(available, sizeof(buffer));
         int bytesRead = stream->readBytes(buffer, toRead);
-        
+
         if (bytesRead > 0) {
             size_t bytesWritten = Update.write(buffer, bytesRead);
             if (bytesWritten != static_cast<size_t>(bytesRead)) {
@@ -570,16 +588,16 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
                 return false;
             }
             written += bytesWritten;
-            
+
             // Update progress every 5%
             int progress = (written * 100) / contentLength;
             if (progress / 5 > lastProgress / 5) {
                 lastProgress = progress;
                 Serial.printf("[OTA] %s: %d%%\n", label, progress);
-                
+
                 // Update display with progress
                 // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
-                int displayProgress = (update_type == U_FLASH) ? 
+                int displayProgress = (update_type == U_FLASH) ?
                     (progress * 85) / 100 : 85 + ((progress * 15) / 100);
                 String statusText = String(label) + " " + String(progress) + "%";
                 matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
@@ -609,7 +627,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             return false;
         }
         Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
-        
+
         // Store the version for this partition in NVS for future display
         extern ConfigManager config_manager;
         config_manager.setPartitionVersion(String(target_partition->label), latest_version);
@@ -633,7 +651,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         if (wdt_err != ESP_OK && wdt_err != ESP_ERR_NOT_FOUND) {
             Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(wdt_err));
         }
-        
+
         // Delete async_tcp task from WDT if it exists
         // This task is created by the AsyncTCP library and may be subscribed to WDT
         TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
@@ -645,19 +663,19 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                 Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(wdt_err));
             }
         }
-        
+
         // Delete IDLE tasks from WDT (they are subscribed by default)
         TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
         TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
         if (idle0) esp_task_wdt_delete(idle0);
         if (idle1) esp_task_wdt_delete(idle1);
-        
+
         // Now we can safely reconfigure WDT with longer timeout
         wdt_err = esp_task_wdt_deinit();
         if (wdt_err != ESP_OK) {
             Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(wdt_err));
         }
-        
+
         // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
         wdt_err = esp_task_wdt_init(120, false);
         if (wdt_err != ESP_OK) {
@@ -735,7 +753,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                      (static_cast<size_t>(header[10]) << 16) |
                      (static_cast<size_t>(header[11]) << 24);
 
-    Serial.printf("[OTA] Bundle: app=%u bytes, fs=%u bytes\n", 
+    Serial.printf("[OTA] Bundle: app=%u bytes, fs=%u bytes\n",
                   static_cast<unsigned>(app_size), static_cast<unsigned>(fs_size));
 
     // Validate sizes
@@ -747,7 +765,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 
     size_t expected_total = 16 + app_size + fs_size;
     if (contentLength > 0 && static_cast<size_t>(contentLength) != expected_total) {
-        Serial.printf("[OTA] Bundle size mismatch: got %d, expected %u\n", 
+        Serial.printf("[OTA] Bundle size mismatch: got %d, expected %u\n",
                       contentLength, static_cast<unsigned>(expected_total));
         // Continue anyway - content-length might be missing for chunked transfer
     }
@@ -794,14 +812,14 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     uint8_t buffer[2048];
     size_t app_written = 0;
     int lastProgress = -1;
-    
+
     // Warn if heap is getting low
     if (ESP.getFreeHeap() < 80000) {
         Serial.printf("[OTA] WARNING: Low heap before firmware download: %u bytes\n", ESP.getFreeHeap());
     }
 
     unsigned long lastDataTime = millis();
-    
+
     while (app_written < app_size) {
 #ifndef NATIVE_BUILD
         vTaskDelay(pdMS_TO_TICKS(1));  // Minimal yield
@@ -812,26 +830,26 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         if (available == 0) {
             // Check if connection is still alive
             if (!stream->connected()) {
-                Serial.printf("[OTA] Stream disconnected during firmware at %d%% (%u/%u bytes)\n", 
+                Serial.printf("[OTA] Stream disconnected during firmware at %d%% (%u/%u bytes)\n",
                               (app_written * 100) / app_size,
-                              static_cast<unsigned>(app_written), 
+                              static_cast<unsigned>(app_written),
                               static_cast<unsigned>(app_size));
                 Serial.flush();
                 Update.abort();
                 http.end();
                 return false;
             }
-            
+
             // Check for timeout
             if (millis() - lastDataTime > 30000) {
-                Serial.printf("[OTA] Stream timeout at %d%% - no data for 30s\n", 
+                Serial.printf("[OTA] Stream timeout at %d%% - no data for 30s\n",
                               (app_written * 100) / app_size);
                 Serial.flush();
                 Update.abort();
                 http.end();
                 return false;
             }
-            
+
 #ifndef NATIVE_BUILD
             vTaskDelay(pdMS_TO_TICKS(10));
 #else
@@ -839,16 +857,16 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 #endif
             continue;
         }
-        
+
         lastDataTime = millis();  // Reset timeout on data received
 
         size_t remaining = app_size - app_written;
         size_t toRead = min(min(available, sizeof(buffer)), remaining);
-        
+
         unsigned long readStart = millis();
         int bytesRead = stream->readBytes(buffer, toRead);
         unsigned long readTime = millis() - readStart;
-        
+
         // Warn if read is taking too long (possible SSL stall)
         if (readTime > 1000) {
             Serial.printf("[OTA] WARNING: Slow read: %lu ms for %d bytes\n", readTime, bytesRead);
@@ -858,12 +876,12 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             unsigned long writeStart = millis();
             size_t bytesWritten = Update.write(buffer, bytesRead);
             unsigned long writeTime = millis() - writeStart;
-            
+
             // Warn if write is taking too long
             if (writeTime > 500) {
                 Serial.printf("[OTA] WARNING: Slow write: %lu ms for %u bytes\n", writeTime, bytesWritten);
             }
-            
+
             if (bytesWritten != static_cast<size_t>(bytesRead)) {
                 Serial.printf("[OTA] App write failed: wrote %d of %d\n", bytesWritten, bytesRead);
                 Update.abort();
@@ -878,7 +896,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                 uint32_t freeHeap = ESP.getFreeHeap();
                 Serial.printf("[OTA] firmware: %d%% (heap: %u, last read: %lums)\n", progress, freeHeap, readTime);
                 Serial.flush();
-                
+
                 // Check for critically low heap
                 if (freeHeap < 50000) {
                     Serial.println("[OTA] CRITICAL: Heap too low, aborting update");
@@ -886,9 +904,9 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                     http.end();
                     return false;
                 }
-                
+
                 int displayProgress = (progress * 85) / 100;
-                matrix_display.showUpdatingProgress(latest_version, displayProgress, 
+                matrix_display.showUpdatingProgress(latest_version, displayProgress,
                     String("Firmware ") + String(progress) + "%");
             }
         }
@@ -901,7 +919,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         http.end();
         return false;
     }
-    
+
     Serial.println("[OTA] Firmware write complete, finalizing...");
     Serial.flush();
     vTaskDelay(pdMS_TO_TICKS(10));  // Brief yield before Update.end
@@ -911,17 +929,17 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         http.end();
         return false;
     }
-    
+
     Serial.println("[OTA] Update.end() succeeded");
     Serial.flush();
 
 #ifndef NATIVE_BUILD
     vTaskDelay(pdMS_TO_TICKS(10));  // Yield before partition operation
-    
+
     // Set boot partition
     Serial.println("[OTA] Setting boot partition...");
     Serial.flush();
-    
+
     esp_err_t err = esp_ota_set_boot_partition(target_partition);
     if (err != ESP_OK) {
         Serial.printf("[OTA] Failed to set boot partition: %s\n", esp_err_to_name(err));
@@ -929,7 +947,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         return false;
     }
     Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
-    
+
     // Store the version for this partition in NVS for future display
     extern ConfigManager config_manager;
     config_manager.setPartitionVersion(String(target_partition->label), latest_version);
@@ -941,7 +959,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 
     // =========== PHASE 2: Flash filesystem ===========
     matrix_display.showUpdatingProgress(latest_version, 85, "Flashing filesystem...");
-    
+
     // Check if HTTP stream is still valid before proceeding
     if (!stream->connected()) {
         Serial.println("[OTA] ERROR: HTTP stream disconnected before filesystem phase");
@@ -949,7 +967,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         return false;
     }
     Serial.printf("[OTA] Stream still connected, %d bytes remaining for FS\n", fs_size);
-    
+
     LittleFS.end();
     Serial.println("[OTA] LittleFS unmounted");
 
