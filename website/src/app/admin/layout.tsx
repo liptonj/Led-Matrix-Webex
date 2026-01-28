@@ -12,6 +12,10 @@ export default function AdminLayout({
 }) {
     const router = useRouter();
     const pathname = usePathname();
+    const normalizedPathname = pathname && pathname !== '/' && pathname.endsWith('/')
+        ? pathname.slice(0, -1)
+        : pathname;
+    const isLoginPage = normalizedPathname === '/admin/login';
     const [loading, setLoading] = useState(true);
     const [authenticated, setAuthenticated] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -19,7 +23,7 @@ export default function AdminLayout({
     useEffect(() => {
         async function checkAuth() {
             // Allow login page to render even if Supabase is not configured
-            if (pathname === '/admin/login') {
+            if (isLoginPage) {
                 setLoading(false);
                 return;
             }
@@ -35,21 +39,21 @@ export default function AdminLayout({
                 if (data?.session) {
                     setAuthenticated(true);
                 } else {
-                    router.push('/admin/login');
+                    router.push('/admin/login/');
                 }
             } catch (err) {
                 console.error('Auth check failed:', err);
-                router.push('/admin/login');
+                router.push('/admin/login/');
             }
             setLoading(false);
         }
 
         checkAuth();
-    }, [pathname, router]);
+    }, [isLoginPage, router]);
 
     const handleSignOut = async () => {
         await signOut();
-        router.push('/admin/login');
+        router.push('/admin/login/');
     };
 
     const navItems = [
@@ -59,7 +63,7 @@ export default function AdminLayout({
     ];
 
     // Login page doesn't need the admin layout - render it immediately
-    if (pathname === '/admin/login') {
+    if (isLoginPage) {
         return <>{children}</>;
     }
 
