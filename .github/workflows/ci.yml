@@ -33,7 +33,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Updating versions to ${VERSION}..."
-          python3 scripts/update_version.py "${VERSION}"
+          python3 ${{ github.workspace }}/scripts/update_version.py "${VERSION}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -86,7 +86,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Updating versions to ${VERSION}..."
-          python3 scripts/update_version.py "${VERSION}"
+          python3 ${{ github.workspace }}/scripts/update_version.py "${VERSION}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -264,7 +264,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
           echo "Updating versions to ${VERSION}..."
-          python3 scripts/update_version.py "${VERSION}"
+          python3 ${{ github.workspace }}/scripts/update_version.py "${VERSION}"
 
       - name: Validate version matches platformio.ini
         run: |
@@ -474,7 +474,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Updating versions to ${VERSION}..."
-          python3 scripts/update_version.py "${VERSION}"
+          python3 ${{ github.workspace }}/scripts/update_version.py "${VERSION}"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
