@@ -129,12 +129,9 @@ export default function DevicesPage() {
                                         <tr key={device.id}>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div>
-                                                    <Link
-                                                        href={`/admin/devices/${device.serial_number}`}
-                                                        className="text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline"
-                                                    >
+                                                    <span className="text-sm font-mono text-gray-900 dark:text-white">
                                                         {device.serial_number}
-                                                    </Link>
+                                                    </span>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
                                                         {device.device_id}
                                                     </p>
@@ -189,12 +186,9 @@ export default function DevicesPage() {
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <Link
-                                                    href={`/admin/devices/${device.serial_number}`}
-                                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                                                >
-                                                    View
-                                                </Link>
+                                                <span className="text-sm text-gray-500 dark:text-gray-400">
+                                                    -
+                                                </span>
                                                 {device.debug_enabled && (
                                                     <span className="ml-2 text-xs text-green-600 dark:text-green-400">
                                                         (logs enabled)

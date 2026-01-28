@@ -211,12 +211,9 @@ function DeviceRow({ device }: { device: Device }) {
     return (
         <tr>
             <td className="px-6 py-4 whitespace-nowrap">
-                <Link
-                    href={`/admin/devices/${device.serial_number}`}
-                    className="text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline"
-                >
+                <span className="text-sm font-mono text-gray-900 dark:text-white">
                     {device.serial_number}
-                </Link>
+                </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
                 <span className="text-sm font-mono text-gray-900 dark:text-white">
