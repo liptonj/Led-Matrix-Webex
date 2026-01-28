@@ -33,58 +33,16 @@ jobs:
         working-directory: website
         run: npm ci
 
-      - name: Create firmware directory
-        run: mkdir -p website/public/updates/firmware
+      # Note: Firmware binaries are no longer downloaded here.
+      # Firmware is stored in Supabase Storage and manifests are generated
+      # dynamically by the get-manifest Edge Function.
+      # ESP Web Tools and OTA updates now use the Edge Function endpoint.
 
-      - name: Download firmware from latest release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "Downloading firmware binaries from latest release..."
-
-          # Get latest release tag
-          LATEST_TAG=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "")
-
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No releases found, skipping firmware download"
-            exit 0
-          fi
-
-          echo "Latest release: $LATEST_TAG"
-
-          # Download firmware binaries
-          cd website/public/updates/firmware
-
-          # Main firmware for OTA updates (ESP32-S3 only, web assets embedded)
-          gh release download "$LATEST_TAG" --pattern "firmware-esp32s3.bin" --clobber || echo "firmware-esp32s3.bin not found"
-
-          # Merged firmware for web installer (includes bootloader, partition table, boot_app0)
-          gh release download "$LATEST_TAG" --pattern "firmware-merged-esp32s3.bin" --clobber || echo "firmware-merged-esp32s3.bin not found"
-
-          # Create copies with build ID for cache busting (ESP Web Tools uses these)
-          BUILD_ID=$(date +%s)
-          echo "BUILD_ID=${BUILD_ID}" >> $GITHUB_ENV
-          
-          if [ -f "firmware-esp32s3.bin" ]; then
-            cp firmware-esp32s3.bin "firmware-esp32s3-${BUILD_ID}.bin"
-            echo "Created build copy: firmware-esp32s3-${BUILD_ID}.bin"
-          fi
-          if [ -f "firmware-merged-esp32s3.bin" ]; then
-            cp firmware-merged-esp32s3.bin "firmware-merged-esp32s3-${BUILD_ID}.bin"
-            echo "Created build copy: firmware-merged-esp32s3-${BUILD_ID}.bin"
-          fi
-
-          echo "Downloaded firmware files:"
-          ls -la
-
-      - name: Build website
+      - name: Build website (Next.js)
         working-directory: website
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_ID: ${{ env.BUILD_ID }}
-        run: |
-          echo "Using BUILD_ID: $BUILD_ID for cache busting"
-          npm run build
+        run: npm run build
 
       - name: Verify build output
         run: |
