@@ -332,23 +332,26 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     
     // Handle postgres_changes events
     if (event == "postgres_changes") {
-        JsonObject data = payload["data"];
-        
-        _lastMessage.valid = true;
-        _lastMessage.event = data["type"].as<String>();  // INSERT, UPDATE, DELETE
-        _lastMessage.table = data["table"].as<String>();
-        _lastMessage.schema = data["schema"].as<String>();
-        _lastMessage.payload = payload;
-        _messagePending = true;
-        
-        Serial.printf("[REALTIME] %s on %s.%s\n", 
-                      _lastMessage.event.c_str(),
-                      _lastMessage.schema.c_str(),
-                      _lastMessage.table.c_str());
-        
-        // Call handler if set
-        if (_messageHandler) {
-            _messageHandler(_lastMessage);
+        // Access data fields directly from const JsonDocument
+        if (payload["data"].is<JsonObject>()) {
+            _lastMessage.valid = true;
+            _lastMessage.event = payload["data"]["type"].as<String>();  // INSERT, UPDATE, DELETE
+            _lastMessage.table = payload["data"]["table"].as<String>();
+            _lastMessage.schema = payload["data"]["schema"].as<String>();
+            _lastMessage.payload = payload;
+            _messagePending = true;
+            
+            Serial.printf("[REALTIME] %s on %s.%s\n", 
+                          _lastMessage.event.c_str(),
+                          _lastMessage.schema.c_str(),
+                          _lastMessage.table.c_str());
+            
+            // Call handler if set
+            if (_messageHandler) {
+                _messageHandler(_lastMessage);
+            }
+        } else {
+            Serial.println("[REALTIME] Invalid postgres_changes data format");
         }
         return;
     }

@@ -1882,9 +1882,12 @@ describe("WebSocketServer - Debug Logging", () => {
       const mockWSServer = {
         on: jest.fn((event: string, handler: (ws: WebSocket) => void) => {
           if (event === "connection") {
+            // Connect both WebSockets when connection handler is set up
             if (connectionCount === 0) {
               handler(displayWs);
               connectionCount++;
+              // Also connect appWs immediately
+              handler(appWs);
             } else {
               handler(appWs);
             }

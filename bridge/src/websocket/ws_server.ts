@@ -195,7 +195,10 @@ export class WebSocketServer {
 
     // Handle messages
     ws.on("message", (data: Buffer) => {
-      this.handleMessage(ws, data.toString());
+      // Handle async message processing
+      this.handleMessage(ws, data.toString()).catch((error) => {
+        this.logger.error(`Error handling message: ${error}`);
+      });
     });
 
     // Handle disconnect
