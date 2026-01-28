@@ -37,7 +37,7 @@ const char* mockAuthResponse = R"({
     "device_id": "webex-display-C3D4",
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJBMUIyQzNENCJ9.signature",
     "expires_at": "2026-01-28T13:00:00Z",
-    "target_firmware_version": "1.5.1"
+    "target_firmware_version": "1.5.2"
 })";
 
 // Auth response without target firmware version
@@ -195,7 +195,7 @@ void test_authenticate_success() {
     TEST_ASSERT_NOT_NULL(token);
     TEST_ASSERT_EQUAL(0, strncmp(token, "eyJ", 3));
     TEST_ASSERT_EQUAL_STRING("2026-01-28T13:00:00Z", doc["expires_at"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("1.5.1", doc["target_firmware_version"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("1.5.2", doc["target_firmware_version"].as<const char*>());
 }
 
 void test_authenticate_success_no_ota() {

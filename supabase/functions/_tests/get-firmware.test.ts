@@ -45,10 +45,10 @@ Deno.test("get-firmware: HMAC headers must all be present", () => {
 // ============================================================================
 
 Deno.test("get-firmware: accepts version query parameter", () => {
-  const url = new URL("http://localhost/get-firmware?version=1.5.1");
+  const url = new URL("http://localhost/get-firmware?version=1.5.2");
   const version = url.searchParams.get("version");
 
-  assertEquals(version, "1.5.1");
+  assertEquals(version, "1.5.2");
 });
 
 Deno.test("get-firmware: version parameter is optional", () => {
@@ -74,10 +74,10 @@ Deno.test("get-firmware: query param takes precedence over target version", () =
     target_firmware_version: "1.4.5",
   };
 
-  const queryVersion = "1.5.1";
+  const queryVersion = "1.5.2";
   const targetVersion = queryVersion || device.target_firmware_version;
 
-  assertEquals(targetVersion, "1.5.1");
+  assertEquals(targetVersion, "1.5.2");
 });
 
 // ============================================================================
@@ -90,17 +90,17 @@ Deno.test("get-firmware: signed URL expiry is 10 minutes", () => {
 });
 
 Deno.test("get-firmware: download URL is signed", () => {
-  const signedUrl = "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.1/firmware.bin?token=abc123xyz";
+  const signedUrl = "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.2/firmware.bin?token=abc123xyz";
 
   assertStringIncludes(signedUrl, "sign");
   assertStringIncludes(signedUrl, "token=");
 });
 
 Deno.test("get-firmware: file path format is version/firmware.bin", () => {
-  const version = "1.5.1";
+  const version = "1.5.2";
   const filePath = `${version}/firmware.bin`;
 
-  assertEquals(filePath, "1.5.1/firmware.bin");
+  assertEquals(filePath, "1.5.2/firmware.bin");
 });
 
 // ============================================================================
@@ -110,8 +110,8 @@ Deno.test("get-firmware: file path format is version/firmware.bin", () => {
 Deno.test("get-firmware: success response has required fields", () => {
   const response = {
     success: true,
-    version: "1.5.1",
-    download_url: "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.1/firmware.bin?token=abc123",
+    version: "1.5.2",
+    download_url: "https://example.supabase.co/storage/v1/object/sign/firmware/1.5.2/firmware.bin?token=abc123",
     size: 1234567,
     expires_in: 600,
   };
@@ -124,7 +124,7 @@ Deno.test("get-firmware: success response has required fields", () => {
 });
 
 Deno.test("get-firmware: version format is semver-like", () => {
-  const validVersions = ["1.0.0", "1.5.1", "2.0.0-beta.1", "1.4.4"];
+  const validVersions = ["1.0.0", "1.5.2", "2.0.0-beta.1", "1.4.4"];
 
   for (const version of validVersions) {
     assertEquals(version.includes("."), true);
@@ -194,12 +194,12 @@ Deno.test("get-firmware: uses latest version when no target specified", () => {
   // When no version query and no target_firmware_version, use is_latest=true release
   const releases = [
     { version: "1.4.4", is_latest: false },
-    { version: "1.5.1", is_latest: true },
+    { version: "1.5.2", is_latest: true },
     { version: "1.3.0", is_latest: false },
   ];
 
   const latest = releases.find((r) => r.is_latest);
-  assertEquals(latest?.version, "1.5.1");
+  assertEquals(latest?.version, "1.5.2");
 });
 
 // ============================================================================

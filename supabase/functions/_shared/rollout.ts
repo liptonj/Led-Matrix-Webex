@@ -11,7 +11,7 @@
  *
  * Uses deterministic hash so same device always gets same result for same version.
  * This ensures:
- * - Device "ABC123" checking version "1.5.1" at 50% rollout either always passes or always fails
+ * - Device "ABC123" checking version "1.5.2" at 50% rollout either always passes or always fails
  * - Increasing rollout to 75% adds more devices without removing any
  *
  * @param serialNumber - Device serial number (8-char CRC32 of eFuse MAC)

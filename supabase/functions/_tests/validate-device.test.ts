@@ -178,7 +178,7 @@ Deno.test("validate-device: device info has correct structure", () => {
     device_id: "webex-display-C3D4",
     pairing_code: "ABC123",
     debug_enabled: false,
-    target_firmware_version: "1.5.1",
+    target_firmware_version: "1.5.2",
   };
 
   assertEquals(device.serial_number.length, 8);

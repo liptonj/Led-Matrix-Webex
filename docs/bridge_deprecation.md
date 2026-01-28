@@ -44,7 +44,7 @@ Timeline: After firmware rollout reaches 95% adoption
 
 Criteria to Proceed:
 - Zero active WebSocket connections to bridge for 7+ days
-- All devices on firmware v1.5.1+ (Supabase-native)
+- All devices on firmware v1.5.2+ (Supabase-native)
 - No bridge-related errors in device logs
 - Embedded app feature flag enabled for all users
 
