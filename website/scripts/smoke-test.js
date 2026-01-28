@@ -29,7 +29,6 @@ const REQUIRED_ASSETS = [
   'icon-512.png',
   'manifest.json',
   '_headers',
-  'updates/manifest.json',
 ];
 
 // Required Next.js output
@@ -150,19 +149,8 @@ try {
   errors++;
 }
 
-// Check firmware manifest
-try {
-  const fwManifest = JSON.parse(fs.readFileSync(path.join(OUT_DIR, 'updates/manifest.json'), 'utf8'));
-  if (fwManifest.latest_version || fwManifest.versions) {
-    log('updates/manifest.json is valid', 'success');
-  } else {
-    log('updates/manifest.json missing version data', 'warning');
-    warnings++;
-  }
-} catch (e) {
-  log('updates/manifest.json is invalid or missing', 'warning');
-  warnings++;
-}
+// Note: Firmware manifests are now generated dynamically by Supabase Edge Functions
+// No longer checking for static updates/manifest.json file
 
 // Summary
 console.log('\n' + '─'.repeat(40));
