@@ -81,6 +81,8 @@ public:
      */
     bool isConnected() const { return _connected && _subscribed; }
     bool isSocketConnected() const { return _connected; }
+    bool isConnecting() const { return _connecting; }
+    uint32_t connectingDurationMs() const;
 
     /**
      * @brief Subscribe to a single table channel
@@ -150,9 +152,17 @@ private:
     String _supabaseUrl;
     String _anonKey;
     String _accessToken;
+    String _wsHeaders;
     String _channelTopic;
     bool _connected;
     bool _subscribed;
+    bool _connecting;
+    unsigned long _connectStartMs;
+    bool _loggedFirstMessage;
+    bool _loggedCloseFrame;
+    bool _loggedJoinDetails;
+    String _pendingJoinMessage;
+    bool _pendingJoin;
     bool _messagePending;
     int _joinRef;
     int _msgRef;

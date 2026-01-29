@@ -86,6 +86,11 @@ static void logHeapStatus(const char* label) {
                   label, freeHeap, minHeap, largestBlock);
 }
 
+static bool hasSafeTlsHeap(uint32_t min_free, uint32_t min_block) {
+    return ESP.getFreeHeap() >= min_free &&
+           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= min_block;
+}
+
 /**
  * @brief Arduino setup function
  */
@@ -591,7 +596,8 @@ void loop() {
 
         // Try to initialize realtime if we have credentials but aren't connected
         if (app_state.wifi_connected && app_state.supabase_connected && 
-            !anonKey.isEmpty() && !supabaseRealtime.isConnected()) {
+            !anonKey.isEmpty() && !supabaseRealtime.isSocketConnected() &&
+            !supabaseRealtime.isConnecting()) {
             if (current_time < app_state.realtime_defer_until) {
                 static bool defer_logged = false;
                 if (!defer_logged) {
@@ -616,8 +622,8 @@ void loop() {
             }
         }
         
-        // Process realtime events if connected
-        if (app_state.wifi_connected && supabaseRealtime.isConnected()) {
+        // Process realtime events once socket is connected (subscription happens asynchronously)
+        if (app_state.wifi_connected && supabaseRealtime.isSocketConnected()) {
             supabaseRealtime.loop();
             
             // Process any pending realtime messages
@@ -636,7 +642,8 @@ void loop() {
         String anonKey = config_manager.getSupabaseAnonKey();
 
         if (app_state.wifi_connected && app_state.supabase_connected &&
-            !anonKey.isEmpty() && !supabaseRealtimeDevices.isConnected()) {
+            !anonKey.isEmpty() && !supabaseRealtimeDevices.isSocketConnected() &&
+            !supabaseRealtimeDevices.isConnecting()) {
             if (current_time < app_state.realtime_defer_until) {
                 static bool defer_logged = false;
                 if (!defer_logged) {
@@ -655,7 +662,7 @@ void loop() {
             }
         }
 
-        if (app_state.wifi_connected && supabaseRealtimeDevices.isConnected()) {
+        if (app_state.wifi_connected && supabaseRealtimeDevices.isSocketConnected()) {
             supabaseRealtimeDevices.loop();
 
             if (supabaseRealtimeDevices.hasMessage()) {
@@ -1060,6 +1067,21 @@ bool provisionDeviceWithSupabase() {
     app_state.supabase_blacklisted = false;
     app_state.supabase_deleted = false;
     Serial.println("[SUPABASE] Device provisioned successfully");
+
+    // Immediately authenticate after provisioning so realtime can initialize
+    if (supabaseClient.authenticate()) {
+        app_state.supabase_connected = true;
+        String authAnonKey = supabaseClient.getAnonKey();
+        if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
+            config_manager.setSupabaseAnonKey(authAnonKey);
+            Serial.println("[SUPABASE] Anon key updated from device-auth");
+        }
+        app_state.realtime_defer_until = millis() + 8000UL;
+        Serial.println("[SUPABASE] Authenticated after provisioning");
+    } else {
+        app_state.supabase_connected = false;
+        Serial.println("[SUPABASE] Authentication failed after provisioning");
+    }
     return true;
 }
 
@@ -1068,6 +1090,14 @@ bool provisionDeviceWithSupabase() {
  */
 void check_for_updates() {
     Serial.println("[OTA] Checking for updates...");
+    bool realtime_was_active = supabaseRealtime.isConnected() || supabaseRealtime.isConnecting() ||
+                               supabaseRealtimeDevices.isConnected() || supabaseRealtimeDevices.isConnecting();
+    if (realtime_was_active) {
+        Serial.println("[OTA] Pausing realtime during OTA check");
+        supabaseRealtime.disconnect();
+        supabaseRealtimeDevices.disconnect();
+        app_state.realtime_defer_until = millis() + 15000UL;
+    }
 
     if (ota_manager.checkForUpdate()) {
         String new_version = ota_manager.getLatestVersion();
@@ -1100,6 +1130,10 @@ void check_for_updates() {
         }
     } else {
         Serial.println("[OTA] No updates available.");
+    }
+
+    if (realtime_was_active) {
+        app_state.supabase_realtime_resubscribe = true;
     }
 }
 
@@ -1262,8 +1296,9 @@ void syncWithSupabase() {
     
     // Telemetry cadence: every 5 minutes (or on-demand via realtime command)
     const unsigned long syncInterval = 300000;
-    const bool realtime_connected = supabaseRealtime.isConnected();
-    unsigned long commandPollInterval = realtime_connected ? 0 :
+    const bool realtime_active = supabaseRealtime.isConnected() || supabaseRealtimeDevices.isConnected();
+    const bool realtime_connecting = supabaseRealtime.isConnecting() || supabaseRealtimeDevices.isConnecting();
+    unsigned long commandPollInterval = (realtime_active || realtime_connecting) ? 0 :
         (app_state.supabase_app_connected ? 5000 : 15000);
     
     // Handle authentication retry
@@ -1321,6 +1356,16 @@ void syncWithSupabase() {
         return;
     }
     
+    // Avoid overlapping TLS handshakes while realtime is connecting
+    if (realtime_connecting) {
+        static unsigned long last_skip_log = 0;
+        if (now - last_skip_log > 10000) {
+            last_skip_log = now;
+            Serial.println("[SUPABASE] Skipping HTTP sync while realtime connects");
+        }
+        return;
+    }
+
     // Post device state periodically
     if (now - lastSync >= syncInterval) {
         lastSync = now;
@@ -1331,17 +1376,25 @@ void syncWithSupabase() {
         uint32_t uptime = millis() / 1000;
         float temp = app_state.temperature;  // From sensor if available
         
+        if (!hasSafeTlsHeap(65000, 40000)) {
+            Serial.println("[SUPABASE] Skipping state sync - low heap for TLS");
+        } else {
         // Post state and get app status back (include firmware version)
         SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
         if (appState.valid) {
             applySupabaseAppState(appState);
+        }
         }
     }
     
     // Poll for commands (can be more frequent than state sync)
     if (commandPollInterval > 0 && now - lastCommandPoll >= commandPollInterval) {
         lastCommandPoll = now;
-        
+        if (!hasSafeTlsHeap(65000, 40000)) {
+            Serial.println("[SUPABASE] Skipping command poll - low heap for TLS");
+            return;
+        }
+
         SupabaseCommand commands[10];
         int count = supabaseClient.pollCommands(commands, 10);
         
@@ -1495,6 +1548,8 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
  * This reduces latency and server load but requires the Supabase anon key.
  */
 bool initSupabaseRealtime() {
+    // Debug: isolate realtime subscriptions (1=commands only, 2=pairings only, 0=both)
+    static const int kRealtimeSubscriptionMode = 1;
     static unsigned long last_realtime_error_log = 0;
     String anonKey = config_manager.getSupabaseAnonKey();
     
@@ -1541,41 +1596,53 @@ bool initSupabaseRealtime() {
     // Initialize WebSocket connection
     supabaseRealtime.begin(supabaseUrl, anonKey, accessToken);
     
-    // Subscribe to commands for this device's pairing code
+    // Subscribe to commands for this device's pairing code (queue if not connected yet)
     String pairingCode = pairing_manager.getCode();
     if (!pairingCode.isEmpty()) {
-        // Wait briefly for connection to establish
-        unsigned long waitStart = millis();
-        while (!supabaseRealtime.isSocketConnected() && millis() - waitStart < 5000) {
-            supabaseRealtime.loop();
-            delay(100);
-        }
-        
-        if (supabaseRealtime.isSocketConnected()) {
-            // Subscribe to both commands and pairings tables for this device
-            String filter = "pairing_code=eq." + pairingCode;
-            const String tables[] = { "commands", "pairings" };
-            supabaseRealtime.subscribeMultiple("display", tables, 2, filter);
-            Serial.printf("[REALTIME] Subscribed to commands + pairings for pairing code: %s\n", 
-                          pairingCode.c_str());
-            app_state.realtime_error = "";
-            return true;
+        String filter = "pairing_code=eq." + pairingCode;
+        if (kRealtimeSubscriptionMode == 1) {
+            const String tables[] = { "commands" };
+            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
+            if (queued) {
+                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
+                              pairingCode.c_str());
+                app_state.realtime_error = "";
+                return true;
+            }
+        } else if (kRealtimeSubscriptionMode == 2) {
+            const String tables[] = { "pairings" };
+            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
+            if (queued) {
+                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
+                              pairingCode.c_str());
+                app_state.realtime_error = "";
+                return true;
+            }
         } else {
-            Serial.println("[REALTIME] Connection timeout - will retry");
-            app_state.realtime_error = "connection_timeout";
-            app_state.last_realtime_error = millis();
-            unsigned long now = millis();
-            if (now - last_realtime_error_log > 600000) {  // 10 minutes
-                last_realtime_error_log = now;
-                JsonDocument meta;
-                meta["reason"] = "connection_timeout";
-                meta["heap"] = ESP.getFreeHeap();
-                meta["time"] = (unsigned long)time(nullptr);
-                String metaStr;
-                serializeJson(meta, metaStr);
-                supabaseClient.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
+            const String tables[] = { "commands", "pairings" };
+            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 2, filter);
+            if (queued) {
+                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
+                              pairingCode.c_str());
+                app_state.realtime_error = "";
+                return true;
             }
         }
+    }
+
+    Serial.println("[REALTIME] Connection timeout - will retry");
+    app_state.realtime_error = "connection_timeout";
+    app_state.last_realtime_error = millis();
+    unsigned long now = millis();
+    if (now - last_realtime_error_log > 600000) {  // 10 minutes
+        last_realtime_error_log = now;
+        JsonDocument meta;
+        meta["reason"] = "connection_timeout";
+        meta["heap"] = ESP.getFreeHeap();
+        meta["time"] = (unsigned long)time(nullptr);
+        String metaStr;
+        serializeJson(meta, metaStr);
+        supabaseClient.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
     }
     return supabaseRealtime.isSocketConnected();
 }
@@ -1584,6 +1651,11 @@ bool initSupabaseRealtime() {
  * @brief Initialize Supabase Realtime for device updates (admin debug toggle)
  */
 bool initSupabaseRealtimeDevices() {
+    // Debug: disable device realtime to isolate pairing channel
+    static const bool kEnableDeviceRealtime = false;
+    if (!kEnableDeviceRealtime) {
+        return false;
+    }
     String anonKey = config_manager.getSupabaseAnonKey();
     if (anonKey.isEmpty()) {
         app_state.realtime_devices_error = "anon_key_missing";
@@ -1620,25 +1692,19 @@ bool initSupabaseRealtimeDevices() {
     supabaseRealtimeDevices.setMessageHandler(handleRealtimeDeviceMessage);
     supabaseRealtimeDevices.begin(supabaseUrl, anonKey, accessToken);
 
-    unsigned long waitStart = millis();
-    while (!supabaseRealtimeDevices.isSocketConnected() && millis() - waitStart < 5000) {
-        supabaseRealtimeDevices.loop();
-        delay(100);
-    }
-
-    if (supabaseRealtimeDevices.isSocketConnected()) {
-        String filter = "device_id=eq." + deviceId;
-        const String tables[] = { "devices" };
-        supabaseRealtimeDevices.subscribeMultiple("display", tables, 1, filter);
-        Serial.printf("[REALTIME] Subscribed to devices updates for %s\n", deviceId.c_str());
+    String filter = "device_id=eq." + deviceId;
+    const String tables[] = { "devices" };
+    bool queued = supabaseRealtimeDevices.subscribeMultiple("display", tables, 1, filter);
+    if (queued) {
+        Serial.printf("[REALTIME] Subscription requested for devices updates: %s\n", deviceId.c_str());
         app_state.realtime_devices_error = "";
         return true;
-    } else {
-        Serial.println("[REALTIME] Device realtime connection timeout - will retry");
-        app_state.realtime_devices_error = "connection_timeout";
-        app_state.last_realtime_devices_error = millis();
-        return false;
     }
+
+    Serial.println("[REALTIME] Device realtime connection timeout - will retry");
+    app_state.realtime_devices_error = "connection_timeout";
+    app_state.last_realtime_devices_error = millis();
+    return false;
 }
 
 /**

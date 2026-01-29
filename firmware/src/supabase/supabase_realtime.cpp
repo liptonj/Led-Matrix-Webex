@@ -10,6 +10,7 @@
  */
 
 #include "supabase_realtime.h"
+#include <mbedtls/base64.h>
 #include "../common/ca_certs.h"
 #include "../config/config_manager.h"
 
@@ -23,10 +24,125 @@ constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 60000;
 constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 45000;
 constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 35000;
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
+
+String urlEncode(const String& str) {
+    String encoded = "";
+    for (unsigned int i = 0; i < str.length(); i++) {
+        char c = str.charAt(i);
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded += c;
+        } else {
+            encoded += '%';
+            if (c < 16) encoded += '0';
+            char hex[3];
+            sprintf(hex, "%02X", (unsigned char)c);
+            encoded += hex;
+        }
+    }
+    return encoded;
+}
+
+bool decodeJwtPayloadJson(const String& jwt, String& outJson, int* outErr, String* payloadSegmentOut) {
+    int firstDot = jwt.indexOf('.');
+    if (firstDot < 0) {
+        return false;
+    }
+    int secondDot = jwt.indexOf('.', firstDot + 1);
+    if (secondDot < 0) {
+        return false;
+    }
+
+    String payload = jwt.substring(firstDot + 1, secondDot);
+    
+    // Store original for output
+    if (payloadSegmentOut) {
+        *payloadSegmentOut = payload;
+    }
+    
+    // Base64url to base64 conversion:
+    // 1. Replace '-' with '+' and '_' with '/'
+    // 2. Add padding '=' to make length multiple of 4
+    // Note: base64url doesn't use '=' padding, so we strip any existing '=' first
+    String sanitized;
+    sanitized.reserve(payload.length());
+    for (size_t i = 0; i < payload.length(); i++) {
+        char c = payload[i];
+        // Base64url characters: A-Z, a-z, 0-9, '-', '_'
+        // Skip any '=' characters that might be present (shouldn't be in base64url)
+        if (c == '=') {
+            continue;
+        }
+        if ((c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_') {
+            sanitized += c;
+        }
+        // Skip any other characters (whitespace, etc.)
+    }
+    
+    // Convert base64url to base64
+    sanitized.replace('-', '+');
+    sanitized.replace('_', '/');
+    
+    // Add padding
+    int mod = sanitized.length() % 4;
+    if (mod != 0) {
+        int padLen = 4 - mod;
+        for (int i = 0; i < padLen; i++) {
+            sanitized += '=';
+        }
+    }
+
+    size_t decodedLen = 0;
+    int ret = mbedtls_base64_decode(nullptr, 0, &decodedLen,
+                                    reinterpret_cast<const unsigned char*>(sanitized.c_str()),
+                                    sanitized.length());
+    if (outErr) {
+        *outErr = ret;
+    }
+    if (ret != 0 || decodedLen == 0) {
+        return false;
+    }
+
+    unsigned char* decoded = new unsigned char[decodedLen + 1];
+    if (!decoded) {
+        return false;
+    }
+    size_t outLen = 0;
+    ret = mbedtls_base64_decode(decoded, decodedLen, &outLen,
+                                reinterpret_cast<const unsigned char*>(sanitized.c_str()),
+                                sanitized.length());
+    if (outErr) {
+        *outErr = ret;
+    }
+    if (ret != 0) {
+        delete[] decoded;
+        return false;
+    }
+    decoded[outLen] = '\0';
+    outJson = String(reinterpret_cast<const char*>(decoded), outLen);
+    delete[] decoded;
+    return true;
+}
+
+String normalizeJwt(const String& token) {
+    String trimmed = token;
+    trimmed.trim();
+    if (trimmed.startsWith("Bearer ")) {
+        trimmed = trimmed.substring(7);
+    } else if (trimmed.startsWith("bearer ")) {
+        trimmed = trimmed.substring(7);
+    }
+    trimmed.trim();
+    return trimmed;
+}
 }  // namespace
 
 SupabaseRealtime::SupabaseRealtime()
-    : _connected(false), _subscribed(false), _messagePending(false),
+    : _connected(false), _subscribed(false), _connecting(false), _connectStartMs(0),
+      _loggedFirstMessage(false), _loggedCloseFrame(false), _loggedJoinDetails(false),
+      _pendingJoinMessage(""), _pendingJoin(false), _messagePending(false),
       _joinRef(0), _msgRef(0), _lastHeartbeat(0), _lastHeartbeatResponse(0),
       _reconnectDelay(PHOENIX_RECONNECT_MIN_MS), _lastReconnectAttempt(0),
       _lowHeapLogAt(0), _messageHandler(nullptr),
@@ -45,10 +161,13 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
                               const String& access_token) {
     _supabaseUrl = supabase_url;
     _anonKey = anon_key;
-    _accessToken = access_token;
+    _accessToken = normalizeJwt(access_token);
+    _loggedJoinDetails = false;
 
     uint32_t minHeap = minHeapRequired();
     if (ESP.getFreeHeap() < minHeap) {
+        _connecting = false;
+        _connectStartMs = 0;
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
@@ -73,21 +192,34 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     }
     
     // Build realtime WebSocket URL
-    // Format: wss://{project}.supabase.co/realtime/v1/websocket?apikey={anon_key}&vsn=1.0.0
-    String wsPath = "/realtime/v1/websocket?apikey=" + _anonKey + "&vsn=1.0.0";
+    // Format: wss://{project}.supabase.co/realtime/v1/websocket?apikey={anon_key}&token={jwt_token}&vsn=1.0.0
+    // For authenticated connections, Supabase Realtime requires:
+    // 1. apikey: The anon/public key for initial connection
+    // 2. token: The JWT access token for authenticated channel access (RLS policies)
+    // URL-encode both to handle any special characters
+    String encodedAnonKey = urlEncode(_anonKey);
+    String encodedToken = urlEncode(_accessToken);
+    String wsPath = "/realtime/v1/websocket?apikey=" + encodedAnonKey + "&token=" + encodedToken + "&vsn=1.0.0";
     
     Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), wsPath.c_str());
+    Serial.printf("[REALTIME] Anon key length: %d (encoded: %d)\n", _anonKey.length(), encodedAnonKey.length());
+    Serial.printf("[REALTIME] Token length: %d (encoded: %d)\n", _accessToken.length(), encodedToken.length());
     Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
                   (unsigned long)time(nullptr), ESP.getFreeHeap());
 
     String uri = "wss://" + host + wsPath;
     esp_websocket_client_config_t config = {};
+    _connecting = true;
+    _connectStartMs = millis();
     config.uri = uri.c_str();
     config.disable_auto_reconnect = true;
     config.buffer_size = 4096;
     config.task_stack = 8192;  // TLS handshake needs extra stack on ESP32-S3
     config.user_context = this;
     config.ping_interval_sec = 0;
+    _wsHeaders = "";
+    config.headers = nullptr;
+    config.subprotocol = nullptr;
     if (config_manager.getTlsVerify()) {
         config.cert_pem = CA_CERT_BUNDLE_SUPABASE;
     } else {
@@ -107,12 +239,14 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
                                       &SupabaseRealtime::websocketEventHandler, this);
         esp_websocket_client_start(_client);
     } else {
+        _connecting = false;
         Serial.println("[REALTIME] Failed to initialize websocket client");
     }
 }
 
 void SupabaseRealtime::setAccessToken(const String& access_token) {
-    _accessToken = access_token;
+    _accessToken = normalizeJwt(access_token);
+    _loggedJoinDetails = false;
     
     // If connected, re-authenticate
     if (_connected) {
@@ -163,8 +297,12 @@ bool SupabaseRealtime::subscribe(const String& schema, const String& table,
 bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tables[],
                                           int tableCount, const String& filter) {
     if (!_connected) {
-        Serial.println("[REALTIME] Cannot subscribe - not connected");
-        return false;
+        if (_client) {
+            Serial.println("[REALTIME] Not connected yet - will queue subscription");
+        } else {
+            Serial.println("[REALTIME] Cannot subscribe - not connected");
+            return false;
+        }
     }
     
     // Validate inputs
@@ -206,12 +344,8 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     _joinRef++;
     _msgRef++;
     
-    // Build channel topic using first table (topic is just an identifier)
-    // Format: realtime:{schema}:multi:{filter}
-    _channelTopic = "realtime:" + schema + ":multi";
-    if (!filter.isEmpty()) {
-        _channelTopic += ":" + filter;
-    }
+    // Supabase Realtime expects an arbitrary channel name (must not be "realtime")
+    _channelTopic = "display-db-changes";
     
     // Build join payload with postgres_changes config
     // ArduinoJson v7 handles memory allocation automatically
@@ -243,6 +377,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         return false;
     }
     
+    const bool kIncludeFilter = true;  // Debug: set false to test without filter
     for (int i = 0; i < tableCount; i++) {
         JsonObject change = pgChanges.add<JsonObject>();
         if (change.isNull()) {
@@ -253,17 +388,78 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         change["event"] = "*";  // Listen to all events (INSERT, UPDATE, DELETE)
         change["schema"] = schema;
         change["table"] = tables[i];
-        if (!filter.isEmpty()) {
+        if (kIncludeFilter && !filter.isEmpty()) {
             change["filter"] = filter;
         }
         Serial.printf("[REALTIME] Adding subscription: %s.%s (filter: %s)\n",
                       schema.c_str(), tables[i].c_str(), 
-                      filter.isEmpty() ? "none" : filter.c_str());
+                      (kIncludeFilter && !filter.isEmpty()) ? filter.c_str() : "none");
     }
     
     // Add access token for authorization
     payload["access_token"] = _accessToken;
+
+    if (!_loggedJoinDetails) {
+        String tableList;
+        for (int i = 0; i < tableCount; i++) {
+            if (i > 0) {
+                tableList += ",";
+            }
+            tableList += tables[i];
+        }
+        Serial.printf("[REALTIME] Join details: schema=%s tables=%s filter=%s topic=%s token_len=%d\n",
+                      schema.c_str(),
+                      tableList.c_str(),
+                      filter.isEmpty() ? "none" : filter.c_str(),
+                      _channelTopic.c_str(),
+                      _accessToken.length());
+        Serial.printf("[REALTIME] Access token (full): %s\n", _accessToken.c_str());
+
+        int dotCount = 0;
+        for (size_t i = 0; i < _accessToken.length(); i++) {
+            if (_accessToken[i] == '.') {
+                dotCount++;
+            }
+        }
+        Serial.printf("[REALTIME] Token structure: dots=%d starts_with_ey=%d\n",
+                      dotCount, _accessToken.startsWith("ey") ? 1 : 0);
+
+        String claimsJson;
+        int decodeErr = 0;
+        String payloadSegment;
+        if (dotCount >= 2 && decodeJwtPayloadJson(_accessToken, claimsJson, &decodeErr, &payloadSegment)) {
+            JsonDocument claimsDoc;
+            DeserializationError err = deserializeJson(claimsDoc, claimsJson);
+            if (!err) {
+                String role = claimsDoc["role"] | "";
+                String tokenType = claimsDoc["token_type"] | "";
+                String pairingCode = claimsDoc["pairing_code"] | "";
+                String sub = claimsDoc["sub"] | "";
+                long exp = claimsDoc["exp"] | 0;
+                Serial.printf("[REALTIME] JWT claims: role=%s token_type=%s pairing_code=%s sub=%s exp=%ld\n",
+                              role.isEmpty() ? "?" : role.c_str(),
+                              tokenType.isEmpty() ? "?" : tokenType.c_str(),
+                              pairingCode.isEmpty() ? "?" : pairingCode.c_str(),
+                              sub.isEmpty() ? "?" : sub.c_str(),
+                              exp);
+            } else {
+                Serial.printf("[REALTIME] JWT decode failed: %s\n", err.c_str());
+            }
+        } else {
+            Serial.printf("[REALTIME] JWT decode failed: unable to parse token payload (err=%d payload_len=%d)\n",
+                          decodeErr, payloadSegment.length());
+            if (!payloadSegment.isEmpty()) {
+                Serial.printf("[REALTIME] JWT payload segment (base64url, sanitized): %s\n",
+                              payloadSegment.c_str());
+            }
+        }
+        _loggedJoinDetails = true;
+    }
     
+    String payloadJson;
+    serializeJson(payload, payloadJson);
+    Serial.printf("[REALTIME] Join payload: %s\n", payloadJson.c_str());
+
     // Build Phoenix message
     String message = buildPhoenixMessage(_channelTopic, "phx_join", payload, _joinRef);
     
@@ -277,22 +473,36 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         Serial.printf("[REALTIME] WARNING: Message very large (%zu bytes)\n", message.length());
     }
     
+    // Debug: log first 500 chars of message for troubleshooting
+    if (!_loggedJoinDetails) {
+        String msgPreview = message.substring(0, 500);
+        Serial.printf("[REALTIME] Join message preview (%zu bytes): %s%s\n",
+                      message.length(), msgPreview.c_str(),
+                      message.length() > 500 ? "..." : "");
+    }
+    
     Serial.printf("[REALTIME] Joining channel: %s\n", _channelTopic.c_str());
     if (!_client) {
         Serial.println("[REALTIME] WebSocket client is null");
         return false;
     }
     if (!esp_websocket_client_is_connected(_client)) {
-        Serial.println("[REALTIME] WebSocket not connected - cannot send subscription");
-        return false;
+        _pendingJoinMessage = message;
+        _pendingJoin = true;
+        Serial.println("[REALTIME] WebSocket not connected - queued subscription");
+        return true;
     }
 
     int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     if (sent < 0) {
         Serial.printf("[REALTIME] Failed to send subscription message (ret=%d)\n", sent);
+        _pendingJoinMessage = message;
+        _pendingJoin = true;
         return false;
     }
-    
+    _pendingJoin = false;
+    _pendingJoinMessage = "";
+
     return true;
 }
 
@@ -324,6 +534,7 @@ void SupabaseRealtime::disconnect() {
     }
     _connected = false;
     _subscribed = false;
+    _connecting = false;
     _lastHeartbeatResponse = 0;
 }
 
@@ -424,29 +635,83 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         Serial.println("[REALTIME] Connected");
         instance->_connected = true;
+        instance->_connecting = false;
+        instance->_loggedFirstMessage = false;
+        instance->_loggedCloseFrame = false;
         instance->_hasConnected = true;
         instance->_lastHeartbeatResponse = millis();
         instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
+        if (instance->_pendingJoin && instance->_client &&
+            esp_websocket_client_is_connected(instance->_client)) {
+            Serial.printf("[REALTIME] Sending queued join message (%zu bytes)\n",
+                          instance->_pendingJoinMessage.length());
+            int sent = esp_websocket_client_send_text(
+                instance->_client,
+                instance->_pendingJoinMessage.c_str(),
+                instance->_pendingJoinMessage.length(),
+                portMAX_DELAY);
+            if (sent < 0) {
+                Serial.printf("[REALTIME] Failed to send queued subscription (ret=%d)\n", sent);
+            } else {
+                Serial.printf("[REALTIME] Sent queued subscription (%d bytes)\n", sent);
+                instance->_pendingJoin = false;
+                instance->_pendingJoinMessage = "";
+            }
+        }
         return;
     }
 
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_CLOSED) {
-        Serial.println("[REALTIME] Disconnected");
+        if (instance->_connected) {
+            Serial.println("[REALTIME] Disconnected (was connected)");
+        } else {
+            Serial.println("[REALTIME] Disconnected (was not connected)");
+        }
         instance->_connected = false;
         instance->_subscribed = false;
+        instance->_connecting = false;
         return;
     }
 
     if (event_id == WEBSOCKET_EVENT_ERROR) {
-        Serial.println("[REALTIME] Error");
+        auto* error_data = static_cast<esp_websocket_event_id_t*>(event_data);
+        Serial.printf("[REALTIME] WebSocket error event (event_id=%ld)\n", (long)event_id);
+        // Log additional error details if available
+        if (error_data) {
+            Serial.printf("[REALTIME] Error data pointer: %p\n", error_data);
+        }
         instance->_connected = false;
         instance->_subscribed = false;
+        instance->_connecting = false;
         return;
     }
 
     if (event_id == WEBSOCKET_EVENT_DATA) {
         auto* data = static_cast<esp_websocket_event_data_t*>(event_data);
-        if (!data || data->op_code != 0x1) {  // text frame
+        if (!data) {
+            return;
+        }
+
+        if (data->op_code == 0x8) {  // close frame
+            if (!instance->_loggedCloseFrame) {
+                uint16_t closeCode = 0;
+                String closeReason = "";
+                if (data->data_len >= 2 && data->data_ptr) {
+                    closeCode = (static_cast<uint8_t>(data->data_ptr[0]) << 8) |
+                                static_cast<uint8_t>(data->data_ptr[1]);
+                    if (data->data_len > 2) {
+                        closeReason = String(data->data_ptr + 2, data->data_len - 2);
+                    }
+                }
+                Serial.printf("[REALTIME] WebSocket close frame (code=%u len=%d reason=%s)\n",
+                              static_cast<unsigned int>(closeCode), data->data_len,
+                              closeReason.isEmpty() ? "none" : closeReason.c_str());
+                instance->_loggedCloseFrame = true;
+            }
+            return;
+        }
+
+        if (data->op_code != 0x1) {  // text frame only
             return;
         }
 
@@ -456,6 +721,12 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
             instance->_pendingMessage = instance->_rxBuffer;
             instance->_rxBuffer = "";
             instance->_pendingMessageAvailable = true;
+            if (!instance->_loggedFirstMessage) {
+                String snippet = instance->_pendingMessage.substring(0, 200);
+                Serial.printf("[REALTIME] First WS message (%d bytes): %s\n",
+                              instance->_pendingMessage.length(), snippet.c_str());
+                instance->_loggedFirstMessage = true;
+            }
         }
         portEXIT_CRITICAL(&instance->_rxMux);
     }
@@ -477,9 +748,23 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             _subscribed = true;
             Serial.println("[REALTIME] Successfully joined channel");
         } else {
-            Serial.printf("[REALTIME] Join failed: %s\n", status.c_str());
-            String reason = payload["response"]["reason"] | "unknown";
-            Serial.printf("[REALTIME] Reason: %s\n", reason.c_str());
+            Serial.printf("[REALTIME] Join failed: status=%s\n", status.c_str());
+            
+            // Try to extract error details
+            if (payload["response"].is<JsonObject>()) {
+                String reason = payload["response"]["reason"] | "unknown";
+                Serial.printf("[REALTIME] Reason: %s\n", reason.c_str());
+                
+                // Log full response for debugging
+                String responseStr;
+                serializeJson(payload["response"], responseStr);
+                Serial.printf("[REALTIME] Full response: %s\n", responseStr.c_str());
+            } else {
+                // Log entire payload if response structure is unexpected
+                String payloadStr;
+                serializeJson(payload, payloadStr);
+                Serial.printf("[REALTIME] Join error payload: %s\n", payloadStr.c_str());
+            }
         }
         return;
     }
