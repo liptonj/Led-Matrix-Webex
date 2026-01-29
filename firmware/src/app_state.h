@@ -50,6 +50,7 @@ struct AppState {
     String realtime_devices_error = "";
     unsigned long last_realtime_error = 0;
     unsigned long last_realtime_devices_error = 0;
+    unsigned long realtime_defer_until = 0;
     // Time tracking
     bool time_synced = false;
 };

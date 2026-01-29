@@ -19,7 +19,9 @@ extern ConfigManager config_manager;
 SupabaseRealtime supabaseRealtime;
 
 namespace {
-constexpr uint32_t REALTIME_MIN_HEAP = 60000;
+constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 60000;
+constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 45000;
+constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 35000;
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
 }  // namespace
 
@@ -27,7 +29,11 @@ SupabaseRealtime::SupabaseRealtime()
     : _connected(false), _subscribed(false), _messagePending(false),
       _joinRef(0), _msgRef(0), _lastHeartbeat(0), _lastHeartbeatResponse(0),
       _reconnectDelay(PHOENIX_RECONNECT_MIN_MS), _lastReconnectAttempt(0),
-      _lowHeapLogAt(0), _messageHandler(nullptr) {
+      _lowHeapLogAt(0), _messageHandler(nullptr),
+      _hasConnected(false),
+      _minHeapFirstConnect(REALTIME_MIN_HEAP_FIRST),
+      _minHeapSteady(REALTIME_MIN_HEAP_STEADY),
+      _minHeapFloor(REALTIME_MIN_HEAP_FLOOR) {
     _lastMessage.valid = false;
 }
 
@@ -41,12 +47,13 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     _anonKey = anon_key;
     _accessToken = access_token;
 
-    if (ESP.getFreeHeap() < REALTIME_MIN_HEAP) {
+    uint32_t minHeap = minHeapRequired();
+    if (ESP.getFreeHeap() < minHeap) {
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
             Serial.printf("[REALTIME] Skipping connect - low heap (%lu < %lu)\n",
-                          ESP.getFreeHeap(), (unsigned long)REALTIME_MIN_HEAP);
+                          ESP.getFreeHeap(), (unsigned long)minHeap);
         }
         return;
     }
@@ -271,14 +278,18 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     }
     
     Serial.printf("[REALTIME] Joining channel: %s\n", _channelTopic.c_str());
-    if (_client) {
-        esp_err_t err = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
-        if (err != ESP_OK) {
-            Serial.printf("[REALTIME] Failed to send subscription message: %s\n", esp_err_to_name(err));
-            return false;
-        }
-    } else {
+    if (!_client) {
         Serial.println("[REALTIME] WebSocket client is null");
+        return false;
+    }
+    if (!esp_websocket_client_is_connected(_client)) {
+        Serial.println("[REALTIME] WebSocket not connected - cannot send subscription");
+        return false;
+    }
+
+    int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    if (sent < 0) {
+        Serial.printf("[REALTIME] Failed to send subscription message (ret=%d)\n", sent);
         return false;
     }
     
@@ -294,7 +305,7 @@ void SupabaseRealtime::unsubscribe() {
     
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage(_channelTopic, "phx_leave", emptyPayload);
-    if (_client) {
+    if (_client && esp_websocket_client_is_connected(_client)) {
         esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
     
@@ -388,7 +399,7 @@ void SupabaseRealtime::sendHeartbeat() {
     
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage("phoenix", "heartbeat", emptyPayload);
-    if (_client) {
+    if (_client && esp_websocket_client_is_connected(_client)) {
         esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
 }
@@ -413,6 +424,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         Serial.println("[REALTIME] Connected");
         instance->_connected = true;
+        instance->_hasConnected = true;
         instance->_lastHeartbeatResponse = millis();
         instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
         return;
@@ -530,16 +542,25 @@ void SupabaseRealtime::attemptReconnect() {
     }
     
     Serial.printf("[REALTIME] Reconnecting (next attempt in %lu ms)...\n", _reconnectDelay);
-    if (ESP.getFreeHeap() < REALTIME_MIN_HEAP) {
+    uint32_t minHeap = minHeapRequired();
+    if (ESP.getFreeHeap() < minHeap) {
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
             Serial.printf("[REALTIME] Skipping reconnect - low heap (%lu < %lu)\n",
-                          ESP.getFreeHeap(), (unsigned long)REALTIME_MIN_HEAP);
+                          ESP.getFreeHeap(), (unsigned long)minHeap);
         }
         return;
     }
     
     disconnect();
     begin(_supabaseUrl, _anonKey, _accessToken);
+}
+
+uint32_t SupabaseRealtime::minHeapRequired() const {
+    uint32_t required = _hasConnected ? _minHeapSteady : _minHeapFirstConnect;
+    if (required < _minHeapFloor) {
+        required = _minHeapFloor;
+    }
+    return required;
 }
