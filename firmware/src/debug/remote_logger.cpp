@@ -20,6 +20,10 @@ void RemoteLogger::begin(SupabaseClient* supabase) {
 }
 
 void RemoteLogger::setRemoteEnabled(bool enabled) {
+    if (_remoteEnabled == enabled) {
+        return;  // avoid spamming status when value unchanged
+    }
+
     _remoteEnabled = enabled;
     if (enabled) {
         Serial.println("[RLOG] Remote logging ENABLED - logs will stream to Supabase");

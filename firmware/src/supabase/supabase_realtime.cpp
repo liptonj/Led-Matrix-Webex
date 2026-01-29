@@ -72,12 +72,13 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), wsPath.c_str());
     Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
                   (unsigned long)time(nullptr), ESP.getFreeHeap());
-    
+
     String uri = "wss://" + host + wsPath;
     esp_websocket_client_config_t config = {};
     config.uri = uri.c_str();
     config.disable_auto_reconnect = true;
     config.buffer_size = 4096;
+    config.task_stack = 8192;  // TLS handshake needs extra stack on ESP32-S3
     config.user_context = this;
     config.ping_interval_sec = 0;
     if (config_manager.getTlsVerify()) {
