@@ -13,6 +13,7 @@ import pkg from '../../../package.json';
 // Configuration
 const CONFIG = {
   storageKeyPairingCode: 'led_matrix_pairing_code',
+  storageKeyDebugVisible: 'led_matrix_debug_visible',
   tokenRefreshThresholdMs: 5 * 60 * 1000, // Refresh token 5 minutes before expiry
   heartbeatIntervalMs: 30 * 1000, // Update app_last_seen every 30 seconds
   // Feature flag: use Edge Functions instead of direct DB updates for better security
@@ -30,6 +31,8 @@ interface AppToken {
 }
 
 type TabId = 'status' | 'display' | 'webex' | 'system';
+
+type DebugLevel = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'activity';
 
 // Device config interface matching firmware response
 interface DeviceConfig {
@@ -65,6 +68,12 @@ interface DeviceStatus {
   humidity?: number;
 }
 
+interface DebugEntry {
+  time: string;
+  level: DebugLevel;
+  message: string;
+}
+
 const statusButtons: { status: WebexStatus; label: string; className: string }[] = [
   { status: 'active', label: 'Available', className: 'bg-status-active/20 text-status-active hover:bg-status-active/30' },
   { status: 'away', label: 'Away', className: 'bg-status-away/20 text-status-away hover:bg-status-away/30' },
@@ -76,6 +85,8 @@ export function EmbeddedAppClient() {
   const [showSetup, setShowSetup] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('status');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [debugVisible, setDebugVisible] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<DebugEntry[]>([]);
   const [pairingCode, setPairingCode] = useState('');
   const [manualStatus, setManualStatus] = useState<WebexStatus>('active');
   const [manualDisplayName, setManualDisplayName] = useState('User');
@@ -107,10 +118,35 @@ export function EmbeddedAppClient() {
   const [rtStatus, setRtStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const appendDebugLog = useCallback((level: DebugLevel, message: string) => {
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+    setDebugLogs(prev => [{ time, level, message }, ...prev].slice(0, 200));
+  }, []);
+
+  const formatDebugValue = useCallback((value: unknown): string => {
+    if (value instanceof Error) {
+      return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ''}`;
+    }
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
+      return String(value);
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }, []);
+
+  const formatDebugArgs = useCallback((args: unknown[]): string => {
+    return args.map(formatDebugValue).join(' ');
+  }, [formatDebugValue]);
+
   const addLog = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     setActivityLog(prev => [{ time, message }, ...prev.slice(0, 29)]);
-  }, []);
+    appendDebugLog('activity', message);
+  }, [appendDebugLog]);
 
   // Exchange pairing code for app token
   const exchangePairingCode = useCallback(async (code: string): Promise<AppToken | null> => {
@@ -400,12 +436,69 @@ export function EmbeddedAppClient() {
   }, [initialize, sdkLoaded]);
 
   useEffect(() => {
+    const savedDebugVisible = localStorage.getItem(CONFIG.storageKeyDebugVisible);
+    if (savedDebugVisible === 'true') {
+      setDebugVisible(true);
+    }
     const savedPairingCode = localStorage.getItem(CONFIG.storageKeyPairingCode);
     if (savedPairingCode) {
       setPairingCode(savedPairingCode);
       autoConnectRef.current = true;
     }
   }, [addLog]);
+
+  useEffect(() => {
+    localStorage.setItem(CONFIG.storageKeyDebugVisible, debugVisible ? 'true' : 'false');
+  }, [debugVisible]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'test') {
+      return;
+    }
+    const original = {
+      log: console.log,
+      info: console.info,
+      warn: console.warn,
+      error: console.error,
+      debug: console.debug,
+    };
+
+    const wrap = (level: Exclude<DebugLevel, 'activity'>) => (...args: unknown[]) => {
+      const handler = original[level] || original.log;
+      handler(...args);
+      appendDebugLog(level, formatDebugArgs(args));
+    };
+
+    console.log = wrap('log');
+    console.info = wrap('info');
+    console.warn = wrap('warn');
+    console.error = wrap('error');
+    console.debug = wrap('debug');
+
+    const handleError = (event: ErrorEvent) => {
+      appendDebugLog(
+        'error',
+        `Window error: ${event.message} (${event.filename}:${event.lineno}:${event.colno})`
+      );
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      appendDebugLog('error', `Unhandled rejection: ${formatDebugValue(event.reason)}`);
+    };
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleRejection);
+
+    return () => {
+      console.log = original.log;
+      console.info = original.info;
+      console.warn = original.warn;
+      console.error = original.error;
+      console.debug = original.debug;
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleRejection);
+    };
+  }, [appendDebugLog, formatDebugArgs, formatDebugValue]);
 
   useEffect(() => {
     if (autoConnectRef.current && pairingCode && rtStatus === 'disconnected') {
@@ -621,6 +714,24 @@ export function EmbeddedAppClient() {
     addLog('Disconnected');
   }, [addLog]);
 
+  const handleCopyDebug = useCallback(async () => {
+    if (!navigator.clipboard) {
+      addLog('Clipboard not available in this context');
+      return;
+    }
+    try {
+      const payload = debugLogs
+        .slice()
+        .reverse()
+        .map(entry => `[${entry.time}] [${entry.level}] ${entry.message}`)
+        .join('\n');
+      await navigator.clipboard.writeText(payload);
+      addLog('Debug log copied to clipboard');
+    } catch (error) {
+      addLog(`Failed to copy debug log: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [debugLogs, addLog]);
+
   const handleStatusChange = (status: WebexStatus) => {
     if (webexReady) {
       addLog('Webex manages your status while embedded.');
@@ -775,9 +886,18 @@ export function EmbeddedAppClient() {
               <Image src="/icon-512.png" alt="LED Matrix Display" width={40} height={40} className="rounded-lg" />
               <h1 className="text-xl font-semibold">LED Matrix Display</h1>
             </div>
-            <div className={`flex items-center gap-2 text-sm ${connectionTextColor}`}>
-              <span className={`w-2 h-2 rounded-full ${connectionDotColor}`} />
-              <span>{connectionLabel}</span>
+            <div className="flex items-center gap-2">
+              <div className={`flex items-center gap-2 text-sm ${connectionTextColor}`}>
+                <span className={`w-2 h-2 rounded-full ${connectionDotColor}`} />
+                <span>{connectionLabel}</span>
+              </div>
+              <Button
+                size="sm"
+                variant={debugVisible ? 'success' : 'default'}
+                onClick={() => setDebugVisible(prev => !prev)}
+              >
+                {debugVisible ? 'Debug On' : 'Debug Off'}
+              </Button>
             </div>
           </header>
 
@@ -1127,9 +1247,56 @@ export function EmbeddedAppClient() {
           {/* Footer */}
           <footer className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
             <span>LED Matrix Webex Display</span>
-            <span className="ml-2">v1.4.5</span>
+            <span className="ml-2">1.5.6</span>
           </footer>
         </div>
+
+        {debugVisible && (
+          <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-6 md:w-[520px] z-50">
+            <Card className="shadow-lg border border-[var(--color-border)] bg-[var(--color-bg-card)]">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold">Debug Console</div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="default" onClick={() => setDebugLogs([])}>
+                    Clear
+                  </Button>
+                  <Button size="sm" variant="default" onClick={handleCopyDebug}>
+                    Copy
+                  </Button>
+                  <Button size="sm" variant="warning" onClick={() => setDebugVisible(false)}>
+                    Close
+                  </Button>
+                </div>
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-2 font-mono text-xs whitespace-pre-wrap">
+                {debugLogs.length === 0 && (
+                  <div className="text-[var(--color-text-muted)]">No logs captured yet.</div>
+                )}
+                {debugLogs.map((entry, index) => (
+                  <div key={`${entry.time}-${index}`} className="flex gap-2">
+                    <span className="text-[var(--color-text-muted)]">[{entry.time}]</span>
+                    <span
+                      className={
+                        entry.level === 'error'
+                          ? 'text-danger'
+                          : entry.level === 'warn'
+                            ? 'text-warning'
+                            : entry.level === 'info'
+                              ? 'text-primary'
+                              : entry.level === 'activity'
+                                ? 'text-success'
+                              : 'text-[var(--color-text)]'
+                      }
+                    >
+                      {entry.level}
+                    </span>
+                    <span className="flex-1">{entry.message}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
       </div>
     </>
   );

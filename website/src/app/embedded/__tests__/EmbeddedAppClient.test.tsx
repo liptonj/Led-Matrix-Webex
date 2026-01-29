@@ -83,16 +83,15 @@ jest.mock("@/lib/utils", () => ({
 }));
 
 // Mock Next.js Script component
-jest.mock("next/script", () => ({
-  __esModule: true,
-  default: ({ onLoad }: { onLoad?: () => void }) => {
-    // Simulate SDK loaded
+jest.mock("next/script", () => {
+  const ScriptMock = ({ onLoad }: { onLoad?: () => void }) => {
     React.useEffect(() => {
       if (onLoad) onLoad();
     }, [onLoad]);
     return null;
-  },
-}));
+  };
+  return { __esModule: true, default: ScriptMock };
+});
 
 // Mock Next.js Image component
 jest.mock("next/image", () => ({
