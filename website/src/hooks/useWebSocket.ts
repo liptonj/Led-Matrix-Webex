@@ -220,16 +220,17 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   // Cleanup on unmount
   useEffect(() => {
     mountedRef.current = true;
+    const pendingCommands = pendingCommandsRef.current;
     return () => {
       mountedRef.current = false;
       clearReconnectTimeout();
       
       // Clear all pending commands
-      for (const [, pending] of pendingCommandsRef.current) {
+      for (const [, pending] of pendingCommands) {
         clearTimeout(pending.timeout);
         pending.reject(new Error("Component unmounted"));
       }
-      pendingCommandsRef.current.clear();
+      pendingCommands.clear();
       
       if (wsRef.current) {
         wsRef.current.close();

@@ -24,6 +24,47 @@ export default function AdminShell({
     useEffect(() => {
         let subscription: { unsubscribe: () => void } | null = null;
 
+        async function hydrateAdminState(hasSession: boolean) {
+            if (!hasSession) {
+                setAuthenticated(false);
+                setAdmin(false);
+                setLoading(false);
+                return;
+            }
+
+            setAuthenticated(true);
+            const [profileResult, adminResult] = await Promise.allSettled([
+                getCurrentUserProfile(),
+                isAdmin(),
+            ]);
+
+            if (profileResult.status === 'fulfilled') {
+                if (profileResult.value?.disabled) {
+                    await signOut();
+                    setAuthenticated(false);
+                    setAdmin(false);
+                    setError('This account is disabled. Contact an administrator.');
+                    setLoading(false);
+                    return;
+                }
+            } else {
+                console.error('Profile check failed:', profileResult.reason);
+                setAuthenticated(false);
+                setAdmin(false);
+                setLoading(false);
+                return;
+            }
+
+            if (adminResult.status === 'fulfilled') {
+                setAdmin(adminResult.value);
+            } else {
+                console.error('Admin check failed:', adminResult.reason);
+                setAdmin(false);
+            }
+
+            setLoading(false);
+        }
+
         async function checkAuth() {
             // Allow login page to render even if Supabase is not configured
             if (isLoginPage) {
@@ -39,58 +80,20 @@ export default function AdminShell({
 
             try {
                 const { data } = await getSession();
-                if (data?.session) {
-                    setAuthenticated(true);
-                    const profile = await getCurrentUserProfile();
-                    if (profile?.disabled) {
-                        await signOut();
-                        setAuthenticated(false);
-                        setAdmin(false);
-                        setError('This account is disabled. Contact an administrator.');
-                        return;
-                    }
-                    try {
-                        const isAdminUser = await isAdmin();
-                        setAdmin(isAdminUser);
-                    } catch (adminError) {
-                        console.error('Admin check failed:', adminError);
-                        setAdmin(false);
-                    }
-                } else {
-                    setAuthenticated(false);
-                }
+                await hydrateAdminState(Boolean(data?.session));
             } catch (err) {
                 console.error('Auth check failed:', err);
                 setAuthenticated(false);
+                setAdmin(false);
+                setLoading(false);
             }
-            setLoading(false);
         }
 
         checkAuth();
 
         if (isSupabaseConfigured()) {
             onAuthStateChange(async (_event, session) => {
-                if (session) {
-                    setAuthenticated(true);
-                    const profile = await getCurrentUserProfile();
-                    if (profile?.disabled) {
-                        await signOut();
-                        setAuthenticated(false);
-                        setAdmin(false);
-                        setError('This account is disabled. Contact an administrator.');
-                        return;
-                    }
-                    try {
-                        const isAdminUser = await isAdmin();
-                        setAdmin(isAdminUser);
-                    } catch (adminError) {
-                        console.error('Admin check failed:', adminError);
-                        setAdmin(false);
-                    }
-                } else {
-                    setAuthenticated(false);
-                    setAdmin(false);
-                }
+                await hydrateAdminState(Boolean(session));
             }).then((result) => {
                 if (result?.data?.subscription) {
                     subscription = result.data.subscription;
@@ -111,21 +114,21 @@ export default function AdminShell({
         if (loading || isLoginPage) return;
 
         if (!authenticated) {
-            router.push('/admin/login/');
+            router.replace('/admin/login/');
             return;
         }
 
         if (admin === false) {
             const adminOnlyRoutes = ['/admin/releases', '/admin/users', '/admin'];
             if (adminOnlyRoutes.some((route) => pathname?.startsWith(route))) {
-                router.push('/admin/devices');
+                router.replace('/admin/devices');
             }
         }
     }, [admin, authenticated, loading, isLoginPage, pathname, router]);
 
     const handleSignOut = async () => {
         await signOut();
-        router.push('/admin/login/');
+        router.replace('/admin/login/');
     };
 
     const navItems = useMemo(() => {
