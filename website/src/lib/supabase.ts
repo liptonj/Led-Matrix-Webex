@@ -8,6 +8,24 @@
 // Row Level Security (RLS) protects the data
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(
+  promise: PromiseLike<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+  });
+
+  return (Promise.race([Promise.resolve(promise), timeoutPromise]) as Promise<T>).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
 
 // Check if Supabase is configured
 export function isSupabaseConfigured(): boolean {
@@ -117,11 +135,15 @@ const DEVICE_COLUMNS = `
 // Helper to get devices from the display schema
 export async function getDevices(): Promise<Device[]> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("devices")
-    .select(DEVICE_COLUMNS)
-    .order("last_seen", { ascending: false });
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("devices")
+      .select(DEVICE_COLUMNS)
+      .order("last_seen", { ascending: false }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading devices.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -130,12 +152,16 @@ export async function getDevices(): Promise<Device[]> {
 // Helper to get a single device
 export async function getDevice(serialNumber: string): Promise<Device | null> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("devices")
-    .select(DEVICE_COLUMNS)
-    .eq("serial_number", serialNumber)
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("devices")
+      .select(DEVICE_COLUMNS)
+      .eq("serial_number", serialNumber)
+      .single(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading the device record.",
+  );
 
   if (error && error.code !== "PGRST116") throw error;
   return data;
@@ -147,13 +173,17 @@ export async function getDeviceLogs(
   limit = 100,
 ): Promise<DeviceLog[]> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("device_logs")
-    .select("id, device_id, serial_number, level, message, metadata, created_at")
-    .eq("device_id", deviceId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("device_logs")
+      .select("id, device_id, serial_number, level, message, metadata, created_at")
+      .eq("device_id", deviceId)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading device logs.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -165,13 +195,17 @@ export async function getDeviceLogsBySerial(
   limit = 100,
 ): Promise<DeviceLog[]> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("device_logs")
-    .select("id, device_id, serial_number, level, message, metadata, created_at")
-    .eq("serial_number", serialNumber)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("device_logs")
+      .select("id, device_id, serial_number, level, message, metadata, created_at")
+      .eq("serial_number", serialNumber)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading device logs.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -302,11 +336,15 @@ const RELEASE_COLUMNS = `
 // Helper to get releases
 export async function getReleases(): Promise<Release[]> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("releases")
-    .select(RELEASE_COLUMNS)
-    .order("created_at", { ascending: false });
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("releases")
+      .select(RELEASE_COLUMNS)
+      .order("created_at", { ascending: false }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading releases.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -380,12 +418,20 @@ export async function signOut() {
 
 export async function getSession() {
   const supabase = await getSupabase();
-  return supabase.auth.getSession();
+  return withTimeout(
+    supabase.auth.getSession(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while checking your session.",
+  );
 }
 
 export async function getUser() {
   const supabase = await getSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user } } = await withTimeout(
+    supabase.auth.getUser(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while fetching user details.",
+  );
   return user;
 }
 
@@ -398,7 +444,11 @@ export async function onAuthStateChange(
 
 export async function isAdmin(): Promise<boolean> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase.schema("display").rpc("is_admin");
+  const { data, error } = await withTimeout(
+    supabase.schema("display").rpc("is_admin"),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while checking admin permissions.",
+  );
   if (error) throw error;
   return Boolean(data);
 }
@@ -424,13 +474,17 @@ export interface UserDeviceAssignment {
 
 export async function getUserProfiles(): Promise<UserProfile[]> {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("user_profiles")
-    .select(
-      "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
-    )
-    .order("email", { ascending: true });
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_profiles")
+      .select(
+        "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+      )
+      .order("email", { ascending: true }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading user profiles.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -440,11 +494,15 @@ export async function getUserDeviceAssignments(): Promise<
   UserDeviceAssignment[]
 > {
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("user_devices")
-    .select("id, user_id, serial_number, created_at, created_by")
-    .order("created_at", { ascending: false });
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_devices")
+      .select("id, user_id, serial_number, created_at, created_by")
+      .order("created_at", { ascending: false }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading device assignments.",
+  );
 
   if (error) throw error;
   return data || [];
@@ -520,14 +578,18 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
   if (!user) return null;
 
   const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .schema("display")
-    .from("user_profiles")
-    .select(
-      "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
-    )
-    .eq("user_id", user.id)
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_profiles")
+      .select(
+        "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+      )
+      .eq("user_id", user.id)
+      .single(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading your profile.",
+  );
 
   if (error && error.code !== "PGRST116") throw error;
   return data || null;

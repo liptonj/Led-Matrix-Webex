@@ -19,7 +19,10 @@
 #define SUPABASE_REALTIME_H
 
 #include <Arduino.h>
-#include <WebSocketsClient.h>
+#include <esp_event.h>
+#include <esp_websocket_client.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 #include <ArduinoJson.h>
 
 // Phoenix protocol constants
@@ -128,7 +131,11 @@ public:
     RealtimeMessage getMessage();
 
 private:
-    WebSocketsClient _wsClient;
+    esp_websocket_client_handle_t _client = nullptr;
+    portMUX_TYPE _rxMux = portMUX_INITIALIZER_UNLOCKED;
+    String _rxBuffer;
+    String _pendingMessage;
+    bool _pendingMessageAvailable = false;
     String _supabaseUrl;
     String _anonKey;
     String _accessToken;
@@ -142,8 +149,13 @@ private:
     unsigned long _lastHeartbeatResponse;
     unsigned long _reconnectDelay;
     unsigned long _lastReconnectAttempt;
+    unsigned long _lowHeapLogAt;
     RealtimeMessage _lastMessage;
     RealtimeMessageHandler _messageHandler;
+
+    void handleIncomingMessage(const String& message);
+    static void websocketEventHandler(void* handler_args, esp_event_base_t base,
+                                      int32_t event_id, void* event_data);
 
     /**
      * @brief Build Phoenix message
@@ -166,7 +178,6 @@ private:
     /**
      * @brief Handle WebSocket events
      */
-    void onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length);
 
     /**
      * @brief Handle Phoenix message
@@ -179,10 +190,6 @@ private:
      */
     void attemptReconnect();
 
-    /**
-     * @brief Static callback for WebSocket events
-     */
-    static void webSocketCallback(WStype_t type, uint8_t* payload, size_t length);
 };
 
 // Global instance
