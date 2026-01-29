@@ -159,9 +159,40 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         return false;
     }
     
-    if (tableCount <= 0) {
-        Serial.println("[REALTIME] No tables specified");
+    // Validate inputs
+    if (tableCount <= 0 || tableCount > 10) {
+        Serial.printf("[REALTIME] Invalid table count: %d (must be 1-10)\n", tableCount);
         return false;
+    }
+    
+    if (tables == nullptr) {
+        Serial.println("[REALTIME] Tables array is null");
+        return false;
+    }
+    
+    if (schema.isEmpty()) {
+        Serial.println("[REALTIME] Schema is empty");
+        return false;
+    }
+    
+    // Check heap before proceeding (need at least 20KB for JSON operations)
+    const uint32_t min_heap = 20000;
+    if (ESP.getFreeHeap() < min_heap) {
+        Serial.printf("[REALTIME] Insufficient heap for subscription (%lu < %lu)\n",
+                      ESP.getFreeHeap(), (unsigned long)min_heap);
+        return false;
+    }
+    
+    // Validate all table names before processing
+    for (int i = 0; i < tableCount; i++) {
+        if (tables[i].isEmpty()) {
+            Serial.printf("[REALTIME] Table %d is empty\n", i);
+            return false;
+        }
+        if (tables[i].length() > 64) {
+            Serial.printf("[REALTIME] Table name too long: %s\n", tables[i].c_str());
+            return false;
+        }
     }
     
     _joinRef++;
@@ -175,15 +206,41 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     }
     
     // Build join payload with postgres_changes config
+    // Reserve capacity upfront to prevent reallocations
     JsonDocument payload;
+    payload.to<JsonObject>();  // Ensure it's an object
+    
+    // Check if we have enough capacity (estimate: ~200 bytes per table + overhead)
+    size_t estimatedSize = 512 + (tableCount * 200) + filter.length() + _accessToken.length();
+    if (payload.capacity() < estimatedSize) {
+        Serial.printf("[REALTIME] WARNING: JSON capacity (%zu) may be insufficient for %d tables\n",
+                      payload.capacity(), tableCount);
+        // Try to continue anyway - ArduinoJson will handle overflow gracefully
+    }
+    
     JsonObject config = payload["config"].to<JsonObject>();
+    if (config.isNull()) {
+        Serial.println("[REALTIME] Failed to create config object");
+        return false;
+    }
+    
     config["broadcast"]["self"] = false;
     config["presence"]["key"] = "";
     
     // Add postgres_changes subscription for each table
     JsonArray pgChanges = config["postgres_changes"].to<JsonArray>();
+    if (pgChanges.isNull()) {
+        Serial.println("[REALTIME] Failed to create postgres_changes array");
+        return false;
+    }
+    
     for (int i = 0; i < tableCount; i++) {
         JsonObject change = pgChanges.add<JsonObject>();
+        if (change.isNull()) {
+            Serial.printf("[REALTIME] Failed to add table %d to postgres_changes\n", i);
+            return false;
+        }
+        
         change["event"] = "*";  // Listen to all events (INSERT, UPDATE, DELETE)
         change["schema"] = schema;
         change["table"] = tables[i];
@@ -198,11 +255,29 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     // Add access token for authorization
     payload["access_token"] = _accessToken;
     
+    // Build Phoenix message
     String message = buildPhoenixMessage(_channelTopic, "phx_join", payload, _joinRef);
+    
+    // Validate message was built successfully
+    if (message.isEmpty()) {
+        Serial.println("[REALTIME] Failed to build Phoenix message");
+        return false;
+    }
+    
+    if (message.length() > 4096) {
+        Serial.printf("[REALTIME] WARNING: Message very large (%zu bytes)\n", message.length());
+    }
     
     Serial.printf("[REALTIME] Joining channel: %s\n", _channelTopic.c_str());
     if (_client) {
-        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+        esp_err_t err = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+        if (err != ESP_OK) {
+            Serial.printf("[REALTIME] Failed to send subscription message: %s\n", esp_err_to_name(err));
+            return false;
+        }
+    } else {
+        Serial.println("[REALTIME] WebSocket client is null");
+        return false;
     }
     
     return true;

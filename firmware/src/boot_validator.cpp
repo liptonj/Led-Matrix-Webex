@@ -38,10 +38,20 @@ bool BootValidator::begin() {
     
     // Check if we've exceeded boot failure threshold
     if (boot_count > MAX_BOOT_FAILURES) {
-        Serial.println("[BOOT] Too many boot failures, rolling back to factory...");
-        rollbackToFactory();
+        Serial.println("[BOOT] Too many boot failures, rolling back to last known good partition...");
+        rollbackToLastKnownGood();
         // Won't return - device reboots
         return false;
+    }
+    
+    // Emergency recovery: if boot count exceeds MAX_BOOT_LOOP_COUNT, reset counter
+    // This prevents infinite boot loops when both partitions are problematic
+    if (boot_count > MAX_BOOT_LOOP_COUNT) {
+        Serial.printf("[BOOT] Emergency recovery: boot count %d exceeds %d, resetting counter\n",
+                      boot_count, MAX_BOOT_LOOP_COUNT);
+        Serial.println("[BOOT] WARNING: Continuing boot despite repeated failures");
+        resetBootCount();
+        // Continue boot - this allows recovery via web installer or serial
     }
     
     initialized = true;
@@ -75,8 +85,95 @@ bool BootValidator::isFactoryPartition() const {
     return running && running->subtype == ESP_PARTITION_SUBTYPE_APP_FACTORY;
 }
 
-void BootValidator::rollbackToFactory() {
-    Serial.println("[BOOT] Initiating rollback to factory partition...");
+void BootValidator::rollbackToLastKnownGood() {
+    Serial.println("[BOOT] Initiating rollback to last known good partition...");
+    
+    // Get current running partition
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (!running) {
+        Serial.println("[BOOT] ERROR: Cannot determine running partition!");
+        // Try factory partition as fallback
+        rollbackToFactoryFallback();
+        return;
+    }
+    
+    Serial.printf("[BOOT] Currently running from: %s\n", running->label);
+    
+    // Read last attempted partition from NVS to prevent ping-ponging
+    Preferences prefs;
+    prefs.begin(BOOT_NVS_NAMESPACE, false);
+    String lastPartition = prefs.getString(LAST_PARTITION_KEY, "");
+    prefs.end();
+    
+    // Determine target partition (switch between ota_0 and ota_1)
+    const esp_partition_t* target = nullptr;
+    
+    if (running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) {
+        // Currently on ota_0, switch to ota_1
+        Serial.println("[BOOT] Switching from ota_0 to ota_1...");
+        target = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, NULL);
+    } else if (running->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_1) {
+        // Currently on ota_1, switch to ota_0
+        Serial.println("[BOOT] Switching from ota_1 to ota_0...");
+        target = esp_partition_find_first(
+            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, NULL);
+    }
+    
+    // Check if we're ping-ponging between partitions
+    if (!lastPartition.isEmpty() && target && lastPartition == target->label) {
+        Serial.printf("[BOOT] WARNING: Already attempted partition %s, preventing ping-pong\n",
+                      target->label);
+        // Both partitions are bad - check if we should reset boot count
+        if (boot_count > MAX_BOOT_LOOP_COUNT) {
+            Serial.println("[BOOT] Both partitions failing, resetting boot count for recovery");
+            resetBootCount();
+            // Don't reboot - allow boot to continue for recovery
+            return;
+        }
+    }
+    
+    if (target) {
+        Serial.printf("[BOOT] Found target partition: %s (address: 0x%x, size: %d)\n",
+                      target->label, target->address, target->size);
+        
+        // Store target partition in NVS before switching
+        prefs.begin(BOOT_NVS_NAMESPACE, false);
+        prefs.putString(LAST_PARTITION_KEY, target->label);
+        // Reset boot count for the new partition
+        prefs.putInt(BOOT_COUNTER_KEY, 0);
+        prefs.end();
+        
+        // Set boot partition to target
+        esp_err_t err = esp_ota_set_boot_partition(target);
+        if (err == ESP_OK) {
+            // Verify partition switch
+            const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
+            if (boot_partition && strcmp(boot_partition->label, target->label) == 0) {
+                Serial.printf("[BOOT] Boot partition verified: %s\n", boot_partition->label);
+                Serial.println("[BOOT] Rebooting to last known good partition...");
+                delay(1000);
+                ESP.restart();
+            } else {
+                Serial.println("[BOOT] WARNING: Boot partition verification failed!");
+                // Continue with reboot anyway
+                delay(1000);
+                ESP.restart();
+            }
+        } else {
+            Serial.printf("[BOOT] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            // Try factory partition as fallback
+            rollbackToFactoryFallback();
+        }
+    } else {
+        Serial.println("[BOOT] Target OTA partition not found!");
+        // Try factory partition as fallback
+        rollbackToFactoryFallback();
+    }
+}
+
+void BootValidator::rollbackToFactoryFallback() {
+    Serial.println("[BOOT] Attempting fallback to factory partition...");
     
     // Find factory partition
     const esp_partition_t* factory = esp_partition_find_first(
@@ -96,13 +193,24 @@ void BootValidator::rollbackToFactory() {
         }
     } else {
         Serial.println("[BOOT] Factory partition not found!");
-        // Try ESP-IDF rollback as fallback
-        esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
-        if (err != ESP_OK) {
-            Serial.printf("[BOOT] OTA rollback failed: %s\n", esp_err_to_name(err));
-            // Last resort - just reboot and hope for the best
-            ESP.restart();
+    }
+    
+    // Last resort: try ESP-IDF rollback mechanism
+    Serial.println("[BOOT] Trying ESP-IDF rollback mechanism...");
+    esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
+    if (err != ESP_OK) {
+        Serial.printf("[BOOT] OTA rollback failed: %s\n", esp_err_to_name(err));
+        
+        // Final fallback: if boot count exceeds MAX_BOOT_LOOP_COUNT, reset and continue
+        if (boot_count > MAX_BOOT_LOOP_COUNT) {
+            Serial.println("[BOOT] Emergency recovery: resetting boot count");
+            resetBootCount();
+            // Don't reboot - allow boot to continue for recovery
+            return;
         }
+        
+        // Last resort - just reboot and hope for the best
+        ESP.restart();
     }
 }
 
@@ -125,8 +233,8 @@ void BootValidator::onCriticalFailure(const String& component, const String& err
     
     delay(3000);  // Give user time to see the message
     
-    // Rollback to bootloader (factory partition)
-    rollbackToFactory();
+    // Rollback to last known good partition
+    rollbackToLastKnownGood();
 }
 
 void BootValidator::incrementBootCount() {

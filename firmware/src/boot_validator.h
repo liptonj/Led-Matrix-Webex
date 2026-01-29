@@ -21,9 +21,14 @@
 // Maximum failed boot attempts before rollback
 #define MAX_BOOT_FAILURES 3
 
-// NVS namespace and key for boot counter
+// Maximum boot loop count before emergency recovery (reset boot count)
+// This prevents infinite boot loops when both partitions are bad
+#define MAX_BOOT_LOOP_COUNT 10
+
+// NVS namespace and keys
 #define BOOT_NVS_NAMESPACE "boot"
 #define BOOT_COUNTER_KEY "boot_count"
+#define LAST_PARTITION_KEY "last_partition"
 
 class BootValidator {
 public:
@@ -62,9 +67,19 @@ public:
     bool isFactoryPartition() const;
     
     /**
-     * @brief Manually trigger rollback to factory partition
+     * @brief Manually trigger rollback to last known good partition
+     * 
+     * Attempts A/B rollback (switch between ota_0 and ota_1).
+     * Falls back to factory partition if it exists.
+     * If both partitions fail repeatedly, resets boot count as last resort.
      */
-    void rollbackToFactory();
+    void rollbackToLastKnownGood();
+    
+    /**
+     * @brief Manually trigger rollback to factory partition (legacy)
+     * @deprecated Use rollbackToLastKnownGood() instead
+     */
+    void rollbackToFactory() { rollbackToLastKnownGood(); }
     
     /**
      * @brief Call this when OTA update fails to rollback to bootloader
@@ -85,6 +100,7 @@ private:
     
     void incrementBootCount();
     void resetBootCount();
+    void rollbackToFactoryFallback();
 };
 
 // Global instance

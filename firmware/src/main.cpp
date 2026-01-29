@@ -168,20 +168,35 @@ void setup() {
 
     // Check if WiFi is already configured - still allow a brief Improv window
     bool wifi_configured = config_manager.hasWiFiCredentials();
-
+    
+    // Check boot count - if high, we're in a boot loop and need extended timeouts
+    // This allows recovery via website firmware installer even during boot loops
+    int boot_count = boot_validator.getBootCount();
+    bool recovery_mode = (boot_count > MAX_BOOT_FAILURES);
+    
     // Two-phase Improv detection:
-    // Phase 1: Quick detection (10 seconds) - check if anyone is sending Improv packets
-    // Phase 2: If activity detected, extend to 60 seconds for full provisioning
+    // Phase 1: Quick detection (10 seconds normal, 5 minutes in recovery mode)
+    // Phase 2: If activity detected, extend to 60 seconds (normal) or 5 minutes (recovery)
+    
+    // Extend timeouts significantly if we're in recovery mode (boot loop)
+    unsigned long DETECT_TIMEOUT = recovery_mode ? 300000 : 10000;   // 5 min vs 10 sec
+    unsigned long PROVISION_TIMEOUT = recovery_mode ? 300000 : 60000;  // 5 min vs 60 sec
+
+    if (recovery_mode) {
+        Serial.println("[IMPROV] RECOVERY MODE: Boot loop detected, extending timeouts for firmware installer recovery");
+        Serial.printf("[IMPROV] Boot count: %d (threshold: %d)\n", boot_count, MAX_BOOT_FAILURES);
+        Serial.printf("[IMPROV] Extended timeouts: %lu sec detection, %lu sec provisioning\n",
+                      DETECT_TIMEOUT / 1000, PROVISION_TIMEOUT / 1000);
+    }
 
     if (wifi_configured) {
         Serial.println("[IMPROV] WiFi credentials present - listening briefly for Improv...");
     } else {
-        Serial.println("[IMPROV] No WiFi configured - detecting serial activity (10 seconds)...");
+        Serial.printf("[IMPROV] No WiFi configured - detecting serial activity (%lu seconds)...\n",
+                      DETECT_TIMEOUT / 1000);
     }
 
     unsigned long detect_start = millis();
-    const unsigned long DETECT_TIMEOUT = 10000;   // 10 seconds detection window
-    const unsigned long PROVISION_TIMEOUT = 60000;  // 60 seconds for provisioning
     bool improv_activity_detected = false;
 
     // Phase 1: Detection
@@ -211,7 +226,8 @@ void setup() {
 
     // Phase 2: Extended provisioning if activity was detected
     if (improv_activity_detected && WiFi.status() != WL_CONNECTED) {
-        Serial.println("[IMPROV] Waiting for WiFi provisioning (60 seconds)...");
+        Serial.printf("[IMPROV] Waiting for WiFi provisioning (%lu seconds)...\n",
+                      PROVISION_TIMEOUT / 1000);
 
         unsigned long provision_start = millis();
         unsigned long last_status = 0;
@@ -243,6 +259,13 @@ void setup() {
             // Show IP only for now - hostname shown after mDNS init
             matrix_display.showConnected(WiFi.localIP().toString(), "");
             delay(2000);  // Show connected screen briefly
+        }
+        
+        // If WiFi was configured via Improv (from ESP Web Tools), mark boot successful early
+        // This prevents boot loop if other initialization fails, allowing WiFi provisioning to complete
+        if (improv_handler.wasConfiguredViaImprov()) {
+            Serial.println("[IMPROV] WiFi configured via ESP Web Tools - marking boot successful early");
+            boot_validator.markBootSuccessful();
         }
     } else if (!improv_activity_detected) {
         Serial.println("[IMPROV] No serial activity detected, continuing boot...");
@@ -321,8 +344,72 @@ void setup() {
             }
             
             // Phase B: Initialize Supabase Realtime (optional, for low-latency commands)
-            initSupabaseRealtime();
-            initSupabaseRealtimeDevices();
+            // Wrap in error handling to prevent crashes during initialization
+            // IMPORTANT: Continue processing Improv WiFi provisioning even if realtime fails
+            Serial.println("[INIT] Initializing Supabase Realtime connections...");
+            
+            // Continue calling Improv handler during realtime initialization to allow WiFi provisioning
+            // This ensures ESP Web Tools can complete WiFi setup even if realtime init takes time or fails
+            
+            // Check stack space before realtime operations
+            UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
+            const UBaseType_t minStackSpace = 2048;  // Minimum 2KB stack required
+            if (stackHighWaterMark < minStackSpace) {
+                Serial.printf("[REALTIME] WARNING: Low stack space (%lu bytes), skipping realtime init\n",
+                              (unsigned long)stackHighWaterMark * sizeof(StackType_t));
+                app_state.realtime_error = "low_stack";
+                app_state.last_realtime_error = millis();
+                // Continue processing Improv in case WiFi provisioning is in progress
+                improv_handler.loop();
+            } else {
+                // Initialize main realtime connection (commands/pairings)
+                bool realtime_ok = false;
+                if (ESP.getFreeHeap() >= 60000) {  // Double-check heap before proceeding
+                    // Call Improv handler periodically during realtime init
+                    improv_handler.loop();
+                    
+                    realtime_ok = initSupabaseRealtime();
+                    if (!realtime_ok) {
+                        Serial.println("[REALTIME] Main realtime init failed, but continuing boot");
+                        // Don't crash - set error state and continue
+                        // Continue processing Improv in case WiFi provisioning is in progress
+                        improv_handler.loop();
+                    }
+                } else {
+                    Serial.printf("[REALTIME] Skipping - insufficient heap (%lu bytes)\n",
+                                  ESP.getFreeHeap());
+                    app_state.realtime_error = "low_heap";
+                    app_state.last_realtime_error = millis();
+                    // Continue processing Improv in case WiFi provisioning is in progress
+                    improv_handler.loop();
+                }
+                
+                // Initialize device realtime connection (admin debug toggle)
+                // This is less critical, so we can skip it if main realtime failed
+                if (realtime_ok || ESP.getFreeHeap() >= 60000) {
+                    // Continue processing Improv during device realtime init
+                    improv_handler.loop();
+                    
+                    bool devices_realtime_ok = initSupabaseRealtimeDevices();
+                    if (!devices_realtime_ok) {
+                        Serial.println("[REALTIME] Device realtime init failed, but continuing boot");
+                        // Don't crash - this is optional functionality
+                    }
+                    
+                    // Final Improv check after realtime initialization
+                    improv_handler.loop();
+                    
+                    // If WiFi was configured via Improv during realtime init, mark boot successful
+                    if (improv_handler.wasConfiguredViaImprov() && WiFi.status() == WL_CONNECTED) {
+                        Serial.println("[REALTIME] WiFi configured via Improv during realtime init");
+                        boot_validator.markBootSuccessful();
+                    }
+                } else {
+                    Serial.println("[REALTIME] Skipping device realtime - insufficient resources");
+                    // Continue processing Improv in case WiFi provisioning is in progress
+                    improv_handler.loop();
+                }
+            }
         } else {
             Serial.println("[INIT] Supabase authentication failed - will retry in loop");
             SupabaseAuthError authError = supabaseClient.getLastAuthError();
