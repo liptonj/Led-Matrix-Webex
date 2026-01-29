@@ -11,6 +11,10 @@ import {
     getPairing,
     getPendingCommands,
     insertCommand,
+    deleteDevice,
+    setDeviceApprovalRequired,
+    setDeviceBlacklisted,
+    setDeviceDisabled,
     setDeviceDebugMode,
     subscribeToCommands,
     subscribeToDeviceLogs,
@@ -39,6 +43,7 @@ export default function DeviceDetailPanel({
     const [pairingError, setPairingError] = useState<string | null>(null);
     const [commandError, setCommandError] = useState<string | null>(null);
     const [debugUpdating, setDebugUpdating] = useState(false);
+    const [accessUpdating, setAccessUpdating] = useState(false);
     const [commandSubmitting, setCommandSubmitting] = useState(false);
     const [logFilter, setLogFilter] = useState<'all' | DeviceLog['level']>('all');
     const [logStatus, setLogStatus] = useState<SubscriptionStatus>('connecting');
@@ -241,6 +246,64 @@ export default function DeviceDetailPanel({
         }
     };
 
+    const handleApprove = async () => {
+        if (!device) return;
+        try {
+            setAccessUpdating(true);
+            await setDeviceApprovalRequired(device.serial_number, false);
+            setDevice({ ...device, approval_required: false });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to approve device.');
+        } finally {
+            setAccessUpdating(false);
+        }
+    };
+
+    const handleToggleDisabled = async () => {
+        if (!device) return;
+        try {
+            setAccessUpdating(true);
+            const next = !device.disabled;
+            await setDeviceDisabled(device.serial_number, next);
+            setDevice({ ...device, disabled: next });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update device.');
+        } finally {
+            setAccessUpdating(false);
+        }
+    };
+
+    const handleToggleBlacklisted = async () => {
+        if (!device) return;
+        try {
+            setAccessUpdating(true);
+            const next = !device.blacklisted;
+            await setDeviceBlacklisted(device.serial_number, next);
+            setDevice({ ...device, blacklisted: next });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update device.');
+        } finally {
+            setAccessUpdating(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!device) return;
+        const confirmed = window.confirm(
+            `Delete device ${device.serial_number}? This cannot be undone.`,
+        );
+        if (!confirmed) return;
+        try {
+            setAccessUpdating(true);
+            await deleteDevice(device.serial_number);
+            onClose();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to delete device.');
+        } finally {
+            setAccessUpdating(false);
+        }
+    };
+
     const handleInsertCommand = async (command: string) => {
         if (!device?.pairing_code) return;
         try {
@@ -263,6 +326,16 @@ export default function DeviceDetailPanel({
     };
 
     if (!serialNumber) return null;
+
+    const accessLabel = device
+        ? device.blacklisted
+            ? 'Blacklisted'
+            : device.disabled
+                ? 'Disabled'
+                : device.approval_required
+                    ? 'Awaiting approval'
+                    : 'Active'
+        : '';
 
     return (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-6">
@@ -299,6 +372,12 @@ export default function DeviceDetailPanel({
                             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device</h3>
                             <p className="text-sm text-gray-900 dark:text-white mt-2">{device.display_name || 'Unnamed device'}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400">Firmware {device.firmware_version || 'Unknown'}</p>
+                            <div className="mt-2">
+                                <span className="text-xs text-gray-500 dark:text-gray-400">Access:</span>
+                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                                    {accessLabel}
+                                </span>
+                            </div>
                         </div>
                         <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4 space-y-2">
                             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Actions</h3>
@@ -308,6 +387,36 @@ export default function DeviceDetailPanel({
                                 className="w-full rounded-md bg-gray-900 text-white text-xs px-3 py-2 hover:bg-gray-700 disabled:opacity-50"
                             >
                                 {device.debug_enabled ? 'Disable debug logs' : 'Enable debug logs'}
+                            </button>
+                            {device.approval_required && (
+                                <button
+                                    onClick={handleApprove}
+                                    disabled={accessUpdating}
+                                    className="w-full rounded-md bg-green-600 text-white text-xs px-3 py-2 hover:bg-green-700 disabled:opacity-50"
+                                >
+                                    Approve device
+                                </button>
+                            )}
+                            <button
+                                onClick={handleToggleDisabled}
+                                disabled={accessUpdating}
+                                className="w-full rounded-md bg-yellow-600 text-white text-xs px-3 py-2 hover:bg-yellow-700 disabled:opacity-50"
+                            >
+                                {device.disabled ? 'Enable device' : 'Disable device'}
+                            </button>
+                            <button
+                                onClick={handleToggleBlacklisted}
+                                disabled={accessUpdating}
+                                className="w-full rounded-md bg-red-600 text-white text-xs px-3 py-2 hover:bg-red-700 disabled:opacity-50"
+                            >
+                                {device.blacklisted ? 'Remove blacklist' : 'Blacklist device'}
+                            </button>
+                            <button
+                                onClick={handleDelete}
+                                disabled={accessUpdating}
+                                className="w-full rounded-md border border-red-600 text-red-600 text-xs px-3 py-2 hover:bg-red-50 disabled:opacity-50"
+                            >
+                                Delete device
                             </button>
                             <button
                                 onClick={() => handleInsertCommand('reboot')}

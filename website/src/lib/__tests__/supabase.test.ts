@@ -194,6 +194,9 @@ describe("Type Definitions", () => {
         last_seen: "2024-01-26T00:00:00Z",
         debug_enabled: false,
         is_provisioned: true,
+        approval_required: false,
+        disabled: false,
+        blacklisted: false,
         registered_at: "2024-01-25T00:00:00Z",
         provisioned_at: null,
         metadata: {},
@@ -1733,7 +1736,7 @@ describe("subscribeToDeviceLogs - payload parsing edge cases", () => {
     jest.resetModules();
 
     mockChannel = {
-      on: jest.fn((event, callback) => {
+      on: jest.fn((event, _filter, callback) => {
         if (event === "postgres_changes") {
           capturedCallback = callback as (payload: unknown) => void;
         }

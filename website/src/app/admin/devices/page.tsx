@@ -173,6 +173,9 @@ export default function DevicesPage() {
                                     Debug
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Access
+                                </th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Actions
                                 </th>
                             </tr>
@@ -181,7 +184,7 @@ export default function DevicesPage() {
                             {filteredDevices.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={7}
+                                        colSpan={8}
                                         className="px-6 py-8 text-center text-gray-500 dark:text-gray-400"
                                     >
                                         No devices found
@@ -249,6 +252,27 @@ export default function DevicesPage() {
                                                 >
                                                     {device.debug_enabled ? 'ON' : 'OFF'}
                                                 </button>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span
+                                                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                        device.blacklisted
+                                                            ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                                                            : device.disabled
+                                                                ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+                                                                : device.approval_required
+                                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                                    : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                                                    }`}
+                                                >
+                                                    {device.blacklisted
+                                                        ? 'Blacklisted'
+                                                        : device.disabled
+                                                            ? 'Disabled'
+                                                            : device.approval_required
+                                                                ? 'Pending approval'
+                                                                : 'Active'}
+                                                </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <button

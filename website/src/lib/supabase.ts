@@ -45,6 +45,9 @@ export interface Device {
   last_seen: string;
   debug_enabled: boolean;
   is_provisioned: boolean;
+  approval_required: boolean;
+  disabled: boolean;
+  blacklisted: boolean;
   registered_at: string;
   provisioned_at: string | null;
   metadata: Record<string, unknown>;
@@ -127,6 +130,9 @@ const DEVICE_COLUMNS = `
   last_seen,
   debug_enabled,
   is_provisioned,
+  approval_required,
+  disabled,
+  blacklisted,
   registered_at,
   provisioned_at,
   metadata
@@ -375,6 +381,63 @@ export async function setDeviceTargetFirmware(
     .schema("display")
     .from("devices")
     .update({ target_firmware_version: version })
+    .eq("serial_number", serialNumber);
+
+  if (error) throw error;
+}
+
+// Helper to approve a device (clear approval_required)
+export async function setDeviceApprovalRequired(
+  serialNumber: string,
+  approvalRequired: boolean,
+): Promise<void> {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("devices")
+    .update({ approval_required: approvalRequired })
+    .eq("serial_number", serialNumber);
+
+  if (error) throw error;
+}
+
+// Helper to enable/disable a device
+export async function setDeviceDisabled(
+  serialNumber: string,
+  disabled: boolean,
+): Promise<void> {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("devices")
+    .update({ disabled })
+    .eq("serial_number", serialNumber);
+
+  if (error) throw error;
+}
+
+// Helper to blacklist/unblacklist a device
+export async function setDeviceBlacklisted(
+  serialNumber: string,
+  blacklisted: boolean,
+): Promise<void> {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("devices")
+    .update({ blacklisted })
+    .eq("serial_number", serialNumber);
+
+  if (error) throw error;
+}
+
+// Helper to delete a device
+export async function deleteDevice(serialNumber: string): Promise<void> {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("devices")
+    .delete()
     .eq("serial_number", serialNumber);
 
   if (error) throw error;

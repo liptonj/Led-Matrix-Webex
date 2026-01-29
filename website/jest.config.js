@@ -35,6 +35,7 @@ module.exports = {
   coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   verbose: true,
   // Use jsdom for hook tests that require browser environment
   projects: [
@@ -57,6 +58,7 @@ module.exports = {
       moduleNameMapper: {
         "^@/(.*)$": "<rootDir>/src/$1",
       },
+      setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
     },
     {
       displayName: "hooks",
@@ -77,6 +79,7 @@ module.exports = {
       moduleNameMapper: {
         "^@/(.*)$": "<rootDir>/src/$1",
       },
+      setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
     },
     {
       displayName: "app",
@@ -97,7 +100,10 @@ module.exports = {
       moduleNameMapper: {
         "^@/(.*)$": "<rootDir>/src/$1",
       },
-      setupFilesAfterEnv: ["<rootDir>/src/app/__tests__/setup.tsx"],
+      setupFilesAfterEnv: [
+        "<rootDir>/jest.setup.ts",
+        "<rootDir>/src/app/__tests__/setup.tsx",
+      ],
     },
   ],
 };
