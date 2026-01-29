@@ -131,6 +131,16 @@ public:
      */
     RealtimeMessage getMessage();
 
+    /**
+     * @brief Minimum heap required to attempt a connect
+     */
+    uint32_t minHeapRequired() const;
+
+    /**
+     * @brief Whether the websocket has ever connected successfully
+     */
+    bool hasEverConnected() const { return _hasConnected; }
+
 private:
     esp_websocket_client_handle_t _client = nullptr;
     portMUX_TYPE _rxMux = portMUX_INITIALIZER_UNLOCKED;
@@ -153,6 +163,10 @@ private:
     unsigned long _lowHeapLogAt;
     RealtimeMessage _lastMessage;
     RealtimeMessageHandler _messageHandler;
+    bool _hasConnected;
+    uint32_t _minHeapFirstConnect;
+    uint32_t _minHeapSteady;
+    uint32_t _minHeapFloor;
 
     void handleIncomingMessage(const String& message);
     static void websocketEventHandler(void* handler_args, esp_event_base_t base,

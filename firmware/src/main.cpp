@@ -14,6 +14,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include "esp_heap_caps.h"
 
 #include "auth/device_credentials.h"
 #include "boot_validator.h"
@@ -76,6 +77,14 @@ String buildStatusJson();
 String buildTelemetryJson();
 String buildConfigJson();
 bool provisionDeviceWithSupabase();
+
+static void logHeapStatus(const char* label) {
+    uint32_t freeHeap = ESP.getFreeHeap();
+    uint32_t minHeap = ESP.getMinFreeHeap();
+    uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    Serial.printf("[HEAP] %s free=%u min=%u largest=%u\n",
+                  label, freeHeap, minHeap, largestBlock);
+}
 
 /**
  * @brief Arduino setup function
@@ -343,73 +352,9 @@ void setup() {
                               targetVersion.c_str());
             }
             
-            // Phase B: Initialize Supabase Realtime (optional, for low-latency commands)
-            // Wrap in error handling to prevent crashes during initialization
-            // IMPORTANT: Continue processing Improv WiFi provisioning even if realtime fails
-            Serial.println("[INIT] Initializing Supabase Realtime connections...");
-            
-            // Continue calling Improv handler during realtime initialization to allow WiFi provisioning
-            // This ensures ESP Web Tools can complete WiFi setup even if realtime init takes time or fails
-            
-            // Check stack space before realtime operations
-            UBaseType_t stackHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-            const UBaseType_t minStackSpace = 2048;  // Minimum 2KB stack required
-            if (stackHighWaterMark < minStackSpace) {
-                Serial.printf("[REALTIME] WARNING: Low stack space (%lu bytes), skipping realtime init\n",
-                              (unsigned long)stackHighWaterMark * sizeof(StackType_t));
-                app_state.realtime_error = "low_stack";
-                app_state.last_realtime_error = millis();
-                // Continue processing Improv in case WiFi provisioning is in progress
-                improv_handler.loop();
-            } else {
-                // Initialize main realtime connection (commands/pairings)
-                bool realtime_ok = false;
-                if (ESP.getFreeHeap() >= 60000) {  // Double-check heap before proceeding
-                    // Call Improv handler periodically during realtime init
-                    improv_handler.loop();
-                    
-                    realtime_ok = initSupabaseRealtime();
-                    if (!realtime_ok) {
-                        Serial.println("[REALTIME] Main realtime init failed, but continuing boot");
-                        // Don't crash - set error state and continue
-                        // Continue processing Improv in case WiFi provisioning is in progress
-                        improv_handler.loop();
-                    }
-                } else {
-                    Serial.printf("[REALTIME] Skipping - insufficient heap (%lu bytes)\n",
-                                  ESP.getFreeHeap());
-                    app_state.realtime_error = "low_heap";
-                    app_state.last_realtime_error = millis();
-                    // Continue processing Improv in case WiFi provisioning is in progress
-                    improv_handler.loop();
-                }
-                
-                // Initialize device realtime connection (admin debug toggle)
-                // This is less critical, so we can skip it if main realtime failed
-                if (realtime_ok || ESP.getFreeHeap() >= 60000) {
-                    // Continue processing Improv during device realtime init
-                    improv_handler.loop();
-                    
-                    bool devices_realtime_ok = initSupabaseRealtimeDevices();
-                    if (!devices_realtime_ok) {
-                        Serial.println("[REALTIME] Device realtime init failed, but continuing boot");
-                        // Don't crash - this is optional functionality
-                    }
-                    
-                    // Final Improv check after realtime initialization
-                    improv_handler.loop();
-                    
-                    // If WiFi was configured via Improv during realtime init, mark boot successful
-                    if (improv_handler.wasConfiguredViaImprov() && WiFi.status() == WL_CONNECTED) {
-                        Serial.println("[REALTIME] WiFi configured via Improv during realtime init");
-                        boot_validator.markBootSuccessful();
-                    }
-                } else {
-                    Serial.println("[REALTIME] Skipping device realtime - insufficient resources");
-                    // Continue processing Improv in case WiFi provisioning is in progress
-                    improv_handler.loop();
-                }
-            }
+            Serial.println("[INIT] Deferring Supabase Realtime init until after OTA/web server settle...");
+            app_state.realtime_defer_until = millis() + 15000UL;  // allow OTA + web to stabilize
+            logHeapStatus("after supabase auth");
         } else {
             Serial.println("[INIT] Supabase authentication failed - will retry in loop");
             SupabaseAuthError authError = supabaseClient.getLastAuthError();
@@ -469,6 +414,12 @@ void setup() {
         Serial.println("[OTA] Performing immediate update check on boot...");
         check_for_updates();
         app_state.last_ota_check = millis();  // Reset timer after check
+        logHeapStatus("after ota check");
+
+        unsigned long deferUntil = millis() + 8000UL;  // short post-OTA cooldown
+        if (app_state.realtime_defer_until < deferUntil) {
+            app_state.realtime_defer_until = deferUntil;
+        }
     }
 
     // Initialize serial command handler (for web installer WiFi setup)
@@ -497,6 +448,12 @@ void setup() {
  */
 void loop() {
     unsigned long current_time = millis();
+    static uint32_t last_min_heap_logged = 0;
+    uint32_t min_heap = ESP.getMinFreeHeap();
+    if (last_min_heap_logged == 0 || min_heap < last_min_heap_logged) {
+        last_min_heap_logged = min_heap;
+        logHeapStatus("min_free_heap");
+    }
 
     // Process Improv Wi-Fi commands (for ESP Web Tools WiFi provisioning)
     // This must be called frequently to respond to Improv requests
@@ -556,6 +513,12 @@ void loop() {
         Serial.println("[OTA] WiFi connected - checking for updates...");
         check_for_updates();
         app_state.last_ota_check = millis();  // Reset timer after check
+        logHeapStatus("after ota check (reconnect)");
+
+        unsigned long deferUntil = millis() + 8000UL;
+        if (app_state.realtime_defer_until < deferUntil) {
+            app_state.realtime_defer_until = deferUntil;
+        }
     }
     was_wifi_connected = app_state.wifi_connected;
 
@@ -629,17 +592,25 @@ void loop() {
         // Try to initialize realtime if we have credentials but aren't connected
         if (app_state.wifi_connected && app_state.supabase_connected && 
             !anonKey.isEmpty() && !supabaseRealtime.isConnected()) {
-            // Retry every 60 seconds
-            if (millis() - lastRealtimeInit > 60000) {
-                if (!supabaseClient.isRequestInFlight()) {
-                    lastRealtimeInit = millis();
-                    Serial.println("[REALTIME] Attempting to reconnect...");
-                    initSupabaseRealtime();
-                } else {
-                    static unsigned long last_skip_log = 0;
-                    if (millis() - last_skip_log > 10000) {
-                        last_skip_log = millis();
-                        Serial.println("[REALTIME] Reconnect skipped (HTTP request in flight)");
+            if (current_time < app_state.realtime_defer_until) {
+                static bool defer_logged = false;
+                if (!defer_logged) {
+                    Serial.println("[REALTIME] Deferring realtime init until boot settles");
+                    defer_logged = true;
+                }
+            } else {
+                unsigned long interval = supabaseRealtime.hasEverConnected() ? 60000UL : 15000UL;
+                if (millis() - lastRealtimeInit > interval) {
+                    if (!supabaseClient.isRequestInFlight()) {
+                        lastRealtimeInit = millis();
+                        Serial.println("[REALTIME] Attempting to reconnect...");
+                        initSupabaseRealtime();
+                    } else {
+                        static unsigned long last_skip_log = 0;
+                        if (millis() - last_skip_log > 10000) {
+                            last_skip_log = millis();
+                            Serial.println("[REALTIME] Reconnect skipped (HTTP request in flight)");
+                        }
                     }
                 }
             }
@@ -666,11 +637,20 @@ void loop() {
 
         if (app_state.wifi_connected && app_state.supabase_connected &&
             !anonKey.isEmpty() && !supabaseRealtimeDevices.isConnected()) {
-            if (millis() - lastDeviceRealtimeInit > 60000) {
-                if (!supabaseClient.isRequestInFlight()) {
-                    lastDeviceRealtimeInit = millis();
-                    Serial.println("[REALTIME] Attempting device realtime reconnect...");
-                    initSupabaseRealtimeDevices();
+            if (current_time < app_state.realtime_defer_until) {
+                static bool defer_logged = false;
+                if (!defer_logged) {
+                    Serial.println("[REALTIME] Deferring device realtime init until boot settles");
+                    defer_logged = true;
+                }
+            } else {
+                unsigned long interval = supabaseRealtimeDevices.hasEverConnected() ? 60000UL : 20000UL;
+                if (millis() - lastDeviceRealtimeInit > interval) {
+                    if (!supabaseClient.isRequestInFlight()) {
+                        lastDeviceRealtimeInit = millis();
+                        Serial.println("[REALTIME] Attempting device realtime reconnect...");
+                        initSupabaseRealtimeDevices();
+                    }
                 }
             }
         }
@@ -1533,10 +1513,11 @@ bool initSupabaseRealtime() {
         return false;
     }
 
-    const uint32_t min_heap = 60000;
+    const uint32_t min_heap = supabaseRealtime.minHeapRequired();
     if (ESP.getFreeHeap() < min_heap) {
         Serial.printf("[REALTIME] Skipping - low heap (%lu < %lu)\n",
                       ESP.getFreeHeap(), (unsigned long)min_heap);
+        logHeapStatus("realtime low heap");
         app_state.realtime_error = "low_heap";
         app_state.last_realtime_error = millis();
         return false;
@@ -1616,10 +1597,11 @@ bool initSupabaseRealtimeDevices() {
         return false;
     }
 
-    const uint32_t min_heap = 60000;
+    const uint32_t min_heap = supabaseRealtimeDevices.minHeapRequired();
     if (ESP.getFreeHeap() < min_heap) {
         app_state.realtime_devices_error = "low_heap";
         app_state.last_realtime_devices_error = millis();
+        logHeapStatus("device realtime low heap");
         return false;
     }
 
