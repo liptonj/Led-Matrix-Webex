@@ -11,7 +11,6 @@
 
 #include "supabase_realtime.h"
 #include "../common/ca_certs.h"
-#include "../common/ws_client_compat.h"
 #include "../config/config_manager.h"
 
 extern ConfigManager config_manager;
@@ -19,14 +18,16 @@ extern ConfigManager config_manager;
 // Global instance
 SupabaseRealtime supabaseRealtime;
 
-// Global pointer for callback
-static SupabaseRealtime* g_realtime_instance = nullptr;
+namespace {
+constexpr uint32_t REALTIME_MIN_HEAP = 60000;
+constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
+}  // namespace
 
 SupabaseRealtime::SupabaseRealtime()
     : _connected(false), _subscribed(false), _messagePending(false),
       _joinRef(0), _msgRef(0), _lastHeartbeat(0), _lastHeartbeatResponse(0),
       _reconnectDelay(PHOENIX_RECONNECT_MIN_MS), _lastReconnectAttempt(0),
-      _messageHandler(nullptr) {
+      _lowHeapLogAt(0), _messageHandler(nullptr) {
     _lastMessage.valid = false;
 }
 
@@ -39,8 +40,16 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     _supabaseUrl = supabase_url;
     _anonKey = anon_key;
     _accessToken = access_token;
-    
-    g_realtime_instance = this;
+
+    if (ESP.getFreeHeap() < REALTIME_MIN_HEAP) {
+        unsigned long now = millis();
+        if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
+            _lowHeapLogAt = now;
+            Serial.printf("[REALTIME] Skipping connect - low heap (%lu < %lu)\n",
+                          ESP.getFreeHeap(), (unsigned long)REALTIME_MIN_HEAP);
+        }
+        return;
+    }
     
     // Extract host from URL (https://xxx.supabase.co -> xxx.supabase.co)
     String host = _supabaseUrl;
@@ -64,22 +73,34 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
                   (unsigned long)time(nullptr), ESP.getFreeHeap());
     
-    // Set up WebSocket event handler
-    _wsClient.onEvent([](WStype_t type, uint8_t* payload, size_t length) {
-        if (g_realtime_instance) {
-            g_realtime_instance->onWebSocketEvent(type, payload, length);
-        }
-    });
-    
-    // Connect with SSL
+    String uri = "wss://" + host + wsPath;
+    esp_websocket_client_config_t config = {};
+    config.uri = uri.c_str();
+    config.disable_auto_reconnect = true;
+    config.buffer_size = 4096;
+    config.user_context = this;
+    config.ping_interval_sec = 0;
     if (config_manager.getTlsVerify()) {
-        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
+        config.cert_pem = CA_CERT_BUNDLE_SUPABASE;
     } else {
-        wsSetInsecure(_wsClient, 0);
-        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
+        config.cert_pem = nullptr;
+        config.skip_cert_common_name_check = true;
     }
-    _wsClient.setReconnectInterval(0);  // We handle reconnection manually
-    _wsClient.enableHeartbeat(0, 0, 0);  // We handle heartbeat via Phoenix protocol
+
+    if (_client) {
+        esp_websocket_client_stop(_client);
+        esp_websocket_client_destroy(_client);
+        _client = nullptr;
+    }
+
+    _client = esp_websocket_client_init(&config);
+    if (_client) {
+        esp_websocket_register_events(_client, WEBSOCKET_EVENT_ANY,
+                                      &SupabaseRealtime::websocketEventHandler, this);
+        esp_websocket_client_start(_client);
+    } else {
+        Serial.println("[REALTIME] Failed to initialize websocket client");
+    }
 }
 
 void SupabaseRealtime::setAccessToken(const String& access_token) {
@@ -94,7 +115,15 @@ void SupabaseRealtime::setAccessToken(const String& access_token) {
 }
 
 void SupabaseRealtime::loop() {
-    _wsClient.loop();
+    if (_pendingMessageAvailable) {
+        String message;
+        portENTER_CRITICAL(&_rxMux);
+        message = _pendingMessage;
+        _pendingMessage = "";
+        _pendingMessageAvailable = false;
+        portEXIT_CRITICAL(&_rxMux);
+        handleIncomingMessage(message);
+    }
     
     unsigned long now = millis();
     
@@ -172,7 +201,9 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     String message = buildPhoenixMessage(_channelTopic, "phx_join", payload, _joinRef);
     
     Serial.printf("[REALTIME] Joining channel: %s\n", _channelTopic.c_str());
-    _wsClient.sendTXT(message);
+    if (_client) {
+        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    }
     
     return true;
 }
@@ -186,7 +217,9 @@ void SupabaseRealtime::unsubscribe() {
     
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage(_channelTopic, "phx_leave", emptyPayload);
-    _wsClient.sendTXT(message);
+    if (_client) {
+        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    }
     
     _subscribed = false;
     _channelTopic = "";
@@ -196,7 +229,11 @@ void SupabaseRealtime::unsubscribe() {
 
 void SupabaseRealtime::disconnect() {
     unsubscribe();
-    _wsClient.disconnect();
+    if (_client) {
+        esp_websocket_client_stop(_client);
+        esp_websocket_client_destroy(_client);
+        _client = nullptr;
+    }
     _connected = false;
     _subscribed = false;
     _lastHeartbeatResponse = 0;
@@ -274,50 +311,67 @@ void SupabaseRealtime::sendHeartbeat() {
     
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage("phoenix", "heartbeat", emptyPayload);
-    _wsClient.sendTXT(message);
-}
-
-void SupabaseRealtime::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
-    switch (type) {
-        case WStype_DISCONNECTED:
-            Serial.println("[REALTIME] Disconnected");
-            _connected = false;
-            _subscribed = false;
-            break;
-            
-        case WStype_CONNECTED:
-            Serial.println("[REALTIME] Connected");
-            _connected = true;
-            _lastHeartbeatResponse = millis();
-            _reconnectDelay = PHOENIX_RECONNECT_MIN_MS;  // Reset backoff
-            break;
-            
-        case WStype_TEXT: {
-            String message = String((char*)payload, length);
-            
-            String topic, event;
-            JsonDocument payloadDoc;
-            int ref, joinRef;
-            
-            if (parsePhoenixMessage(message, topic, event, payloadDoc, ref, joinRef)) {
-                handlePhoenixMessage(topic, event, payloadDoc);
-            }
-            break;
-        }
-        
-        case WStype_PING:
-        case WStype_PONG:
-            // Handled automatically by library
-            break;
-            
-        case WStype_ERROR:
-            Serial.printf("[REALTIME] Error: %.*s\n", (int)length, payload ? (char*)payload : "unknown");
-            break;
-            
-        default:
-            break;
+    if (_client) {
+        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
 }
+
+void SupabaseRealtime::handleIncomingMessage(const String& message) {
+    String topic, event;
+    JsonDocument payloadDoc;
+    int ref, joinRef;
+
+    if (parsePhoenixMessage(message, topic, event, payloadDoc, ref, joinRef)) {
+        handlePhoenixMessage(topic, event, payloadDoc);
+    }
+}
+
+void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_t base,
+                                             int32_t event_id, void* event_data) {
+    auto* instance = static_cast<SupabaseRealtime*>(handler_args);
+    if (!instance) {
+        return;
+    }
+
+    if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        Serial.println("[REALTIME] Connected");
+        instance->_connected = true;
+        instance->_lastHeartbeatResponse = millis();
+        instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
+        return;
+    }
+
+    if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_CLOSED) {
+        Serial.println("[REALTIME] Disconnected");
+        instance->_connected = false;
+        instance->_subscribed = false;
+        return;
+    }
+
+    if (event_id == WEBSOCKET_EVENT_ERROR) {
+        Serial.println("[REALTIME] Error");
+        instance->_connected = false;
+        instance->_subscribed = false;
+        return;
+    }
+
+    if (event_id == WEBSOCKET_EVENT_DATA) {
+        auto* data = static_cast<esp_websocket_event_data_t*>(event_data);
+        if (!data || data->op_code != 0x1) {  // text frame
+            return;
+        }
+
+        portENTER_CRITICAL(&instance->_rxMux);
+        instance->_rxBuffer.concat(String(data->data_ptr, data->data_len));
+        if (data->payload_offset + data->data_len >= data->payload_len) {
+            instance->_pendingMessage = instance->_rxBuffer;
+            instance->_rxBuffer = "";
+            instance->_pendingMessageAvailable = true;
+        }
+        portEXIT_CRITICAL(&instance->_rxMux);
+    }
+}
+
 
 void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& event,
                                              const JsonDocument& payload) {
@@ -399,24 +453,16 @@ void SupabaseRealtime::attemptReconnect() {
     }
     
     Serial.printf("[REALTIME] Reconnecting (next attempt in %lu ms)...\n", _reconnectDelay);
+    if (ESP.getFreeHeap() < REALTIME_MIN_HEAP) {
+        unsigned long now = millis();
+        if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
+            _lowHeapLogAt = now;
+            Serial.printf("[REALTIME] Skipping reconnect - low heap (%lu < %lu)\n",
+                          ESP.getFreeHeap(), (unsigned long)REALTIME_MIN_HEAP);
+        }
+        return;
+    }
     
-    // Re-extract host and connect
-    String host = _supabaseUrl;
-    if (host.startsWith("https://")) {
-        host = host.substring(8);
-    }
-    int slashIdx = host.indexOf('/');
-    if (slashIdx > 0) {
-        host = host.substring(0, slashIdx);
-    }
-    
-    String wsPath = "/realtime/v1/websocket?apikey=" + _anonKey + "&vsn=1.0.0";
-    Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
-                  (unsigned long)time(nullptr), ESP.getFreeHeap());
-    if (config_manager.getTlsVerify()) {
-        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), CA_CERT_BUNDLE_SUPABASE);
-    } else {
-        wsSetInsecure(_wsClient, 0);
-        _wsClient.beginSSL(host.c_str(), 443, wsPath.c_str(), nullptr);
-    }
+    disconnect();
+    begin(_supabaseUrl, _anonKey, _accessToken);
 }

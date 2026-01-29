@@ -457,7 +457,7 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
     _client.stop();
-    configureSecureClient(_client);
+    configureSecureClient(_client, 2048, 2048);
     if (config_manager.getTlsVerify()) {
         _client.setCACert(CA_CERT_BUNDLE_SUPABASE);
     } else {

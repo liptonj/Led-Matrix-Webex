@@ -1104,7 +1104,7 @@ bool provisionDeviceWithSupabase() {
     Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
 
     WiFiClientSecure client;
-    configureSecureClient(client);
+    configureSecureClient(client, 2048, 2048);
     if (config_manager.getTlsVerify()) {
         client.setCACert(CA_CERT_BUNDLE_SUPABASE);
     } else {
@@ -1669,6 +1669,13 @@ void initSupabaseRealtime() {
 
     if (!app_state.time_synced) {
         Serial.println("[REALTIME] Skipping - time not synced yet");
+        return;
+    }
+
+    const uint32_t min_heap = 60000;
+    if (ESP.getFreeHeap() < min_heap) {
+        Serial.printf("[REALTIME] Skipping - low heap (%lu < %lu)\n",
+                      ESP.getFreeHeap(), (unsigned long)min_heap);
         return;
     }
     
