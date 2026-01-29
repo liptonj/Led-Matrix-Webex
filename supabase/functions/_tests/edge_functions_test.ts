@@ -583,10 +583,19 @@ Deno.test("update-app-state: validates webex_status values", () => {
     "active",
     "away",
     "dnd",
+    "busy",
     "meeting",
-    "offline",
     "call",
     "presenting",
+    "ooo",
+    "pending",
+    "unknown",
+    "offline",
+    "available",
+    "inactive",
+    "brb",
+    "donotdisturb",
+    "outofoffice",
   ];
 
   for (const status of VALID_STATUSES) {

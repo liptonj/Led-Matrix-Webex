@@ -869,7 +869,7 @@ export function EmbeddedAppClient() {
     <>
       {/* Webex SDK Script */}
       <Script
-        src="https://binaries.webex.com/static-content-pipeline/webex-embedded-app/v1/webex-embedded-app-sdk.js"
+        src="https://unpkg.com/@webex/embedded-app-sdk@latest"
         strategy="afterInteractive"
         onLoad={() => setSdkLoaded(true)}
         onError={(e) => {

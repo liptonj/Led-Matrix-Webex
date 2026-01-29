@@ -14,7 +14,24 @@ import {
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 
 // Valid status values from the Edge Function
-const VALID_STATUSES = ["active", "away", "dnd", "meeting", "offline", "call", "presenting"];
+const VALID_STATUSES = [
+  "active",
+  "away",
+  "dnd",
+  "busy",
+  "meeting",
+  "call",
+  "presenting",
+  "ooo",
+  "pending",
+  "unknown",
+  "offline",
+  "available",
+  "inactive",
+  "brb",
+  "donotdisturb",
+  "outofoffice",
+];
 
 // ============================================================================
 // Authentication Tests
@@ -44,7 +61,7 @@ Deno.test("update-app-state: validates webex_status values", () => {
 });
 
 Deno.test("update-app-state: rejects invalid webex_status", () => {
-  const invalidStatuses = ["online", "busy", "available", "unknown", "invisible", ""];
+  const invalidStatuses = ["online", "invisible", "unknown_status", ""];
 
   for (const status of invalidStatuses) {
     assertEquals(VALID_STATUSES.includes(status), false);
@@ -269,7 +286,7 @@ Deno.test("update-app-state: 400 for invalid JSON", () => {
 Deno.test("update-app-state: 400 for invalid webex_status", () => {
   const errorResponse = {
     success: false,
-    error: "Invalid webex_status. Must be one of: active, away, dnd, meeting, offline, call, presenting",
+    error: "Invalid webex_status. Must be one of: active, away, dnd, busy, meeting, call, presenting, ooo, pending, unknown, offline, available, inactive, brb, donotdisturb, outofoffice",
   };
 
   assertEquals(errorResponse.success, false);

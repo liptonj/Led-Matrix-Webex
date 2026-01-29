@@ -8,7 +8,7 @@
  *
  * Request body:
  *   {
- *     webex_status: string,      // "active", "away", "dnd", "meeting", "offline"
+ *     webex_status: string,      // "active", "away", "dnd", "meeting", "offline", "busy", "ooo", etc.
  *     camera_on?: boolean,
  *     mic_muted?: boolean,
  *     in_call?: boolean,
@@ -49,8 +49,39 @@ interface TokenPayload {
   exp: number;
 }
 
-// Valid Webex status values
-const VALID_STATUSES = ["active", "away", "dnd", "meeting", "offline", "call", "presenting"];
+// Valid Webex status values (includes firmware-supported aliases)
+const CANONICAL_STATUSES = [
+  "active",
+  "away",
+  "dnd",
+  "busy",
+  "meeting",
+  "call",
+  "presenting",
+  "ooo",
+  "pending",
+  "unknown",
+  "offline",
+];
+
+const STATUS_ALIASES: Record<string, string> = {
+  available: "active",
+  inactive: "away",
+  brb: "away",
+  donotdisturb: "dnd",
+  outofoffice: "ooo",
+};
+
+const VALID_STATUSES = Array.from(
+  new Set([...CANONICAL_STATUSES, ...Object.keys(STATUS_ALIASES)]),
+);
+
+function normalizeWebexStatus(value: string): string | null {
+  const key = value.trim().toLowerCase();
+  if (!key) return null;
+  const normalized = STATUS_ALIASES[key] ?? key;
+  return CANONICAL_STATUSES.includes(normalized) ? normalized : null;
+}
 
 /**
  * Validate bearer token and return app info
@@ -152,6 +183,22 @@ Deno.serve(async (req) => {
     }
 
     // Validate webex_status if provided
+    if (typeof stateData.webex_status === "string") {
+      const normalizedStatus = normalizeWebexStatus(stateData.webex_status);
+      if (!normalizedStatus) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `Invalid webex_status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      stateData.webex_status = normalizedStatus;
+    }
     if (stateData.webex_status && !VALID_STATUSES.includes(stateData.webex_status)) {
       return new Response(
         JSON.stringify({

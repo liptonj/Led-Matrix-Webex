@@ -4,11 +4,19 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 export type WebexStatus =
   | "active"
+  | "available"
   | "meeting"
   | "call"
   | "presenting"
+  | "busy"
   | "dnd"
+  | "donotdisturb"
   | "away"
+  | "inactive"
+  | "brb"
+  | "ooo"
+  | "outofoffice"
+  | "pending"
   | "offline"
   | "unknown";
 
@@ -41,6 +49,17 @@ export interface UseWebexSDKReturn extends WebexState {
 }
 
 // Webex SDK types (simplified)
+declare global {
+  interface Window {
+    webex?: {
+      Application: {
+        new (): WebexApp;
+      };
+    };
+  }
+}
+
+// Webex SDK types (simplified)
 interface WebexApp {
   onReady: () => Promise<void>;
   context: {
@@ -50,16 +69,6 @@ interface WebexApp {
   listen: () => Promise<void>;
   on: (event: string, callback: (data: unknown) => void) => void;
   off: (event: string, callback?: (data: unknown) => void) => void;
-}
-
-declare global {
-  interface Window {
-    Webex?: {
-      Application: {
-        new (): WebexApp;
-      };
-    };
-  }
 }
 
 const initialState: WebexState = {
@@ -147,12 +156,17 @@ export function useWebexSDK(): UseWebexSDKReturn {
         available: "active",
         meeting: "meeting",
         call: "call",
+        busy: "busy",
         presenting: "presenting",
         dnd: "dnd",
         donotdisturb: "dnd",
         away: "away",
         inactive: "away",
+        brb: "away",
         offline: "offline",
+        outofoffice: "ooo",
+        ooo: "ooo",
+        pending: "pending",
       };
 
       const newStatus =
@@ -171,7 +185,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
       const checkSDK = () => {
         attempts++;
 
-        if (typeof window !== "undefined" && window.Webex?.Application) {
+        if (typeof window !== "undefined" && window.webex?.Application) {
           resolve(true);
           return;
         }
@@ -199,7 +213,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     // Wait for SDK to load with retry logic
     const sdkAvailable = await waitForWebexSDK(5000);
 
-    if (!sdkAvailable || !window.Webex?.Application) {
+    if (!sdkAvailable || !window.webex?.Application) {
       setError(
         "Webex SDK not available. Make sure you are running inside a Webex embedded app.",
       );
@@ -210,7 +224,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
       updateState({ isInitialized: true });
 
       // Create Webex Application instance
-      const app = new window.Webex.Application();
+      const app = new window.webex.Application();
       appRef.current = app;
 
       // Wait for app to be ready
