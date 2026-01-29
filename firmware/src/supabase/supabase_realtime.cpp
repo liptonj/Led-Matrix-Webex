@@ -206,16 +206,17 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     }
     
     // Build join payload with postgres_changes config
-    // Reserve capacity upfront to prevent reallocations
+    // ArduinoJson v7 handles memory allocation automatically
     JsonDocument payload;
     payload.to<JsonObject>();  // Ensure it's an object
     
-    // Check if we have enough capacity (estimate: ~200 bytes per table + overhead)
+    // Estimate required memory (rough estimate: ~200 bytes per table + overhead)
+    // ArduinoJson will allocate as needed, but we check heap to ensure we have enough
     size_t estimatedSize = 512 + (tableCount * 200) + filter.length() + _accessToken.length();
-    if (payload.capacity() < estimatedSize) {
-        Serial.printf("[REALTIME] WARNING: JSON capacity (%zu) may be insufficient for %d tables\n",
-                      payload.capacity(), tableCount);
-        // Try to continue anyway - ArduinoJson will handle overflow gracefully
+    if (ESP.getFreeHeap() < estimatedSize + 10000) {  // Add 10KB buffer
+        Serial.printf("[REALTIME] WARNING: Low heap (%lu bytes) for %d tables (estimated %zu bytes needed)\n",
+                      ESP.getFreeHeap(), tableCount, estimatedSize);
+        // Continue anyway - ArduinoJson will handle memory allocation
     }
     
     JsonObject config = payload["config"].to<JsonObject>();
