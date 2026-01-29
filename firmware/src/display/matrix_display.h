@@ -66,7 +66,6 @@ struct DisplayData {
     bool show_sensors = false;
     bool sensor_page_enabled = true;  // Whether to show sensor page rotation
     bool wifi_connected = false;
-    bool bridge_connected = false;
     // Time and date
     int hour = 0;                   // 0-23
     int minute = 0;                 // 0-59
@@ -159,11 +158,11 @@ public:
     void showWaitingForWebex(const String& hostname);
 
     /**
-     * @brief Show pairing code for bridge connection
+     * @brief Show pairing code for app connection
      * @param code 6-character pairing code
-     * @param bridge_url Optional bridge URL to display
+     * @param hub_url Optional hub URL to display
      */
-    void showPairingCode(const String& code, const String& bridge_url = "");
+    void showPairingCode(const String& code, const String& hub_url = "");
 
     /**
      * @brief Clear the display

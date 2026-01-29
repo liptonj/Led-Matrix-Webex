@@ -392,7 +392,6 @@ async function loadDisplayStatus() {
         // Connection status
         updateConnectionItem('conn-wifi', data.wifi_connected);
         updateConnectionItem('conn-webex', data.webex_authenticated);
-        updateConnectionItem('conn-bridge', data.bridge_connected);
         updateConnectionItem('conn-mqtt', data.mqtt_connected);
         
     } catch (error) {

@@ -2,7 +2,7 @@
  * @file remote_logger.h
  * @brief Remote Debug Logger
  *
- * Streams debug logs to the bridge server when debug mode is enabled.
+ * Streams debug logs to Supabase when debug mode is enabled.
  * Logs are also written to Serial for local debugging.
  */
 
@@ -21,13 +21,12 @@ enum LogLevel {
 };
 
 // Forward declaration
-class BridgeClient;
 class SupabaseClient;
 
 /**
  * @brief Remote Debug Logger Class
  *
- * Provides debug logging that can be streamed to the bridge server
+ * Provides debug logging that can be streamed to Supabase
  * for remote troubleshooting.
  */
 class RemoteLogger {
@@ -36,13 +35,13 @@ public:
 
     /**
      * @brief Initialize the remote logger
-     * @param bridge Pointer to the bridge client for sending logs
+     * @param supabase Pointer to the Supabase client for sending logs
      */
-    void begin(BridgeClient* bridge, SupabaseClient* supabase = nullptr);
+    void begin(SupabaseClient* supabase = nullptr);
 
     /**
      * @brief Enable or disable remote logging
-     * @param enabled Whether to stream logs to bridge
+     * @param enabled Whether to stream logs to Supabase
      */
     void setRemoteEnabled(bool enabled);
 
@@ -50,7 +49,7 @@ public:
      * @brief Check if remote logging is enabled
      * @return true if remote logging is active
      */
-    bool isRemoteEnabled() const { return _remoteEnabled && (_bridge != nullptr || _supabase != nullptr); }
+    bool isRemoteEnabled() const { return _remoteEnabled && (_supabase != nullptr); }
 
     /**
      * @brief Set minimum log level for remote streaming
@@ -84,7 +83,6 @@ public:
     void log(LogLevel level, const char* tag, const char* format, va_list args);
 
 private:
-    BridgeClient* _bridge;
     SupabaseClient* _supabase;
     bool _remoteEnabled;
     LogLevel _minLevel;
@@ -95,7 +93,7 @@ private:
     static const char* levelToString(LogLevel level);
 
     /**
-     * @brief Send log to bridge server
+     * @brief Send log to Supabase
      */
     void sendRemote(LogLevel level, const char* tag, const char* message);
     void sendToSupabase(LogLevel level, const char* tag, const char* message);

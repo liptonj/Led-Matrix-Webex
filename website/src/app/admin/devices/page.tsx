@@ -3,7 +3,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DeviceDetailPanel from './DeviceDetailPanel';
-import { getDevices, setDeviceDebugMode, subscribeToDevices, Device, DeviceChangeEvent } from '@/lib/supabase';
+import {
+    getDevices,
+    setDeviceApprovalRequired,
+    setDeviceBlacklisted,
+    setDeviceDebugMode,
+    setDeviceDisabled,
+    deleteDevice,
+    subscribeToDevices,
+    Device,
+    DeviceChangeEvent,
+} from '@/lib/supabase';
 
 export default function DevicesPage() {
     const router = useRouter();
@@ -13,6 +23,7 @@ export default function DevicesPage() {
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
     const [now, setNow] = useState(Date.now());
+    const [actionSerial, setActionSerial] = useState<string | null>(null);
 
     const serialParam = useMemo(() => {
         const raw = searchParams.get('serial');
@@ -89,6 +100,59 @@ export default function DevicesPage() {
             await loadDevices();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to toggle debug mode');
+        }
+    }
+
+    async function handleApprove(device: Device) {
+        if (!device.approval_required) return;
+        try {
+            setActionSerial(device.serial_number);
+            await setDeviceApprovalRequired(device.serial_number, false);
+            await loadDevices();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to approve device');
+        } finally {
+            setActionSerial(null);
+        }
+    }
+
+    async function handleToggleDisabled(device: Device) {
+        try {
+            setActionSerial(device.serial_number);
+            await setDeviceDisabled(device.serial_number, !device.disabled);
+            await loadDevices();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update device access');
+        } finally {
+            setActionSerial(null);
+        }
+    }
+
+    async function handleToggleBlacklisted(device: Device) {
+        try {
+            setActionSerial(device.serial_number);
+            await setDeviceBlacklisted(device.serial_number, !device.blacklisted);
+            await loadDevices();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update device access');
+        } finally {
+            setActionSerial(null);
+        }
+    }
+
+    async function handleDelete(device: Device) {
+        const confirmed = window.confirm(
+            `Delete device ${device.serial_number}? This cannot be undone.`,
+        );
+        if (!confirmed) return;
+        try {
+            setActionSerial(device.serial_number);
+            await deleteDevice(device.serial_number);
+            await loadDevices();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to delete device');
+        } finally {
+            setActionSerial(null);
         }
     }
 
@@ -291,6 +355,42 @@ export default function DevicesPage() {
                                                         (logs enabled)
                                                     </span>
                                                 )}
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {device.approval_required && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleApprove(device)}
+                                                            disabled={actionSerial === device.serial_number}
+                                                            className="text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                                                        >
+                                                            Approve
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleDisabled(device)}
+                                                        disabled={actionSerial === device.serial_number}
+                                                        className="text-xs px-2 py-1 rounded bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-50"
+                                                    >
+                                                        {device.disabled ? 'Enable' : 'Disable'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleBlacklisted(device)}
+                                                        disabled={actionSerial === device.serial_number}
+                                                        className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                                                    >
+                                                        {device.blacklisted ? 'Unblacklist' : 'Blacklist'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDelete(device)}
+                                                        disabled={actionSerial === device.serial_number}
+                                                        className="text-xs px-2 py-1 rounded border border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );

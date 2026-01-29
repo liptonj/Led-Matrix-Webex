@@ -15,16 +15,17 @@
 // External MQTT client for config invalidation
 extern MerakiMQTTClient mqtt_client;
 
-// External pairing manager for bridge pairing code
-#include "../bridge/pairing_manager.h"
+// External pairing manager for pairing code
+#include "../common/pairing_manager.h"
+#include "../supabase/supabase_client.h"
 extern PairingManager pairing_manager;
+extern SupabaseClient supabaseClient;
 
 void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     JsonDocument doc;
 
     doc["wifi_connected"] = app_state->wifi_connected;
     doc["webex_authenticated"] = app_state->webex_authenticated;
-    doc["bridge_connected"] = app_state->bridge_connected;
     doc["pairing_code"] = pairing_manager.getCode();
     doc["embedded_app_connected"] = app_state->embedded_app_connected;
     doc["xapi_connected"] = app_state->xapi_connected;
@@ -48,8 +49,13 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["ip_address"] = WiFi.localIP().toString();
     doc["mac_address"] = WiFi.macAddress();
     doc["serial_number"] = deviceCredentials.getSerialNumber();
+    doc["hmac_enabled"] = deviceCredentials.isProvisioned();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["uptime"] = millis() / 1000;
+    doc["realtime_error"] = app_state->realtime_error;
+    doc["realtime_devices_error"] = app_state->realtime_devices_error;
+    doc["last_realtime_error"] = app_state->last_realtime_error;
+    doc["last_realtime_devices_error"] = app_state->last_realtime_devices_error;
 
     const esp_partition_t* running = esp_ota_get_running_partition();
     const esp_partition_t* boot = esp_ota_get_boot_partition();
@@ -251,15 +257,11 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
     doc["date_format"] = config_manager->getDateFormat().isEmpty() ? "mdy" : config_manager->getDateFormat();
 
-    // Bridge configuration
-    doc["bridge_url"] = config_manager->getBridgeUrl().isEmpty() ? "" : config_manager->getBridgeUrl();
-    doc["bridge_host"] = config_manager->getBridgeHost().isEmpty() ? "" : config_manager->getBridgeHost();
-    doc["bridge_port"] = config_manager->getBridgePort();
-    doc["bridge_use_ssl"] = config_manager->getBridgeUseSSL();
-    doc["has_bridge_config"] = config_manager->hasBridgeConfig();
+    doc["has_bridge_config"] = false;
 
     // Debug configuration
     doc["debug_mode"] = config_manager->getDebugMode();
+    doc["pairing_realtime_debug"] = config_manager->getPairingRealtimeDebug();
     doc["tls_verify"] = config_manager->getTlsVerify();
 
     String responseStr;
@@ -445,75 +447,6 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         }
     }
 
-    // Bridge configuration
-    // Always trigger reconnection if ANY bridge config is provided in the request
-    // This ensures reconnection even if going from cloud discovery to manual config
-    bool bridge_url_provided = doc["bridge_url"].is<const char*>();
-    bool bridge_host_provided = doc["bridge_host"].is<const char*>();
-    bool bridge_port_provided = doc["bridge_port"].is<int>();
-    bool bridge_ssl_provided = doc["bridge_use_ssl"].is<bool>();
-    bool bridge_config_provided = bridge_url_provided || bridge_host_provided ||
-                                   bridge_port_provided || bridge_ssl_provided;
-    bool bridge_config_changed = false;
-
-    Serial.printf("[WEB] Bridge config detection: url=%d host=%d port=%d ssl=%d total=%d\n",
-                  bridge_url_provided, bridge_host_provided, bridge_port_provided,
-                  bridge_ssl_provided, bridge_config_provided);
-
-    if (doc["bridge_url"].is<const char*>()) {
-        String bridge_url = doc["bridge_url"].as<String>();
-        bridge_url.trim();
-        String current_url = config_manager->getBridgeUrl();
-        if (bridge_url != current_url) {
-            bridge_config_changed = true;
-        }
-        config_manager->setBridgeUrl(bridge_url);
-        Serial.printf("[WEB] Bridge URL saved: %s\n", bridge_url.isEmpty() ? "(empty)" : bridge_url.c_str());
-    }
-    if (doc["bridge_host"].is<const char*>()) {
-        String bridge_host = doc["bridge_host"].as<String>();
-        bridge_host.trim();
-        String current_host = config_manager->getBridgeHost();
-        if (bridge_host != current_host) {
-            bridge_config_changed = true;
-        }
-        config_manager->setBridgeHost(bridge_host);
-        Serial.printf("[WEB] Bridge host saved: %s\n", bridge_host.isEmpty() ? "(empty)" : bridge_host.c_str());
-    }
-    if (doc["bridge_port"].is<int>()) {
-        uint16_t bridge_port = doc["bridge_port"].as<uint16_t>();
-        if (bridge_port == 0) bridge_port = 443;
-        uint16_t current_port = config_manager->getBridgePort();
-        if (bridge_port != current_port) {
-            bridge_config_changed = true;
-        }
-        config_manager->setBridgePort(bridge_port);
-        Serial.printf("[WEB] Bridge port saved: %d\n", bridge_port);
-    }
-    if (doc["bridge_use_ssl"].is<bool>()) {
-        bool bridge_use_ssl = doc["bridge_use_ssl"].as<bool>();
-        bool current_ssl = config_manager->getBridgeUseSSL();
-        if (bridge_use_ssl != current_ssl) {
-            bridge_config_changed = true;
-        }
-        config_manager->setBridgeUseSSL(bridge_use_ssl);
-        Serial.printf("[WEB] Bridge SSL saved: %s\n", bridge_use_ssl ? "true" : "false");
-    }
-
-    // Trigger bridge reconnection if config changed OR if config was provided
-    // (handles switching from auto-discovery to manual config)
-    Serial.printf("[WEB] Bridge trigger check: provided=%d changed=%d condition=%d\n",
-                  bridge_config_provided, bridge_config_changed,
-                  (bridge_config_provided || bridge_config_changed));
-    if (bridge_config_provided || bridge_config_changed) {
-        Serial.println("[WEB] Bridge configuration updated - triggering reconnection");
-        app_state->bridge_config_changed = true;
-        Serial.printf("[WEB] app_state->bridge_config_changed set to: %d\n",
-                      app_state->bridge_config_changed);
-    } else {
-        Serial.println("[WEB] Bridge reconnection NOT triggered");
-    }
-
     // Debug configuration
     if (doc["debug_mode"].is<bool>()) {
         bool debug_mode = doc["debug_mode"].as<bool>();
@@ -522,6 +455,10 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         extern bool g_debug_mode;
         g_debug_mode = debug_mode;
         Serial.printf("[WEB] Debug mode %s\n", debug_mode ? "enabled" : "disabled");
+    }
+    if (doc["pairing_realtime_debug"].is<bool>()) {
+        bool pairing_debug = doc["pairing_realtime_debug"].as<bool>();
+        config_manager->setPairingRealtimeDebug(pairing_debug);
     }
     if (doc["tls_verify"].is<bool>()) {
         bool tls_verify = doc["tls_verify"].as<bool>();
@@ -603,6 +540,8 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
 
 void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* request) {
     String newCode = pairing_manager.generateCode(true);
+    supabaseClient.setPairingCode(newCode);
+    app_state->supabase_realtime_resubscribe = true;
     Serial.printf("[WEB] New pairing code generated: %s\n", newCode.c_str());
 
     JsonDocument doc;

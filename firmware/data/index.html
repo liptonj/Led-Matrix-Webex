@@ -16,7 +16,7 @@
         <nav class="tabs">
             <button class="tab-btn active" data-tab="status">Status</button>
             <button class="tab-btn" data-tab="wifi">WiFi</button>
-            <button class="tab-btn" data-tab="bridge">Bridge</button>
+            <button class="tab-btn" data-tab="pairing">Pairing</button>
             <button class="tab-btn" data-tab="webex">Webex</button>
             <button class="tab-btn" data-tab="sensors">Sensors</button>
             <button class="tab-btn" data-tab="display">Display</button>
@@ -89,10 +89,6 @@
                         <span class="icon">🔗</span>
                         <span class="name">Webex</span>
                     </div>
-                    <div class="connection-item" id="conn-bridge">
-                        <span class="icon">🌉</span>
-                        <span class="name">Bridge</span>
-                    </div>
                     <div class="connection-item" id="conn-mqtt">
                         <span class="icon">📡</span>
                         <span class="name">MQTT</span>
@@ -131,10 +127,10 @@
             </div>
         </section>
 
-        <!-- Bridge Tab -->
-        <section id="bridge" class="tab-content">
+        <!-- Pairing Tab -->
+        <section id="pairing" class="tab-content">
             <div class="card">
-                <h2>Bridge Pairing</h2>
+                <h2>Pairing</h2>
                 <p class="help-text">Enter this code in the Webex Embedded App to pair your display.</p>
                 <div class="pairing-code-container">
                     <span id="pairing-code" class="pairing-code">------</span>
@@ -142,59 +138,8 @@
                 </div>
                 <div class="status-grid" style="margin-top: 1rem;">
                     <div class="status-item">
-                        <span class="label">Bridge:</span>
-                        <span id="bridge-status" class="value">--</span>
-                    </div>
-                    <div class="status-item">
                         <span class="label">Embedded App:</span>
                         <span id="app-status" class="value">--</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Bridge Server Configuration</h2>
-                <p class="help-text">Configure the WebSocket bridge server. Leave empty to use auto-discovery (cloud bridge).</p>
-                <form id="bridge-form">
-                    <div class="form-group">
-                        <label for="bridge-mode">Connection Mode:</label>
-                        <select id="bridge-mode" name="bridge_mode">
-                            <option value="auto">Auto (Cloud Bridge)</option>
-                            <option value="url">Custom URL</option>
-                            <option value="manual">Manual (Host/Port)</option>
-                        </select>
-                        <p class="help-text">Auto uses the cloud bridge (wss://bridge.5ls.us). Use Manual for local testing.</p>
-                    </div>
-                    <div id="bridge-url-section" class="form-group" style="display: none;">
-                        <label for="bridge-url">Bridge URL:</label>
-                        <input type="text" id="bridge-url" name="bridge_url" placeholder="wss://bridge.example.com">
-                        <p class="help-text">Full WebSocket URL (ws:// or wss://)</p>
-                    </div>
-                    <div id="bridge-manual-section" style="display: none;">
-                        <div class="form-group">
-                            <label for="bridge-host">Bridge Host:</label>
-                            <input type="text" id="bridge-host" name="bridge_host" placeholder="192.168.1.100 or hostname.local">
-                            <p class="help-text">IP address or hostname of the bridge server</p>
-                        </div>
-                        <div class="form-group">
-                            <label for="bridge-port">Bridge Port:</label>
-                            <input type="number" id="bridge-port" name="bridge_port" value="8080" min="1" max="65535">
-                        </div>
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="bridge-use-ssl" name="bridge_use_ssl">
-                                Use SSL (wss://)
-                            </label>
-                            <p class="help-text">Enable for secure connections. Disable for local testing without certificates.</p>
-                        </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Save Bridge Config</button>
-                    <button type="button" id="bridge-clear" class="btn btn-secondary">Clear (Use Auto)</button>
-                </form>
-                <div class="status-grid" style="margin-top: 1rem;">
-                    <div class="status-item">
-                        <span class="label">Current Bridge:</span>
-                        <span id="bridge-current-url" class="value">--</span>
                     </div>
                 </div>
             </div>
@@ -439,6 +384,14 @@
                         <span id="mac-address" class="value">--</span>
                     </div>
                     <div class="status-item">
+                        <span class="label">Serial Number:</span>
+                        <span id="serial-number" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">HMAC Security:</span>
+                        <span id="hmac-status" class="value">--</span>
+                    </div>
+                    <div class="status-item">
                         <span class="label">Free Heap:</span>
                         <span id="free-heap" class="value">--</span>
                     </div>
@@ -487,6 +440,12 @@
                             <input type="checkbox" id="debug-mode"> Enable debug mode (verbose serial logging)
                         </label>
                         <p class="help-text">When enabled, detailed debug messages are output to the serial console.</p>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="pairing-realtime-debug"> Enable pairing realtime debug
+                        </label>
+                        <p class="help-text">Logs pairing update payloads to serial when debug mode is on.</p>
                     </div>
                     <div class="form-group">
                         <label>

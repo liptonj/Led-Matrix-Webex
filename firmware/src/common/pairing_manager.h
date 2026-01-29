@@ -3,7 +3,7 @@
  * @brief Pairing Code Manager for Bridge Connection
  * 
  * Generates and manages 6-character pairing codes for secure
- * bridge connection between embedded app and display.
+ * pairing between embedded app and display.
  */
 
 #ifndef PAIRING_MANAGER_H

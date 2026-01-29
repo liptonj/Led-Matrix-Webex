@@ -4,7 +4,6 @@
  */
 
 #include "remote_logger.h"
-#include "../bridge/bridge_client.h"
 #include "../supabase/supabase_client.h"
 #include <stdarg.h>
 
@@ -12,11 +11,10 @@
 RemoteLogger remoteLogger;
 
 RemoteLogger::RemoteLogger()
-    : _bridge(nullptr), _supabase(nullptr), _remoteEnabled(false), _minLevel(LOG_DEBUG) {
+    : _supabase(nullptr), _remoteEnabled(false), _minLevel(LOG_DEBUG) {
 }
 
-void RemoteLogger::begin(BridgeClient* bridge, SupabaseClient* supabase) {
-    _bridge = bridge;
+void RemoteLogger::begin(SupabaseClient* supabase) {
     _supabase = supabase;
     Serial.println("[RLOG] Remote logger initialized");
 }
@@ -24,7 +22,7 @@ void RemoteLogger::begin(BridgeClient* bridge, SupabaseClient* supabase) {
 void RemoteLogger::setRemoteEnabled(bool enabled) {
     _remoteEnabled = enabled;
     if (enabled) {
-        Serial.println("[RLOG] Remote logging ENABLED - logs will stream to bridge");
+        Serial.println("[RLOG] Remote logging ENABLED - logs will stream to Supabase");
     } else {
         Serial.println("[RLOG] Remote logging disabled");
     }
@@ -67,7 +65,7 @@ void RemoteLogger::log(LogLevel level, const char* tag, const char* format, va_l
     const char* levelStr = levelToString(level);
     Serial.printf("[%s][%s] %s\n", levelStr, tag, message);
 
-    // Send to bridge if enabled and level meets threshold
+    // Send to Supabase if enabled and level meets threshold
     if (_remoteEnabled && level >= _minLevel) {
         sendRemote(level, tag, message);
     }
@@ -84,28 +82,8 @@ const char* RemoteLogger::levelToString(LogLevel level) {
 }
 
 void RemoteLogger::sendRemote(LogLevel level, const char* tag, const char* message) {
-    // Prefer Supabase when available (Supabase-only mode)
     if (_supabase != nullptr && _supabase->isInitialized() && _supabase->isAuthenticated()) {
         sendToSupabase(level, tag, message);
-        return;
-    }
-
-    if (_bridge != nullptr && _bridge->isConnected()) {
-        // Build metadata JSON
-        JsonDocument metaDoc;
-        metaDoc["tag"] = tag;
-        metaDoc["uptime_ms"] = millis();
-        metaDoc["free_heap"] = ESP.getFreeHeap();
-        metaDoc["min_free_heap"] = ESP.getMinFreeHeap();
-
-        String metadata;
-        serializeJson(metaDoc, metadata);
-
-        // Format full message with tag
-        String fullMessage = String("[") + tag + "] " + message;
-
-        // Send via dedicated debug log method
-        _bridge->sendDebugLog(levelToString(level), fullMessage, metadata);
     }
 }
 

@@ -77,6 +77,7 @@ bool SupabaseClient::ensureAuthenticated() {
 }
 
 bool SupabaseClient::authenticate() {
+    _lastAuthError = SupabaseAuthError::None;
     if (!deviceCredentials.isProvisioned()) {
         Serial.println("[SUPABASE] Cannot authenticate - device not provisioned");
         return false;
@@ -102,6 +103,21 @@ bool SupabaseClient::authenticate() {
         Serial.printf("[SUPABASE] Auth failed: HTTP %d\n", httpCode);
         if (!response.isEmpty()) {
             Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
+            if (response.indexOf("Invalid signature") >= 0) {
+                _lastAuthError = SupabaseAuthError::InvalidSignature;
+            } else if (response.indexOf("approval_required") >= 0) {
+                _lastAuthError = SupabaseAuthError::ApprovalRequired;
+            } else if (response.indexOf("device_disabled") >= 0) {
+                _lastAuthError = SupabaseAuthError::Disabled;
+            } else if (response.indexOf("device_blacklisted") >= 0) {
+                _lastAuthError = SupabaseAuthError::Blacklisted;
+            } else if (response.indexOf("device_deleted") >= 0) {
+                _lastAuthError = SupabaseAuthError::Deleted;
+            } else {
+                _lastAuthError = SupabaseAuthError::Other;
+            }
+        } else {
+            _lastAuthError = SupabaseAuthError::Other;
         }
         return false;
     }
@@ -111,6 +127,7 @@ bool SupabaseClient::authenticate() {
     
     if (!result.success) {
         Serial.println("[SUPABASE] Auth response parsing failed");
+        _lastAuthError = SupabaseAuthError::Other;
         return false;
     }
     
@@ -254,9 +271,13 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
         Serial.printf("[SUPABASE] Post state error: %s\n", errMsg.c_str());
         return state;
     }
-    
+
     // Mark request as successful; app state is handled via realtime/commands.
     state.valid = true;
+
+    if (respDoc["debug_enabled"].is<bool>()) {
+        _remoteDebugEnabled = respDoc["debug_enabled"] | false;
+    }
 
     if (respDoc["app_connected"].is<bool>()) {
         state.app_connected = respDoc["app_connected"] | false;

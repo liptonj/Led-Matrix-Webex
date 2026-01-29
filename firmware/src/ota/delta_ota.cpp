@@ -18,7 +18,7 @@ const size_t MODULE_SIZES[] = {
     180,  // MODULE_CORE (0x01)
     35,   // MODULE_WEBEX_POLLING (0x02)
     25,   // MODULE_MQTT_SENSORS (0x04)
-    20,   // MODULE_BRIDGE_CLIENT (0x08)
+    0,    // (0x08) unused
     30,   // MODULE_XAPI_CLIENT (0x10)
     45    // MODULE_EMBEDDED_APP (0x20)
 };
@@ -277,14 +277,12 @@ size_t DeltaOTAManager::estimateDownloadSize(const String& from_variant,
     if (from_variant == "embedded") from_modules = 0x21;
     else if (from_variant == "standard") from_modules = 0x23;
     else if (from_variant == "sensors") from_modules = 0x25;
-    else if (from_variant == "bridge") from_modules = 0x29;
-    else if (from_variant == "full") from_modules = 0x3F;
+    else if (from_variant == "full") from_modules = 0x37;
     
     if (to_variant == "embedded") to_modules = 0x21;
     else if (to_variant == "standard") to_modules = 0x23;
     else if (to_variant == "sensors") to_modules = 0x25;
-    else if (to_variant == "bridge") to_modules = 0x29;
-    else if (to_variant == "full") to_modules = 0x3F;
+    else if (to_variant == "full") to_modules = 0x37;
     
     ModuleDelta delta = calculateModuleDelta(from_modules, to_modules);
     return estimatePatchSize(delta);

@@ -62,7 +62,6 @@ String sim_air_quality_text = "good";
 void init_simulation_state() {
     app_state.wifi_connected = true;  // Simulate connected by default
     app_state.webex_authenticated = false;
-    app_state.bridge_connected = false;
     app_state.xapi_connected = false;
     app_state.mqtt_connected = false;
     app_state.webex_status = "active";
@@ -93,7 +92,6 @@ void print_help() {
     printf("  humidity <value>                                - Set humidity (%%)\n");
     printf("  door <open|closed>                              - Set door status\n");
     printf("  wifi <on|off>                                   - Toggle WiFi connection\n");
-    printf("  bridge <on|off>                                 - Toggle bridge connection\n");
     printf("  display                                         - Dump display state\n");
     printf("  config                                          - Show configuration\n");
     printf("  help                                            - Show this help\n");
@@ -232,23 +230,10 @@ void process_command(const char* cmd) {
         return;
     }
     
-    if (action == "bridge") {
-        if (arg == "on") {
-            app_state.bridge_connected = true;
-            printf("[SIM] Bridge CONNECTED\n");
-        } else if (arg == "off") {
-            app_state.bridge_connected = false;
-            printf("[SIM] Bridge DISCONNECTED\n");
-        } else {
-            printf("[SIM] Usage: bridge <on|off>\n");
-        }
-        return;
-    }
     
     if (action == "display") {
         printf("\n=== Current Display State ===\n");
         printf("  WiFi: %s\n", app_state.wifi_connected ? "Connected" : "Disconnected");
-        printf("  Bridge: %s\n", app_state.bridge_connected ? "Connected" : "Disconnected");
         printf("  Webex Status: %s\n", app_state.webex_status.c_str());
         printf("  xAPI Connected: %s\n", app_state.xapi_connected ? "Yes" : "No");
         printf("  In Call: %s\n", app_state.in_call ? "Yes" : "No");
@@ -299,7 +284,6 @@ void update_display() {
     data.air_quality_index = app_state.air_quality_index;
     data.show_sensors = app_state.mqtt_connected;
     data.wifi_connected = app_state.wifi_connected;
-    data.bridge_connected = app_state.bridge_connected;
     
     matrix_display.update(data);
 }

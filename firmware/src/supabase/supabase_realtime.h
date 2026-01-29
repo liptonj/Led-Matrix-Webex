@@ -80,6 +80,7 @@ public:
      * @return true if connected and subscribed
      */
     bool isConnected() const { return _connected && _subscribed; }
+    bool isSocketConnected() const { return _connected; }
 
     /**
      * @brief Subscribe to a single table channel

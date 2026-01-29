@@ -7,7 +7,7 @@
  * 
  * Module Architecture:
  * - Core: WiFi, Display, Web Server, OTA, Module Manager (always present)
- * - Modules: Webex Polling, MQTT Sensors, Bridge Client, xAPI, etc.
+ * - Modules: Webex Polling, MQTT Sensors, xAPI, etc.
  */
 
 #ifndef MODULE_MANAGER_H
@@ -21,7 +21,6 @@
 #define MODULE_CORE           0x01  // Always installed
 #define MODULE_WEBEX_POLLING  0x02  // Direct Webex API polling
 #define MODULE_MQTT_SENSORS   0x04  // MQTT client for Meraki sensors
-#define MODULE_BRIDGE_CLIENT  0x08  // WebSocket bridge connectivity
 #define MODULE_XAPI_CLIENT    0x10  // RoomOS xAPI WebSocket
 #define MODULE_EMBEDDED_APP   0x20  // Webex Embedded App (can be minimal)
 
@@ -89,16 +88,6 @@ const ModuleInfo AVAILABLE_MODULES[] = {
         "firmware-mqtt.bin"
     },
     {
-        MODULE_BRIDGE_CLIENT,
-        "bridge_client",
-        "WebSocket client for Node.js bridge server",
-        "1.0.0",
-        20,
-        (INSTALLED_MODULES & MODULE_BRIDGE_CLIENT) != 0,
-        true,
-        "firmware-bridge.bin"
-    },
-    {
         MODULE_XAPI_CLIENT,
         "xapi_client",
         "RoomOS xAPI WebSocket for device control",
@@ -156,19 +145,12 @@ const FirmwareVariant FIRMWARE_VARIANTS[] = {
         250
     },
     {
-        "bridge",
-        "Core + Embedded App + Bridge Client",
-        MODULE_CORE | MODULE_EMBEDDED_APP | MODULE_BRIDGE_CLIENT,
-        "firmware-bridge.bin",
-        245
-    },
-    {
         "full",
         "All features included",
         MODULE_CORE | MODULE_EMBEDDED_APP | MODULE_WEBEX_POLLING | 
-        MODULE_MQTT_SENSORS | MODULE_BRIDGE_CLIENT | MODULE_XAPI_CLIENT,
+        MODULE_MQTT_SENSORS | MODULE_XAPI_CLIENT,
         "firmware-full.bin",
-        350
+        330
     }
 };
 

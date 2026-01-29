@@ -11,7 +11,6 @@
 
 // Service types
 #define MDNS_SERVICE_HTTP "_http"
-#define MDNS_SERVICE_BRIDGE "_webex-bridge"
 #define MDNS_PROTOCOL_TCP "_tcp"
 
 // Refresh interval (60 seconds - well before 120s TTL expiry)
@@ -46,37 +45,6 @@ public:
     void advertiseHTTP(uint16_t port);
     
     /**
-     * @brief Discover bridge server on the network
-     * @param host Output: Bridge host address
-     * @param port Output: Bridge port
-     * @return true if bridge found
-     */
-    bool discoverBridge(String& host, uint16_t& port);
-    
-    /**
-     * @brief Check if a bridge server has been discovered
-     * @return true if bridge is available
-     */
-    bool hasBridge() const { return bridge_found; }
-    
-    /**
-     * @brief Get discovered bridge host
-     * @return Bridge host address
-     */
-    String getBridgeHost() const { return bridge_host; }
-    
-    /**
-     * @brief Get discovered bridge port
-     * @return Bridge port number
-     */
-    uint16_t getBridgePort() const { return bridge_port; }
-    
-    /**
-     * @brief Refresh bridge discovery
-     */
-    void refreshBridgeDiscovery();
-    
-    /**
      * @brief Refresh mDNS by forcing periodic restart
      * 
      * ESP32's mDNS can become unresponsive without indication.
@@ -99,10 +67,6 @@ public:
 
 private:
     bool initialized;
-    bool bridge_found;
-    String bridge_host;
-    uint16_t bridge_port;
-    unsigned long last_discovery;
     unsigned long last_refresh;
     String current_hostname;
 };

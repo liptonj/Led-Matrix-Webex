@@ -124,12 +124,6 @@ void ConfigManager::loadCache() const {
     cached_time_format = loadString("time_format", "24h");
     cached_date_format = loadString("date_format", "mdy");
 
-    // Load bridge config
-    cached_bridge_url = loadString("bridge_url", "");
-    cached_bridge_host = loadString("bridge_host", "");
-    cached_bridge_port = loadUInt("bridge_port", 443);
-    cached_bridge_use_ssl = loadBool("bridge_ssl", true);
-
     // Load Supabase config
     cached_supabase_url = loadString("supabase_url", "");
     cached_supabase_anon_key = loadString("supabase_anon", "");
@@ -489,76 +483,6 @@ void ConfigManager::setDisplayMetric(const String& metric) {
     Serial.printf("[CONFIG] Display metric saved: %s\n", metric.c_str());
 }
 
-// Bridge Configuration
-
-String ConfigManager::getBridgeUrl() const {
-    if (!cache_loaded) {
-        return loadString("bridge_url", "");
-    }
-    return cached_bridge_url;
-}
-
-void ConfigManager::setBridgeUrl(const String& url) {
-    saveString("bridge_url", url);
-    cached_bridge_url = url;
-    Serial.printf("[CONFIG] Bridge URL saved: %s\n", url.c_str());
-}
-
-String ConfigManager::getBridgeHost() const {
-    if (!cache_loaded) {
-        return loadString("bridge_host", "");
-    }
-    return cached_bridge_host;
-}
-
-void ConfigManager::setBridgeHost(const String& host) {
-    saveString("bridge_host", host);
-    cached_bridge_host = host;
-    Serial.printf("[CONFIG] Bridge host saved: %s\n", host.c_str());
-}
-
-uint16_t ConfigManager::getBridgePort() const {
-    if (!cache_loaded) {
-        return loadUInt("bridge_port", 443);
-    }
-    return cached_bridge_port;
-}
-
-void ConfigManager::setBridgePort(uint16_t port) {
-    saveUInt("bridge_port", port);
-    cached_bridge_port = port;
-    Serial.printf("[CONFIG] Bridge port saved: %d\n", port);
-}
-
-bool ConfigManager::getBridgeUseSSL() const {
-    if (!cache_loaded) {
-        return loadBool("bridge_ssl", true);
-    }
-    return cached_bridge_use_ssl;
-}
-
-void ConfigManager::setBridgeUseSSL(bool use_ssl) {
-    saveBool("bridge_ssl", use_ssl);
-    cached_bridge_use_ssl = use_ssl;
-    Serial.printf("[CONFIG] Bridge SSL saved: %s\n", use_ssl ? "true" : "false");
-}
-
-bool ConfigManager::hasBridgeConfig() const {
-    return !getBridgeUrl().isEmpty() || !getBridgeHost().isEmpty();
-}
-
-void ConfigManager::clearBridgeConfig() {
-    saveString("bridge_url", "");
-    saveString("bridge_host", "");
-    saveUInt("bridge_port", 443);
-    saveBool("bridge_ssl", true);
-    cached_bridge_url = "";
-    cached_bridge_host = "";
-    cached_bridge_port = 443;
-    cached_bridge_use_ssl = true;
-    Serial.println("[CONFIG] Bridge config cleared");
-}
-
 // OTA Configuration
 
 String ConfigManager::getOTAUrl() const {
@@ -679,6 +603,15 @@ bool ConfigManager::getDebugMode() const {
 void ConfigManager::setDebugMode(bool enabled) {
     saveBool("debug_mode", enabled);
     Serial.printf("[CONFIG] Debug mode %s\n", enabled ? "enabled" : "disabled");
+}
+
+bool ConfigManager::getPairingRealtimeDebug() const {
+    return loadBool("pairing_rt_debug", false);
+}
+
+void ConfigManager::setPairingRealtimeDebug(bool enabled) {
+    saveBool("pairing_rt_debug", enabled);
+    Serial.printf("[CONFIG] Pairing realtime debug %s\n", enabled ? "enabled" : "disabled");
 }
 
 // TLS Configuration
@@ -890,10 +823,7 @@ String ConfigManager::exportConfig() const {
     doc["ntp_server"] = getNtpServer();
     doc["time_format"] = getTimeFormat();
     doc["date_format"] = getDateFormat();
-    doc["bridge_url"] = getBridgeUrl();
-    doc["bridge_host"] = getBridgeHost();
-    doc["bridge_port"] = getBridgePort();
-    doc["bridge_use_ssl"] = getBridgeUseSSL();
+    doc["pairing_realtime_debug"] = getPairingRealtimeDebug();
     doc["tls_verify"] = getTlsVerify();
 
     String output;
@@ -978,17 +908,8 @@ bool ConfigManager::importConfig(const String& json) {
     if (doc["date_format"].is<const char*>()) {
         setDateFormat(doc["date_format"].as<const char*>());
     }
-    if (doc["bridge_url"].is<const char*>()) {
-        setBridgeUrl(doc["bridge_url"].as<const char*>());
-    }
-    if (doc["bridge_host"].is<const char*>()) {
-        setBridgeHost(doc["bridge_host"].as<const char*>());
-    }
-    if (doc["bridge_port"].is<int>()) {
-        setBridgePort(doc["bridge_port"].as<uint16_t>());
-    }
-    if (doc["bridge_use_ssl"].is<bool>()) {
-        setBridgeUseSSL(doc["bridge_use_ssl"].as<bool>());
+    if (doc["pairing_realtime_debug"].is<bool>()) {
+        setPairingRealtimeDebug(doc["pairing_realtime_debug"].as<bool>());
     }
     if (doc["tls_verify"].is<bool>()) {
         setTlsVerify(doc["tls_verify"].as<bool>());

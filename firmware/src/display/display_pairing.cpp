@@ -1,19 +1,19 @@
 /**
  * @file display_pairing.cpp
- * @brief Display pairing code for bridge connection
+ * @brief Display pairing code for app connection
  */
 
 #include "matrix_display.h"
 
 /**
- * @brief Show pairing code for bridge connection
+ * @brief Show pairing code for app connection
  * 
  * Display layout (64x32):
  * Row 0-7:   "PAIR CODE"
  * Row 10-22: Large pairing code (e.g., "ABC123")
- * Row 24-31: "Bridge ready" or bridge URL (scrolls if long)
+ * Row 24-31: "Pairing ready" or hub URL (scrolls if long)
  */
-void MatrixDisplay::showPairingCode(const String& code, const String& bridge_url) {
+void MatrixDisplay::showPairingCode(const String& code, const String& hub_url) {
     if (!dma_display) return;
     
     const String screen_key = "pairing:" + code;
@@ -53,11 +53,11 @@ void MatrixDisplay::showPairingCode(const String& code, const String& bridge_url
     }
     
     // Bottom text - scrolls if URL is long
-    if (bridge_url.isEmpty()) {
-        drawScrollingText(24, "Bridge ready", COLOR_GREEN, MATRIX_WIDTH - 4, "pair_status");
+    if (hub_url.isEmpty()) {
+        drawScrollingText(24, "Pairing ready", COLOR_GREEN, MATRIX_WIDTH - 4, "pair_status");
     } else {
-        // Show bridge URL (remove ws:// prefix for display)
-        String shortUrl = bridge_url;
+        // Show hub URL (remove ws:// prefix for display)
+        String shortUrl = hub_url;
         if (shortUrl.startsWith("ws://")) {
             shortUrl = shortUrl.substring(5);
         } else if (shortUrl.startsWith("wss://")) {

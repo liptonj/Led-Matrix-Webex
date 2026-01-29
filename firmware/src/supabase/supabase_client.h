@@ -62,6 +62,16 @@ struct SupabaseAuthResult {
     unsigned long expires_at;  // Unix timestamp in seconds
 };
 
+enum class SupabaseAuthError {
+    None,
+    InvalidSignature,
+    ApprovalRequired,
+    Disabled,
+    Blacklisted,
+    Deleted,
+    Other
+};
+
 // Command handler callback type
 typedef void (*SupabaseCommandHandler)(const SupabaseCommand& cmd);
 
@@ -177,6 +187,7 @@ public:
      * @return true if debug_enabled is set in display.devices
      */
     bool isRemoteDebugEnabled() const { return _remoteDebugEnabled; }
+    void setRemoteDebugEnabled(bool enabled) { _remoteDebugEnabled = enabled; }
 
     /**
      * @brief Get last known app state
@@ -206,6 +217,7 @@ public:
      * @return Base Supabase URL
      */
     String getSupabaseUrl() const { return _supabaseUrl; }
+    SupabaseAuthError getLastAuthError() const { return _lastAuthError; }
 
 private:
     String _supabaseUrl;
@@ -218,6 +230,7 @@ private:
     bool _appConnected;
     SupabaseAppState _lastAppState;
     SupabaseCommandHandler _commandHandler;
+    SupabaseAuthError _lastAuthError = SupabaseAuthError::None;
 
     /**
      * @brief Ensure we have a valid token (refresh if needed)

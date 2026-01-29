@@ -56,7 +56,6 @@ Once running, the simulation accepts these commands:
 | `humidity <value>` | Set humidity percentage |
 | `door <open\|closed>` | Set door sensor status |
 | `wifi <on\|off>` | Toggle WiFi connection |
-| `bridge <on\|off>` | Toggle bridge connection |
 | `display` | Show current display state |
 | `config` | Show configuration |
 | `help` | Show available commands |

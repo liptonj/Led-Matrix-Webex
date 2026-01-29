@@ -18,11 +18,9 @@
 struct AppState {
     bool wifi_connected = false;
     bool webex_authenticated = false;
-    bool bridge_connected = false;
     bool embedded_app_connected = false;
     bool xapi_connected = false;
     bool mqtt_connected = false;
-    bool bridge_config_changed = false;  // Flag to trigger bridge reconnection
     String webex_status = "unknown";
     String embedded_app_display_name = "";  // Display name from embedded app user
     bool camera_on = false;
@@ -39,11 +37,19 @@ struct AppState {
     String sensor_mac = "";
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
-    unsigned long last_bridge_status_time = 0;  // Track when last status received from bridge
     // Supabase state sync (Phase A)
     bool supabase_connected = false;           // Successfully authenticated with Supabase
     bool supabase_app_connected = false;       // App connected via Supabase (redundant with embedded_app_connected but explicit)
+    bool supabase_approval_pending = false;    // Provisioning awaiting admin approval
+    bool supabase_disabled = false;            // Disabled by admin
+    bool supabase_blacklisted = false;         // Permanently blocked
+    bool supabase_deleted = false;             // Server deleted device record
     unsigned long last_supabase_sync = 0;      // Last successful state sync with Supabase
+    bool supabase_realtime_resubscribe = false; // Trigger realtime resubscribe on pairing change
+    String realtime_error = "";
+    String realtime_devices_error = "";
+    unsigned long last_realtime_error = 0;
+    unsigned long last_realtime_devices_error = 0;
     // Time tracking
     bool time_synced = false;
 };
