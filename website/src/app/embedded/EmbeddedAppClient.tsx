@@ -216,6 +216,7 @@ export function EmbeddedAppClient() {
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Unknown error' }));
         console.error('update-app-state failed:', error);
+        addLog(`update-app-state failed: ${error.error || response.status}`);
         return false;
       }
 
@@ -227,9 +228,10 @@ export function EmbeddedAppClient() {
       return true;
     } catch (err) {
       console.error('update-app-state error:', err);
+      addLog(`update-app-state error: ${err instanceof Error ? err.message : 'unknown error'}`);
       return false;
     }
-  }, [appToken]);
+  }, [appToken, addLog]);
 
   // Insert command via Edge Function (more secure than direct DB insert)
   const insertCommandViaEdge = useCallback(async (
@@ -294,10 +296,12 @@ export function EmbeddedAppClient() {
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error('Supabase not configured (missing NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY)');
     }
-    return createClient(supabaseUrl, supabaseAnonKey, {
+    const client = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
+    client.realtime.setAuth(token);
+    return client;
   }, []);
 
   const subscribeToPairing = useCallback(async (code: string, token: string) => {
@@ -378,6 +382,7 @@ export function EmbeddedAppClient() {
         .single();
 
       if (error || !inserted?.id) {
+        addLog(`Command insert failed: ${error?.message || 'Unknown error'}`);
         throw new Error(error?.message || 'Failed to queue command');
       }
       commandId = inserted.id as string;
@@ -413,7 +418,7 @@ export function EmbeddedAppClient() {
           }
         });
     });
-  }, [appToken, pairingCode, insertCommandViaEdge]);
+  }, [addLog, appToken, pairingCode, insertCommandViaEdge]);
 
   const {
     isReady: webexReady,
@@ -638,7 +643,11 @@ export function EmbeddedAppClient() {
           display_name: displayName,
         })
         .eq('pairing_code', code)
-        .then(() => {}, () => {});
+        .then(({ error }) => {
+          if (error) {
+            addLog(`pairings update failed: ${error.message}`);
+          }
+        });
     }
   }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, updateAppStateViaEdge]);
 
@@ -686,7 +695,11 @@ export function EmbeddedAppClient() {
           supabaseRef.current?.schema('display').from('pairings').update({
             app_connected: true,
             app_last_seen: new Date().toISOString(),
-          }).eq('pairing_code', code).then(() => {}, () => {});
+          }).eq('pairing_code', code).then(({ error }) => {
+            if (error) {
+              addLog(`pairings heartbeat failed: ${error.message}`);
+            }
+          });
         }
       }, CONFIG.heartbeatIntervalMs);
     } catch (err) {
