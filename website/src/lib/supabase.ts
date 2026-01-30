@@ -9,6 +9,8 @@
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
+const SUPABASE_AUTH_TIMEOUT_MS = 30_000;
+let sessionCheckPromise: Promise<any> | null = null;
 
 function withTimeout<T>(
   promise: PromiseLike<T>,
@@ -481,18 +483,51 @@ export async function signOut() {
 
 export async function getSession() {
   const supabase = await getSupabase();
-  return withTimeout(
-    supabase.auth.getSession(),
-    SUPABASE_REQUEST_TIMEOUT_MS,
-    "Timed out while checking your session.",
-  );
+  if (sessionCheckPromise) {
+    return sessionCheckPromise;
+  }
+
+  sessionCheckPromise = (async () => {
+    try {
+      return await withTimeout(
+        supabase.auth.getSession(),
+        SUPABASE_AUTH_TIMEOUT_MS,
+        "Timed out while checking your session.",
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (!message.includes("Timed out")) {
+        throw err;
+      }
+
+      try {
+        await withTimeout(
+          supabase.auth.refreshSession(),
+          SUPABASE_AUTH_TIMEOUT_MS,
+          "Timed out while refreshing your session.",
+        );
+      } catch (refreshErr) {
+        throw refreshErr;
+      }
+
+      return withTimeout(
+        supabase.auth.getSession(),
+        SUPABASE_AUTH_TIMEOUT_MS,
+        "Timed out while checking your session.",
+      );
+    } finally {
+      sessionCheckPromise = null;
+    }
+  })();
+
+  return sessionCheckPromise;
 }
 
 export async function getUser() {
   const supabase = await getSupabase();
   const { data: { user } } = await withTimeout(
     supabase.auth.getUser(),
-    SUPABASE_REQUEST_TIMEOUT_MS,
+    SUPABASE_AUTH_TIMEOUT_MS,
     "Timed out while fetching user details.",
   );
   return user;
