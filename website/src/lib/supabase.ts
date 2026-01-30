@@ -14,6 +14,16 @@ const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
 const SUPABASE_AUTH_TIMEOUT_MS = 60_000;
 let sessionCheckPromise: Promise<any> | null = null;
 
+function isAbortError(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof Error) {
+    return err.name === "AbortError" || err.message.includes("aborted");
+  }
+  const maybe = err as { name?: string; message?: string };
+  if (maybe?.name === "AbortError") return true;
+  return typeof maybe?.message === "string" && maybe.message.includes("aborted");
+}
+
 function withTimeout<T>(
   promise: PromiseLike<T>,
   timeoutMs: number,
@@ -471,7 +481,7 @@ export async function getSession() {
       );
     } catch (err) {
       // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
-      if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+      if (isAbortError(err)) {
         // Return empty session instead of throwing - component unmounted
         console.debug('getSession aborted (likely component unmounted)');
         sessionCheckPromise = null;
@@ -491,7 +501,7 @@ export async function getSession() {
         );
       } catch (refreshErr) {
         // Handle AbortError gracefully
-        if (refreshErr instanceof Error && (refreshErr.name === 'AbortError' || refreshErr.message.includes('aborted'))) {
+        if (isAbortError(refreshErr)) {
           sessionCheckPromise = null;
           return { data: { session: null }, error: null };
         }
@@ -506,7 +516,7 @@ export async function getSession() {
         );
       } catch (finalErr) {
         // Handle AbortError gracefully
-        if (finalErr instanceof Error && (finalErr.name === 'AbortError' || finalErr.message.includes('aborted'))) {
+        if (isAbortError(finalErr)) {
           sessionCheckPromise = null;
           return { data: { session: null }, error: null };
         }
@@ -532,7 +542,7 @@ export async function getUser() {
     return user;
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
-    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+    if (isAbortError(err)) {
       // Return null instead of throwing - component unmounted, no need to error
       console.debug('getUser aborted (likely component unmounted)');
       return null;
@@ -560,7 +570,7 @@ export async function isAdmin(): Promise<boolean> {
     return Boolean(data);
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
-    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+    if (isAbortError(err)) {
       console.debug('isAdmin aborted (likely component unmounted)');
       return false;
     }
@@ -711,7 +721,7 @@ export async function getCurrentUserProfile(): Promise<UserProfile | null> {
     return data || null;
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
-    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+    if (isAbortError(err)) {
       console.debug('getCurrentUserProfile aborted (likely component unmounted)');
       return null;
     }

@@ -23,6 +23,7 @@ export default function AdminShell({
 
     useEffect(() => {
         let subscription: { unsubscribe: () => void } | null = null;
+        const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
         async function hydrateAdminState(hasSession: boolean) {
             if (!hasSession) {
@@ -86,6 +87,16 @@ export default function AdminShell({
 
             try {
                 const { data } = await getSession();
+                if (!data?.session && typeof window !== 'undefined') {
+                    const pendingLogin = window.sessionStorage.getItem('admin_login_in_progress') === '1';
+                    if (pendingLogin) {
+                        window.sessionStorage.removeItem('admin_login_in_progress');
+                        await sleep(500);
+                        const retry = await getSession();
+                        await hydrateAdminState(Boolean(retry.data?.session));
+                        return;
+                    }
+                }
                 await hydrateAdminState(Boolean(data?.session));
             } catch (err) {
                 // Handle AbortError gracefully (component unmounted or request cancelled)

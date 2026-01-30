@@ -42,11 +42,17 @@ export default function AdminLoginPage() {
                     return;
                 }
                 // Success - redirect to admin
-                router.push('/admin');
+                if (typeof window !== 'undefined') {
+                    window.sessionStorage.setItem('admin_login_in_progress', '1');
+                }
+                router.replace('/admin');
             } catch (profileErr) {
                 // Profile check failed, but login succeeded - allow access
                 console.warn('Profile check failed, but login succeeded:', profileErr);
-                router.push('/admin');
+                if (typeof window !== 'undefined') {
+                    window.sessionStorage.setItem('admin_login_in_progress', '1');
+                }
+                router.replace('/admin');
             }
         } catch (err) {
             // Only ignore AbortError if it's clearly from component unmount (very rare during active login)
