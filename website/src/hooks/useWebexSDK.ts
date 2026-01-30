@@ -232,8 +232,15 @@ export function useWebexSDK(): UseWebexSDKReturn {
 
       if (!mountedRef.current) return;
 
-      // Get user info
-      const user = await app.context.getUser();
+      // Get user info (may fail in some Webex contexts)
+      let user: WebexUser | null = null;
+      try {
+        user = await app.context.getUser();
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "context.getUser failed";
+        console.error("Webex SDK getUser error:", err);
+        setError(`Webex SDK context.getUser failed: ${errMsg}`);
+      }
 
       if (!mountedRef.current) return;
 
@@ -256,11 +263,13 @@ export function useWebexSDK(): UseWebexSDKReturn {
 
       updateState({
         isReady: true,
-        user: {
-          id: user.id,
-          displayName: user.displayName,
-          email: user.email,
-        },
+        user: user
+          ? {
+              id: user.id,
+              displayName: user.displayName,
+              email: user.email,
+            }
+          : null,
         meeting,
         status: meeting ? "meeting" : "active",
         isInCall: !!meeting,
