@@ -43,6 +43,11 @@ export function Avatar() {
           setUser(null);
         }
       } catch (err) {
+        // Handle AbortError gracefully (component unmounted or request cancelled)
+        if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+          console.debug('Avatar auth check aborted (likely component unmounted)');
+          return; // Don't update state if component unmounted
+        }
         console.error('Auth check failed:', err);
         setUser(null);
       }

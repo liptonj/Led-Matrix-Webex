@@ -25,24 +25,43 @@ export default function AdminLoginPage() {
         }
 
         try {
-            const { error: authError } = await signIn(email, password);
-            if (authError) {
-                setError(authError.message);
-            } else {
+            const result = await signIn(email, password);
+            if (result.error) {
+                setError(result.error.message || 'Invalid email or password');
+                setLoading(false);
+                return;
+            }
+            
+            // Login successful - get user profile
+            try {
                 const profile = await getCurrentUserProfile();
                 if (profile?.disabled) {
                     await signOut();
                     setError('This account is disabled. Contact an administrator.');
+                    setLoading(false);
                     return;
                 }
+                // Success - redirect to admin
+                router.push('/admin');
+            } catch (profileErr) {
+                // Profile check failed, but login succeeded - allow access
+                console.warn('Profile check failed, but login succeeded:', profileErr);
                 router.push('/admin');
             }
         } catch (err) {
-            setError('An unexpected error occurred');
+            // Only ignore AbortError if it's clearly from component unmount (very rare during active login)
+            // Most AbortErrors during login are real network issues and should be shown
+            if (err instanceof Error && err.name === 'AbortError' && err.message.includes('cancelled')) {
+                // Only ignore if explicitly cancelled (component unmount)
+                console.debug('Login cancelled');
+                setLoading(false);
+                return;
+            }
+            const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.';
+            setError(errorMessage);
             console.error('Login error:', err);
+            setLoading(false);
         }
-
-        setLoading(false);
     };
 
     return (

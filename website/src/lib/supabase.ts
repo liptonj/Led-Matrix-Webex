@@ -446,6 +446,8 @@ export async function setLatestRelease(version: string): Promise<void> {
 // Auth helpers
 export async function signIn(email: string, password: string) {
   const supabase = await getSupabase();
+  // Don't wrap signIn in timeout - let Supabase handle its own timeouts
+  // The timeout wrapper can cause AbortErrors that interfere with login
   return supabase.auth.signInWithPassword({ email, password });
 }
 
@@ -468,6 +470,14 @@ export async function getSession() {
         "Timed out while checking your session.",
       );
     } catch (err) {
+      // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
+      if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+        // Return empty session instead of throwing - component unmounted
+        console.debug('getSession aborted (likely component unmounted)');
+        sessionCheckPromise = null;
+        return { data: { session: null }, error: null };
+      }
+      
       const message = err instanceof Error ? err.message : "";
       if (!message.includes("Timed out")) {
         throw err;
@@ -480,6 +490,11 @@ export async function getSession() {
           "Timed out while refreshing your session.",
         );
       } catch (refreshErr) {
+        // Handle AbortError gracefully
+        if (refreshErr instanceof Error && (refreshErr.name === 'AbortError' || refreshErr.message.includes('aborted'))) {
+          sessionCheckPromise = null;
+          return { data: { session: null }, error: null };
+        }
         console.warn("Supabase session refresh timed out, falling back to direct session fetch.");
       }
 
@@ -490,6 +505,11 @@ export async function getSession() {
           "Timed out while checking your session.",
         );
       } catch (finalErr) {
+        // Handle AbortError gracefully
+        if (finalErr instanceof Error && (finalErr.name === 'AbortError' || finalErr.message.includes('aborted'))) {
+          sessionCheckPromise = null;
+          return { data: { session: null }, error: null };
+        }
         console.warn("Supabase session check still timing out; returning direct session promise.");
         return supabase.auth.getSession();
       }
@@ -503,12 +523,22 @@ export async function getSession() {
 
 export async function getUser() {
   const supabase = await getSupabase();
-  const { data: { user } } = await withTimeout(
-    supabase.auth.getUser(),
-    SUPABASE_AUTH_TIMEOUT_MS,
-    "Timed out while fetching user details.",
-  );
-  return user;
+  try {
+    const { data: { user } } = await withTimeout(
+      supabase.auth.getUser(),
+      SUPABASE_AUTH_TIMEOUT_MS,
+      "Timed out while fetching user details.",
+    );
+    return user;
+  } catch (err) {
+    // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
+    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+      // Return null instead of throwing - component unmounted, no need to error
+      console.debug('getUser aborted (likely component unmounted)');
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function onAuthStateChange(
@@ -519,14 +549,23 @@ export async function onAuthStateChange(
 }
 
 export async function isAdmin(): Promise<boolean> {
-  const supabase = await getSupabase();
-  const { data, error } = await withTimeout(
-    supabase.schema("display").rpc("is_admin"),
-    SUPABASE_REQUEST_TIMEOUT_MS,
-    "Timed out while checking admin permissions.",
-  );
-  if (error) throw error;
-  return Boolean(data);
+  try {
+    const supabase = await getSupabase();
+    const { data, error } = await withTimeout(
+      supabase.schema("display").rpc("is_admin"),
+      SUPABASE_REQUEST_TIMEOUT_MS,
+      "Timed out while checking admin permissions.",
+    );
+    if (error) throw error;
+    return Boolean(data);
+  } catch (err) {
+    // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
+    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+      console.debug('isAdmin aborted (likely component unmounted)');
+      return false;
+    }
+    throw err;
+  }
 }
 
 export interface UserProfile {
@@ -650,25 +689,34 @@ export async function createUserWithRole(
 }
 
 export async function getCurrentUserProfile(): Promise<UserProfile | null> {
-  const user = await getUser();
-  if (!user) return null;
+  try {
+    const user = await getUser();
+    if (!user) return null;
 
-  const supabase = await getSupabase();
-  const { data, error } = await withTimeout(
-    supabase
-      .schema("display")
-      .from("user_profiles")
-      .select(
-        "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
-      )
-      .eq("user_id", user.id)
-      .single(),
-    SUPABASE_REQUEST_TIMEOUT_MS,
-    "Timed out while loading your profile.",
-  );
+    const supabase = await getSupabase();
+    const { data, error } = await withTimeout(
+      supabase
+        .schema("display")
+        .from("user_profiles")
+        .select(
+          "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+        )
+        .eq("user_id", user.id)
+        .single(),
+      SUPABASE_REQUEST_TIMEOUT_MS,
+      "Timed out while loading your profile.",
+    );
 
-  if (error && error.code !== "PGRST116") throw error;
-  return data || null;
+    if (error && error.code !== "PGRST116") throw error;
+    return data || null;
+  } catch (err) {
+    // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
+    if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+      console.debug('getCurrentUserProfile aborted (likely component unmounted)');
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function updateAdminUser(params: {

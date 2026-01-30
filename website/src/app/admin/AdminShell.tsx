@@ -48,7 +48,13 @@ export default function AdminShell({
                     return;
                 }
             } else {
-                console.error('Profile check failed:', profileResult.reason);
+                // Handle AbortError gracefully
+                const reason = profileResult.reason;
+                if (reason instanceof Error && (reason.name === 'AbortError' || reason.message.includes('aborted'))) {
+                    console.debug('Profile check aborted (likely component unmounted)');
+                    return; // Don't update state if component unmounted
+                }
+                console.error('Profile check failed:', reason);
                 setAuthenticated(false);
                 setAdmin(false);
                 setLoading(false);
@@ -82,6 +88,11 @@ export default function AdminShell({
                 const { data } = await getSession();
                 await hydrateAdminState(Boolean(data?.session));
             } catch (err) {
+                // Handle AbortError gracefully (component unmounted or request cancelled)
+                if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
+                    console.debug('Auth check aborted (likely component unmounted)');
+                    return; // Don't update state if component unmounted
+                }
                 console.error('Auth check failed:', err);
                 setAuthenticated(false);
                 setAdmin(false);

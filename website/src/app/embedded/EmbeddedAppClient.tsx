@@ -16,6 +16,9 @@ const CONFIG = {
   storageKeyDebugVisible: 'led_matrix_debug_visible',
   tokenRefreshThresholdMs: 5 * 60 * 1000, // Refresh token 5 minutes before expiry
   heartbeatIntervalMs: 30 * 1000, // Update app_last_seen every 30 seconds
+  commandTimeoutMs: 15 * 1000, // Command timeout (increased from 10s to 15s)
+  reconnectDelayMs: 2000, // Delay before attempting reconnection
+  reconnectMaxAttempts: 5, // Maximum reconnection attempts
   // Feature flag: use Edge Functions instead of direct DB updates for better security
   useEdgeFunctions: process.env.NEXT_PUBLIC_USE_SUPABASE_EDGE_FUNCTIONS === 'true',
 };
@@ -30,7 +33,7 @@ interface AppToken {
   expires_at: string;
 }
 
-type TabId = 'status' | 'display' | 'webex' | 'system';
+type TabId = 'status' | 'display' | 'mqtt' | 'webex' | 'system';
 
 type DebugLevel = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'activity';
 
@@ -142,6 +145,9 @@ export function EmbeddedAppClient() {
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const connectInFlightRef = useRef(false);
   const prevPeerConnectedRef = useRef(false);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const isReconnectingRef = useRef(false);
   const lastOfflineCommandRef = useRef(0);
 
   const appendDebugLog = useCallback((level: DebugLevel, message: string) => {
@@ -344,6 +350,54 @@ export function EmbeddedAppClient() {
     return client;
   }, []);
 
+  // Store subscribeToPairing in a ref to avoid circular dependency
+  const subscribeToPairingRef = useRef<((code: string, token: string) => Promise<void>) | null>(null);
+
+  const attemptReconnect = useCallback(async (code: string, token: string) => {
+    if (isReconnectingRef.current || reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) {
+      if (reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) {
+        setRtStatus('error');
+        setConnectionError('Failed to reconnect after multiple attempts');
+        addLog('Reconnection failed: maximum attempts reached');
+        isReconnectingRef.current = false;
+        reconnectAttemptsRef.current = 0;
+      }
+      return;
+    }
+
+    isReconnectingRef.current = true;
+    reconnectAttemptsRef.current += 1;
+    setRtStatus('connecting');
+    addLog(`Reconnection attempt ${reconnectAttemptsRef.current}/${CONFIG.reconnectMaxAttempts}...`);
+
+    // Clear any existing reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+    }
+
+    reconnectTimeoutRef.current = setTimeout(async () => {
+      try {
+        if (subscribeToPairingRef.current) {
+          await subscribeToPairingRef.current(code, token);
+          // Success will be handled by the subscription callback
+        } else {
+          throw new Error('Subscribe function not available');
+        }
+      } catch (err) {
+        addLog(`Reconnection attempt failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        // Retry again if we haven't exceeded max attempts
+        if (reconnectAttemptsRef.current < CONFIG.reconnectMaxAttempts) {
+          attemptReconnect(code, token);
+        } else {
+          setRtStatus('error');
+          setConnectionError('Failed to reconnect');
+          isReconnectingRef.current = false;
+          reconnectAttemptsRef.current = 0;
+        }
+      }
+    }, CONFIG.reconnectDelayMs);
+  }, [addLog]);
+
   const subscribeToPairing = useCallback(async (code: string, token: string) => {
     const supabase = getSupabaseClient(token);
 
@@ -381,14 +435,30 @@ export function EmbeddedAppClient() {
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setRtStatus('connected');
-        } else if (status === 'CHANNEL_ERROR') {
-          setRtStatus('error');
-          setConnectionError('Realtime subscription error');
+          reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful connection
+          isReconnectingRef.current = false;
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = null;
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') {
+          // Channel closed or errored - trigger reconnection if we're supposed to be connected
+          if (isPaired && !isReconnectingRef.current) {
+            setRtStatus('disconnected');
+            addLog(`Realtime connection ${status.toLowerCase()}, attempting to reconnect...`);
+            attemptReconnect(code, token);
+          } else if (!isPaired) {
+            setRtStatus('error');
+            setConnectionError(`Realtime subscription ${status.toLowerCase()}`);
+          }
         }
       });
 
     pairingChannelRef.current = channel;
-  }, [getSupabaseClient]);
+  }, [getSupabaseClient, isPaired, addLog, attemptReconnect]);
+
+  // Update ref after subscribeToPairing is defined
+  subscribeToPairingRef.current = subscribeToPairing;
 
   const sendCommand = useCallback(async (command: string, payload: Record<string, unknown> = {}) => {
     if (!supabaseRef.current || !appToken) {
@@ -429,7 +499,7 @@ export function EmbeddedAppClient() {
 
     // Subscribe to command updates (same for both modes)
     return await new Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`Command "${command}" timed out`)), 10_000);
+      const timeout = setTimeout(() => reject(new Error(`Command "${command}" timed out`)), CONFIG.commandTimeoutMs);
 
       const channel = supabase
         .channel(`cmd:${commandId}`)
@@ -725,6 +795,15 @@ export function EmbeddedAppClient() {
     }
   }, [rtStatus]);
 
+  // Monitor realtime connection and auto-reconnect if needed
+  useEffect(() => {
+    if (isPaired && rtStatus === 'disconnected' && !isReconnectingRef.current && pairingCode && appToken) {
+      // Only auto-reconnect if we're supposed to be connected (isPaired) but got disconnected
+      addLog('Connection lost, attempting to reconnect...');
+      attemptReconnect(pairingCode, appToken.token);
+    }
+  }, [isPaired, rtStatus, pairingCode, appToken, addLog, attemptReconnect]);
+
   const statusToDisplay = webexReady ? webexStatus : manualStatus;
   const displayName = user?.displayName || manualDisplayName;
   const cameraOn = webexReady ? isVideoOn : manualCameraOn;
@@ -849,9 +928,17 @@ export function EmbeddedAppClient() {
     } finally {
       connectInFlightRef.current = false;
     }
-  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge]);
+  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge, attemptReconnect]);
 
   const handleDisconnect = useCallback(() => {
+    // Stop reconnection attempts
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    isReconnectingRef.current = false;
+    reconnectAttemptsRef.current = 0;
+
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = null;
@@ -1145,7 +1232,7 @@ export function EmbeddedAppClient() {
             <>
               {/* Tab Navigation */}
               <nav className="flex gap-1 mb-6 p-1 bg-[var(--color-surface-alt)] rounded-lg">
-                {(['status', 'display', 'webex', 'system'] as TabId[]).map((tab) => (
+                {(['status', 'display', 'mqtt', 'webex', 'system'] as TabId[]).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -1155,7 +1242,7 @@ export function EmbeddedAppClient() {
                         : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
                     }`}
                   >
-                    {tab}
+                    {tab === 'mqtt' ? 'MQTT' : tab}
                   </button>
                 ))}
               </nav>
@@ -1265,11 +1352,62 @@ export function EmbeddedAppClient() {
                         type="text"
                         placeholder="John Doe"
                         value={manualDisplayName}
-                        onChange={(event) => setManualDisplayName(event.target.value)}
+                        onChange={(event) => {
+                          const newName = event.target.value;
+                          setManualDisplayName(newName);
+                          // Update display name immediately when user types
+                          if (isPaired && rtStatus === 'connected' && pairingCode) {
+                            const code = pairingCode.trim().toUpperCase();
+                            const displayName = user?.displayName || newName;
+                            if (CONFIG.useEdgeFunctions) {
+                              updateAppStateViaEdge({
+                                display_name: displayName,
+                              }).catch(() => {});
+                            } else {
+                              const supabase = supabaseRef.current;
+                              if (supabase) {
+                                supabase
+                                  .schema('display')
+                                  .from('pairings')
+                                  .update({
+                                    display_name: displayName,
+                                    app_last_seen: new Date().toISOString(),
+                                  })
+                                  .eq('pairing_code', code)
+                                  .then(() => {}, () => {});
+                              }
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          // Ensure final update on blur
+                          if (isPaired && rtStatus === 'connected' && pairingCode) {
+                            const code = pairingCode.trim().toUpperCase();
+                            const displayName = user?.displayName || manualDisplayName;
+                            if (CONFIG.useEdgeFunctions) {
+                              updateAppStateViaEdge({
+                                display_name: displayName,
+                              }).catch(() => {});
+                            } else {
+                              const supabase = supabaseRef.current;
+                              if (supabase) {
+                                supabase
+                                  .schema('display')
+                                  .from('pairings')
+                                  .update({
+                                    display_name: displayName,
+                                    app_last_seen: new Date().toISOString(),
+                                  })
+                                  .eq('pairing_code', code)
+                                  .then(() => {}, () => {});
+                              }
+                            }
+                          }
+                        }}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                        Name shown on the display
+                        Name shown on the display (updates automatically)
                       </p>
                     </div>
                     <div>
@@ -1328,139 +1466,13 @@ export function EmbeddedAppClient() {
                         <span>30s</span>
                       </div>
                     </div>
-                    <div>
-                      <label className="flex items-center gap-2 text-sm font-medium mb-2">
-                        <input
-                          type="checkbox"
-                          checked={sensorPageEnabled}
-                          onChange={(e) => setSensorPageEnabled(e.target.checked)}
-                          disabled={!isPeerConnected}
-                          className="rounded"
-                        />
-                        Enable Sensor Page Rotation
-                      </label>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                        Show sensor data page when rotating between status pages
-                      </p>
-                    </div>
-
-                    <hr className="my-6 border-[var(--color-border)]" />
-
-                    <h3 className="font-medium mb-4">MQTT Settings</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">MQTT Broker</label>
-                        <input
-                          type="text"
-                          placeholder="mqtt.example.com"
-                          value={mqttBroker}
-                          onChange={(e) => setMqttBroker(e.target.value)}
-                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium mb-2">Port</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="65535"
-                            value={mqttPort}
-                            onChange={(e) => setMqttPort(parseInt(e.target.value, 10) || 1883)}
-                            className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                            disabled={!isPeerConnected}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium mb-2">Username</label>
-                          <input
-                            type="text"
-                            placeholder="Optional"
-                            value={mqttUsername}
-                            onChange={(e) => setMqttUsername(e.target.value)}
-                            className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                            disabled={!isPeerConnected}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">
-                          Password
-                          {hasMqttPassword && (
-                            <span className="ml-2 text-xs text-[var(--color-text-muted)] font-normal">
-                              (Password is set)
-                            </span>
-                          )}
-                        </label>
-                        <input
-                          type="password"
-                          placeholder={hasMqttPassword ? "Enter new password to change" : "Enter password"}
-                          value={mqttPassword}
-                          onChange={(e) => setMqttPassword(e.target.value)}
-                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
-                        />
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                          {hasMqttPassword 
-                            ? "Leave empty to keep current password, or enter new password to change it"
-                            : "Password will be set when you save"}
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Topic</label>
-                        <input
-                          type="text"
-                          placeholder="meraki/v1/mt/#"
-                          value={mqttTopic}
-                          onChange={(e) => setMqttTopic(e.target.value)}
-                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
-                        />
-                      </div>
-                    </div>
-
-                    <hr className="my-6 border-[var(--color-border)]" />
-
-                    <h3 className="font-medium mb-4">Sensor Settings</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Display Sensor MAC</label>
-                        <input
-                          type="text"
-                          placeholder="AA:BB:CC:DD:EE:FF"
-                          value={displaySensorMac}
-                          onChange={(e) => setDisplaySensorMac(e.target.value)}
-                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] font-mono"
-                          disabled={!isPeerConnected}
-                        />
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                          Specific sensor MAC to display (leave empty to use first available)
-                        </p>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Display Metric</label>
-                        <select
-                          value={displayMetric}
-                          onChange={(e) => setDisplayMetric(e.target.value)}
-                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
-                        >
-                          <option value="tvoc">TVOC</option>
-                          <option value="co2">CO2</option>
-                          <option value="pm2_5">PM2.5</option>
-                          <option value="noise">Noise</option>
-                        </select>
-                      </div>
-                    </div>
-
                     <Button
                       variant="primary"
                       onClick={handleSaveSettings}
                       disabled={!isPeerConnected || isSaving}
                       className="mt-6"
                     >
-                      {isSaving ? 'Saving...' : 'Save All Settings'}
+                      {isSaving ? 'Saving...' : 'Save Display Settings'}
                     </Button>
                   </div>
 
@@ -1491,6 +1503,154 @@ export function EmbeddedAppClient() {
                   </div>
                   <Button variant="warning" className="mt-4" onClick={handleDisconnect}>
                     Disconnect Display
+                  </Button>
+                </Card>
+              )}
+
+              {/* MQTT Tab */}
+              {activeTab === 'mqtt' && (
+                <Card>
+                  <h2 className="text-lg font-semibold mb-4">MQTT Settings</h2>
+                  <p className="text-sm text-[var(--color-text-muted)] mb-6">
+                    Configure MQTT broker connection for sensor data display.
+                  </p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">MQTT Broker</label>
+                      <input
+                        type="text"
+                        placeholder="mqtt.example.com"
+                        value={mqttBroker}
+                        onChange={(e) => setMqttBroker(e.target.value)}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                        disabled={!isPeerConnected}
+                      />
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        MQTT broker hostname or IP address
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Port</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="65535"
+                          value={mqttPort}
+                          onChange={(e) => setMqttPort(parseInt(e.target.value, 10) || 1883)}
+                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                          disabled={!isPeerConnected}
+                        />
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                          Default: 1883
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium mb-2">Username</label>
+                        <input
+                          type="text"
+                          placeholder="Optional"
+                          value={mqttUsername}
+                          onChange={(e) => setMqttUsername(e.target.value)}
+                          className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                          disabled={!isPeerConnected}
+                        />
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                          Leave empty if not required
+                        </p>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">
+                        Password
+                        {hasMqttPassword && (
+                          <span className="ml-2 text-xs text-[var(--color-text-muted)] font-normal">
+                            (Password is set)
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type="password"
+                        placeholder={hasMqttPassword ? "Enter new password to change" : "Enter password"}
+                        value={mqttPassword}
+                        onChange={(e) => setMqttPassword(e.target.value)}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                        disabled={!isPeerConnected}
+                      />
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        {hasMqttPassword 
+                          ? "Leave empty to keep current password, or enter new password to change it"
+                          : "Password will be set when you save"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Topic</label>
+                      <input
+                        type="text"
+                        placeholder="meraki/v1/mt/#"
+                        value={mqttTopic}
+                        onChange={(e) => setMqttTopic(e.target.value)}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] font-mono"
+                        disabled={!isPeerConnected}
+                      />
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        MQTT topic pattern to subscribe to (supports wildcards)
+                      </p>
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium mb-2">
+                        <input
+                          type="checkbox"
+                          checked={sensorPageEnabled}
+                          onChange={(e) => setSensorPageEnabled(e.target.checked)}
+                          disabled={!isPeerConnected}
+                          className="rounded"
+                        />
+                        Enable Sensor Page Rotation
+                      </label>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Show sensor data page when rotating between status pages
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Display Sensor MAC</label>
+                      <input
+                        type="text"
+                        placeholder="AA:BB:CC:DD:EE:FF"
+                        value={displaySensorMac}
+                        onChange={(e) => setDisplaySensorMac(e.target.value)}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] font-mono"
+                        disabled={!isPeerConnected}
+                      />
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Specific sensor MAC to display (leave empty to use first available)
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Display Metric</label>
+                      <select
+                        value={displayMetric}
+                        onChange={(e) => setDisplayMetric(e.target.value)}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                        disabled={!isPeerConnected}
+                      >
+                        <option value="tvoc">TVOC</option>
+                        <option value="co2">CO2</option>
+                        <option value="pm2_5">PM2.5</option>
+                        <option value="noise">Noise</option>
+                      </select>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Which sensor metric to display on the sensor page
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    onClick={handleSaveSettings}
+                    disabled={!isPeerConnected || isSaving}
+                    className="mt-6"
+                  >
+                    {isSaving ? 'Saving...' : 'Save MQTT Settings'}
                   </Button>
                 </Card>
               )}
@@ -1609,7 +1769,7 @@ export function EmbeddedAppClient() {
           {/* Footer */}
           <footer className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
             <span>LED Matrix Webex Display</span>
-            <span className="ml-2">1.5.6</span>
+            <span className="ml-2">1.5.11-Beta1</span>
           </footer>
         </div>
 
