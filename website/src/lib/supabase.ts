@@ -4,6 +4,8 @@
  * Provides the Supabase client for authentication and database access.
  */
 
+import { getSupabaseClient } from "./supabaseClient";
+
 // Supabase URL and anon key are public - they're meant to be exposed
 // Row Level Security (RLS) protects the data
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -84,39 +86,10 @@ export interface Release {
 }
 
 // Supabase client type (we'll create it dynamically)
-let supabaseClient: Awaited<ReturnType<typeof createSupabaseClient>> | null = null;
-let supabaseClientPromise: Promise<
-  Awaited<ReturnType<typeof createSupabaseClient>>
-> | null = null;
-
-// Dynamic import to avoid bundling issues
-async function createSupabaseClient() {
-  const { createClient } = await import("@supabase/supabase-js");
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-    },
-  });
-}
+// Supabase client is a global singleton (see supabaseClient.ts)
 
 export async function getSupabase() {
-  if (!isSupabaseConfigured()) {
-    throw new Error(
-      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-    );
-  }
-
-  if (!supabaseClient) {
-    if (!supabaseClientPromise) {
-      supabaseClientPromise = createSupabaseClient();
-    }
-    supabaseClient = await supabaseClientPromise;
-    supabaseClientPromise = null;
-  }
-
-  return supabaseClient;
+  return getSupabaseClient();
 }
 
 // Explicit column list for devices - NEVER include key_hash for security
