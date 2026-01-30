@@ -59,6 +59,8 @@ temp/
 
 # Supabase CLI temp files
 supabase/.temp/
+# Supabase secrets
+supabase/signing_key.json
 
 # Website environment (contains API keys)
 website/.env
