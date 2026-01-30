@@ -21,6 +21,7 @@ function getInitials(email?: string): string {
 
 export function Avatar() {
   const router = useRouter();
+  const supabaseConfigured = isSupabaseConfigured();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
@@ -28,7 +29,7 @@ export function Avatar() {
 
   useEffect(() => {
     async function checkAuth() {
-      if (!isSupabaseConfigured()) {
+      if (!supabaseConfigured) {
         setLoading(false);
         return;
       }
@@ -52,7 +53,7 @@ export function Avatar() {
     // Listen for auth state changes
     let subscription: { unsubscribe: () => void } | null = null;
     
-    if (isSupabaseConfigured()) {
+    if (supabaseConfigured) {
       onAuthStateChange(async () => {
         await checkAuth();
       }).then((result) => {
@@ -69,7 +70,7 @@ export function Avatar() {
         subscription.unsubscribe();
       }
     };
-  }, []);
+  }, [supabaseConfigured]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -98,7 +99,7 @@ export function Avatar() {
     }
   };
 
-  if (loading || !isSupabaseConfigured()) {
+  if (loading) {
     return null;
   }
 
@@ -183,6 +184,11 @@ export function Avatar() {
             >
               Login
             </Link>
+          )}
+          {!user && !supabaseConfigured && (
+            <div className="px-4 pb-2 text-xs text-[var(--color-text-muted)]">
+              Supabase is not configured.
+            </div>
           )}
         </div>
       )}
