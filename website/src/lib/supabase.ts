@@ -11,7 +11,7 @@ import { getSupabaseClient } from "./supabaseClient";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_REQUEST_TIMEOUT_MS = 15_000;
-const SUPABASE_AUTH_TIMEOUT_MS = 30_000;
+const SUPABASE_AUTH_TIMEOUT_MS = 60_000;
 let sessionCheckPromise: Promise<any> | null = null;
 
 function withTimeout<T>(
@@ -480,14 +480,19 @@ export async function getSession() {
           "Timed out while refreshing your session.",
         );
       } catch (refreshErr) {
-        throw refreshErr;
+        console.warn("Supabase session refresh timed out, falling back to direct session fetch.");
       }
 
-      return withTimeout(
-        supabase.auth.getSession(),
-        SUPABASE_AUTH_TIMEOUT_MS,
-        "Timed out while checking your session.",
-      );
+      try {
+        return await withTimeout(
+          supabase.auth.getSession(),
+          SUPABASE_AUTH_TIMEOUT_MS,
+          "Timed out while checking your session.",
+        );
+      } catch (finalErr) {
+        console.warn("Supabase session check still timing out; returning direct session promise.");
+        return supabase.auth.getSession();
+      }
     } finally {
       sessionCheckPromise = null;
     }
