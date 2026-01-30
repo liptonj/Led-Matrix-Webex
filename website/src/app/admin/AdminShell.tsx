@@ -140,6 +140,7 @@ export default function AdminShell({
             { href: '/admin', label: 'Dashboard' },
             { href: '/admin/devices', label: 'Devices' },
             { href: '/admin/releases', label: 'Releases' },
+            { href: '/admin/oauth', label: 'OAuth' },
             { href: '/admin/users', label: 'Users' },
         ];
     }, [admin]);

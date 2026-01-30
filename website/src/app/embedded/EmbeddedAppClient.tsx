@@ -456,6 +456,21 @@ export function EmbeddedAppClient() {
   }, [initialize, sdkLoaded]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const pairingParam = params.get('pairing');
+    if (pairingParam) {
+      const code = pairingParam.trim().toUpperCase();
+      if (code) {
+        setPairingCode(code);
+        localStorage.setItem(CONFIG.storageKeyPairingCode, code);
+        autoConnectRef.current = true;
+        addLog(`Pairing code detected in URL: ${code}`);
+      }
+    }
+  }, [addLog]);
+
+  useEffect(() => {
     const savedDebugVisible = localStorage.getItem(CONFIG.storageKeyDebugVisible);
     if (savedDebugVisible === 'true') {
       setDebugVisible(true);
