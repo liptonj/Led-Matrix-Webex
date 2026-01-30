@@ -350,8 +350,9 @@ export function EmbeddedAppClient() {
     return client;
   }, []);
 
-  // Store subscribeToPairing in a ref to avoid circular dependency
+  // Store subscribeToPairing and attemptReconnect in refs to avoid circular dependency
   const subscribeToPairingRef = useRef<((code: string, token: string) => Promise<void>) | null>(null);
+  const attemptReconnectRef = useRef<((code: string, token: string) => Promise<void>) | null>(null);
 
   const attemptReconnect = useCallback(async (code: string, token: string) => {
     if (isReconnectingRef.current || reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) {
@@ -398,6 +399,9 @@ export function EmbeddedAppClient() {
     }, CONFIG.reconnectDelayMs);
   }, [addLog]);
 
+  // Update ref after attemptReconnect is defined
+  attemptReconnectRef.current = attemptReconnect;
+
   const subscribeToPairing = useCallback(async (code: string, token: string) => {
     const supabase = getSupabaseClient(token);
 
@@ -443,10 +447,10 @@ export function EmbeddedAppClient() {
           }
         } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') {
           // Channel closed or errored - trigger reconnection if we're supposed to be connected
-          if (isPaired && !isReconnectingRef.current) {
+          if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) {
             setRtStatus('disconnected');
             addLog(`Realtime connection ${status.toLowerCase()}, attempting to reconnect...`);
-            attemptReconnect(code, token);
+            attemptReconnectRef.current(code, token);
           } else if (!isPaired) {
             setRtStatus('error');
             setConnectionError(`Realtime subscription ${status.toLowerCase()}`);
@@ -455,7 +459,7 @@ export function EmbeddedAppClient() {
       });
 
     pairingChannelRef.current = channel;
-  }, [getSupabaseClient, isPaired, addLog, attemptReconnect]);
+  }, [getSupabaseClient, isPaired, addLog]);
 
   // Update ref after subscribeToPairing is defined
   subscribeToPairingRef.current = subscribeToPairing;
@@ -797,12 +801,12 @@ export function EmbeddedAppClient() {
 
   // Monitor realtime connection and auto-reconnect if needed
   useEffect(() => {
-    if (isPaired && rtStatus === 'disconnected' && !isReconnectingRef.current && pairingCode && appToken) {
+    if (isPaired && rtStatus === 'disconnected' && !isReconnectingRef.current && pairingCode && appToken && attemptReconnectRef.current) {
       // Only auto-reconnect if we're supposed to be connected (isPaired) but got disconnected
       addLog('Connection lost, attempting to reconnect...');
-      attemptReconnect(pairingCode, appToken.token);
+      attemptReconnectRef.current(pairingCode, appToken.token);
     }
-  }, [isPaired, rtStatus, pairingCode, appToken, addLog, attemptReconnect]);
+  }, [isPaired, rtStatus, pairingCode, appToken, addLog]);
 
   const statusToDisplay = webexReady ? webexStatus : manualStatus;
   const displayName = user?.displayName || manualDisplayName;
@@ -862,7 +866,7 @@ export function EmbeddedAppClient() {
           }
         });
     }
-  }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, updateAppStateViaEdge]);
+  }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, updateAppStateViaEdge, addLog]);
 
   const handleConnect = useCallback(async () => {
     const code = pairingCode.trim().toUpperCase();
@@ -928,7 +932,7 @@ export function EmbeddedAppClient() {
     } finally {
       connectInFlightRef.current = false;
     }
-  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge, attemptReconnect]);
+  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge]);
 
   const handleDisconnect = useCallback(() => {
     // Stop reconnection attempts
