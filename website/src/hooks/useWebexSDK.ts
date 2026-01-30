@@ -59,12 +59,23 @@ declare global {
   }
 }
 
-// Webex SDK types (simplified)
+// Webex SDK types (simplified) - EAF 2.x compatible
+// In EAF 2.x, getUser() is replaced by app.application.states.user (static property)
 interface WebexApp {
   onReady: () => Promise<void>;
   context: {
-    getUser: () => Promise<{ id: string; displayName: string; email?: string }>;
     getMeeting?: () => Promise<{ id: string; title?: string } | null>;
+    getSpace?: () => Promise<any>;
+    getSidebar?: () => Promise<any>;
+  };
+  application: {
+    states: {
+      user?: {
+        id?: string;
+        displayName?: string;
+        email?: string;
+      };
+    };
   };
   listen: () => Promise<void>;
   on: (event: string, callback: (data: unknown) => void) => void;
@@ -176,6 +187,32 @@ export function useWebexSDK(): UseWebexSDKReturn {
     [updateState],
   );
 
+  // Handle device media events (camera state)
+  const handleDeviceMediaEvent = useCallback(
+    (data: unknown) => {
+      const mediaData = data as { type?: string; state?: string; active?: boolean };
+      // device:media:active / device:media:inactive events
+      // type could be "video" or "audio"
+      if (mediaData.type === "video") {
+        const isOn = mediaData.state === "active" || mediaData.active === true;
+        updateState({ isVideoOn: isOn });
+      }
+    },
+    [updateState],
+  );
+
+  // Handle device audio events (mic state)
+  const handleDeviceAudioEvent = useCallback(
+    (data: unknown) => {
+      const audioData = data as { state?: string; muted?: boolean; active?: boolean };
+      // device:audio:active / device:audio:inactive events
+      // muted state is inverse of active
+      const isMuted = audioData.muted === true || audioData.state === "inactive" || audioData.active === false;
+      updateState({ isMuted });
+    },
+    [updateState],
+  );
+
   // Helper function to wait for SDK with retry logic
   const waitForWebexSDK = useCallback((timeout = 5000): Promise<boolean> => {
     return new Promise((resolve) => {
@@ -232,14 +269,22 @@ export function useWebexSDK(): UseWebexSDKReturn {
 
       if (!mountedRef.current) return;
 
-      // Get user info (may fail in some Webex contexts)
+      // In EAF 2.x, getUser() is replaced by app.application.states.user (static property)
+      // Access user info directly from the application states
       let user: WebexUser | null = null;
       try {
-        user = await app.context.getUser();
+        const userState = app.application?.states?.user;
+        if (userState && userState.id) {
+          user = {
+            id: userState.id,
+            displayName: userState.displayName || userState.email || "Unknown User",
+            email: userState.email,
+          };
+        }
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : "context.getUser failed";
-        console.error("Webex SDK getUser error:", err);
-        setError(`Webex SDK context.getUser failed: ${errMsg}`);
+        // User info may not be available in all contexts (e.g., certain embedded app contexts)
+        // This is expected behavior - app continues normally without user info
+        console.warn("Webex SDK user info unavailable:", err instanceof Error ? err.message : "user state not available");
       }
 
       if (!mountedRef.current) return;
@@ -263,13 +308,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
 
       updateState({
         isReady: true,
-        user: user
-          ? {
-              id: user.id,
-              displayName: user.displayName,
-              email: user.email,
-            }
-          : null,
+        user: user,
         meeting,
         status: meeting ? "meeting" : "active",
         isInCall: !!meeting,
@@ -286,6 +325,20 @@ export function useWebexSDK(): UseWebexSDKReturn {
       app.on("call:connected", handleCallEvent);
       app.on("call:disconnected", handleCallEvent);
       app.on("presence:changed", handlePresenceEvent);
+      
+      // Device media events (camera/video state)
+      app.on("device:media:active", handleDeviceMediaEvent);
+      app.on("device:media:inactive", handleDeviceMediaEvent);
+      
+      // Device audio events (mic state)
+      app.on("device:audio:active", handleDeviceAudioEvent);
+      app.on("device:audio:inactive", handleDeviceAudioEvent);
+      
+      // Space meeting events (for Webex Spaces)
+      app.on("space:meeting:started", handleMeetingEvent);
+      app.on("space:meeting:ended", handleMeetingEvent);
+      app.on("space:meeting:joined", handleMeetingEvent);
+      app.on("space:meeting:left", handleMeetingEvent);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to initialize Webex SDK";
@@ -299,6 +352,8 @@ export function useWebexSDK(): UseWebexSDKReturn {
     handleMeetingEvent,
     handleCallEvent,
     handlePresenceEvent,
+    handleDeviceMediaEvent,
+    handleDeviceAudioEvent,
     waitForWebexSDK,
   ]);
 
@@ -309,6 +364,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     return () => {
       mountedRef.current = false;
       if (appRef.current) {
+        // Meeting and call events
         appRef.current.off("meeting:started");
         appRef.current.off("meeting:ended");
         appRef.current.off("meeting:joined");
@@ -316,6 +372,19 @@ export function useWebexSDK(): UseWebexSDKReturn {
         appRef.current.off("call:connected");
         appRef.current.off("call:disconnected");
         appRef.current.off("presence:changed");
+        
+        // Device media/audio events
+        appRef.current.off("device:media:active");
+        appRef.current.off("device:media:inactive");
+        appRef.current.off("device:audio:active");
+        appRef.current.off("device:audio:inactive");
+        
+        // Space meeting events
+        appRef.current.off("space:meeting:started");
+        appRef.current.off("space:meeting:ended");
+        appRef.current.off("space:meeting:joined");
+        appRef.current.off("space:meeting:left");
+        
         appRef.current = null;
       }
     };

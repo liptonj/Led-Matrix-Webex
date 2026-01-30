@@ -43,9 +43,11 @@ export function Header({
           {/* Navigation - includes hamburger on mobile, desktop nav on large screens */}
           <Navigation />
 
-          {/* Theme Toggle and Avatar - Desktop only */}
-          <div className="hidden lg:flex items-center gap-3">
-            <ThemeToggle />
+          {/* Theme Toggle and Avatar */}
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:block">
+              <ThemeToggle />
+            </div>
             <Avatar />
           </div>
         </div>

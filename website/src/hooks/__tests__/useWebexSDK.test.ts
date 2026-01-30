@@ -15,7 +15,7 @@ class MockWebexApp {
   private _onReadyResolve!: () => void;
   private _onReadyReject!: (error: Error) => void;
   private _shouldFailReady = false;
-  private _shouldFailGetUser = false;
+  // Note: getUser() is deprecated in EAF 2.x - user object is static and not available via API
   private _user: { id: string; displayName: string; email?: string } = { id: "user-1", displayName: "Test User", email: "test@example.com" };
   private _meeting: { id: string; title: string } | null = null;
 
@@ -27,14 +27,15 @@ class MockWebexApp {
   }
 
   context = {
-    getUser: async () => {
-      if (this._shouldFailGetUser) {
-        throw new Error("Failed to get user");
-      }
-      return this._user;
-    },
+    // getUser() is deprecated in EAF 2.x - not available in context API
     getMeeting: async () => {
       return this._meeting;
+    },
+    getSpace: async () => {
+      return null;
+    },
+    getSidebar: async () => {
+      return null;
     },
   };
 
@@ -83,9 +84,7 @@ class MockWebexApp {
     this._shouldFailReady = fail;
   }
 
-  setFailOnGetUser(fail: boolean): void {
-    this._shouldFailGetUser = fail;
-  }
+  // Note: getUser() is deprecated in EAF 2.x - removed setFailOnGetUser method
 
   setUser(user: { id: string; displayName: string; email?: string }): void {
     this._user = user;
@@ -711,26 +710,8 @@ describe("useWebexSDK", () => {
       });
     });
 
-    it("should handle getUser rejection", async () => {
-      const { result } = renderHook(() => useWebexSDK());
-
-      await act(async () => {
-        result.current.initialize();
-        await Promise.resolve();
-      });
-
-      mockWebexAppInstance?.setFailOnGetUser(true);
-
-      await act(async () => {
-        mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(result.current.error).toBe("Failed to get user");
-      });
-    });
+    // Note: getUser() is deprecated in EAF 2.x - removed test for getUser rejection
+    // The app now functions without user info, which is the expected behavior
 
     it("should set error message on failure", async () => {
       setupWebexSDK(false);
@@ -757,17 +738,9 @@ describe("useWebexSDK", () => {
       // It gets set to true during initialization
       expect(result.current.isInitialized).toBe(true);
 
-      mockWebexAppInstance?.setFailOnGetUser(true);
-
-      await act(async () => {
-        mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      await waitFor(() => {
-        expect(result.current.isInitialized).toBe(false);
-      });
+      // Note: getUser() is deprecated in EAF 2.x - app continues normally without user info
+      // This test is no longer relevant since getUser() is not called
+      // The app should remain initialized even without user info
     });
   });
 
