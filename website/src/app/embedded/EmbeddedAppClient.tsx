@@ -114,9 +114,11 @@ export function EmbeddedAppClient() {
 
   // Supabase realtime client state
   const supabaseRef = useRef<SupabaseClient | null>(null);
+  const supabaseAuthRef = useRef<string | null>(null);
   const pairingChannelRef = useRef<ReturnType<SupabaseClient['channel']> | null>(null);
   const [rtStatus, setRtStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const connectInFlightRef = useRef(false);
 
   const appendDebugLog = useCallback((level: DebugLevel, message: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -296,17 +298,30 @@ export function EmbeddedAppClient() {
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error('Supabase not configured (missing NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY)');
     }
+    if (supabaseRef.current) {
+      if (supabaseAuthRef.current !== token) {
+        supabaseAuthRef.current = token;
+        supabaseRef.current.realtime.setAuth(token);
+      }
+      return supabaseRef.current;
+    }
     const client = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        storageKey: 'sb-embedded-app',
+      },
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
     client.realtime.setAuth(token);
+    supabaseRef.current = client;
+    supabaseAuthRef.current = token;
     return client;
   }, []);
 
   const subscribeToPairing = useCallback(async (code: string, token: string) => {
     const supabase = getSupabaseClient(token);
-    supabaseRef.current = supabase;
 
     if (pairingChannelRef.current) {
       supabase.removeChannel(pairingChannelRef.current);
@@ -658,6 +673,12 @@ export function EmbeddedAppClient() {
       return;
     }
 
+    if (connectInFlightRef.current) {
+      addLog('Connect already in progress, skipping duplicate request');
+      return;
+    }
+    connectInFlightRef.current = true;
+
     setPairingCode(code);
     localStorage.setItem(CONFIG.storageKeyPairingCode, code);
     setConnectionError(null);
@@ -671,6 +692,7 @@ export function EmbeddedAppClient() {
     if (!token) {
       setRtStatus('error');
       setConnectionError('Failed to obtain auth token');
+      connectInFlightRef.current = false;
       return;
     }
 
@@ -705,6 +727,8 @@ export function EmbeddedAppClient() {
     } catch (err) {
       setRtStatus('error');
       setConnectionError(err instanceof Error ? err.message : 'Failed to connect');
+    } finally {
+      connectInFlightRef.current = false;
     }
   }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge]);
 
