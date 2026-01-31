@@ -1,0 +1,252 @@
+import {
+  SUPABASE_REQUEST_TIMEOUT_MS,
+  getSupabase,
+  getCachedSessionFromStorage,
+  isAbortError,
+  supabaseUrl,
+  withTimeout,
+} from "./core";
+import { getSession, getUser } from "./auth";
+import type { UserDeviceAssignment, UserProfile } from "./types";
+
+export async function getUserProfiles(): Promise<UserProfile[]> {
+  const supabase = await getSupabase();
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_profiles")
+      .select(
+        "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+      )
+      .order("email", { ascending: true }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading user profiles.",
+  );
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getUserDeviceAssignments(): Promise<UserDeviceAssignment[]> {
+  const supabase = await getSupabase();
+  const { data, error } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_devices")
+      .select("id, user_id, serial_number, created_at, created_by")
+      .order("created_at", { ascending: false }),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading device assignments.",
+  );
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function assignDeviceToUser(
+  userId: string,
+  serialNumber: string,
+): Promise<void> {
+  const supabase = await getSupabase();
+  const user = await getUser();
+  const { error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .insert({
+      user_id: userId,
+      serial_number: serialNumber,
+      created_by: user?.id ?? null,
+    });
+
+  if (error) throw error;
+}
+
+export async function removeUserDeviceAssignment(assignmentId: string) {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .delete()
+    .eq("id", assignmentId);
+
+  if (error) throw error;
+}
+
+export async function createUserWithRole(
+  email: string,
+  password: string,
+  role: "admin" | "user",
+): Promise<{ userId: string; existing: boolean }> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-create-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      role,
+    }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to create user.");
+  }
+
+  return { userId: body.user_id, existing: Boolean(body.existing) };
+}
+
+export async function getCurrentUserProfile(
+  signal?: AbortSignal,
+  options?: { skipRemote?: boolean },
+): Promise<UserProfile | null> {
+  console.log('[getCurrentUserProfile] Starting profile fetch');
+
+  // Check if signal is already aborted
+  if (signal?.aborted) {
+    console.log('[getCurrentUserProfile] Signal already aborted');
+    return null;
+  }
+
+  try {
+    // Get user from session instead of making a network request
+    console.log('[getCurrentUserProfile] Getting session for user ID');
+    const cachedSession = getCachedSessionFromStorage();
+    const cachedUser = cachedSession?.user;
+    const sessionResult = cachedUser ? null : await getSession(signal);
+    const user = cachedUser ?? sessionResult?.data?.session?.user;
+
+    if (!user) {
+      console.log('[getCurrentUserProfile] No user in session');
+      return null;
+    }
+
+    // Quick check for disabled status from JWT claims (instant)
+    if (user.app_metadata?.disabled === true) {
+      console.log('[getCurrentUserProfile] User is disabled (from JWT claim)');
+      return null;
+    }
+
+    console.log('[getCurrentUserProfile] User ID:', user.id);
+    if (options?.skipRemote) {
+      console.log('[getCurrentUserProfile] Skipping remote profile fetch');
+      return null;
+    }
+    const supabase = await getSupabase();
+    console.log('[getCurrentUserProfile] Querying user_profiles table');
+    const startTime = Date.now();
+    const { data, error } = await withTimeout(
+      supabase
+        .schema("display")
+        .from("user_profiles")
+        .select(
+          "user_id, email, role, first_name, last_name, disabled, created_at, created_by",
+        )
+        .eq("user_id", user.id)
+        .single(),
+      SUPABASE_REQUEST_TIMEOUT_MS,
+      "Timed out while loading your profile.",
+      signal,
+    );
+    console.log('[getCurrentUserProfile] Query completed in', Date.now() - startTime, 'ms');
+
+    if (error && error.code !== "PGRST116") {
+      console.error('[getCurrentUserProfile] Query error:', error);
+      throw error;
+    }
+    console.log('[getCurrentUserProfile] Profile data:', data ? 'found' : 'not found');
+    return data || null;
+  } catch (err) {
+    // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
+    if (isAbortError(err)) {
+      console.debug("[getCurrentUserProfile] aborted (likely component unmounted)");
+      return null;
+    }
+    if (err instanceof Error && err.message.includes("Timed out")) {
+      console.warn("[getCurrentUserProfile] timed out after", SUPABASE_REQUEST_TIMEOUT_MS, "ms");
+      return null;
+    }
+    console.error('[getCurrentUserProfile] Unexpected error:', err);
+    throw err;
+  }
+}
+
+export async function updateAdminUser(params: {
+  userId: string;
+  email?: string;
+  password?: string;
+  role?: "admin" | "user";
+  firstName?: string | null;
+  lastName?: string | null;
+  disabled?: boolean;
+}): Promise<void> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-update-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      user_id: params.userId,
+      email: params.email,
+      password: params.password,
+      role: params.role,
+      first_name: params.firstName,
+      last_name: params.lastName,
+      disabled: params.disabled,
+    }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to update user.");
+  }
+}
+
+export async function deleteAdminUser(userId: string): Promise<void> {
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL is not configured.");
+  }
+
+  const sessionResult = await getSession();
+  const token = sessionResult.data.session?.access_token;
+  if (!token) {
+    throw new Error("Not authenticated.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/admin-delete-user`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ user_id: userId }),
+  });
+
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body?.error || "Failed to delete user.");
+  }
+}

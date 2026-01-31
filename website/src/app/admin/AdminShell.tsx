@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { getSession, signOut, isSupabaseConfigured, isAdmin, onAuthStateChange, getCurrentUserProfile } from '@/lib/supabase';
+import { getSession, signOut, isSupabaseConfigured, isAdmin, onAuthStateChange, getCurrentUserProfile, getCachedSession } from '@/lib/supabase';
+import { checkSupabaseHealth } from '@/lib/supabase/health';
 
 export default function AdminShell({
     children,
@@ -23,21 +24,49 @@ export default function AdminShell({
 
     useEffect(() => {
         let subscription: { unsubscribe: () => void } | null = null;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let finished = false;
+        let initialAuthCheckComplete = false;
+        let hydrationRunId = 0;
+        const abortController = new AbortController();
         const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
         async function hydrateAdminState(hasSession: boolean) {
+            if (abortController.signal.aborted) {
+                console.debug('[AdminShell] Hydration skipped (signal aborted)');
+                return;
+            }
+            const runId = ++hydrationRunId;
+            finished = true;
             if (!hasSession) {
+                console.log('[AdminShell] No session, setting unauthenticated');
                 setAuthenticated(false);
                 setAdmin(false);
+                setError(null);
                 setLoading(false);
                 return;
             }
 
+            console.log('[AdminShell] Session found, hydrating admin state');
             setAuthenticated(true);
+            setError(null);
+            setLoading(false);
+            setAdmin(null);
+
+            const startTime = Date.now();
             const [profileResult, adminResult] = await Promise.allSettled([
-                getCurrentUserProfile(),
-                isAdmin(),
+                getCurrentUserProfile(abortController.signal, { skipRemote: true }),
+                isAdmin(abortController.signal),
             ]);
+            console.log('[AdminShell] Profile and admin checks completed in', Date.now() - startTime, 'ms');
+
+            if (abortController.signal.aborted || runId !== hydrationRunId) {
+                console.debug('[AdminShell] Hydration results discarded (stale or aborted)');
+                return;
+            }
+
+            const isTimeout = (err: unknown) =>
+                err instanceof Error && err.message.toLowerCase().includes('timed out');
 
             if (profileResult.status === 'fulfilled') {
                 if (profileResult.value?.disabled) {
@@ -45,7 +74,6 @@ export default function AdminShell({
                     setAuthenticated(false);
                     setAdmin(false);
                     setError('This account is disabled. Contact an administrator.');
-                    setLoading(false);
                     return;
                 }
             } else {
@@ -55,66 +83,151 @@ export default function AdminShell({
                     console.debug('Profile check aborted (likely component unmounted)');
                     return; // Don't update state if component unmounted
                 }
-                console.error('Profile check failed:', reason);
-                setAuthenticated(false);
-                setAdmin(false);
-                setLoading(false);
-                return;
+                if (isTimeout(reason)) {
+                    console.warn('Profile check timed out; continuing with cached session.');
+                } else {
+                    console.error('Profile check failed:', reason);
+                    setAuthenticated(false);
+                    setAdmin(false);
+                    setError('Failed to load your profile.');
+                    return;
+                }
             }
 
             if (adminResult.status === 'fulfilled') {
                 setAdmin(adminResult.value);
             } else {
-                console.error('Admin check failed:', adminResult.reason);
-                setAdmin(false);
+                if (isTimeout(adminResult.reason)) {
+                    console.warn('Admin check timed out; will retry on auth change.');
+                    setAdmin(null);
+                } else {
+                    console.error('Admin check failed:', adminResult.reason);
+                    setAdmin(false);
+                }
             }
-
-            setLoading(false);
         }
 
         async function checkAuth() {
             // Allow login page to render even if Supabase is not configured
             if (isLoginPage) {
+                finished = true;
                 setLoading(false);
                 return;
             }
 
             if (!isSupabaseConfigured()) {
+                finished = true;
                 setError('Supabase is not configured. Admin features are disabled.');
                 setLoading(false);
                 return;
             }
 
             try {
-                const { data } = await getSession();
-                if (!data?.session && typeof window !== 'undefined') {
-                    const pendingLogin = window.sessionStorage.getItem('admin_login_in_progress') === '1';
-                    if (pendingLogin) {
-                        window.sessionStorage.removeItem('admin_login_in_progress');
-                        await sleep(500);
-                        const retry = await getSession();
-                        await hydrateAdminState(Boolean(retry.data?.session));
+                console.log('[AdminShell] Starting auth check at', new Date().toISOString());
+
+                // Quick health check to catch connectivity issues early
+                console.log('[AdminShell] Performing health check');
+                const healthStart = Date.now();
+                const health = await checkSupabaseHealth();
+                console.log('[AdminShell] Health check completed in', Date.now() - healthStart, 'ms:', health);
+
+                if (!health.healthy) {
+                    finished = true;
+                    setError(`Cannot connect to Supabase: ${health.error || 'Unknown error'}`);
+                    setLoading(false);
+                    return;
+                }
+
+                if (health.latency && health.latency > 2000) {
+                    console.warn('[AdminShell] High latency detected:', health.latency, 'ms');
+                }
+
+                // Check for pending login first to avoid unnecessary retries
+                const hasPendingLogin = typeof window !== 'undefined' &&
+                    window.sessionStorage.getItem('admin_login_in_progress') === '1';
+
+                if (hasPendingLogin) {
+                    console.log('[AdminShell] Found pending login flag');
+                    window.sessionStorage.removeItem('admin_login_in_progress');
+                    // Give a moment for session to be established after login
+                    await sleep(300);
+                }
+
+                const cachedSession = getCachedSession();
+                const usedCachedSession = Boolean(cachedSession);
+                if (usedCachedSession && !abortController.signal.aborted) {
+                    console.log('[AdminShell] Cached session found, hydrating immediately');
+                    void hydrateAdminState(true);
+                }
+
+                if (abortController.signal.aborted) {
+                    console.debug('[AdminShell] Auth check aborted before session fetch');
+                    return;
+                }
+
+                console.log('[AdminShell] Calling getSession (attempt 1)');
+                const startTime = Date.now();
+                let sessionData = await getSession(abortController.signal);
+                console.log('[AdminShell] getSession completed in', Date.now() - startTime, 'ms');
+
+                if (abortController.signal.aborted) {
+                    console.debug('[AdminShell] Auth check aborted after session fetch');
+                    return;
+                }
+
+                // Single retry if no session found and we're not already aborted
+                if (!sessionData?.data?.session && !abortController.signal.aborted) {
+                    console.log('[AdminShell] No session found, retrying after 500ms');
+                    await sleep(500);
+                    if (abortController.signal.aborted) {
+                        console.debug('[AdminShell] Auth check aborted before session retry');
+                        return;
+                    }
+                    const retryStart = Date.now();
+                    sessionData = await getSession(abortController.signal);
+                    console.log('[AdminShell] getSession retry completed in', Date.now() - retryStart, 'ms');
+                    if (abortController.signal.aborted) {
+                        console.debug('[AdminShell] Auth check aborted after session retry');
                         return;
                     }
                 }
-                await hydrateAdminState(Boolean(data?.session));
+
+                console.log('[AdminShell] Session check complete, has session:', Boolean(sessionData?.data?.session));
+                const hasSession = Boolean(sessionData?.data?.session);
+                if (!usedCachedSession || !hasSession) {
+                    await hydrateAdminState(hasSession);
+                }
+                initialAuthCheckComplete = true;
             } catch (err) {
                 // Handle AbortError gracefully (component unmounted or request cancelled)
                 if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
                     console.debug('Auth check aborted (likely component unmounted)');
                     return; // Don't update state if component unmounted
                 }
-                console.error('Auth check failed:', err);
+                console.error('[AdminShell] Auth check failed:', err);
                 setAuthenticated(false);
                 setAdmin(false);
+                setError('Auth check failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
                 setLoading(false);
+                initialAuthCheckComplete = true;
             }
         }
+
+        timeoutId = setTimeout(() => {
+            if (!finished) {
+                setError('Auth check timed out. Please refresh or check your network.');
+                setLoading(false);
+            }
+        }, 20000);
 
         checkAuth();
 
         if (isSupabaseConfigured()) {
             onAuthStateChange(async (_event, session) => {
+                if (!initialAuthCheckComplete && _event === 'INITIAL_SESSION') {
+                    console.log('[AdminShell] Ignoring initial auth event until check completes');
+                    return;
+                }
                 await hydrateAdminState(Boolean(session));
             }).then((result) => {
                 if (result?.data?.subscription) {
@@ -126,11 +239,15 @@ export default function AdminShell({
         }
 
         return () => {
+            abortController.abort();
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
             if (subscription) {
                 subscription.unsubscribe();
             }
         };
-    }, [isLoginPage, router]);
+    }, [isLoginPage]);
 
     useEffect(() => {
         if (loading || isLoginPage) return;

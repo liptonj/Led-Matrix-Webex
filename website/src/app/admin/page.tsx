@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getDevices, getReleases, Device, Release } from '@/lib/supabase';
+import {
+    getConnectionHeartbeats,
+    getDevices,
+    getReleases,
+    ConnectionHeartbeat,
+    Device,
+    Release,
+} from '@/lib/supabase';
 
 interface Stats {
     totalDevices: number;
@@ -14,22 +21,30 @@ interface Stats {
 export default function AdminDashboardPage() {
     const [stats, setStats] = useState<Stats | null>(null);
     const [recentDevices, setRecentDevices] = useState<Device[]>([]);
+    const [heartbeats, setHeartbeats] = useState<Record<string, ConnectionHeartbeat>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         async function loadDashboard() {
             try {
-                const [devices, releases] = await Promise.all([
-                    getDevices(),
-                    getReleases(),
-                ]);
+                const [devices, releases] = await Promise.all([getDevices(), getReleases()]);
+                const heartbeatRows = await getConnectionHeartbeats(
+                    devices.map((device) => device.pairing_code),
+                );
+                const heartbeatMap = heartbeatRows.reduce<Record<string, ConnectionHeartbeat>>(
+                    (acc, row) => {
+                        acc[row.pairing_code] = row;
+                        return acc;
+                    },
+                    {},
+                );
 
-                // Calculate stats
-                const now = new Date();
-                const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
-                const onlineDevices = devices.filter(
-                    (d) => new Date(d.last_seen) > fiveMinutesAgo
+                setHeartbeats(heartbeatMap);
+
+                const nowMs = Date.now();
+                const onlineDevices = devices.filter((device) =>
+                    isDeviceOnlineWithMap(device, heartbeatMap, nowMs),
                 ).length;
 
                 const latestRelease = releases.find((r) => r.is_latest);
@@ -41,7 +56,11 @@ export default function AdminDashboardPage() {
                     latestVersion: latestRelease?.version || 'N/A',
                 });
 
-                setRecentDevices(devices.slice(0, 5));
+                const sortedDevices = [...devices].sort(
+                    (a, b) =>
+                        getLastSeenMs(b, heartbeatMap) - getLastSeenMs(a, heartbeatMap),
+                );
+                setRecentDevices(sortedDevices.slice(0, 5));
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to load dashboard');
             }
@@ -146,7 +165,11 @@ export default function AdminDashboardPage() {
                                 </tr>
                             ) : (
                                 recentDevices.map((device) => (
-                                    <DeviceRow key={device.id} device={device} />
+                                    <DeviceRow
+                                        key={device.id}
+                                        device={device}
+                                        heartbeat={heartbeats[device.pairing_code]}
+                                    />
                                 ))
                             )}
                         </tbody>
@@ -204,9 +227,16 @@ function StatCard({
     return content;
 }
 
-function DeviceRow({ device }: { device: Device }) {
-    const isOnline = new Date(device.last_seen) > new Date(Date.now() - 5 * 60 * 1000);
-    const lastSeen = new Date(device.last_seen).toLocaleString();
+function DeviceRow({
+    device,
+    heartbeat,
+}: {
+    device: Device;
+    heartbeat?: ConnectionHeartbeat;
+}) {
+    const lastSeen = getLastSeenValue(device, heartbeat);
+    const isOnline = isDeviceOnlineWithHeartbeat(device, heartbeat, Date.now());
+    const lastSeenLabel = lastSeen ? new Date(lastSeen).toLocaleString() : 'Unknown';
 
     return (
         <tr>
@@ -227,7 +257,7 @@ function DeviceRow({ device }: { device: Device }) {
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
                 <span className="text-sm text-gray-600 dark:text-gray-400">
-                    {lastSeen}
+                    {lastSeenLabel}
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
@@ -243,4 +273,37 @@ function DeviceRow({ device }: { device: Device }) {
             </td>
         </tr>
     );
+}
+
+function getLastSeenValue(
+    device: Device,
+    heartbeat?: ConnectionHeartbeat,
+): string | null {
+    return heartbeat?.device_last_seen ?? device.last_seen ?? null;
+}
+
+function getLastSeenMs(
+    device: Device,
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+): number {
+    const lastSeen = getLastSeenValue(device, heartbeatMap[device.pairing_code]);
+    return lastSeen ? new Date(lastSeen).getTime() : 0;
+}
+
+function isDeviceOnlineWithMap(
+    device: Device,
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    nowMs: number,
+): boolean {
+    return isDeviceOnlineWithHeartbeat(device, heartbeatMap[device.pairing_code], nowMs);
+}
+
+function isDeviceOnlineWithHeartbeat(
+    device: Device,
+    heartbeat: ConnectionHeartbeat | undefined,
+    nowMs: number,
+): boolean {
+    const lastSeen = getLastSeenValue(device, heartbeat);
+    const lastSeenMs = lastSeen ? new Date(lastSeen).getTime() : 0;
+    return lastSeenMs > nowMs - 5 * 60 * 1000;
 }

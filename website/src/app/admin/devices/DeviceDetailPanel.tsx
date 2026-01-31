@@ -9,7 +9,7 @@ import {
     getDevice,
     getDeviceLogsBySerial,
     getPairing,
-    getPendingCommands,
+    getCommandsPage,
     insertCommand,
     deleteDevice,
     setDeviceApprovalRequired,
@@ -22,6 +22,7 @@ import {
 } from '@/lib/supabase';
 
 const LOG_LIMIT = 200;
+const COMMAND_PAGE_SIZE = 10;
 
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -46,10 +47,13 @@ export default function DeviceDetailPanel({
     const [accessUpdating, setAccessUpdating] = useState(false);
     const [commandSubmitting, setCommandSubmitting] = useState(false);
     const [logFilter, setLogFilter] = useState<'all' | DeviceLog['level']>('all');
+    const [commandFilter, setCommandFilter] = useState<'all' | Command['status']>('all');
+    const [commandPage, setCommandPage] = useState(1);
+    const [commandCount, setCommandCount] = useState(0);
+    const [commandRefreshToken, setCommandRefreshToken] = useState(0);
     const [logStatus, setLogStatus] = useState<SubscriptionStatus>('connecting');
     const [pairingStatus, setPairingStatus] = useState<SubscriptionStatus>('connecting');
     const [commandStatus, setCommandStatus] = useState<SubscriptionStatus>('connecting');
-    const [pendingCommandIds, setPendingCommandIds] = useState<Set<string>>(new Set());
     const [responseModalOpen, setResponseModalOpen] = useState(false);
     const [responseModalTitle, setResponseModalTitle] = useState('');
     const [responseModalBody, setResponseModalBody] = useState<Record<string, unknown> | null>(null);
@@ -106,20 +110,6 @@ export default function DeviceDetailPanel({
             }
         };
 
-        const loadCommands = async () => {
-            if (!device.pairing_code) return;
-            try {
-                const data = await getPendingCommands(device.pairing_code);
-                if (!isMounted) return;
-                setCommands(data);
-                setPendingCommandIds(new Set(data.map((cmd) => cmd.id)));
-                setCommandError(null);
-            } catch (err) {
-                if (!isMounted) return;
-                setCommandError(err instanceof Error ? err.message : 'Failed to load commands.');
-            }
-        };
-
         const loadLogs = async () => {
             try {
                 setLogsLoading(true);
@@ -136,7 +126,6 @@ export default function DeviceDetailPanel({
         };
 
         loadPairing();
-        loadCommands();
         loadLogs();
 
         if (device.pairing_code) {
@@ -161,26 +150,8 @@ export default function DeviceDetailPanel({
             subscribeToCommands(
                 device.pairing_code,
                 (update) => {
-                    setCommands((prev) => {
-                        const existingIndex = prev.findIndex((cmd) => cmd.id === update.id);
-                        const next = [...prev];
-                        if (existingIndex >= 0) {
-                            next[existingIndex] = { ...next[existingIndex], ...update } as Command;
-                        } else if (update.id) {
-                            next.unshift(update as Command);
-                        }
-                        return next.slice(0, 20);
-                    });
-                    if (update.id && update.status) {
-                        if (update.status === 'pending') {
-                            setPendingCommandIds((prev) => new Set(prev).add(update.id as string));
-                        } else {
-                            setPendingCommandIds((prev) => {
-                                const next = new Set(prev);
-                                next.delete(update.id as string);
-                                return next;
-                            });
-                        }
+                    if (update.id) {
+                        setCommandRefreshToken((prev) => prev + 1);
                     }
                 },
                 (subscribed) => {
@@ -226,12 +197,64 @@ export default function DeviceDetailPanel({
             if (logsUnsubscribe) logsUnsubscribe();
             if (commandsUnsubscribe) commandsUnsubscribe();
         };
-    }, [device?.serial_number, device?.pairing_code]);
+    }, [device?.serial_number, device?.pairing_code, commandFilter]);
 
     const filteredLogs = useMemo(() => {
         if (logFilter === 'all') return logs;
         return logs.filter((log) => log.level === logFilter);
     }, [logs, logFilter]);
+
+    useEffect(() => {
+        setCommandPage(1);
+    }, [commandFilter]);
+
+    useEffect(() => {
+        if (!device?.pairing_code) {
+            setCommands([]);
+            setCommandCount(0);
+            return;
+        }
+
+        let isMounted = true;
+        (async () => {
+            try {
+                const result = await getCommandsPage(device.pairing_code, {
+                    status: commandFilter,
+                    page: commandPage,
+                    pageSize: COMMAND_PAGE_SIZE,
+                });
+                if (!isMounted) return;
+                setCommands(result.data);
+                setCommandCount(result.count ?? result.data.length);
+                setCommandError(null);
+            } catch (err) {
+                if (!isMounted) return;
+                setCommandError(err instanceof Error ? err.message : 'Failed to load commands.');
+            }
+        })();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [device?.pairing_code, commandFilter, commandPage, commandRefreshToken]);
+
+    const formatCommandAge = (createdAt: string) => {
+        const deltaMs = Date.now() - new Date(createdAt).getTime();
+        const minutes = Math.max(0, Math.floor(deltaMs / 60000));
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
+    };
+
+    const getCommandStatusClasses = (status: Command['status']) => {
+        if (status === 'acked') return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        if (status === 'failed') return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+        if (status === 'expired') return 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+    };
 
     const handleToggleDebug = async () => {
         if (!device) return;
@@ -337,6 +360,15 @@ export default function DeviceDetailPanel({
                     : 'Active'
         : '';
 
+    const commandTotalPages = Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE));
+    const commandPageSafe = Math.min(commandPage, commandTotalPages);
+
+    useEffect(() => {
+        if (commandPage > commandTotalPages) {
+            setCommandPage(commandTotalPages);
+        }
+    }, [commandPage, commandTotalPages]);
+
     return (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-6">
             <div className="flex items-center justify-between">
@@ -349,7 +381,7 @@ export default function DeviceDetailPanel({
                     onClick={onClose}
                     className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
                 >
-                    Close
+                    Back to devices
                 </button>
             </div>
 
@@ -366,8 +398,9 @@ export default function DeviceDetailPanel({
             )}
 
             {!loading && device && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="space-y-4">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="space-y-4">
                         <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
                             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device</h3>
                             <p className="text-sm text-gray-900 dark:text-white mt-2">{device.display_name || 'Unnamed device'}</p>
@@ -426,32 +459,9 @@ export default function DeviceDetailPanel({
                                 Send reboot command
                             </button>
                         </div>
-                        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
-                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Command Status</h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {commandStatus}</p>
-                            {commandError && (
-                                <p className="text-xs text-red-600 dark:text-red-400 mt-2">{commandError}</p>
-                            )}
-                            {commands.length > 0 && (
-                                <div className="mt-3 space-y-2">
-                                    {commands.map((cmd) => (
-                                        <button
-                                            key={cmd.id}
-                                            onClick={() => handleShowResponse(`Command ${cmd.command}`, cmd.response || null)}
-                                            className="w-full text-left text-xs px-2 py-2 rounded border border-gray-200 dark:border-gray-700"
-                                        >
-                                            <div className="flex items-center justify-between">
-                                                <span>{cmd.command}</span>
-                                                <span className="text-[10px] text-gray-500">{cmd.status}</span>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
                         </div>
-                    </div>
 
-                    <div className="lg:col-span-2 space-y-4">
+                        <div className="lg:col-span-2 space-y-4">
                         <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
                             <div className="flex items-center justify-between">
                                 <div>
@@ -512,6 +522,88 @@ export default function DeviceDetailPanel({
                                     ))}
                                 </div>
                             )}
+                        </div>
+                        </div>
+                    </div>
+                    <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Command Status</h3>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {commandStatus}</p>
+                            </div>
+                            <select
+                                value={commandFilter}
+                                onChange={(event) =>
+                                    setCommandFilter(event.target.value as 'all' | Command['status'])
+                                }
+                                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-white"
+                            >
+                                <option value="pending">Pending</option>
+                                <option value="acked">Acked</option>
+                                <option value="failed">Failed</option>
+                                <option value="expired">Expired</option>
+                                <option value="all">All</option>
+                            </select>
+                        </div>
+                        {commandError && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-2">{commandError}</p>
+                        )}
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">
+                            Showing {commands.length} of {commandCount}
+                        </p>
+                        {commands.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                                {commands.map((cmd) => (
+                                    <button
+                                        key={cmd.id}
+                                        onClick={() => handleShowResponse(`Command ${cmd.command}`, cmd.response || null)}
+                                        className="w-full text-left text-xs px-2 py-2 rounded border border-gray-200 dark:border-gray-700"
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-medium text-gray-900 dark:text-gray-100">{cmd.command}</span>
+                                            <span
+                                                className={`text-[10px] px-2 py-0.5 rounded ${getCommandStatusClasses(cmd.status)}`}
+                                            >
+                                                {cmd.status}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center justify-between mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+                                            <span>Created {formatCommandAge(cmd.created_at)}</span>
+                                            <span>
+                                                {cmd.acked_at ? `Acked ${formatCommandAge(cmd.acked_at)}` : 'Not acked'}
+                                            </span>
+                                        </div>
+                                        {cmd.error && (
+                                            <div className="mt-1 text-[10px] text-red-600 dark:text-red-400">
+                                                {cmd.error}
+                                            </div>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                            <button
+                                type="button"
+                                onClick={() => setCommandPage((prev) => Math.max(1, prev - 1))}
+                                disabled={commandPageSafe <= 1}
+                                className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 disabled:opacity-50"
+                            >
+                                Prev
+                            </button>
+                            <span>
+                                Page {commandPageSafe} of {commandTotalPages}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setCommandPage((prev) => Math.min(commandTotalPages, prev + 1))
+                                }
+                                disabled={commandPageSafe >= commandTotalPages}
+                                className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 disabled:opacity-50"
+                            >
+                                Next
+                            </button>
                         </div>
                     </div>
                 </div>

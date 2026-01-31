@@ -65,8 +65,13 @@ interface WebexApp {
   onReady: () => Promise<void>;
   context: {
     getMeeting?: () => Promise<{ id: string; title?: string } | null>;
-    getSpace?: () => Promise<any>;
-    getSidebar?: () => Promise<any>;
+    getSpace?: () => Promise<unknown>;
+    getSidebar?: () => Promise<{
+      callState?: string;
+      isInCall?: boolean;
+      inCall?: boolean;
+      isInMeeting?: boolean;
+    } | null>;
   };
   application: {
     states: {
@@ -140,7 +145,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     [updateState],
   );
 
-  const handleCallEvent = useCallback(
+const handleCallEvent = useCallback(
     (data: unknown) => {
       const callData = data as { state?: string };
 
@@ -150,6 +155,53 @@ export function useWebexSDK(): UseWebexSDKReturn {
           isInCall: true,
         });
       } else if (callData.state === "disconnected") {
+        updateState({
+          status: "active",
+          isInCall: false,
+        });
+      }
+    },
+    [updateState],
+  );
+
+  const handleSidebarCallStateEvent = useCallback(
+    (data: unknown) => {
+      const sidebarData = data as {
+        callState?: string;
+        state?: string;
+        isInCall?: boolean;
+        inCall?: boolean;
+        isInMeeting?: boolean;
+      };
+      const rawState = (sidebarData.callState || sidebarData.state || "").toLowerCase();
+      const inCall =
+        sidebarData.isInCall === true ||
+        sidebarData.inCall === true ||
+        sidebarData.isInMeeting === true ||
+        rawState === "connected" ||
+        rawState === "started" ||
+        rawState === "joined" ||
+        rawState === "in_call" ||
+        rawState === "incall" ||
+        rawState === "in_meeting" ||
+        rawState === "meeting";
+
+      if (inCall) {
+        updateState({
+          status: "meeting",
+          isInCall: true,
+        });
+        return;
+      }
+
+      if (
+        rawState === "disconnected" ||
+        rawState === "ended" ||
+        rawState === "left" ||
+        rawState === "idle" ||
+        rawState === "inactive" ||
+        rawState === "not_in_call"
+      ) {
         updateState({
           status: "active",
           isInCall: false,
@@ -306,6 +358,33 @@ export function useWebexSDK(): UseWebexSDKReturn {
         }
       }
 
+      // Fallback: check sidebar call state if meeting context isn't available
+      if (!meeting && app.context.getSidebar) {
+        try {
+          const sidebarData = await app.context.getSidebar();
+          const rawState = (sidebarData?.callState || "").toLowerCase();
+          const inCall =
+            sidebarData?.isInCall === true ||
+            sidebarData?.inCall === true ||
+            sidebarData?.isInMeeting === true ||
+            rawState === "connected" ||
+            rawState === "started" ||
+            rawState === "joined" ||
+            rawState === "in_call" ||
+            rawState === "incall" ||
+            rawState === "in_meeting" ||
+            rawState === "meeting";
+          if (inCall) {
+            meeting = {
+              id: "sidebar",
+              isActive: true,
+            };
+          }
+        } catch {
+          // Sidebar context not available
+        }
+      }
+
       updateState({
         isReady: true,
         user: user,
@@ -324,6 +403,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
       app.on("meeting:left", handleMeetingEvent);
       app.on("call:connected", handleCallEvent);
       app.on("call:disconnected", handleCallEvent);
+      app.on("sidebar:callStateChanged", handleSidebarCallStateEvent);
       app.on("presence:changed", handlePresenceEvent);
       
       // Device media events (camera/video state)
@@ -351,6 +431,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
     updateState,
     handleMeetingEvent,
     handleCallEvent,
+    handleSidebarCallStateEvent,
     handlePresenceEvent,
     handleDeviceMediaEvent,
     handleDeviceAudioEvent,
@@ -371,6 +452,7 @@ export function useWebexSDK(): UseWebexSDKReturn {
         appRef.current.off("meeting:left");
         appRef.current.off("call:connected");
         appRef.current.off("call:disconnected");
+        appRef.current.off("sidebar:callStateChanged");
         appRef.current.off("presence:changed");
         
         // Device media/audio events

@@ -18,6 +18,7 @@ export function getSupabaseClient(): SupabaseClient {
 
   const globalAny = globalThis as GlobalWithSupabase;
   if (!globalAny.__supabaseClient) {
+    console.log('[SupabaseClient] Creating new Supabase client');
     globalAny.__supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: true,
@@ -25,6 +26,7 @@ export function getSupabaseClient(): SupabaseClient {
         detectSessionInUrl: true,
       },
     });
+    console.log('[SupabaseClient] Supabase client created successfully');
   }
 
   return globalAny.__supabaseClient;

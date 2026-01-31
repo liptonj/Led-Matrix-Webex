@@ -14,6 +14,7 @@ import pkg from '../../../package.json';
 const CONFIG = {
   storageKeyPairingCode: 'led_matrix_pairing_code',
   storageKeyDebugVisible: 'led_matrix_debug_visible',
+  storageKeyWebexPollInterval: 'led_matrix_webex_poll_interval',
   tokenRefreshThresholdMs: 5 * 60 * 1000, // Refresh token 5 minutes before expiry
   heartbeatIntervalMs: 30 * 1000, // Update app_last_seen every 30 seconds
   commandTimeoutMs: 15 * 1000, // Command timeout (increased from 10s to 15s)
@@ -21,6 +22,7 @@ const CONFIG = {
   reconnectMaxAttempts: 5, // Maximum reconnection attempts
   // Feature flag: use Edge Functions instead of direct DB updates for better security
   useEdgeFunctions: process.env.NEXT_PUBLIC_USE_SUPABASE_EDGE_FUNCTIONS === 'true',
+  webexPollIntervalMs: 30 * 1000,
 };
 
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || pkg.version || 'unknown';
@@ -45,6 +47,10 @@ interface DeviceConfig {
   scroll_speed_ms?: number;
   page_interval_ms?: number;
   sensor_page_enabled?: boolean;
+  date_color?: string;
+  time_color?: string;
+  name_color?: string;
+  metric_color?: string;
   poll_interval?: number;
   time_zone?: string;
   time_format?: string;
@@ -107,6 +113,15 @@ export function EmbeddedAppClient() {
   const [manualCameraOn, setManualCameraOn] = useState(false);
   const [manualMicMuted, setManualMicMuted] = useState(false);
   const [manualInCall, setManualInCall] = useState(false);
+  const [dateColor, setDateColor] = useState('#00ffff');
+  const [timeColor, setTimeColor] = useState('#ffffff');
+  const [nameColor, setNameColor] = useState('#ffa500');
+  const [metricColor, setMetricColor] = useState('#00bfff');
+  const [webexPollIntervalMs, setWebexPollIntervalMs] = useState(CONFIG.webexPollIntervalMs);
+  const [apiWebexStatus, setApiWebexStatus] = useState<WebexStatus | null>(null);
+  const [webexToken, setWebexToken] = useState<string | null>(null);
+  const [webexTokenExpiresAt, setWebexTokenExpiresAt] = useState<string | null>(null);
+  const [webexOauthStatus, setWebexOauthStatus] = useState<'idle' | 'starting' | 'error'>('idle');
   const [isPaired, setIsPaired] = useState(false);
   const [isPeerConnected, setIsPeerConnected] = useState(false);
   const [activityLog, setActivityLog] = useState<{ time: string; message: string }[]>([
@@ -578,11 +593,148 @@ export function EmbeddedAppClient() {
       setPairingCode(savedPairingCode);
       autoConnectRef.current = true;
     }
+    const savedPoll = localStorage.getItem(CONFIG.storageKeyWebexPollInterval);
+    if (savedPoll) {
+      const parsed = Number(savedPoll);
+      if (!Number.isNaN(parsed) && parsed >= 5000) {
+        setWebexPollIntervalMs(parsed);
+      }
+    }
   }, [addLog]);
 
   useEffect(() => {
     localStorage.setItem(CONFIG.storageKeyDebugVisible, debugVisible ? 'true' : 'false');
   }, [debugVisible]);
+
+  useEffect(() => {
+    localStorage.setItem(CONFIG.storageKeyWebexPollInterval, String(webexPollIntervalMs));
+  }, [webexPollIntervalMs]);
+
+  const normalizeWebexStatus = useCallback((status: string | null | undefined): WebexStatus => {
+    const key = (status || '').trim().toLowerCase();
+    const statusMap: Record<string, WebexStatus> = {
+      active: 'active',
+      available: 'active',
+      meeting: 'meeting',
+      call: 'call',
+      busy: 'busy',
+      presenting: 'presenting',
+      dnd: 'dnd',
+      donotdisturb: 'dnd',
+      away: 'away',
+      inactive: 'away',
+      brb: 'away',
+      offline: 'offline',
+      outofoffice: 'ooo',
+      ooo: 'ooo',
+      pending: 'pending',
+    };
+    return statusMap[key] || 'unknown';
+  }, []);
+
+  const shouldRefreshWebexToken = useCallback((expiresAt: string | null): boolean => {
+    if (!expiresAt) return true;
+    const expMs = new Date(expiresAt).getTime();
+    return (expMs - Date.now()) < CONFIG.tokenRefreshThresholdMs;
+  }, []);
+
+  const fetchWebexToken = useCallback(async () => {
+    if (!appToken) return null;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) return null;
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/webex-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${appToken.token}`,
+        },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        addLog(`webex-token failed: ${data?.error || response.status}`);
+        return null;
+      }
+      setWebexToken(data.access_token);
+      setWebexTokenExpiresAt(data.expires_at || null);
+      return data.access_token as string;
+    } catch (err) {
+      addLog(`webex-token error: ${err instanceof Error ? err.message : 'unknown error'}`);
+      return null;
+    }
+  }, [appToken, addLog]);
+
+  const ensureWebexToken = useCallback(async () => {
+    if (!appToken) return null;
+    if (webexToken && !shouldRefreshWebexToken(webexTokenExpiresAt)) {
+      return webexToken;
+    }
+    return await fetchWebexToken();
+  }, [appToken, webexToken, webexTokenExpiresAt, shouldRefreshWebexToken, fetchWebexToken]);
+
+  const pollWebexStatus = useCallback(async () => {
+    if (!appToken || !isPaired) return;
+    const token = await ensureWebexToken();
+    if (!token) return;
+    try {
+      const response = await fetch('https://webexapis.com/v1/people/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        addLog(`Webex API error: ${data?.message || data?.error || response.status}`);
+        return;
+      }
+      const rawStatus = data?.status || data?.presence || data?.availability || data?.state || data?.activity;
+      const normalized = normalizeWebexStatus(rawStatus);
+      setApiWebexStatus(normalized);
+    } catch (err) {
+      addLog(`Webex API error: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
+  }, [appToken, isPaired, ensureWebexToken, addLog, normalizeWebexStatus]);
+
+  const startWebexOAuth = useCallback(async () => {
+    if (!appToken) {
+      addLog('Missing app token - connect to the display first.');
+      return;
+    }
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      addLog('Supabase URL not configured.');
+      return;
+    }
+    setWebexOauthStatus('starting');
+    try {
+      const response = await fetch(`${supabaseUrl}/functions/v1/webex-oauth-start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${appToken.token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.auth_url) {
+        throw new Error(data?.error || 'Failed to start Webex authorization');
+      }
+      window.open(data.auth_url as string, '_blank', 'noopener,noreferrer');
+      setWebexOauthStatus('idle');
+      addLog('Opened Webex authorization flow.');
+    } catch (err) {
+      setWebexOauthStatus('error');
+      addLog(`Webex OAuth start failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
+  }, [appToken, addLog]);
+
+  useEffect(() => {
+    if (!isPaired) return;
+    if (webexPollIntervalMs < 5000) return;
+    pollWebexStatus().catch(() => {});
+    const timer = setInterval(() => {
+      pollWebexStatus().catch(() => {});
+    }, webexPollIntervalMs);
+    return () => clearInterval(timer);
+  }, [isPaired, webexPollIntervalMs, pollWebexStatus]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === 'test') {
@@ -682,6 +834,18 @@ export function EmbeddedAppClient() {
         }
         if (config.sensor_page_enabled !== undefined) {
           setSensorPageEnabled(config.sensor_page_enabled);
+        }
+        if (config.date_color) {
+          setDateColor(config.date_color);
+        }
+        if (config.time_color) {
+          setTimeColor(config.time_color);
+        }
+        if (config.name_color) {
+          setNameColor(config.name_color);
+        }
+        if (config.metric_color) {
+          setMetricColor(config.metric_color);
         }
         if (config.device_name) {
           setDeviceName(config.device_name);
@@ -808,7 +972,8 @@ export function EmbeddedAppClient() {
     }
   }, [isPaired, rtStatus, pairingCode, appToken, addLog]);
 
-  const statusToDisplay = webexReady ? webexStatus : manualStatus;
+  const effectiveWebexStatus = apiWebexStatus ?? webexStatus;
+  const statusToDisplay = webexReady ? effectiveWebexStatus : manualStatus;
   const displayName = user?.displayName || manualDisplayName;
   const cameraOn = webexReady ? isVideoOn : manualCameraOn;
   const micMuted = webexReady ? isMuted : manualMicMuted;
@@ -1059,6 +1224,10 @@ export function EmbeddedAppClient() {
         scroll_speed_ms: scrollSpeedMs,
         page_interval_ms: pageIntervalMs,
         sensor_page_enabled: sensorPageEnabled,
+        date_color: dateColor,
+        time_color: timeColor,
+        name_color: nameColor,
+        metric_color: metricColor,
       };
 
       // MQTT settings (only include if broker is set)
@@ -1098,6 +1267,10 @@ export function EmbeddedAppClient() {
           if (config.scroll_speed_ms !== undefined) setScrollSpeedMs(config.scroll_speed_ms);
           if (config.page_interval_ms !== undefined) setPageIntervalMs(config.page_interval_ms);
           if (config.sensor_page_enabled !== undefined) setSensorPageEnabled(config.sensor_page_enabled);
+          if (config.date_color) setDateColor(config.date_color);
+          if (config.time_color) setTimeColor(config.time_color);
+          if (config.name_color) setNameColor(config.name_color);
+          if (config.metric_color) setMetricColor(config.metric_color);
           if (config.has_mqtt_password !== undefined) setHasMqttPassword(config.has_mqtt_password);
           // Clear password field after save (don't keep it in memory)
           setMqttPassword('');
@@ -1110,7 +1283,7 @@ export function EmbeddedAppClient() {
     } finally {
       setIsSaving(false);
     }
-  }, [isPeerConnected, sendCommand, deviceName, manualDisplayName, brightness, scrollSpeedMs, pageIntervalMs, sensorPageEnabled, mqttBroker, mqttPort, mqttUsername, mqttPassword, mqttTopic, displaySensorMac, displayMetric, addLog]);
+  }, [isPeerConnected, sendCommand, deviceName, manualDisplayName, brightness, scrollSpeedMs, pageIntervalMs, sensorPageEnabled, dateColor, timeColor, nameColor, metricColor, mqttBroker, mqttPort, mqttUsername, mqttPassword, mqttTopic, displaySensorMac, displayMetric, addLog]);
 
   // Handle reboot
   const handleReboot = useCallback(async () => {
@@ -1470,6 +1643,74 @@ export function EmbeddedAppClient() {
                         <span>30s</span>
                       </div>
                     </div>
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3">Text Colors</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Date</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={dateColor}
+                              onChange={(e) => setDateColor(e.target.value)}
+                              className="h-10 w-16 rounded border border-[var(--color-border)] bg-[var(--color-bg)]"
+                              disabled={!isPeerConnected}
+                            />
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {dateColor.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Time</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={timeColor}
+                              onChange={(e) => setTimeColor(e.target.value)}
+                              className="h-10 w-16 rounded border border-[var(--color-border)] bg-[var(--color-bg)]"
+                              disabled={!isPeerConnected}
+                            />
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {timeColor.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Name</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={nameColor}
+                              onChange={(e) => setNameColor(e.target.value)}
+                              className="h-10 w-16 rounded border border-[var(--color-border)] bg-[var(--color-bg)]"
+                              disabled={!isPeerConnected}
+                            />
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {nameColor.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-2">MQTT Metric</label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="color"
+                              value={metricColor}
+                              onChange={(e) => setMetricColor(e.target.value)}
+                              className="h-10 w-16 rounded border border-[var(--color-border)] bg-[var(--color-bg)]"
+                              disabled={!isPeerConnected}
+                            />
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {metricColor.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                        Tip: avoid status colors (green/yellow/red/purple) for best contrast.
+                      </p>
+                    </div>
                     <Button
                       variant="primary"
                       onClick={handleSaveSettings}
@@ -1518,6 +1759,11 @@ export function EmbeddedAppClient() {
                   <p className="text-sm text-[var(--color-text-muted)] mb-6">
                     Configure MQTT broker connection for sensor data display.
                   </p>
+                  {!isPeerConnected && (
+                    <p className="text-sm text-warning mb-4">
+                      Connect a display to save changes. You can edit fields now; saving is disabled until connected.
+                    </p>
+                  )}
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium mb-2">MQTT Broker</label>
@@ -1527,7 +1773,7 @@ export function EmbeddedAppClient() {
                         value={mqttBroker}
                         onChange={(e) => setMqttBroker(e.target.value)}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                        disabled={!isPeerConnected}
+                        disabled={isSaving}
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
                         MQTT broker hostname or IP address
@@ -1543,7 +1789,7 @@ export function EmbeddedAppClient() {
                           value={mqttPort}
                           onChange={(e) => setMqttPort(parseInt(e.target.value, 10) || 1883)}
                           className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
+                          disabled={isSaving}
                         />
                         <p className="text-xs text-[var(--color-text-muted)] mt-1">
                           Default: 1883
@@ -1557,7 +1803,7 @@ export function EmbeddedAppClient() {
                           value={mqttUsername}
                           onChange={(e) => setMqttUsername(e.target.value)}
                           className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                          disabled={!isPeerConnected}
+                          disabled={isSaving}
                         />
                         <p className="text-xs text-[var(--color-text-muted)] mt-1">
                           Leave empty if not required
@@ -1579,7 +1825,7 @@ export function EmbeddedAppClient() {
                         value={mqttPassword}
                         onChange={(e) => setMqttPassword(e.target.value)}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                        disabled={!isPeerConnected}
+                        disabled={isSaving}
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
                         {hasMqttPassword 
@@ -1595,7 +1841,7 @@ export function EmbeddedAppClient() {
                         value={mqttTopic}
                         onChange={(e) => setMqttTopic(e.target.value)}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] font-mono"
-                        disabled={!isPeerConnected}
+                        disabled={isSaving}
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
                         MQTT topic pattern to subscribe to (supports wildcards)
@@ -1607,7 +1853,7 @@ export function EmbeddedAppClient() {
                           type="checkbox"
                           checked={sensorPageEnabled}
                           onChange={(e) => setSensorPageEnabled(e.target.checked)}
-                          disabled={!isPeerConnected}
+                          disabled={isSaving}
                           className="rounded"
                         />
                         Enable Sensor Page Rotation
@@ -1624,7 +1870,7 @@ export function EmbeddedAppClient() {
                         value={displaySensorMac}
                         onChange={(e) => setDisplaySensorMac(e.target.value)}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)] font-mono"
-                        disabled={!isPeerConnected}
+                        disabled={isSaving}
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
                         Specific sensor MAC to display (leave empty to use first available)
@@ -1636,7 +1882,7 @@ export function EmbeddedAppClient() {
                         value={displayMetric}
                         onChange={(e) => setDisplayMetric(e.target.value)}
                         className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
-                        disabled={!isPeerConnected}
+                        disabled={isSaving}
                       >
                         <option value="tvoc">TVOC</option>
                         <option value="co2">CO2</option>
@@ -1666,6 +1912,40 @@ export function EmbeddedAppClient() {
                   <p className="text-sm text-[var(--color-text-muted)] mb-4">
                     The embedded app automatically detects your Webex status when running inside Webex.
                   </p>
+                  <div className="mb-4">
+                    <Button
+                      variant="primary"
+                      onClick={startWebexOAuth}
+                      disabled={!appToken || webexOauthStatus === 'starting'}
+                    >
+                      {webexOauthStatus === 'starting' ? 'Starting Webex OAuth…' : 'Connect Webex Account'}
+                    </Button>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                      Opens Webex authorization in a new tab and stores tokens in the shared vault.
+                    </p>
+                  </div>
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium mb-2">
+                      Webex API poll interval (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={300}
+                      step={1}
+                      value={Math.round(webexPollIntervalMs / 1000)}
+                      onChange={(e) => {
+                        const next = Number(e.target.value);
+                        if (Number.isNaN(next)) return;
+                        const clamped = Math.max(5, Math.min(300, next));
+                        setWebexPollIntervalMs(clamped * 1000);
+                      }}
+                      className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                    />
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                      Polls Webex API directly using shared OAuth tokens.
+                    </p>
+                  </div>
                   {webexError ? (
                     <Alert variant="warning">
                       {webexError}

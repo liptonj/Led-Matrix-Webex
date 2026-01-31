@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getSession, signOut, isSupabaseConfigured, onAuthStateChange } from '@/lib/supabase';
+import { getSession, signOut, isSupabaseConfigured, onAuthStateChange, getCachedSession } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
 interface User {
@@ -26,32 +26,71 @@ export function Avatar() {
   const [loading, setLoading] = useState(true);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    async function checkAuth() {
-      if (!supabaseConfigured) {
+    mountedRef.current = true;
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    loadingTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current) {
         setUser(null);
         setLoading(false);
+      }
+    }, 8000);
+
+    async function checkAuth() {
+      if (!supabaseConfigured) {
+        if (mountedRef.current) {
+          setUser(null);
+          setLoading(false);
+        }
         return;
+      }
+
+      const cached = getCachedSession();
+      if (cached && mountedRef.current) {
+        if (cached.user?.email) {
+          setUser({ email: cached.user.email });
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
       }
 
       try {
         const { data } = await getSession();
-        if (data?.session?.user) {
-          setUser({ email: data.session.user.email || undefined });
-        } else {
-          setUser(null);
+        if (mountedRef.current) {
+          if (data?.session?.user) {
+            setUser({ email: data.session.user.email || undefined });
+          } else {
+            setUser(null);
+          }
         }
       } catch (err) {
         // Handle AbortError gracefully (component unmounted or request cancelled)
         if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
           console.debug('Avatar auth check aborted (likely component unmounted)');
-          return; // Don't update state if component unmounted
+          if (mountedRef.current) {
+            setUser(null);
+          }
+          return;
         }
         console.error('Auth check failed:', err);
-        setUser(null);
+        if (mountedRef.current) {
+          setUser(null);
+        }
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+        }
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
       }
-      setLoading(false);
     }
 
     checkAuth();
@@ -72,6 +111,11 @@ export function Avatar() {
     }
 
     return () => {
+      mountedRef.current = false;
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
       if (subscription) {
         subscription.unsubscribe();
       }

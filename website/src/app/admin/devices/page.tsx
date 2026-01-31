@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import DeviceDetailPanel from './DeviceDetailPanel';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
+    getConnectionHeartbeats,
     getDevices,
     setDeviceApprovalRequired,
     setDeviceBlacklisted,
@@ -11,28 +11,29 @@ import {
     setDeviceDisabled,
     deleteDevice,
     subscribeToDevices,
+    ConnectionHeartbeat,
     Device,
     DeviceChangeEvent,
 } from '@/lib/supabase';
 
 export default function DevicesPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
     const [devices, setDevices] = useState<Device[]>([]);
+    const [heartbeats, setHeartbeats] = useState<Record<string, ConnectionHeartbeat>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
     const [now, setNow] = useState(Date.now());
     const [actionSerial, setActionSerial] = useState<string | null>(null);
-
-    const serialParam = useMemo(() => {
-        const raw = searchParams.get('serial');
-        return raw ? decodeURIComponent(raw) : '';
-    }, [searchParams]);
+    const devicesRef = useRef<Device[]>([]);
 
     useEffect(() => {
         loadDevices();
     }, []);
+
+    useEffect(() => {
+        devicesRef.current = devices;
+    }, [devices]);
 
     useEffect(() => {
         let unsubscribe: (() => void) | null = null;
@@ -53,12 +54,12 @@ export default function DevicesPage() {
 
                         const existingIndex = prev.findIndex((device) => device.id === updated.id);
                         if (existingIndex === -1) {
-                            return sortDevices([...prev, updated]);
+                            return [...prev, updated];
                         }
 
                         const next = [...prev];
                         next[existingIndex] = updated;
-                        return sortDevices(next);
+                        return next;
                     });
                 });
             } catch (err) {
@@ -76,17 +77,42 @@ export default function DevicesPage() {
         };
     }, []);
 
+    const refreshHeartbeats = useCallback(async (deviceList?: Device[]) => {
+        const list = deviceList ?? devicesRef.current;
+        if (!list.length) {
+            setHeartbeats({});
+            return;
+        }
+
+        try {
+            const rows = await getConnectionHeartbeats(
+                list.map((device) => device.pairing_code),
+            );
+            const map = rows.reduce<Record<string, ConnectionHeartbeat>>((acc, row) => {
+                acc[row.pairing_code] = row;
+                return acc;
+            }, {});
+            setHeartbeats(map);
+        } catch (err) {
+            setError(
+                err instanceof Error ? err.message : 'Failed to load connection heartbeats',
+            );
+        }
+    }, []);
+
     useEffect(() => {
         const interval = setInterval(() => {
             setNow(Date.now());
+            refreshHeartbeats();
         }, 30_000);
         return () => clearInterval(interval);
-    }, []);
+    }, [refreshHeartbeats]);
 
     async function loadDevices() {
         try {
             const data = await getDevices();
-            setDevices(sortDevices(data));
+            setDevices(data);
+            await refreshHeartbeats(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load devices');
         }
@@ -156,12 +182,44 @@ export default function DevicesPage() {
         }
     }
 
-    const filteredDevices = devices.filter((device) => {
-        const isOnline = new Date(device.last_seen).getTime() > now - 5 * 60 * 1000;
+    async function handleActionSelect(device: Device, action: string) {
+        if (!action) return;
+        if (action === 'view') {
+            router.push(`/admin/devices/details?serial=${encodeURIComponent(device.serial_number)}`);
+            return;
+        }
+        if (action === 'approve') {
+            await handleApprove(device);
+            return;
+        }
+        if (action === 'toggle-disabled') {
+            await handleToggleDisabled(device);
+            return;
+        }
+        if (action === 'toggle-blacklist') {
+            await handleToggleBlacklisted(device);
+            return;
+        }
+        if (action === 'delete') {
+            await handleDelete(device);
+        }
+    }
+
+    const sortedDevices = useMemo(
+        () => sortDevices(devices, heartbeats),
+        [devices, heartbeats],
+    );
+
+    const filteredDevices = sortedDevices.filter((device) => {
+        const isOnline = isDeviceOnline(device, heartbeats, now);
         if (filter === 'online') return isOnline;
         if (filter === 'offline') return !isOnline;
         return true;
     });
+
+    const onlineCount = sortedDevices.filter((device) =>
+        isDeviceOnline(device, heartbeats, now),
+    ).length;
 
     if (loading) {
         return (
@@ -185,10 +243,10 @@ export default function DevicesPage() {
                     >
                         <option value="all">All Devices ({devices.length})</option>
                         <option value="online">
-                            Online ({devices.filter((d) => new Date(d.last_seen).getTime() > now - 5 * 60 * 1000).length})
+                            Online ({onlineCount})
                         </option>
                         <option value="offline">
-                            Offline ({devices.filter((d) => new Date(d.last_seen).getTime() <= now - 5 * 60 * 1000).length})
+                            Offline ({devices.length - onlineCount})
                         </option>
                     </select>
                     <button
@@ -204,13 +262,6 @@ export default function DevicesPage() {
                 <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                     <p className="text-red-600 dark:text-red-400">{error}</p>
                 </div>
-            )}
-
-            {serialParam && (
-                <DeviceDetailPanel
-                    serialNumber={serialParam}
-                    onClose={() => router.push('/admin/devices')}
-                />
             )}
 
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
@@ -256,14 +307,26 @@ export default function DevicesPage() {
                                 </tr>
                             ) : (
                                 filteredDevices.map((device) => {
-                                    const isOnline = new Date(device.last_seen).getTime() > now - 5 * 60 * 1000;
+                                    const lastSeen = getLastSeenValue(device, heartbeats);
+                                    const lastSeenLabel = lastSeen
+                                        ? new Date(lastSeen).toLocaleString()
+                                        : 'Unknown';
+                                    const isOnline = isDeviceOnline(device, heartbeats, now);
                                     return (
                                         <tr key={device.id}>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div>
-                                                    <span className="text-sm font-mono text-gray-900 dark:text-gray-100">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() =>
+                                                            router.push(
+                                                                `/admin/devices/details?serial=${encodeURIComponent(device.serial_number)}`,
+                                                            )
+                                                        }
+                                                        className="text-sm font-mono text-blue-600 dark:text-blue-400 hover:underline"
+                                                    >
                                                         {device.serial_number}
-                                                    </span>
+                                                    </button>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
                                                         {device.device_id}
                                                     </p>
@@ -301,7 +364,7 @@ export default function DevicesPage() {
                                                         {isOnline ? 'Online' : 'Offline'}
                                                     </span>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                                        {new Date(device.last_seen).toLocaleString()}
+                                                        {lastSeenLabel}
                                                     </p>
                                                 </div>
                                             </td>
@@ -339,57 +402,35 @@ export default function DevicesPage() {
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        router.push(
-                                                            `/admin/devices?serial=${encodeURIComponent(device.serial_number)}`,
-                                                        )
-                                                    }
-                                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                                                >
-                                                    View details
-                                                </button>
-                                                {device.debug_enabled && (
-                                                    <span className="ml-2 text-xs text-green-600 dark:text-green-400">
-                                                        (logs enabled)
-                                                    </span>
-                                                )}
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {device.approval_required && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleApprove(device)}
-                                                            disabled={actionSerial === device.serial_number}
-                                                            className="text-xs px-2 py-1 rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                                                        >
-                                                            Approve
-                                                        </button>
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        defaultValue=""
+                                                        onChange={(event) => {
+                                                            const action = event.target.value;
+                                                            event.target.value = '';
+                                                            handleActionSelect(device, action);
+                                                        }}
+                                                        disabled={actionSerial === device.serial_number}
+                                                        className="text-sm px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                                                    >
+                                                        <option value="">Actions</option>
+                                                        <option value="view">View details</option>
+                                                        {device.approval_required && (
+                                                            <option value="approve">Approve</option>
+                                                        )}
+                                                        <option value="toggle-disabled">
+                                                            {device.disabled ? 'Enable' : 'Disable'}
+                                                        </option>
+                                                        <option value="toggle-blacklist">
+                                                            {device.blacklisted ? 'Unblacklist' : 'Blacklist'}
+                                                        </option>
+                                                        <option value="delete">Delete</option>
+                                                    </select>
+                                                    {device.debug_enabled && (
+                                                        <span className="text-xs text-green-600 dark:text-green-400">
+                                                            logs enabled
+                                                        </span>
                                                     )}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleToggleDisabled(device)}
-                                                        disabled={actionSerial === device.serial_number}
-                                                        className="text-xs px-2 py-1 rounded bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-50"
-                                                    >
-                                                        {device.disabled ? 'Enable' : 'Disable'}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleToggleBlacklisted(device)}
-                                                        disabled={actionSerial === device.serial_number}
-                                                        className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-                                                    >
-                                                        {device.blacklisted ? 'Unblacklist' : 'Blacklist'}
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDelete(device)}
-                                                        disabled={actionSerial === device.serial_number}
-                                                        className="text-xs px-2 py-1 rounded border border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-50"
-                                                    >
-                                                        Delete
-                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -404,8 +445,35 @@ export default function DevicesPage() {
     );
 }
 
-function sortDevices(list: Device[]) {
+function getLastSeenValue(
+    device: Device,
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+): string | null {
+    return heartbeatMap[device.pairing_code]?.device_last_seen ?? device.last_seen ?? null;
+}
+
+function getLastSeenMs(
+    device: Device,
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+): number {
+    const lastSeen = getLastSeenValue(device, heartbeatMap);
+    return lastSeen ? new Date(lastSeen).getTime() : 0;
+}
+
+function isDeviceOnline(
+    device: Device,
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    nowMs: number,
+): boolean {
+    const lastSeenMs = getLastSeenMs(device, heartbeatMap);
+    return lastSeenMs > nowMs - 5 * 60 * 1000;
+}
+
+function sortDevices(
+    list: Device[],
+    heartbeatMap: Record<string, ConnectionHeartbeat>,
+) {
     return [...list].sort(
-        (a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime(),
+        (a, b) => getLastSeenMs(b, heartbeatMap) - getLastSeenMs(a, heartbeatMap),
     );
 }
