@@ -358,6 +358,21 @@ export default function DeviceDetailPanel({
                     : 'Active'
         : '';
 
+    const realtimeStatuses: SubscriptionStatus[] = [pairingStatus, commandStatus, logStatus];
+    const realtimeAllConnected = realtimeStatuses.every((status) => status === 'connected');
+    const realtimeAnyError = realtimeStatuses.some((status) => status === 'error');
+    const realtimeAnyDisconnected = realtimeStatuses.some((status) => status === 'disconnected');
+    const realtimeLabel = realtimeAllConnected
+        ? 'Connected'
+        : `P:${pairingStatus} C:${commandStatus} L:${logStatus}`;
+    const realtimeBadgeClass = realtimeAllConnected
+        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+        : realtimeAnyError
+            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+            : realtimeAnyDisconnected
+                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+
     const commandTotalPages = Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE));
     const commandPageSafe = Math.min(commandPage, commandTotalPages);
 
@@ -407,6 +422,12 @@ export default function DeviceDetailPanel({
                                 <span className="text-xs text-gray-500 dark:text-gray-400">Access:</span>
                                 <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                                     {accessLabel}
+                                </span>
+                            </div>
+                            <div className="mt-2">
+                                <span className="text-xs text-gray-500 dark:text-gray-400">Realtime (Admin):</span>
+                                <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs ${realtimeBadgeClass}`}>
+                                    {realtimeLabel}
                                 </span>
                             </div>
                         </div>

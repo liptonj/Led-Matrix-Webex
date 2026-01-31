@@ -92,6 +92,8 @@ export interface DeviceConfig {
   pairing_code?: string;
   has_webex_tokens?: boolean;
   has_webex_credentials?: boolean;
+  display_pages?: "status" | "sensors" | "rotate";
+  status_layout?: "name" | "sensors";
 }
 
 // Navigation types
