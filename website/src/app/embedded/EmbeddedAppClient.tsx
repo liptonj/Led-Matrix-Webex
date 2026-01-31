@@ -47,6 +47,8 @@ interface DeviceConfig {
   scroll_speed_ms?: number;
   page_interval_ms?: number;
   sensor_page_enabled?: boolean;
+  display_pages?: 'status' | 'sensors' | 'rotate';
+  status_layout?: 'name' | 'sensors';
   date_color?: string;
   time_color?: string;
   name_color?: string;
@@ -124,6 +126,8 @@ export function EmbeddedAppClient() {
   const [webexOauthStatus, setWebexOauthStatus] = useState<'idle' | 'starting' | 'error'>('idle');
   const [isPaired, setIsPaired] = useState(false);
   const [isPeerConnected, setIsPeerConnected] = useState(false);
+  const [lastDeviceSeenAt, setLastDeviceSeenAt] = useState<string | null>(null);
+  const [lastDeviceSeenMs, setLastDeviceSeenMs] = useState<number | null>(null);
   const [activityLog, setActivityLog] = useState<{ time: string; message: string }[]>([
     { time: new Date().toLocaleTimeString('en-US', { hour12: false }), message: 'Initializing...' },
   ]);
@@ -134,7 +138,8 @@ export function EmbeddedAppClient() {
   const [brightness, setBrightness] = useState(128);
   const [scrollSpeedMs, setScrollSpeedMs] = useState(250);
   const [pageIntervalMs, setPageIntervalMs] = useState(5000);
-  const [sensorPageEnabled, setSensorPageEnabled] = useState(true);
+  const [displayPages, setDisplayPages] = useState<'status' | 'sensors' | 'rotate'>('rotate');
+  const [statusLayout, setStatusLayout] = useState<'name' | 'sensors'>('sensors');
   const [deviceName, setDeviceName] = useState('');
   const [mqttBroker, setMqttBroker] = useState('');
   const [mqttPort, setMqttPort] = useState(1883);
@@ -164,6 +169,8 @@ export function EmbeddedAppClient() {
   const reconnectAttemptsRef = useRef(0);
   const isReconnectingRef = useRef(false);
   const lastOfflineCommandRef = useRef(0);
+  const lastPairingUpdateRef = useRef(0);
+  const lastPairingSnapshotRef = useRef(0);
 
   const appendDebugLog = useCallback((level: DebugLevel, message: string) => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -194,6 +201,20 @@ export function EmbeddedAppClient() {
     setActivityLog(prev => [{ time, message }, ...prev.slice(0, 29)]);
     appendDebugLog('activity', message);
   }, [appendDebugLog]);
+
+  const formatRelativeTime = useCallback((timestampMs: number | null) => {
+    if (!timestampMs) return 'Unknown';
+    const delta = Math.max(0, Date.now() - timestampMs);
+    const seconds = Math.floor(delta / 1000);
+    if (seconds < 10) return 'just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }, []);
 
   // Exchange pairing code for app token
   const exchangePairingCode = useCallback(async (code: string): Promise<AppToken | null> => {
@@ -436,6 +457,10 @@ export function EmbeddedAppClient() {
     if (pairing) {
       const lastSeen = pairing.device_last_seen ? new Date(pairing.device_last_seen).getTime() : 0;
       setIsPeerConnected(!!pairing.device_connected && Date.now() - lastSeen < 60_000);
+      setLastDeviceSeenAt(pairing.device_last_seen ?? null);
+      setLastDeviceSeenMs(lastSeen || null);
+      lastPairingSnapshotRef.current = Date.now();
+      lastPairingUpdateRef.current = Date.now();
     }
 
     const channel = supabase
@@ -449,6 +474,11 @@ export function EmbeddedAppClient() {
           if (typeof row?.device_connected === 'boolean') {
             setIsPeerConnected(!!row.device_connected && Date.now() - lastSeen < 60_000);
           }
+          if (row?.device_last_seen) {
+            setLastDeviceSeenAt(String(row.device_last_seen));
+            setLastDeviceSeenMs(lastSeen || null);
+          }
+          lastPairingUpdateRef.current = Date.now();
         },
       )
       .subscribe((status) => {
@@ -478,6 +508,28 @@ export function EmbeddedAppClient() {
 
   // Update ref after subscribeToPairing is defined
   subscribeToPairingRef.current = subscribeToPairing;
+
+  const refreshPairingSnapshot = useCallback(async (code: string, token: string, reason: string) => {
+    try {
+      const supabase = getSupabaseClient(token);
+      const { data: pairing } = await supabase
+        .schema('display')
+        .from('pairings')
+        .select('device_last_seen, device_connected')
+        .eq('pairing_code', code)
+        .single();
+      if (pairing) {
+        const lastSeen = pairing.device_last_seen ? new Date(pairing.device_last_seen).getTime() : 0;
+        setIsPeerConnected(!!pairing.device_connected && Date.now() - lastSeen < 60_000);
+        setLastDeviceSeenAt(pairing.device_last_seen ?? null);
+        setLastDeviceSeenMs(lastSeen || null);
+        lastPairingSnapshotRef.current = Date.now();
+        addLog(`Refreshed display status (${reason})`);
+      }
+    } catch (err) {
+      addLog(`Failed to refresh display status: ${err instanceof Error ? err.message : 'unknown error'}`);
+    }
+  }, [addLog, getSupabaseClient]);
 
   const sendCommand = useCallback(async (command: string, payload: Record<string, unknown> = {}) => {
     if (!supabaseRef.current || !appToken) {
@@ -832,8 +884,13 @@ export function EmbeddedAppClient() {
         if (config.page_interval_ms !== undefined) {
           setPageIntervalMs(config.page_interval_ms);
         }
-        if (config.sensor_page_enabled !== undefined) {
-          setSensorPageEnabled(config.sensor_page_enabled);
+        if (config.display_pages) {
+          setDisplayPages(config.display_pages);
+        } else if (config.sensor_page_enabled !== undefined) {
+          setDisplayPages(config.sensor_page_enabled ? 'rotate' : 'status');
+        }
+        if (config.status_layout) {
+          setStatusLayout(config.status_layout);
         }
         if (config.date_color) {
           setDateColor(config.date_color);
@@ -955,13 +1012,47 @@ export function EmbeddedAppClient() {
     prevPeerConnectedRef.current = isPeerConnected;
   }, [isPeerConnected, isPaired, rtStatus, sendCommand, addLog]);
 
+  // Realtime watchdog: refresh pairing snapshot and force reconnect if stale
+  useEffect(() => {
+    if (!isPaired || !pairingCode || !appToken) return;
+    const interval = setInterval(() => {
+      const now = Date.now();
+      if (rtStatus !== 'connected') return;
+
+      if (lastPairingUpdateRef.current === 0) {
+        lastPairingUpdateRef.current = now;
+      }
+
+      const staleMs = now - lastPairingUpdateRef.current;
+      const snapshotAge = now - lastPairingSnapshotRef.current;
+
+      if (staleMs > 45000 && snapshotAge > 20000) {
+        refreshPairingSnapshot(pairingCode, appToken.token, 'realtime stale').catch(() => {});
+      }
+
+      if (staleMs > 90000 && attemptReconnectRef.current && !isReconnectingRef.current) {
+        addLog('Realtime stale - forcing reconnect...');
+        attemptReconnectRef.current(pairingCode, appToken.token);
+      }
+
+      if (!isPeerConnected && staleMs > 30000 && now - lastOfflineCommandRef.current > 20000) {
+        lastOfflineCommandRef.current = now;
+        addLog('Display offline - sending get_telemetry ping...');
+        sendCommand('get_telemetry', {}).catch((err) => {
+          addLog(`Display ping failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+        });
+      }
+    }, 15000);
+
+    return () => clearInterval(interval);
+  }, [isPaired, rtStatus, pairingCode, appToken, refreshPairingSnapshot, addLog, sendCommand, isPeerConnected]);
+
   useEffect(() => {
     if (rtStatus === 'disconnected') {
-      setShowSetup(true);
-      setIsPaired(false);
       setIsPeerConnected(false);
+      setShowSetup(!isPaired);
     }
-  }, [rtStatus]);
+  }, [rtStatus, isPaired]);
 
   // Monitor realtime connection and auto-reconnect if needed
   useEffect(() => {
@@ -1223,7 +1314,9 @@ export function EmbeddedAppClient() {
         brightness,
         scroll_speed_ms: scrollSpeedMs,
         page_interval_ms: pageIntervalMs,
-        sensor_page_enabled: sensorPageEnabled,
+        sensor_page_enabled: displayPages === 'rotate',
+        display_pages: displayPages,
+        status_layout: statusLayout,
         date_color: dateColor,
         time_color: timeColor,
         name_color: nameColor,
@@ -1266,7 +1359,12 @@ export function EmbeddedAppClient() {
           if (config.brightness !== undefined) setBrightness(config.brightness);
           if (config.scroll_speed_ms !== undefined) setScrollSpeedMs(config.scroll_speed_ms);
           if (config.page_interval_ms !== undefined) setPageIntervalMs(config.page_interval_ms);
-          if (config.sensor_page_enabled !== undefined) setSensorPageEnabled(config.sensor_page_enabled);
+          if (config.display_pages) {
+            setDisplayPages(config.display_pages);
+          } else if (config.sensor_page_enabled !== undefined) {
+            setDisplayPages(config.sensor_page_enabled ? 'rotate' : 'status');
+          }
+          if (config.status_layout) setStatusLayout(config.status_layout);
           if (config.date_color) setDateColor(config.date_color);
           if (config.time_color) setTimeColor(config.time_color);
           if (config.name_color) setNameColor(config.name_color);
@@ -1283,7 +1381,7 @@ export function EmbeddedAppClient() {
     } finally {
       setIsSaving(false);
     }
-  }, [isPeerConnected, sendCommand, deviceName, manualDisplayName, brightness, scrollSpeedMs, pageIntervalMs, sensorPageEnabled, dateColor, timeColor, nameColor, metricColor, mqttBroker, mqttPort, mqttUsername, mqttPassword, mqttTopic, displaySensorMac, displayMetric, addLog]);
+  }, [isPeerConnected, sendCommand, deviceName, manualDisplayName, brightness, scrollSpeedMs, pageIntervalMs, displayPages, statusLayout, dateColor, timeColor, nameColor, metricColor, mqttBroker, mqttPort, mqttUsername, mqttPassword, mqttTopic, displaySensorMac, displayMetric, addLog]);
 
   // Handle reboot
   const handleReboot = useCallback(async () => {
@@ -1304,6 +1402,27 @@ export function EmbeddedAppClient() {
       setIsRebooting(false);
     }
   }, [isPeerConnected, sendCommand, addLog]);
+
+  const handleRefreshDisplay = useCallback(async () => {
+    if (!pairingCode || !appToken) {
+      addLog('Missing pairing info - cannot refresh display status');
+      return;
+    }
+
+    await refreshPairingSnapshot(pairingCode, appToken.token, 'manual refresh');
+
+    if (rtStatus === 'connected') {
+      try {
+        const result = await sendCommand('get_status');
+        if (result.success && result.data) {
+          setDeviceStatus(result.data as unknown as DeviceStatus);
+          addLog('Display status refreshed');
+        }
+      } catch (err) {
+        addLog(`Display refresh failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      }
+    }
+  }, [pairingCode, appToken, rtStatus, refreshPairingSnapshot, sendCommand, addLog]);
 
   const isBridgeConnected = rtStatus === 'connected';
   const connectionLabel = isBridgeConnected
@@ -1489,6 +1608,34 @@ export function EmbeddedAppClient() {
                     </div>
                   </Card>
 
+                  {/* Display Connection */}
+                  <Card>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-medium">Display Connection</h3>
+                      <Button size="sm" variant="default" onClick={handleRefreshDisplay} disabled={!isPaired}>
+                        Refresh
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-[var(--color-text-muted)]">Realtime</div>
+                        <div>{rtStatus}</div>
+                      </div>
+                      <div>
+                        <div className="text-[var(--color-text-muted)]">Display connected</div>
+                        <div>{isPeerConnected ? 'Yes' : 'No'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[var(--color-text-muted)]">Last seen</div>
+                        <div>{formatRelativeTime(lastDeviceSeenMs)}</div>
+                      </div>
+                      <div>
+                        <div className="text-[var(--color-text-muted)]">IP address</div>
+                        <div>{deviceStatus.ip_address || 'Unknown'}</div>
+                      </div>
+                    </div>
+                  </Card>
+
                   {/* Activity Log */}
                   <Card>
                     <h2 className="text-lg font-semibold mb-4">Activity Log</h2>
@@ -1642,6 +1789,37 @@ export function EmbeddedAppClient() {
                         <span>2s</span>
                         <span>30s</span>
                       </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Pages to Show</label>
+                      <select
+                        value={displayPages}
+                        onChange={(e) => setDisplayPages(e.target.value as 'status' | 'sensors' | 'rotate')}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                        disabled={!isPeerConnected}
+                      >
+                        <option value="status">Status only</option>
+                        <option value="sensors">Sensors only</option>
+                        <option value="rotate">Rotate status & sensors</option>
+                      </select>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Sensors only requires MQTT data; otherwise it falls back to status.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Status Layout</label>
+                      <select
+                        value={statusLayout}
+                        onChange={(e) => setStatusLayout(e.target.value as 'name' | 'sensors')}
+                        className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+                        disabled={!isPeerConnected}
+                      >
+                        <option value="name">Name large, sensors separate</option>
+                        <option value="sensors">Sensors large, name small</option>
+                      </select>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        Controls which line gets the larger text on the status page.
+                      </p>
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold mb-3">Text Colors</h3>
@@ -1845,21 +2023,6 @@ export function EmbeddedAppClient() {
                       />
                       <p className="text-xs text-[var(--color-text-muted)] mt-1">
                         MQTT topic pattern to subscribe to (supports wildcards)
-                      </p>
-                    </div>
-                    <div>
-                      <label className="flex items-center gap-2 text-sm font-medium mb-2">
-                        <input
-                          type="checkbox"
-                          checked={sensorPageEnabled}
-                          onChange={(e) => setSensorPageEnabled(e.target.checked)}
-                          disabled={isSaving}
-                          className="rounded"
-                        />
-                        Enable Sensor Page Rotation
-                      </label>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                        Show sensor data page when rotating between status pages
                       </p>
                     </div>
                     <div>
