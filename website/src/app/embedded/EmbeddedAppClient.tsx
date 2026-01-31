@@ -446,18 +446,18 @@ export function EmbeddedAppClient() {
       pairingChannelRef.current = null;
     }
 
-    // Fetch initial pairing row
-    const { data: pairing } = await supabase
+    // Fetch initial device connection status from connection_heartbeats
+    const { data: heartbeat } = await supabase
       .schema('display')
-      .from('pairings')
-      .select('*')
+      .from('connection_heartbeats')
+      .select('device_last_seen, device_connected')
       .eq('pairing_code', code)
       .single();
 
-    if (pairing) {
-      const lastSeen = pairing.device_last_seen ? new Date(pairing.device_last_seen).getTime() : 0;
-      setIsPeerConnected(!!pairing.device_connected && Date.now() - lastSeen < 60_000);
-      setLastDeviceSeenAt(pairing.device_last_seen ?? null);
+    if (heartbeat) {
+      const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0;
+      setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000);
+      setLastDeviceSeenAt(heartbeat.device_last_seen ?? null);
       setLastDeviceSeenMs(lastSeen || null);
       lastPairingSnapshotRef.current = Date.now();
       lastPairingUpdateRef.current = Date.now();
@@ -469,15 +469,8 @@ export function EmbeddedAppClient() {
         'postgres_changes',
         { event: 'UPDATE', schema: 'display', table: 'pairings', filter: `pairing_code=eq.${code}` },
         (evt) => {
-          const row = (evt as { new: Record<string, unknown> }).new;
-          const lastSeen = row?.device_last_seen ? new Date(String(row.device_last_seen)).getTime() : 0;
-          if (typeof row?.device_connected === 'boolean') {
-            setIsPeerConnected(!!row.device_connected && Date.now() - lastSeen < 60_000);
-          }
-          if (row?.device_last_seen) {
-            setLastDeviceSeenAt(String(row.device_last_seen));
-            setLastDeviceSeenMs(lastSeen || null);
-          }
+          // Pairings table updates are for status changes (webex_status, camera_on, etc.)
+          // Device connection status is tracked in connection_heartbeats and polled periodically
           lastPairingUpdateRef.current = Date.now();
         },
       )
@@ -512,16 +505,16 @@ export function EmbeddedAppClient() {
   const refreshPairingSnapshot = useCallback(async (code: string, token: string, reason: string) => {
     try {
       const supabase = getSupabaseClient(token);
-      const { data: pairing } = await supabase
+      const { data: heartbeat } = await supabase
         .schema('display')
-        .from('pairings')
+        .from('connection_heartbeats')
         .select('device_last_seen, device_connected')
         .eq('pairing_code', code)
         .single();
-      if (pairing) {
-        const lastSeen = pairing.device_last_seen ? new Date(pairing.device_last_seen).getTime() : 0;
-        setIsPeerConnected(!!pairing.device_connected && Date.now() - lastSeen < 60_000);
-        setLastDeviceSeenAt(pairing.device_last_seen ?? null);
+      if (heartbeat) {
+        const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0;
+        setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000);
+        setLastDeviceSeenAt(heartbeat.device_last_seen ?? null);
         setLastDeviceSeenMs(lastSeen || null);
         lastPairingSnapshotRef.current = Date.now();
         addLog(`Refreshed display status (${reason})`);
@@ -1062,6 +1055,18 @@ export function EmbeddedAppClient() {
       attemptReconnectRef.current(pairingCode, appToken.token);
     }
   }, [isPaired, rtStatus, pairingCode, appToken, addLog]);
+
+  // Poll connection_heartbeats for device connection status
+  // (connection_heartbeats doesn't trigger realtime by design to avoid notification spam)
+  useEffect(() => {
+    if (!isPaired || !pairingCode || !appToken || rtStatus !== 'connected') return;
+
+    const pollInterval = setInterval(() => {
+      refreshPairingSnapshot(pairingCode, appToken.token, 'heartbeat poll').catch(() => {});
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [isPaired, pairingCode, appToken, rtStatus, refreshPairingSnapshot]);
 
   const effectiveWebexStatus = apiWebexStatus ?? webexStatus;
   const statusToDisplay = webexReady ? effectiveWebexStatus : manualStatus;
