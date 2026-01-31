@@ -111,18 +111,11 @@ export default function DeviceDetailPanel({
         };
 
         const loadLogs = async () => {
-            try {
-                setLogsLoading(true);
-                const data = await getDeviceLogsBySerial(device.serial_number, LOG_LIMIT);
-                if (!isMounted) return;
-                setLogs(data);
-                setLogsError(null);
-            } catch (err) {
-                if (!isMounted) return;
-                setLogsError(err instanceof Error ? err.message : 'Failed to load logs.');
-            } finally {
-                if (isMounted) setLogsLoading(false);
-            }
+            // BROADCAST-ONLY MODE: No historical logs in database
+            // We start with empty logs and only populate from Realtime
+            setLogs([]);
+            setLogsLoading(false);
+            setLogsError(null);
         };
 
         loadPairing();
@@ -503,8 +496,8 @@ export default function DeviceDetailPanel({
                         <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device Logs</h3>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {logStatus}</p>
+                                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device Logs (Live Only)</h3>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {logStatus} • Real-time streaming only, no history</p>
                                 </div>
                                 <select
                                     value={logFilter}
@@ -524,7 +517,7 @@ export default function DeviceDetailPanel({
                             {logsLoading ? (
                                 <div className="py-6 text-xs text-gray-500">Loading logs...</div>
                             ) : filteredLogs.length === 0 ? (
-                                <div className="py-6 text-xs text-gray-500">No logs yet.</div>
+                                <div className="py-6 text-xs text-gray-500">Waiting for live logs... (Enable debug mode on device to see more logs)</div>
                             ) : (
                                 <div className="mt-3 max-h-72 overflow-y-auto space-y-2">
                                     {filteredLogs.map((log) => (

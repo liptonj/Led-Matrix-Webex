@@ -10,7 +10,6 @@
  */
 
 #include "supabase_realtime.h"
-#include <mbedtls/base64.h>
 #include "../common/ca_certs.h"
 #include "../config/config_manager.h"
 
@@ -20,9 +19,9 @@ extern ConfigManager config_manager;
 SupabaseRealtime supabaseRealtime;
 
 namespace {
-constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 60000;
-constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 45000;
-constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 35000;
+constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 80000;   // Increased from 60000
+constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 60000;  // Increased from 45000
+constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 50000;   // Increased from 35000
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
 
 String urlEncode(const String& str) {
@@ -42,90 +41,6 @@ String urlEncode(const String& str) {
     return encoded;
 }
 
-bool decodeJwtPayloadJson(const String& jwt, String& outJson, int* outErr, String* payloadSegmentOut) {
-    int firstDot = jwt.indexOf('.');
-    if (firstDot < 0) {
-        return false;
-    }
-    int secondDot = jwt.indexOf('.', firstDot + 1);
-    if (secondDot < 0) {
-        return false;
-    }
-
-    String payload = jwt.substring(firstDot + 1, secondDot);
-    
-    // Store original for output
-    if (payloadSegmentOut) {
-        *payloadSegmentOut = payload;
-    }
-    
-    // Base64url to base64 conversion:
-    // 1. Replace '-' with '+' and '_' with '/'
-    // 2. Add padding '=' to make length multiple of 4
-    // Note: base64url doesn't use '=' padding, so we strip any existing '=' first
-    String sanitized;
-    sanitized.reserve(payload.length());
-    for (size_t i = 0; i < payload.length(); i++) {
-        char c = payload[i];
-        // Base64url characters: A-Z, a-z, 0-9, '-', '_'
-        // Skip any '=' characters that might be present (shouldn't be in base64url)
-        if (c == '=') {
-            continue;
-        }
-        if ((c >= 'A' && c <= 'Z') ||
-            (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') ||
-            c == '-' || c == '_') {
-            sanitized += c;
-        }
-        // Skip any other characters (whitespace, etc.)
-    }
-    
-    // Convert base64url to base64
-    sanitized.replace('-', '+');
-    sanitized.replace('_', '/');
-    
-    // Add padding
-    int mod = sanitized.length() % 4;
-    if (mod != 0) {
-        int padLen = 4 - mod;
-        for (int i = 0; i < padLen; i++) {
-            sanitized += '=';
-        }
-    }
-
-    size_t decodedLen = 0;
-    int ret = mbedtls_base64_decode(nullptr, 0, &decodedLen,
-                                    reinterpret_cast<const unsigned char*>(sanitized.c_str()),
-                                    sanitized.length());
-    if (outErr) {
-        *outErr = ret;
-    }
-    if (ret != 0 || decodedLen == 0) {
-        return false;
-    }
-
-    unsigned char* decoded = new unsigned char[decodedLen + 1];
-    if (!decoded) {
-        return false;
-    }
-    size_t outLen = 0;
-    ret = mbedtls_base64_decode(decoded, decodedLen, &outLen,
-                                reinterpret_cast<const unsigned char*>(sanitized.c_str()),
-                                sanitized.length());
-    if (outErr) {
-        *outErr = ret;
-    }
-    if (ret != 0) {
-        delete[] decoded;
-        return false;
-    }
-    decoded[outLen] = '\0';
-    outJson = String(reinterpret_cast<const char*>(decoded), outLen);
-    delete[] decoded;
-    return true;
-}
-
 String normalizeJwt(const String& token) {
     String trimmed = token;
     trimmed.trim();
@@ -136,6 +51,33 @@ String normalizeJwt(const String& token) {
     }
     trimmed.trim();
     return trimmed;
+}
+
+String redactKeyInUrl(const String& url, const String& keyName) {
+    String redacted = url;
+    String needle = keyName + "=";
+    int start = redacted.indexOf(needle);
+    if (start < 0) {
+        return redacted;
+    }
+    int valueStart = start + needle.length();
+    int valueEnd = redacted.indexOf('&', valueStart);
+    if (valueEnd < 0) {
+        valueEnd = redacted.length();
+    }
+    redacted = redacted.substring(0, valueStart) + "<redacted>" + redacted.substring(valueEnd);
+    return redacted;
+}
+
+String buildRedactedJoinPayload(const JsonDocument& payload) {
+    JsonDocument copy;
+    copy.set(payload);
+    if (copy["access_token"].is<const char*>()) {
+        copy["access_token"] = "<redacted>";
+    }
+    String out;
+    serializeJson(copy, out);
+    return out;
 }
 }  // namespace
 
@@ -151,10 +93,15 @@ SupabaseRealtime::SupabaseRealtime()
       _minHeapSteady(REALTIME_MIN_HEAP_STEADY),
       _minHeapFloor(REALTIME_MIN_HEAP_FLOOR) {
     _lastMessage.valid = false;
+    _privateChannel = false;
 }
 
 SupabaseRealtime::~SupabaseRealtime() {
     disconnect();
+}
+
+void SupabaseRealtime::setChannelTopic(const String& topic) {
+    _channelTopic = topic;
 }
 
 void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
@@ -163,6 +110,7 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     _anonKey = anon_key;
     _accessToken = normalizeJwt(access_token);
     _loggedJoinDetails = false;
+    _privateChannel = false;
 
     uint32_t minHeap = minHeapRequired();
     if (ESP.getFreeHeap() < minHeap) {
@@ -192,20 +140,16 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     }
     
     // Build realtime WebSocket URL
-    // Format: wss://{project}.supabase.co/realtime/v1/websocket?apikey={anon_key}&token={jwt_token}&vsn=1.0.0
-    // For authenticated connections, Supabase Realtime requires:
-    // 1. apikey: The anon/public key for initial connection
-    // 2. token: The JWT access token for authenticated channel access (RLS policies)
-    // URL-encode both to handle any special characters
+    // Format: wss://{project}.supabase.co/realtime/v1/websocket?apikey={anon_key}&vsn=1.0.0
+    // Access token is sent in the channel join payload for private channels.
     String encodedAnonKey = urlEncode(_anonKey);
-    String encodedToken = urlEncode(_accessToken);
-    String wsPath = "/realtime/v1/websocket?apikey=" + encodedAnonKey + "&token=" + encodedToken + "&vsn=1.0.0";
+    String wsPath = "/realtime/v1/websocket?apikey=" + encodedAnonKey + "&vsn=1.0.0";
     
-    Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), wsPath.c_str());
-    Serial.printf("[REALTIME] Anon key length: %d (encoded: %d)\n", _anonKey.length(), encodedAnonKey.length());
-    Serial.printf("[REALTIME] Token length: %d (encoded: %d)\n", _accessToken.length(), encodedToken.length());
+    String redactedWsPath = redactKeyInUrl(wsPath, "apikey");
+    Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), redactedWsPath.c_str());
     Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
                   (unsigned long)time(nullptr), ESP.getFreeHeap());
+    Serial.println("[REALTIME] WS headers: (default)");
 
     String uri = "wss://" + host + wsPath;
     esp_websocket_client_config_t config = {};
@@ -213,8 +157,8 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     _connectStartMs = millis();
     config.uri = uri.c_str();
     config.disable_auto_reconnect = true;
-    config.buffer_size = 4096;
-    config.task_stack = 8192;  // TLS handshake needs extra stack on ESP32-S3
+    config.buffer_size = 2048;  // Reduced from 4096 to save heap
+    config.task_stack = 6144;   // Reduced from 8192 (TLS needs ~5KB minimum)
     config.user_context = this;
     config.ping_interval_sec = 0;
     _wsHeaders = "";
@@ -275,8 +219,8 @@ void SupabaseRealtime::loop() {
     }
     
     // Check for heartbeat timeout
-    if (_connected && _lastHeartbeatResponse > 0 && 
-        now - _lastHeartbeatResponse > PHOENIX_HEARTBEAT_TIMEOUT_MS * 2) {
+    if (_connected && _lastHeartbeatResponse > 0 &&
+        now - _lastHeartbeatResponse > (PHOENIX_HEARTBEAT_TIMEOUT_MS)) {
         Serial.println("[REALTIME] Heartbeat timeout - disconnecting");
         disconnect();
     }
@@ -294,8 +238,14 @@ bool SupabaseRealtime::subscribe(const String& schema, const String& table,
     return subscribeMultiple(schema, tables, 1, filter);
 }
 
+bool SupabaseRealtime::subscribeBroadcast() {
+    _privateChannel = true;
+    return subscribeMultiple("", nullptr, 0, "", false);
+}
+
 bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tables[],
-                                          int tableCount, const String& filter) {
+                                          int tableCount, const String& filter,
+                                          bool includePostgresChanges) {
     if (!_connected) {
         if (_client) {
             Serial.println("[REALTIME] Not connected yet - will queue subscription");
@@ -306,19 +256,22 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     }
     
     // Validate inputs
-    if (tableCount <= 0 || tableCount > 10) {
-        Serial.printf("[REALTIME] Invalid table count: %d (must be 1-10)\n", tableCount);
-        return false;
-    }
-    
-    if (tables == nullptr) {
-        Serial.println("[REALTIME] Tables array is null");
-        return false;
-    }
-    
-    if (schema.isEmpty()) {
-        Serial.println("[REALTIME] Schema is empty");
-        return false;
+    if (includePostgresChanges) {
+        _privateChannel = false;
+        if (tableCount <= 0 || tableCount > 10) {
+            Serial.printf("[REALTIME] Invalid table count: %d (must be 1-10)\n", tableCount);
+            return false;
+        }
+        
+        if (tables == nullptr) {
+            Serial.println("[REALTIME] Tables array is null");
+            return false;
+        }
+        
+        if (schema.isEmpty()) {
+            Serial.println("[REALTIME] Schema is empty");
+            return false;
+        }
     }
     
     // Check heap before proceeding (need at least 20KB for JSON operations)
@@ -330,14 +283,16 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     }
     
     // Validate all table names before processing
-    for (int i = 0; i < tableCount; i++) {
-        if (tables[i].isEmpty()) {
-            Serial.printf("[REALTIME] Table %d is empty\n", i);
-            return false;
-        }
-        if (tables[i].length() > 64) {
-            Serial.printf("[REALTIME] Table name too long: %s\n", tables[i].c_str());
-            return false;
+    if (includePostgresChanges) {
+        for (int i = 0; i < tableCount; i++) {
+            if (tables[i].isEmpty()) {
+                Serial.printf("[REALTIME] Table %d is empty\n", i);
+                return false;
+            }
+            if (tables[i].length() > 64) {
+                Serial.printf("[REALTIME] Table name too long: %s\n", tables[i].c_str());
+                return false;
+            }
         }
     }
     
@@ -345,7 +300,9 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     _msgRef++;
     
     // Supabase Realtime expects an arbitrary channel name (must not be "realtime")
-    _channelTopic = "display-db-changes";
+    if (_channelTopic.isEmpty() || _channelTopic == "realtime") {
+        _channelTopic = "display-db-changes";
+    }
     
     // Build join payload with postgres_changes config
     // ArduinoJson v7 handles memory allocation automatically
@@ -369,99 +326,69 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     
     config["broadcast"]["self"] = false;
     config["presence"]["key"] = "";
-    
-    // Add postgres_changes subscription for each table
-    JsonArray pgChanges = config["postgres_changes"].to<JsonArray>();
-    if (pgChanges.isNull()) {
-        Serial.println("[REALTIME] Failed to create postgres_changes array");
-        return false;
+    if (_privateChannel) {
+        config["private"] = true;
     }
     
-    const bool kIncludeFilter = true;  // Debug: set false to test without filter
-    for (int i = 0; i < tableCount; i++) {
-        JsonObject change = pgChanges.add<JsonObject>();
-        if (change.isNull()) {
-            Serial.printf("[REALTIME] Failed to add table %d to postgres_changes\n", i);
+    if (includePostgresChanges) {
+        // Add postgres_changes subscription for each table
+        JsonArray pgChanges = config["postgres_changes"].to<JsonArray>();
+        if (pgChanges.isNull()) {
+            Serial.println("[REALTIME] Failed to create postgres_changes array");
             return false;
         }
         
-        change["event"] = "*";  // Listen to all events (INSERT, UPDATE, DELETE)
-        change["schema"] = schema;
-        change["table"] = tables[i];
-        if (kIncludeFilter && !filter.isEmpty()) {
-            change["filter"] = filter;
+        const bool kIncludeFilter = true;  // Debug: set false to test without filter
+        for (int i = 0; i < tableCount; i++) {
+            JsonObject change = pgChanges.add<JsonObject>();
+            if (change.isNull()) {
+                Serial.printf("[REALTIME] Failed to add table %d to postgres_changes\n", i);
+                return false;
+            }
+            
+            change["event"] = "*";  // Listen to all events (INSERT, UPDATE, DELETE)
+            change["schema"] = schema;
+            change["table"] = tables[i];
+            if (kIncludeFilter && !filter.isEmpty()) {
+                change["filter"] = filter;
+            }
+            Serial.printf("[REALTIME] Adding subscription: %s.%s (filter: %s)\n",
+                          schema.c_str(), tables[i].c_str(), 
+                          (kIncludeFilter && !filter.isEmpty()) ? filter.c_str() : "none");
         }
-        Serial.printf("[REALTIME] Adding subscription: %s.%s (filter: %s)\n",
-                      schema.c_str(), tables[i].c_str(), 
-                      (kIncludeFilter && !filter.isEmpty()) ? filter.c_str() : "none");
     }
     
     // Add access token for authorization
     payload["access_token"] = _accessToken;
 
     if (!_loggedJoinDetails) {
-        String tableList;
-        for (int i = 0; i < tableCount; i++) {
-            if (i > 0) {
-                tableList += ",";
+        String tableList = "none";
+        if (includePostgresChanges) {
+            tableList = "";
+            for (int i = 0; i < tableCount; i++) {
+                if (i > 0) {
+                    tableList += ",";
+                }
+                tableList += tables[i];
             }
-            tableList += tables[i];
         }
         Serial.printf("[REALTIME] Join details: schema=%s tables=%s filter=%s topic=%s token_len=%d\n",
-                      schema.c_str(),
+                      includePostgresChanges ? schema.c_str() : "none",
                       tableList.c_str(),
-                      filter.isEmpty() ? "none" : filter.c_str(),
+                      (includePostgresChanges && !filter.isEmpty()) ? filter.c_str() : "none",
                       _channelTopic.c_str(),
                       _accessToken.length());
-        Serial.printf("[REALTIME] Access token (full): %s\n", _accessToken.c_str());
-
-        int dotCount = 0;
-        for (size_t i = 0; i < _accessToken.length(); i++) {
-            if (_accessToken[i] == '.') {
-                dotCount++;
-            }
-        }
-        Serial.printf("[REALTIME] Token structure: dots=%d starts_with_ey=%d\n",
-                      dotCount, _accessToken.startsWith("ey") ? 1 : 0);
-
-        String claimsJson;
-        int decodeErr = 0;
-        String payloadSegment;
-        if (dotCount >= 2 && decodeJwtPayloadJson(_accessToken, claimsJson, &decodeErr, &payloadSegment)) {
-            JsonDocument claimsDoc;
-            DeserializationError err = deserializeJson(claimsDoc, claimsJson);
-            if (!err) {
-                String role = claimsDoc["role"] | "";
-                String tokenType = claimsDoc["token_type"] | "";
-                String pairingCode = claimsDoc["pairing_code"] | "";
-                String sub = claimsDoc["sub"] | "";
-                long exp = claimsDoc["exp"] | 0;
-                Serial.printf("[REALTIME] JWT claims: role=%s token_type=%s pairing_code=%s sub=%s exp=%ld\n",
-                              role.isEmpty() ? "?" : role.c_str(),
-                              tokenType.isEmpty() ? "?" : tokenType.c_str(),
-                              pairingCode.isEmpty() ? "?" : pairingCode.c_str(),
-                              sub.isEmpty() ? "?" : sub.c_str(),
-                              exp);
-            } else {
-                Serial.printf("[REALTIME] JWT decode failed: %s\n", err.c_str());
-            }
-        } else {
-            Serial.printf("[REALTIME] JWT decode failed: unable to parse token payload (err=%d payload_len=%d)\n",
-                          decodeErr, payloadSegment.length());
-            if (!payloadSegment.isEmpty()) {
-                Serial.printf("[REALTIME] JWT payload segment (base64url, sanitized): %s\n",
-                              payloadSegment.c_str());
-            }
-        }
         _loggedJoinDetails = true;
     }
     
-    String payloadJson;
-    serializeJson(payload, payloadJson);
-    Serial.printf("[REALTIME] Join payload: %s\n", payloadJson.c_str());
+    String payloadJson = buildRedactedJoinPayload(payload);
+    Serial.printf("[REALTIME] Join payload (redacted): %s\n", payloadJson.c_str());
 
     // Build Phoenix message
     String message = buildPhoenixMessage(_channelTopic, "phx_join", payload, _joinRef);
+    String payloadFull;
+    serializeJson(payload, payloadFull);
+    _lastJoinPayload = payloadFull;
     
     // Validate message was built successfully
     if (message.isEmpty()) {
@@ -520,7 +447,6 @@ void SupabaseRealtime::unsubscribe() {
     }
     
     _subscribed = false;
-    _channelTopic = "";
     
     Serial.println("[REALTIME] Unsubscribed from channel");
 }
@@ -545,21 +471,23 @@ RealtimeMessage SupabaseRealtime::getMessage() {
 
 String SupabaseRealtime::buildPhoenixMessage(const String& topic, const String& event,
                                               const JsonDocument& payload, int ref) {
-    // Phoenix message format: [join_ref, ref, topic, event, payload]
+    // Supabase Realtime protocol (v2) message format (object)
+    // { topic, event, payload, ref, join_ref }
     JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-    
-    if (event == "phx_join") {
-        arr.add(_joinRef);
-    } else {
-        arr.add(nullptr);  // null for non-join messages
+    doc["topic"] = topic;
+    doc["event"] = event;
+    doc["payload"] = payload;
+
+    int msgRef = (ref > 0 ? ref : _msgRef);
+    doc["ref"] = String(msgRef);
+
+    bool includeJoinRef = (event == "phx_join") || (event == "access_token") ||
+                          (event == "broadcast") || (event == "presence") ||
+                          (event == "phx_leave");
+    if (includeJoinRef && _joinRef > 0) {
+        doc["join_ref"] = String(_joinRef);
     }
-    
-    arr.add(ref > 0 ? ref : _msgRef);
-    arr.add(topic);
-    arr.add(event);
-    arr.add(payload);
-    
+
     String message;
     serializeJson(doc, message);
     return message;
@@ -575,7 +503,31 @@ bool SupabaseRealtime::parsePhoenixMessage(const String& message, String& topic,
         Serial.printf("[REALTIME] Parse error: %s\n", error.c_str());
         return false;
     }
-    
+
+    if (doc.is<JsonObject>()) {
+        topic = doc["topic"] | "";
+        event = doc["event"] | "";
+        payload = doc["payload"];
+
+        if (doc["ref"].is<const char*>()) {
+            ref = atoi(doc["ref"].as<const char*>());
+        } else if (doc["ref"].is<int>()) {
+            ref = doc["ref"].as<int>();
+        } else {
+            ref = 0;
+        }
+
+        if (doc["join_ref"].is<const char*>()) {
+            joinRef = atoi(doc["join_ref"].as<const char*>());
+        } else if (doc["join_ref"].is<int>()) {
+            joinRef = doc["join_ref"].as<int>();
+        } else {
+            joinRef = 0;
+        }
+        return true;
+    }
+
+    // Legacy Phoenix array format: [join_ref, ref, topic, event, payload]
     if (!doc.is<JsonArray>() || doc.size() < 5) {
         Serial.println("[REALTIME] Invalid message format");
         return false;
@@ -583,14 +535,12 @@ bool SupabaseRealtime::parsePhoenixMessage(const String& message, String& topic,
     
     JsonArray arr = doc.as<JsonArray>();
     
-    // Handle null join_ref
     if (arr[0].is<int>()) {
         joinRef = arr[0].as<int>();
     } else {
         joinRef = 0;
     }
     
-    // Handle null ref
     if (arr[1].is<int>()) {
         ref = arr[1].as<int>();
     } else {
@@ -611,8 +561,27 @@ void SupabaseRealtime::sendHeartbeat() {
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage("phoenix", "heartbeat", emptyPayload);
     if (_client && esp_websocket_client_is_connected(_client)) {
+        Serial.printf("[REALTIME] Sending heartbeat (ref=%d)\n", _msgRef);
         esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
+
+    if (_privateChannel) {
+        sendAccessToken();
+    }
+}
+
+void SupabaseRealtime::sendAccessToken() {
+    if (!_client || !esp_websocket_client_is_connected(_client)) {
+        return;
+    }
+    if (_accessToken.isEmpty() || _channelTopic.isEmpty()) {
+        return;
+    }
+    _msgRef++;
+    JsonDocument payload;
+    payload["access_token"] = _accessToken;
+    String message = buildPhoenixMessage(_channelTopic, "access_token", payload, _msgRef);
+    esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
 }
 
 void SupabaseRealtime::handleIncomingMessage(const String& message) {
@@ -656,6 +625,40 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                 Serial.printf("[REALTIME] Sent queued subscription (%d bytes)\n", sent);
                 instance->_pendingJoin = false;
                 instance->_pendingJoinMessage = "";
+                if (instance->_privateChannel) {
+                    instance->sendAccessToken();
+                }
+            }
+        } else if (!instance->_lastJoinPayload.isEmpty() &&
+                   !instance->_channelTopic.isEmpty() &&
+                   instance->_client && esp_websocket_client_is_connected(instance->_client)) {
+            JsonDocument payloadDoc;
+            if (!deserializeJson(payloadDoc, instance->_lastJoinPayload)) {
+                instance->_joinRef++;
+                instance->_msgRef++;
+                String msg = instance->buildPhoenixMessage(instance->_channelTopic, "phx_join",
+                                                           payloadDoc, instance->_joinRef);
+                int sent = esp_websocket_client_send_text(
+                    instance->_client,
+                    msg.c_str(),
+                    msg.length(),
+                    portMAX_DELAY);
+                if (sent < 0) {
+                    Serial.printf("[REALTIME] Failed to resend join (ret=%d)\n", sent);
+                } else {
+                    Serial.printf("[REALTIME] Resent join (%d bytes)\n", sent);
+                    if (instance->_privateChannel) {
+                        instance->sendAccessToken();
+                    }
+                }
+            }
+        } else {
+            if (instance->_channelTopic.isEmpty()) {
+                Serial.println("[REALTIME] No channel topic set - cannot join");
+            } else if (instance->_lastJoinPayload.isEmpty()) {
+                Serial.println("[REALTIME] No cached join payload - cannot join");
+            } else {
+                Serial.println("[REALTIME] Join not sent (no pending join)");
             }
         }
         return;
@@ -727,6 +730,14 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                               instance->_pendingMessage.length(), snippet.c_str());
                 instance->_loggedFirstMessage = true;
             }
+            if (config_manager.getPairingRealtimeDebug()) {
+                const int maxLen = 1024;
+                String raw = instance->_pendingMessage;
+                if (raw.length() > maxLen) {
+                    raw = raw.substring(0, maxLen) + "...";
+                }
+                Serial.printf("[REALTIME][RAW] %s\n", raw.c_str());
+            }
         }
         portEXIT_CRITICAL(&instance->_rxMux);
     }
@@ -735,9 +746,12 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
 
 void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& event,
                                              const JsonDocument& payload) {
+    // Any valid message indicates the socket is alive.
+    _lastHeartbeatResponse = millis();
+
     // Handle heartbeat response
     if (topic == "phoenix" && event == "phx_reply") {
-        _lastHeartbeatResponse = millis();
+        Serial.println("[REALTIME] Heartbeat reply received");
         return;
     }
     
@@ -747,6 +761,15 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
         if (status == "ok") {
             _subscribed = true;
             Serial.println("[REALTIME] Successfully joined channel");
+            if (config_manager.getPairingRealtimeDebug()) {
+                String responseStr;
+                if (payload["response"].is<JsonObject>()) {
+                    serializeJson(payload["response"], responseStr);
+                } else {
+                    serializeJson(payload, responseStr);
+                }
+                Serial.printf("[REALTIME] Join ok response: %s\n", responseStr.c_str());
+            }
         } else {
             Serial.printf("[REALTIME] Join failed: status=%s\n", status.c_str());
             
@@ -771,12 +794,33 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     
     // Handle postgres_changes events
     if (event == "postgres_changes") {
+        if (config_manager.getPairingRealtimeDebug()) {
+            String payloadStr;
+            serializeJson(payload, payloadStr);
+            Serial.printf("[REALTIME] postgres_changes inbound: %s\n", payloadStr.c_str());
+        }
+        JsonVariantConst dataVar;
+        if (payload["data"].is<JsonObjectConst>()) {
+            dataVar = payload["data"];
+        } else if (payload["data"].is<JsonArrayConst>()) {
+            JsonArrayConst dataArr = payload["data"].as<JsonArrayConst>();
+            if (!dataArr.isNull() && dataArr.size() > 0 && dataArr[0].is<JsonObjectConst>()) {
+                dataVar = dataArr[0];
+                Serial.printf("[REALTIME] postgres_changes array size=%d (using first)\n",
+                              dataArr.size());
+            }
+        } else if (payload.is<JsonObjectConst>() &&
+                   (payload["schema"].is<const char*>() || payload["table"].is<const char*>())) {
+            dataVar = payload.as<JsonObjectConst>();
+        }
+
         // Access data fields directly from const JsonDocument
-        if (payload["data"].is<JsonObject>()) {
+        if (!dataVar.isNull() && dataVar.is<JsonObjectConst>()) {
+            JsonObjectConst dataObj = dataVar.as<JsonObjectConst>();
             _lastMessage.valid = true;
-            _lastMessage.event = payload["data"]["type"].as<String>();  // INSERT, UPDATE, DELETE
-            _lastMessage.table = payload["data"]["table"].as<String>();
-            _lastMessage.schema = payload["data"]["schema"].as<String>();
+            _lastMessage.event = dataObj["type"] | dataObj["eventType"] | "";
+            _lastMessage.table = dataObj["table"] | dataObj["relation"] | "";
+            _lastMessage.schema = dataObj["schema"] | "";
             _lastMessage.payload = payload;
             _messagePending = true;
             
@@ -791,6 +835,9 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             }
         } else {
             Serial.println("[REALTIME] Invalid postgres_changes data format");
+            String payloadStr;
+            serializeJson(payload, payloadStr);
+            Serial.printf("[REALTIME] postgres_changes payload: %s\n", payloadStr.c_str());
         }
         return;
     }

@@ -35,8 +35,89 @@ additional_redirect_urls = ["https://display.5ls.us"]
 jwt_expiry = 3600
 enable_signup = false
 enable_anonymous_sign_ins = false
+signing_keys_path = "./signing_key.json"
 
 [auth.email]
 enable_signup = false
 double_confirm_changes = true
 enable_confirmations = false
+
+# Auth hook to set JWT claims (is_admin, disabled)
+# Uses Postgres function public.custom_access_token_hook for better performance
+# Note: Postgres functions for auth hooks may only work in production/cloud
+# For local dev, revert to HTTP Edge Function if this doesn't work
+[auth.hook.custom_access_token]
+enabled = false
+
+# Edge Function auth settings
+[functions.ack-command]
+verify_jwt = false
+
+[functions.admin-create-user]
+verify_jwt = false
+
+[functions.admin-delete-user]
+verify_jwt = false
+
+[functions.admin-update-user]
+verify_jwt = false
+
+[functions.admin-upsert-oauth-client]
+verify_jwt = false
+
+[functions.auth-hook-set-claims]
+verify_jwt = false
+
+[functions.broadcast-device-log]
+verify_jwt = false
+
+[functions.cleanup-logs]
+verify_jwt = false
+
+[functions.device-auth]
+verify_jwt = false
+
+[functions.exchange-pairing-code]
+verify_jwt = false
+
+[functions.get-firmware]
+verify_jwt = false
+
+[functions.get-manifest]
+verify_jwt = false
+
+[functions.insert-command]
+verify_jwt = false
+
+[functions.insert-device-log]
+verify_jwt = false
+
+[functions.poll-commands]
+verify_jwt = false
+
+[functions.post-device-state]
+verify_jwt = false
+
+[functions.provision-device]
+verify_jwt = false
+
+[functions.update-app-state]
+verify_jwt = false
+
+[functions.validate-device]
+verify_jwt = false
+
+[functions.webex-oauth-callback]
+verify_jwt = false
+
+[functions.webex-oauth-start]
+verify_jwt = false
+
+[functions.webex-status]
+verify_jwt = false
+
+[functions.webex-status-sweep]
+verify_jwt = false
+
+[functions.webex-token]
+verify_jwt = false

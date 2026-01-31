@@ -5,6 +5,7 @@
 
 #include "remote_logger.h"
 #include "../supabase/supabase_client.h"
+#include "esp_heap_caps.h"
 #include <stdarg.h>
 
 // Global instance
@@ -87,6 +88,18 @@ const char* RemoteLogger::levelToString(LogLevel level) {
 
 void RemoteLogger::sendRemote(LogLevel level, const char* tag, const char* message) {
     if (_supabase != nullptr && _supabase->isInitialized() && _supabase->isAuthenticated()) {
+        uint32_t freeHeap = ESP.getFreeHeap();
+        uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        if (freeHeap < 65000 || largestBlock < 40000) {
+            static unsigned long last_skip_log = 0;
+            unsigned long now = millis();
+            if (now - last_skip_log > 10000) {
+                last_skip_log = now;
+                Serial.printf("[RLOG] Skipping remote log (low heap free=%u block=%u)\n",
+                              freeHeap, largestBlock);
+            }
+            return;
+        }
         sendToSupabase(level, tag, message);
     }
 }

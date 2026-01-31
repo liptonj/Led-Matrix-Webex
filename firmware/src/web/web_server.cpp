@@ -52,7 +52,7 @@ WebServerManager::~WebServerManager() {
 }
 
 void WebServerManager::stop() {
-    if (!running) {
+    if (!running && !server && !dns_server) {
         return;
     }
     
@@ -79,6 +79,9 @@ void WebServerManager::stop() {
 }
 
 void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules, MDNSManager* mdns) {
+    if (running || server || dns_server) {
+        stop();
+    }
     config_manager = config;
     app_state = state;
     module_manager = modules;
@@ -118,6 +121,12 @@ void WebServerManager::setupCaptivePortal() {
     if (ap_ip == IPAddress(0, 0, 0, 0)) {
         captive_portal_active = false;
         return;
+    }
+
+    if (dns_server) {
+        dns_server->stop();
+        delete dns_server;
+        dns_server = nullptr;
     }
 
     dns_server = new DNSServer();

@@ -18,9 +18,9 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
+import { verifyDeviceToken } from "../_shared/jwt.ts";
 
 interface AckCommandRequest {
   command_id: string;
@@ -51,15 +51,7 @@ async function validateBearerToken(
   const token = authHeader.substring(7);
 
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(tokenSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
-
-    const payload = (await verify(token, key)) as unknown as TokenPayload;
+    const payload = await verifyDeviceToken(token, tokenSecret);
 
     // Verify token type
     if (payload.token_type !== "device") {

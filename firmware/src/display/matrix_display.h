@@ -44,6 +44,17 @@ enum class DisplayPage : uint8_t {
     IN_CALL = 2    // In-call with camera/mic status
 };
 
+enum class DisplayPageMode : uint8_t {
+    STATUS_ONLY = 0,
+    SENSORS_ONLY = 1,
+    ROTATE = 2
+};
+
+enum class StatusLayoutMode : uint8_t {
+    NAME = 0,     // Display name uses full line, sensors on separate page
+    SENSORS = 1   // Sensor bar inline, name shown in tiny text when space allows
+};
+
 /**
  * @brief Display data structure
  */
@@ -64,8 +75,14 @@ struct DisplayData {
     float ambient_noise = 0.0f;
     String right_metric = "tvoc";
     bool show_sensors = false;
-    bool sensor_page_enabled = true;  // Whether to show sensor page rotation
+    DisplayPageMode page_mode = DisplayPageMode::ROTATE;
+    StatusLayoutMode status_layout = StatusLayoutMode::SENSORS;
     bool wifi_connected = false;
+    uint8_t border_width = 1;         // Status border width (1-3 pixels)
+    uint16_t date_color = COLOR_CYAN;
+    uint16_t time_color = COLOR_WHITE;
+    uint16_t name_color = COLOR_ORANGE;
+    uint16_t metric_color = COLOR_BLUE;
     // Time and date
     int hour = 0;                   // 0-23
     int minute = 0;                 // 0-59
@@ -112,7 +129,7 @@ public:
      * @brief Show fallback screen when Webex is unavailable
      * @param ip_address Device IP address
      */
-    void showUnconfigured(const String& ip_address);
+    void showUnconfigured(const String& ip_address, const String& hostname = "");
 
     /**
      * @brief Show WiFi disconnected screen
@@ -201,15 +218,22 @@ private:
     void drawSmallText(int x, int y, const String& text, uint16_t color);
     void drawCenteredText(int y, const String& text, uint16_t color);
     void drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key);
+    void drawScrollingText(int y, const String& text, uint16_t color, int start_x, int max_width, const String& key);
+    void drawTextAutoScroll(int y, const String& text, uint16_t color, int content_x, int content_width, const String& key);
+    void drawTinyScrollingText(int y, const String& text, uint16_t color, int start_x, int max_width, const String& key);
     int getTextLineY(uint8_t line_index, uint8_t line_height) const;
     int getTextLineY(uint8_t line_index, uint8_t line_height, int top_offset) const;
     String normalizeIpText(const String& input);
     String sanitizeSingleLine(const String& input);
     void drawSensorBar(const DisplayData& data, int y);
+    void drawSensorBar(const DisplayData& data, int y, int content_x, int content_width);
     void drawRect(int x, int y, int w, int h, uint16_t color);
     void fillRect(int x, int y, int w, int h, uint16_t color);
     void drawPixel(int x, int y, uint16_t color);
-    void drawDateTimeLine(int y, const DisplayData& data, uint16_t color);
+    void drawStatusBorder(uint16_t color, uint8_t width);
+    void drawDateTimeLine(int y, const DisplayData& data, uint16_t date_color, uint16_t time_color);
+    void drawDateTimeLine(int y, const DisplayData& data, uint16_t date_color, uint16_t time_color,
+                          int content_x, int content_width);
     void drawTinyText(int x, int y, const String& text, uint16_t color);
     void drawTinyChar(int x, int y, char c, uint16_t color);
     int tinyTextWidth(const String& text) const;
@@ -226,6 +250,7 @@ private:
         String text;
         int offset = 0;
         unsigned long last_ms = 0;
+        uint16_t color = 0;
     };
 
     // Dynamic scroll states for different text elements

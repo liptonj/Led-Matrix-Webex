@@ -13,6 +13,23 @@ ImprovHandler* ImprovHandler::instance = nullptr;
 // Global instance
 ImprovHandler improv_handler;
 
+ImprovHandler::ImprovHandler()
+    : improv(nullptr),
+      config_manager(nullptr),
+      app_state(nullptr),
+      matrix_display(nullptr),
+      provisioning_active(false),
+      configured_via_improv(false),
+      initialized(false) {
+}
+
+ImprovHandler::~ImprovHandler() {
+    if (improv) {
+        delete improv;
+        improv = nullptr;
+    }
+}
+
 void ImprovHandler::begin(Stream* serial, ConfigManager* config, AppState* state, MatrixDisplay* display) {
     config_manager = config;
     app_state = state;
@@ -24,6 +41,10 @@ void ImprovHandler::begin(Stream* serial, ConfigManager* config, AppState* state
     Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
     
     // Create improv instance with serial stream
+    if (improv) {
+        delete improv;
+        improv = nullptr;
+    }
     improv = new ImprovWiFi(serial);
     
     // Set device info for Improv
@@ -95,7 +116,7 @@ void ImprovHandler::onImprovConnected(const char* ssid, const char* password) {
     
     // Show connected status on display (hostname shown later after mDNS init)
     if (instance->matrix_display) {
-        instance->matrix_display->showConnected(WiFi.localIP().toString(), "");
+        instance->matrix_display->showUnconfigured(WiFi.localIP().toString(), "");
     }
 }
 

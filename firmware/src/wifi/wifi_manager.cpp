@@ -122,7 +122,7 @@ void WiFiManager::setupWiFi() {
         Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
         // Note: hostname shown later after mDNS is initialized
         if (matrix_display) {
-            matrix_display->showConnected(WiFi.localIP().toString());
+            matrix_display->showUnconfigured(WiFi.localIP().toString(), "");
         }
     } else {
         Serial.println("[WIFI] Connection failed, starting AP mode for reconfiguration...");

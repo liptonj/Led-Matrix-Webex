@@ -200,11 +200,18 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["scroll_speed_ms"] = config_manager->getScrollSpeedMs();
     doc["page_interval_ms"] = config_manager->getPageIntervalMs();
     doc["sensor_page_enabled"] = config_manager->getSensorPageEnabled();
+    doc["display_pages"] = config_manager->getDisplayPages();
+    doc["status_layout"] = config_manager->getStatusLayout();
+    doc["date_color"] = config_manager->getDateColor();
+    doc["time_color"] = config_manager->getTimeColor();
+    doc["name_color"] = config_manager->getNameColor();
+    doc["metric_color"] = config_manager->getMetricColor();
     doc["poll_interval"] = config_manager->getWebexPollInterval();
     doc["xapi_poll_interval"] = config_manager->getXAPIPollInterval();
     // Boolean flags - always include as explicit booleans
     doc["has_webex_credentials"] = config_manager->hasWebexCredentials();
     doc["has_webex_tokens"] = config_manager->hasWebexTokens();
+    doc["webex_authenticated"] = app_state->webex_authenticated;  // Includes Supabase OAuth
     doc["has_xapi_device"] = config_manager->hasXAPIDevice();
     doc["xapi_device_id"] = config_manager->getXAPIDeviceId().isEmpty() ? "" : config_manager->getXAPIDeviceId();
 
@@ -326,6 +333,24 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
     if (doc["sensor_page_enabled"].is<bool>()) {
         config_manager->setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
+    }
+    if (doc["display_pages"].is<const char*>()) {
+        config_manager->setDisplayPages(doc["display_pages"].as<const char*>());
+    }
+    if (doc["status_layout"].is<const char*>()) {
+        config_manager->setStatusLayout(doc["status_layout"].as<const char*>());
+    }
+    if (doc["date_color"].is<const char*>()) {
+        config_manager->setDateColor(doc["date_color"].as<const char*>());
+    }
+    if (doc["time_color"].is<const char*>()) {
+        config_manager->setTimeColor(doc["time_color"].as<const char*>());
+    }
+    if (doc["name_color"].is<const char*>()) {
+        config_manager->setNameColor(doc["name_color"].as<const char*>());
+    }
+    if (doc["metric_color"].is<const char*>()) {
+        config_manager->setMetricColor(doc["metric_color"].as<const char*>());
     }
     if (doc["poll_interval"].is<int>()) {
         config_manager->setWebexPollInterval(doc["poll_interval"].as<uint16_t>());

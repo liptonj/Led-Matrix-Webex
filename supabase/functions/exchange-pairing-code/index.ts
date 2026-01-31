@@ -87,12 +87,18 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
+    // Get JWT signing material (ES256/RS256 preferred, HS256 fallback)
     // Note: This must match BRIDGE_APP_TOKEN_SECRET in bridge environment
     // for bridge token validation to work. Both should be set to the same value.
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-    if (!tokenSecret) {
-      console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
+    const supabaseJwtSecret = Deno.env.get("SUPABASE_JWT_SECRET");
+    const deviceJwtSecret = Deno.env.get("DEVICE_JWT_SECRET");
+    const deviceJwtPrivateJwk = Deno.env.get("DEVICE_JWT_PRIVATE_KEY_JWK");
+    const deviceJwtKid = Deno.env.get("DEVICE_JWT_KID");
+    const deviceJwtAlg = Deno.env.get("DEVICE_JWT_ALG");
+
+    const tokenSecret = supabaseJwtSecret || deviceJwtSecret;
+    if (!deviceJwtPrivateJwk && !tokenSecret) {
+      console.error("DEVICE_JWT_PRIVATE_KEY_JWK or SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
       return new Response(
         JSON.stringify({ error: "Server configuration error" }),
         {
@@ -137,34 +143,115 @@ Deno.serve(async (req) => {
     const expiresAt = now + TOKEN_TTL_SECONDS;
     const expiresAtISO = new Date(expiresAt * 1000).toISOString();
 
-    // Create JWT token
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(tokenSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
+    const payload = {
+      // Supabase expects sub to be a UUID for auth.uid()
+      sub: crypto.randomUUID(),
+      role: "authenticated",
+      aud: "authenticated",
+      pairing_code: device.pairing_code,
+      serial_number: device.serial_number,
+      device_id: device.device_id,
+      // "token_type" is used by RLS policies (must be "app")
+      token_type: "app",
+      // "type" field is used by bridge for token validation (must be "app_auth")
+      type: "app_auth",
+      iat: getNumericDate(0),
+      exp: getNumericDate(TOKEN_TTL_SECONDS),
+    };
 
-    const token = await create(
-      { alg: TOKEN_ALGORITHM, typ: "JWT" },
-      {
-        // Supabase expects sub to be a UUID for auth.uid()
-        sub: crypto.randomUUID(),
-        role: "authenticated",
-        aud: "authenticated",
-        pairing_code: device.pairing_code,
-        serial_number: device.serial_number,
-        device_id: device.device_id,
-        // "token_type" is used by RLS policies (must be "app")
-        token_type: "app",
-        // "type" field is used by bridge for token validation (must be "app_auth")
-        type: "app_auth",
-        iat: getNumericDate(0),
-        exp: getNumericDate(TOKEN_TTL_SECONDS),
-      },
-      key,
-    );
+    let token: string;
+    if (deviceJwtPrivateJwk) {
+      let jwk: JsonWebKey;
+      try {
+        jwk = JSON.parse(deviceJwtPrivateJwk);
+      } catch {
+        console.error("DEVICE_JWT_PRIVATE_KEY_JWK is not valid JSON");
+        return new Response(
+          JSON.stringify({ error: "Server configuration error" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (!deviceJwtKid && !jwk.kid) {
+        console.error("DEVICE_JWT_KID not configured and JWK is missing kid");
+        return new Response(
+          JSON.stringify({ error: "Server configuration error" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      const alg = deviceJwtAlg ?? jwk.alg ?? (jwk.kty === "EC" ? "ES256" : "RS256");
+      if (alg !== "ES256" && alg !== "RS256") {
+        console.error(`Unsupported DEVICE_JWT_ALG: ${alg}`);
+        return new Response(
+          JSON.stringify({ error: "Server configuration error" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (alg === "ES256" && (jwk.kty !== "EC" || jwk.crv !== "P-256")) {
+        console.error("DEVICE_JWT_PRIVATE_KEY_JWK must be EC P-256 for ES256");
+        return new Response(
+          JSON.stringify({ error: "Server configuration error" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      const jwkSanitized = { ...jwk } as JsonWebKey;
+      // deno-lint-ignore no-explicit-any
+      delete (jwkSanitized as any).key_ops;
+      // deno-lint-ignore no-explicit-any
+      delete (jwkSanitized as any).use;
+
+      const key =
+        alg === "ES256"
+          ? await crypto.subtle.importKey(
+              "jwk",
+              jwkSanitized,
+              { name: "ECDSA", namedCurve: "P-256" },
+              false,
+              ["sign"],
+            )
+          : await crypto.subtle.importKey(
+              "jwk",
+              jwkSanitized,
+              { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+              false,
+              ["sign"],
+            );
+
+      token = await create(
+        { alg, typ: "JWT", kid: deviceJwtKid ?? jwk.kid },
+        payload,
+        key,
+      );
+    } else {
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(tokenSecret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign", "verify"],
+      );
+
+      token = await create(
+        { alg: TOKEN_ALGORITHM, typ: "JWT" },
+        payload,
+        key,
+      );
+    }
 
     console.log(`Token issued for device ${device.serial_number} (expires ${expiresAtISO})`);
 

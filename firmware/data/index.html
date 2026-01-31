@@ -154,10 +154,10 @@
                 <div class="auth-section">
                     <h3>Authorization</h3>
                     <p id="auth-status">Status: <span id="webex-auth-status">Not connected</span></p>
-                    <button id="webex-auth-btn" class="btn">Connect to Webex</button>
+                    <button id="webex-auth-btn" class="btn">Authorize via display.5ls.us</button>
                     <div class="form-group">
-                        <p class="help-text" id="webex-redirect-note">Redirect URI will appear here after clicking Connect.</p>
-                        <input type="text" id="webex-redirect-uri" readonly placeholder="http://webex-display.local/oauth/callback">
+                        <p class="help-text" id="webex-redirect-note">Authorization link will appear here after clicking.</p>
+                        <input type="text" id="webex-redirect-uri" readonly placeholder="https://display.5ls.us/webexauth?pairing_code=XXXXXX">
                     </div>
                 </div>
                 <hr>
@@ -295,16 +295,56 @@
                         <span id="scroll-speed-value">250</span>
                     </div>
                     <div class="form-group">
-                        <label>
-                            <input type="checkbox" id="sensor-page-enabled" name="sensor_page_enabled" checked>
-                            Show sensor page
-                        </label>
-                        <p class="help-text">When enabled, display will rotate between status and sensor pages</p>
+                        <label for="display-pages">Pages to Show:</label>
+                        <select id="display-pages" name="display_pages">
+                            <option value="status">Status only</option>
+                            <option value="sensors">Sensors only</option>
+                            <option value="rotate">Rotate status &amp; sensors</option>
+                        </select>
+                        <p class="help-text">Sensors only requires MQTT data; otherwise it falls back to status</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="status-layout">Status Layout:</label>
+                        <select id="status-layout" name="status_layout">
+                            <option value="name">Name large, sensors separate</option>
+                            <option value="sensors">Sensors large, name small</option>
+                        </select>
+                        <p class="help-text">Controls which line is larger on the status page</p>
                     </div>
                     <div class="form-group">
                         <label for="page-interval">Page Switch Interval (seconds):</label>
                         <input type="range" id="page-interval" name="page_interval_ms" min="3" max="30" value="5">
                         <span id="page-interval-value">5</span>s
+                        <p class="help-text">Only used when pages are set to rotate</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="border-width">Status Border Width:</label>
+                        <select id="border-width" name="border_width">
+                            <option value="1">1 pixel (thin)</option>
+                            <option value="2">2 pixels (medium)</option>
+                            <option value="3">3 pixels (thick)</option>
+                        </select>
+                        <p class="help-text">Colored border around display indicates status</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="date-color">Date Color:</label>
+                        <input type="color" id="date-color" name="date_color" value="#00ffff">
+                        <p class="help-text">Date text color (independent of status)</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="time-color">Time Color:</label>
+                        <input type="color" id="time-color" name="time_color" value="#ffffff">
+                        <p class="help-text">Time text color (independent of status)</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="name-color">Name Color:</label>
+                        <input type="color" id="name-color" name="name_color" value="#ffa500">
+                        <p class="help-text">Name text color (independent of status)</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="metric-color">MQTT Metric Color:</label>
+                        <input type="color" id="metric-color" name="metric_color" value="#00bfff">
+                        <p class="help-text">Sensor metric text color (avoid status colors like green/yellow/red/purple)</p>
                     </div>
                     <button type="submit" class="btn btn-primary">Save Display Settings</button>
                 </form>

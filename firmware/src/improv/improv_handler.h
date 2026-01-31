@@ -29,6 +29,9 @@ class MatrixDisplay;
  */
 class ImprovHandler {
 public:
+    ImprovHandler();
+    ~ImprovHandler();
+
     /**
      * @brief Initialize the Improv handler
      * @param serial Pointer to the Serial stream (usually &Serial)

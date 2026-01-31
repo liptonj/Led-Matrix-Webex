@@ -24,8 +24,8 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { verifyDeviceToken } from "../_shared/jwt.ts";
 
 interface UpdateAppStateRequest {
   webex_status?: string;
@@ -97,15 +97,7 @@ async function validateAppToken(
   const token = authHeader.substring(7);
 
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(tokenSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
-
-    const payload = (await verify(token, key)) as unknown as TokenPayload;
+    const payload = await verifyDeviceToken(token, tokenSecret);
 
     // Verify token type - app tokens have type "app_auth"
     if (payload.token_type !== "app") {
@@ -223,36 +215,97 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Build update data - only app-owned columns
-    const updateData: Record<string, unknown> = {
-      app_connected: true,
-      app_last_seen: new Date().toISOString(),
-    };
-
-    if (typeof stateData.webex_status === "string") {
-      updateData.webex_status = stateData.webex_status;
-    }
-    if (typeof stateData.camera_on === "boolean") {
-      updateData.camera_on = stateData.camera_on;
-    }
-    if (typeof stateData.mic_muted === "boolean") {
-      updateData.mic_muted = stateData.mic_muted;
-    }
-    if (typeof stateData.in_call === "boolean") {
-      updateData.in_call = stateData.in_call;
-    }
-    if (typeof stateData.display_name === "string") {
-      updateData.display_name = stateData.display_name;
-    }
-
-    // Update pairings table and get device connection state
-    const { data: pairing, error: updateError } = await supabase
+    // First, fetch current status values to check if anything actually changed
+    const { data: currentPairing, error: fetchError } = await supabase
       .schema("display")
       .from("pairings")
-      .update(updateData)
+      .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected")
       .eq("pairing_code", appInfo.pairing_code)
+      .maybeSingle();
+
+    if (fetchError && fetchError.code !== "PGRST116") {
+      console.error("Failed to fetch current pairing:", fetchError);
+    }
+
+    // Track if any status-relevant fields are changing
+    let hasStatusChange = false;
+    const statusUpdateData: Record<string, unknown> = {};
+
+    // Only include status fields if they differ from current values
+    if (typeof stateData.webex_status === "string") {
+      if (!currentPairing || currentPairing.webex_status !== stateData.webex_status) {
+        statusUpdateData.webex_status = stateData.webex_status;
+        hasStatusChange = true;
+      }
+    }
+    if (typeof stateData.camera_on === "boolean") {
+      if (!currentPairing || currentPairing.camera_on !== stateData.camera_on) {
+        statusUpdateData.camera_on = stateData.camera_on;
+        hasStatusChange = true;
+      }
+    }
+    if (typeof stateData.mic_muted === "boolean") {
+      if (!currentPairing || currentPairing.mic_muted !== stateData.mic_muted) {
+        statusUpdateData.mic_muted = stateData.mic_muted;
+        hasStatusChange = true;
+      }
+    }
+    if (typeof stateData.in_call === "boolean") {
+      if (!currentPairing || currentPairing.in_call !== stateData.in_call) {
+        statusUpdateData.in_call = stateData.in_call;
+        hasStatusChange = true;
+      }
+    }
+    if (typeof stateData.display_name === "string" && stateData.display_name.trim()) {
+      if (!currentPairing || currentPairing.display_name !== stateData.display_name) {
+        statusUpdateData.display_name = stateData.display_name;
+        hasStatusChange = true;
+      }
+    }
+
+    // Check if app_connected state is changing (was disconnected, now connected)
+    const wasDisconnected = !currentPairing || !currentPairing.app_connected;
+    if (wasDisconnected) {
+      statusUpdateData.app_connected = true;
+      hasStatusChange = true;
+    }
+
+    const now = new Date().toISOString();
+
+    // ALWAYS update heartbeat table (does NOT trigger realtime to device)
+    await supabase
+      .schema("display")
+      .from("connection_heartbeats")
+      .upsert({
+        pairing_code: appInfo.pairing_code,
+        app_last_seen: now,
+        app_connected: true,
+      }, { onConflict: "pairing_code" });
+
+    // Get device connection state from heartbeat table
+    const { data: heartbeat } = await supabase
+      .schema("display")
+      .from("connection_heartbeats")
       .select("device_connected, device_last_seen")
-      .single();
+      .eq("pairing_code", appInfo.pairing_code)
+      .maybeSingle();
+
+    // ONLY update pairings table if status actually changed (triggers realtime)
+    let pairing = currentPairing;
+    let updateError: { code?: string; message?: string } | null = null;
+
+    if (hasStatusChange) {
+      const { data, error } = await supabase
+        .schema("display")
+        .from("pairings")
+        .update(statusUpdateData)
+        .eq("pairing_code", appInfo.pairing_code)
+        .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected")
+        .single();
+      
+      pairing = data;
+      updateError = error;
+    }
 
     if (updateError) {
       // If pairing doesn't exist, try to create it
@@ -274,13 +327,22 @@ Deno.serve(async (req) => {
               serial_number: device.serial_number,
               device_id: device.device_id,
               app_connected: true,
-              app_last_seen: new Date().toISOString(),
               ...stateData,
             });
 
           if (insertError) {
             console.error("Failed to create pairing:", insertError);
           }
+
+          // Also create heartbeat record
+          await supabase
+            .schema("display")
+            .from("connection_heartbeats")
+            .upsert({
+              pairing_code: appInfo.pairing_code,
+              app_last_seen: now,
+              app_connected: true,
+            }, { onConflict: "pairing_code" });
         }
 
         // Return default response for new pairing
@@ -307,11 +369,12 @@ Deno.serve(async (req) => {
     }
 
     // Check if device connection is stale (no heartbeat in 60s)
-    let deviceConnected = pairing?.device_connected ?? false;
-    if (deviceConnected && pairing?.device_last_seen) {
-      const lastSeen = new Date(pairing.device_last_seen).getTime();
-      const now = Date.now();
-      if (now - lastSeen > 60000) {
+    // Use heartbeat table data instead of pairings table
+    let deviceConnected = heartbeat?.device_connected ?? false;
+    if (deviceConnected && heartbeat?.device_last_seen) {
+      const lastSeen = new Date(heartbeat.device_last_seen as string).getTime();
+      const nowMs = Date.now();
+      if (nowMs - lastSeen > 60000) {
         deviceConnected = false;
       }
     }
@@ -319,7 +382,7 @@ Deno.serve(async (req) => {
     const response: UpdateAppStateResponse = {
       success: true,
       device_connected: deviceConnected,
-      device_last_seen: pairing?.device_last_seen ?? null,
+      device_last_seen: (heartbeat?.device_last_seen as string) ?? null,
     };
 
     return new Response(JSON.stringify(response), {

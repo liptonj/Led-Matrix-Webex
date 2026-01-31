@@ -111,6 +111,7 @@ private:
     bool update_pending;
     unsigned long last_reconnect;
     String latest_sensor_id;
+    bool last_connected_state = false;  // Track connection state for disconnect logging
     
     // Persistent storage for broker/topic - PubSubClient stores pointers, not copies
     String cached_broker;

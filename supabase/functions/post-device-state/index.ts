@@ -34,9 +34,9 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
+import { verifyDeviceToken } from "../_shared/jwt.ts";
 
 // Rate limit configuration
 const MAX_REQUESTS_PER_MINUTE = 12;
@@ -61,6 +61,7 @@ interface DeviceStateResponse {
   firmware_version?: string;
   ssid?: string;
   ota_partition?: string;
+  debug_enabled?: boolean;
 }
 
 interface TokenPayload {
@@ -85,15 +86,7 @@ async function validateBearerToken(
   const token = authHeader.substring(7);
 
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(tokenSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
-
-    const payload = (await verify(token, key)) as unknown as TokenPayload;
+    const payload = await verifyDeviceToken(token, tokenSecret);
 
     // Verify token type
   if (payload.token_type !== "device") {
@@ -234,42 +227,73 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Update pairings table with device telemetry
-    const updateData: Record<string, unknown> = {
-      device_connected: true,
-      device_last_seen: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
+
+    // Always fetch current debug_enabled so devices can react without separate realtime channel.
+    const { data: dev } = await supabase
+      .schema("display")
+      .from("devices")
+      .select("debug_enabled")
+      .eq("serial_number", deviceInfo.serial_number)
+      .single();
+
+    // ALWAYS update heartbeat table (does NOT trigger realtime to device)
+    await supabase
+      .schema("display")
+      .from("connection_heartbeats")
+      .upsert({
+        pairing_code: deviceInfo.pairing_code,
+        device_last_seen: now,
+        device_connected: true,
+      }, { onConflict: "pairing_code" });
+
+    // Build telemetry update data (only include fields that are provided)
+    const telemetryData: Record<string, unknown> = {};
+    let hasTelemetryUpdate = false;
 
     if (typeof stateData.rssi === "number") {
-      updateData.rssi = stateData.rssi;
+      telemetryData.rssi = stateData.rssi;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.free_heap === "number") {
-      updateData.free_heap = stateData.free_heap;
+      telemetryData.free_heap = stateData.free_heap;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.uptime === "number") {
-      updateData.uptime = stateData.uptime;
+      telemetryData.uptime = stateData.uptime;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.temperature === "number") {
-      updateData.temperature = stateData.temperature;
+      telemetryData.temperature = stateData.temperature;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.firmware_version === "string" && stateData.firmware_version) {
-      updateData.firmware_version = stateData.firmware_version;
+      telemetryData.firmware_version = stateData.firmware_version;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.ssid === "string" && stateData.ssid) {
-      updateData.ssid = stateData.ssid;
+      telemetryData.ssid = stateData.ssid;
+      hasTelemetryUpdate = true;
     }
     if (typeof stateData.ota_partition === "string" && stateData.ota_partition) {
-      updateData.ota_partition = stateData.ota_partition;
+      telemetryData.ota_partition = stateData.ota_partition;
+      hasTelemetryUpdate = true;
     }
 
-    // Update pairings and get current app state
-    const { data: pairing, error: updateError } = await supabase
-      .schema("display")
-      .from("pairings")
-      .update(updateData)
-      .eq("pairing_code", deviceInfo.pairing_code)
-      .select("pairing_code")
-      .single();
+    // Only update pairings table if there's telemetry data (reduces realtime noise)
+    // Pure heartbeats (no telemetry) only update the heartbeat table
+    let updateError: { code?: string; message?: string } | null = null;
+
+    if (hasTelemetryUpdate) {
+      const { error } = await supabase
+        .schema("display")
+        .from("pairings")
+        .update(telemetryData)
+        .eq("pairing_code", deviceInfo.pairing_code)
+        .select("pairing_code")
+        .single();
+      updateError = error;
+    }
 
     if (updateError) {
       // If pairing doesn't exist, try to create it
@@ -281,14 +305,22 @@ Deno.serve(async (req) => {
           .insert({
             pairing_code: deviceInfo.pairing_code,
             serial_number: deviceInfo.serial_number,
-            device_connected: true,
-            device_last_seen: new Date().toISOString(),
-            ...updateData,
+            ...telemetryData,
           });
 
         if (insertError) {
           console.error("Failed to create pairing:", insertError);
         }
+
+        // Also ensure heartbeat record exists
+        await supabase
+          .schema("display")
+          .from("connection_heartbeats")
+          .upsert({
+            pairing_code: deviceInfo.pairing_code,
+            device_last_seen: now,
+            device_connected: true,
+          }, { onConflict: "pairing_code" });
 
         // Return telemetry echo (no app state)
         const response: DeviceStateResponse = {
@@ -300,6 +332,7 @@ Deno.serve(async (req) => {
           firmware_version: stateData.firmware_version,
           ssid: stateData.ssid,
           ota_partition: stateData.ota_partition,
+          debug_enabled: dev?.debug_enabled === true,
         };
 
         return new Response(JSON.stringify(response), {
@@ -328,6 +361,7 @@ Deno.serve(async (req) => {
       firmware_version: stateData.firmware_version,
       ssid: stateData.ssid,
       ota_partition: stateData.ota_partition,
+      debug_enabled: dev?.debug_enabled === true,
     };
 
     return new Response(JSON.stringify(response), {

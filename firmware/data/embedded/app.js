@@ -138,10 +138,16 @@ function initTabs() {
 async function getUserContext() {
     try {
         const context = await state.webexApp.context.getUser();
+        const displayName = context.displayName || context.email.split('@')[0];
+
+        // Extract first name from displayName (or use firstName if provided by Webex)
+        const firstName = context.firstName || displayName.split(' ')[0];
+
         state.user = {
             id: context.id,
             email: context.email,
-            displayName: context.displayName || context.email.split('@')[0],
+            displayName: displayName,
+            firstName: firstName,
             orgId: context.orgId
         };
         updateUserDisplay();
@@ -409,6 +415,20 @@ async function loadDisplayConfig() {
         document.getElementById('display-name').value = state.displayConfig.display_name || '';
         document.getElementById('brightness').value = state.displayConfig.brightness || 128;
         document.getElementById('brightness-value').textContent = state.displayConfig.brightness || 128;
+        const displayPagesEl = document.getElementById('display-pages');
+        if (displayPagesEl) {
+            const pagesValue = state.displayConfig.display_pages ||
+                (state.displayConfig.sensor_page_enabled === false ? 'status' : 'rotate');
+            displayPagesEl.value = pagesValue;
+        }
+        const statusLayoutEl = document.getElementById('status-layout');
+        if (statusLayoutEl) {
+            statusLayoutEl.value = state.displayConfig.status_layout || 'sensors';
+        }
+        document.getElementById('date-color').value = state.displayConfig.date_color || '#00ffff';
+        document.getElementById('time-color').value = state.displayConfig.time_color || '#ffffff';
+        document.getElementById('name-color').value = state.displayConfig.name_color || '#ffa500';
+        document.getElementById('metric-color').value = state.displayConfig.metric_color || '#00bfff';
         document.getElementById('poll-interval').value = state.displayConfig.poll_interval || 30;
         document.getElementById('xapi-device-id').value = state.displayConfig.xapi_device_id || '';
         document.getElementById('xapi-poll-interval').value = state.displayConfig.xapi_poll_interval || 10;
@@ -419,9 +439,10 @@ async function loadDisplayConfig() {
         document.getElementById('ota-url').value = state.displayConfig.ota_url || '';
         document.getElementById('auto-update').checked = state.displayConfig.auto_update || false;
         
-        // Auth status
+        // Auth status - check actual authentication state (Supabase or local)
         const authStatus = document.getElementById('webex-auth-status');
-        if (state.displayConfig.has_webex_tokens) {
+        if (state.webex_authenticated) {
+            // Connected via Supabase OAuth or local tokens
             authStatus.textContent = 'Connected';
             authStatus.style.color = '#6cc04a';
         } else if (state.displayConfig.has_webex_credentials) {
@@ -479,6 +500,13 @@ function setupEventListeners() {
             device_name: document.getElementById('device-name').value,
             display_name: document.getElementById('display-name').value,
             brightness: parseInt(document.getElementById('brightness').value),
+            display_pages: document.getElementById('display-pages').value,
+            status_layout: document.getElementById('status-layout').value,
+            sensor_page_enabled: document.getElementById('display-pages').value === 'rotate',
+            date_color: document.getElementById('date-color').value,
+            time_color: document.getElementById('time-color').value,
+            name_color: document.getElementById('name-color').value,
+            metric_color: document.getElementById('metric-color').value,
             poll_interval: parseInt(document.getElementById('poll-interval').value)
         });
     });

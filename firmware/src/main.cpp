@@ -38,6 +38,12 @@
 #include "time/time_manager.h"
 #include "wifi/wifi_manager.h"
 
+// New modular components
+#include "sync/sync_manager.h"
+#include "realtime/realtime_manager.h"
+#include "device/device_info.h"
+#include "commands/command_processor.h"
+
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
@@ -50,7 +56,6 @@ MDNSManager mdns_manager;
 WebServerManager web_server;
 WebexClient webex_client;
 XAPIWebSocket xapi_websocket;
-SupabaseRealtime supabaseRealtimeDevices;
 PairingManager pairing_manager;
 MerakiMQTTClient mqtt_client;
 OTAManager ota_manager;
@@ -69,13 +74,6 @@ void update_display();
 void check_for_updates();
 void handleSupabaseCommand(const SupabaseCommand& cmd);
 void handleRealtimeMessage(const RealtimeMessage& msg);
-void handleRealtimeDeviceMessage(const RealtimeMessage& msg);
-void syncWithSupabase();
-bool initSupabaseRealtime();
-bool initSupabaseRealtimeDevices();
-String buildStatusJson();
-String buildTelemetryJson();
-String buildConfigJson();
 bool provisionDeviceWithSupabase();
 
 static void logHeapStatus(const char* label) {
@@ -90,6 +88,101 @@ static bool hasSafeTlsHeap(uint32_t min_free, uint32_t min_block) {
     return ESP.getFreeHeap() >= min_free &&
            heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= min_block;
 }
+
+static void handleLowHeapRecovery(unsigned long now) {
+    static unsigned long lowHeapSince = 0;
+    static unsigned long lastRecovery = 0;
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    const uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint32_t kLowHeapFree = 50000;    // Increased from 40000
+    const uint32_t kLowHeapBlock = 30000;   // Increased from 25000
+    const uint32_t kCriticalFree = 40000;   // Increased from 32000
+    const unsigned long kLowHeapDuration = 10000;  // Reduced from 15000 (react faster)
+    const unsigned long kCriticalDuration = 2000;  // Reduced from 3000 (react faster)
+    const unsigned long kRecoveryCooldown = 30000;
+
+    const bool lowHeap = (freeHeap < kLowHeapFree || largestBlock < kLowHeapBlock);
+    const bool criticalHeap = (freeHeap < kCriticalFree);
+
+    if (lowHeap) {
+        if (lowHeapSince == 0) {
+            lowHeapSince = now;
+        }
+        const unsigned long duration = now - lowHeapSince;
+        if (((duration >= kLowHeapDuration) || (criticalHeap && duration >= kCriticalDuration)) &&
+            now - lastRecovery >= kRecoveryCooldown) {
+            lastRecovery = now;
+            Serial.printf("[HEAP] Low heap recovery triggered (free=%u block=%u)\n",
+                          freeHeap, largestBlock);
+            // Disconnect realtime to free heap
+            supabaseRealtime.disconnect();
+            app_state.realtime_defer_until = now + 60000UL;
+            Serial.println("[HEAP] Freed realtime connection to recover heap");
+        }
+        return;
+    }
+
+    lowHeapSince = 0;
+}
+
+struct HeapTrendMonitor {
+    static constexpr uint8_t kSamples = 8;
+    static constexpr unsigned long kSampleIntervalMs = 5000;
+    uint32_t free_samples[kSamples] = {};
+    uint32_t block_samples[kSamples] = {};
+    uint8_t count = 0;
+    uint8_t index = 0;
+    unsigned long last_sample = 0;
+    unsigned long last_log = 0;
+
+    void sample(unsigned long now) {
+        if (now - last_sample < kSampleIntervalMs) {
+            return;
+        }
+        last_sample = now;
+        free_samples[index] = ESP.getFreeHeap();
+        block_samples[index] = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        index = (index + 1) % kSamples;
+        if (count < kSamples) {
+            count++;
+        }
+    }
+
+    void logIfTrending(unsigned long now) {
+        if (count < kSamples || now - last_log < 30000) {
+            return;
+        }
+
+        bool free_dropping = true;
+        bool block_dropping = true;
+        uint32_t prev_free = free_samples[(index + kSamples - count) % kSamples];
+        uint32_t prev_block = block_samples[(index + kSamples - count) % kSamples];
+        for (uint8_t i = 1; i < count; i++) {
+            uint8_t idx = (index + kSamples - count + i) % kSamples;
+            uint32_t cur_free = free_samples[idx];
+            uint32_t cur_block = block_samples[idx];
+            if (cur_free + 256 >= prev_free) {
+                free_dropping = false;
+            }
+            if (cur_block + 256 >= prev_block) {
+                block_dropping = false;
+            }
+            prev_free = cur_free;
+            prev_block = cur_block;
+        }
+
+        if (free_dropping || block_dropping) {
+            last_log = now;
+            Serial.printf("[HEAP] Trend warning: free%s block%s (last=%u block=%u)\n",
+                          free_dropping ? "↓" : "-",
+                          block_dropping ? "↓" : "-",
+                          free_samples[(index + kSamples - 1) % kSamples],
+                          block_samples[(index + kSamples - 1) % kSamples]);
+        }
+    }
+};
+
+// Command queue management moved to command_processor module
 
 /**
  * @brief Arduino setup function
@@ -270,9 +363,7 @@ void setup() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.println("[IMPROV] Provisioning complete, continuing boot...");
         if (display_ok) {
-            // Show IP only for now - hostname shown after mDNS init
-            matrix_display.showConnected(WiFi.localIP().toString(), "");
-            delay(2000);  // Show connected screen briefly
+            matrix_display.showUnconfigured(WiFi.localIP().toString(), "");
         }
         
         // If WiFi was configured via Improv (from ESP Web Tools), mark boot successful early
@@ -323,6 +414,18 @@ void setup() {
     pairing_manager.begin();
     Serial.printf("[INIT] Pairing code: %s\n", pairing_manager.getCode().c_str());
 
+    // Initialize command processor
+    Serial.println("[INIT] Initializing command processor...");
+    commandProcessor.begin();
+
+    // Initialize sync manager
+    Serial.println("[INIT] Initializing sync manager...");
+    syncManager.begin();
+
+    // Initialize realtime manager
+    Serial.println("[INIT] Initializing realtime manager...");
+    realtimeManager.begin();
+
     // Register device with Supabase on first boot (requires WiFi + Supabase URL)
     if (app_state.wifi_connected) {
         provisionDeviceWithSupabase();
@@ -355,6 +458,19 @@ void setup() {
             if (!targetVersion.isEmpty()) {
                 Serial.printf("[INIT] Target firmware version from Supabase: %s\n", 
                               targetVersion.c_str());
+            }
+            
+            // Immediately update device_connected so embedded app knows device is online
+            if (hasSafeTlsHeap(65000, 40000)) {
+                Serial.println("[INIT] Sending initial device state to mark device as connected...");
+                int rssi = WiFi.RSSI();
+                uint32_t freeHeap = ESP.getFreeHeap();
+                uint32_t uptime = millis() / 1000;
+                float temp = app_state.temperature;
+                SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+                if (appState.valid) {
+                    DeviceInfo::applyAppState(appState);
+                }
             }
             
             Serial.println("[INIT] Deferring Supabase Realtime init until after OTA/web server settle...");
@@ -412,21 +528,6 @@ void setup() {
         ota_manager.setManifestUrl(ota_url);
     }
 
-    // Perform immediate OTA check when WiFi is connected
-    // This fixes the issue where the first OTA check was delayed by 1 hour after boot
-    // because last_ota_check starts at 0 and millis() takes an hour to exceed the threshold
-    if (app_state.wifi_connected) {
-        Serial.println("[OTA] Performing immediate update check on boot...");
-        check_for_updates();
-        app_state.last_ota_check = millis();  // Reset timer after check
-        logHeapStatus("after ota check");
-
-        unsigned long deferUntil = millis() + 8000UL;  // short post-OTA cooldown
-        if (app_state.realtime_defer_until < deferUntil) {
-            app_state.realtime_defer_until = deferUntil;
-        }
-    }
-
     // Initialize serial command handler (for web installer WiFi setup)
     Serial.println("[INIT] Initializing serial command handler...");
     serial_commands_begin();
@@ -438,11 +539,9 @@ void setup() {
     // Only do this after all critical initialization succeeded
     boot_validator.markBootSuccessful();
 
-    // Show connection info briefly on display
     if (app_state.wifi_connected) {
         String hostname = mdns_manager.getHostname();
-        matrix_display.showConnected(WiFi.localIP().toString(), hostname);
-        delay(3000);  // Show for 3 seconds
+        matrix_display.showUnconfigured(WiFi.localIP().toString(), hostname);
         Serial.printf("[INIT] Device ready at http://%s or http://%s.local\n",
                       WiFi.localIP().toString().c_str(), hostname.c_str());
     }
@@ -453,12 +552,16 @@ void setup() {
  */
 void loop() {
     unsigned long current_time = millis();
+    static HeapTrendMonitor heap_trend;
     static uint32_t last_min_heap_logged = 0;
     uint32_t min_heap = ESP.getMinFreeHeap();
     if (last_min_heap_logged == 0 || min_heap < last_min_heap_logged) {
         last_min_heap_logged = min_heap;
         logHeapStatus("min_free_heap");
     }
+    handleLowHeapRecovery(current_time);
+    heap_trend.sample(current_time);
+    heap_trend.logIfTrending(current_time);
 
     // Process Improv Wi-Fi commands (for ESP Web Tools WiFi provisioning)
     // This must be called frequently to respond to Improv requests
@@ -500,7 +603,7 @@ void loop() {
             // Sync time
             setup_time();
 
-            matrix_display.showConnected(WiFi.localIP().toString(), mdns_manager.getHostname());
+            matrix_display.showUnconfigured(WiFi.localIP().toString(), mdns_manager.getHostname());
         } else {
             Serial.println("[WIFI] Connection failed!");
             app_state.wifi_connected = false;
@@ -514,16 +617,8 @@ void loop() {
     static bool was_wifi_connected = false;
     if (app_state.wifi_connected && !was_wifi_connected) {
         // WiFi just connected (either first time or after disconnect)
-        // Trigger immediate OTA check so we don't wait 1 hour after reconnect
-        Serial.println("[OTA] WiFi connected - checking for updates...");
-        check_for_updates();
-        app_state.last_ota_check = millis();  // Reset timer after check
-        logHeapStatus("after ota check (reconnect)");
-
-        unsigned long deferUntil = millis() + 8000UL;
-        if (app_state.realtime_defer_until < deferUntil) {
-            app_state.realtime_defer_until = deferUntil;
-        }
+        // Defer OTA checks to keep startup responsive.
+        app_state.last_ota_check = millis();
     }
     was_wifi_connected = app_state.wifi_connected;
 
@@ -576,7 +671,10 @@ void loop() {
     // Supabase Phase A: State sync via Edge Functions (replaces bridge for pairing)
     // =========================================================================
     if (app_state.wifi_connected && supabaseClient.isInitialized()) {
-        syncWithSupabase();
+        syncManager.loop(current_time);
+        realtimeManager.loop(current_time);
+        commandProcessor.processPendingAcks();
+        commandProcessor.processPendingActions();
         // Keep remote logger in sync with server-side debug toggle
         remoteLogger.setRemoteEnabled(supabaseClient.isRemoteDebugEnabled());
     }
@@ -585,91 +683,14 @@ void loop() {
     // Supabase Phase B: Realtime WebSocket for instant command delivery
     // =========================================================================
     {
-        static unsigned long lastRealtimeInit = 0;
-        String anonKey = config_manager.getSupabaseAnonKey();
-        
+        // Handle realtime resubscribe request
         if (app_state.supabase_realtime_resubscribe) {
             app_state.supabase_realtime_resubscribe = false;
-            supabaseRealtime.disconnect();
-            initSupabaseRealtime();
+            realtimeManager.reconnect();
         }
 
-        // Try to initialize realtime if we have credentials but aren't connected
-        if (app_state.wifi_connected && app_state.supabase_connected && 
-            !anonKey.isEmpty() && !supabaseRealtime.isSocketConnected() &&
-            !supabaseRealtime.isConnecting()) {
-            if (current_time < app_state.realtime_defer_until) {
-                static bool defer_logged = false;
-                if (!defer_logged) {
-                    Serial.println("[REALTIME] Deferring realtime init until boot settles");
-                    defer_logged = true;
-                }
-            } else {
-                unsigned long interval = supabaseRealtime.hasEverConnected() ? 60000UL : 15000UL;
-                if (millis() - lastRealtimeInit > interval) {
-                    if (!supabaseClient.isRequestInFlight()) {
-                        lastRealtimeInit = millis();
-                        Serial.println("[REALTIME] Attempting to reconnect...");
-                        initSupabaseRealtime();
-                    } else {
-                        static unsigned long last_skip_log = 0;
-                        if (millis() - last_skip_log > 10000) {
-                            last_skip_log = millis();
-                            Serial.println("[REALTIME] Reconnect skipped (HTTP request in flight)");
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Process realtime events once socket is connected (subscription happens asynchronously)
-        if (app_state.wifi_connected && supabaseRealtime.isSocketConnected()) {
-            supabaseRealtime.loop();
-            
-            // Process any pending realtime messages
-            if (supabaseRealtime.hasMessage()) {
-                RealtimeMessage msg = supabaseRealtime.getMessage();
-                handleRealtimeMessage(msg);
-            }
-        }
-    }
-
-    // =========================================================================
-    // Supabase Phase B (devices): Realtime updates for admin debug toggle
-    // =========================================================================
-    {
-        static unsigned long lastDeviceRealtimeInit = 0;
-        String anonKey = config_manager.getSupabaseAnonKey();
-
-        if (app_state.wifi_connected && app_state.supabase_connected &&
-            !anonKey.isEmpty() && !supabaseRealtimeDevices.isSocketConnected() &&
-            !supabaseRealtimeDevices.isConnecting()) {
-            if (current_time < app_state.realtime_defer_until) {
-                static bool defer_logged = false;
-                if (!defer_logged) {
-                    Serial.println("[REALTIME] Deferring device realtime init until boot settles");
-                    defer_logged = true;
-                }
-            } else {
-                unsigned long interval = supabaseRealtimeDevices.hasEverConnected() ? 60000UL : 20000UL;
-                if (millis() - lastDeviceRealtimeInit > interval) {
-                    if (!supabaseClient.isRequestInFlight()) {
-                        lastDeviceRealtimeInit = millis();
-                        Serial.println("[REALTIME] Attempting device realtime reconnect...");
-                        initSupabaseRealtimeDevices();
-                    }
-                }
-            }
-        }
-
-        if (app_state.wifi_connected && supabaseRealtimeDevices.isSocketConnected()) {
-            supabaseRealtimeDevices.loop();
-
-            if (supabaseRealtimeDevices.hasMessage()) {
-                RealtimeMessage msg = supabaseRealtimeDevices.getMessage();
-                handleRealtimeDeviceMessage(msg);
-            }
-        }
+        // Realtime connection management and event processing
+        realtimeManager.loop(current_time);
     }
 
     // Process xAPI WebSocket
@@ -693,9 +714,10 @@ void loop() {
     const unsigned long SUPABASE_STALE_THRESHOLD = 60000UL;  // 60 seconds
     bool supabase_status_stale = (app_state.last_supabase_sync > 0) &&
                                  (current_time - app_state.last_supabase_sync > SUPABASE_STALE_THRESHOLD);
-    bool need_api_fallback = !app_state.embedded_app_connected || supabase_status_stale;
+    bool need_api_fallback = !app_state.embedded_app_connected &&
+                             (supabase_status_stale || !app_state.webex_status_received);
 
-    if (need_api_fallback && app_state.webex_authenticated) {
+    if (need_api_fallback && (supabaseClient.isAuthenticated() || app_state.webex_authenticated)) {
         unsigned long poll_interval = config_manager.getWebexPollInterval() * 1000UL;
 
         if (current_time - app_state.last_poll_time >= poll_interval) {
@@ -703,25 +725,80 @@ void loop() {
 
             // Log why we're polling (for debugging)
             if (supabase_status_stale) {
-                Serial.println("[WEBEX] Supabase status stale, polling API directly");
+                Serial.println("[WEBEX] Supabase status stale, polling cloud status");
             } else if (!app_state.embedded_app_connected) {
-                Serial.println("[WEBEX] Embedded app not connected, polling API directly");
+                Serial.println("[WEBEX] Embedded app not connected, polling cloud status");
             }
 
-            WebexPresence presence;
-            if (webex_client.getPresence(presence)) {
-                app_state.webex_status = presence.status;
+            bool cloud_synced = false;
+            String cloud_status;
 
-                // Auto-populate display name with firstName if not already set
-                if (config_manager.getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {
-                    config_manager.setDisplayName(presence.first_name);
-                    Serial.printf("[WEBEX] Auto-populated display name: %s\n", presence.first_name.c_str());
+            if (supabaseClient.isAuthenticated()) {
+                if (!hasSafeTlsHeap(65000, 40000)) {
+                    Serial.println("[SUPABASE] Skipping webex-status - low heap for TLS");
+                } else {
+                    cloud_synced = supabaseClient.syncWebexStatus(cloud_status);
+                    if (cloud_synced) {
+                        app_state.webex_status = cloud_status;
+                        app_state.webex_status_received = true;
+                        app_state.webex_status_source = "cloud";
+                        Serial.printf("[WEBEX] Cloud status: %s\n", cloud_status.c_str());
+                    }
                 }
+            }
 
-                // Derive in_call from status if not connected to xAPI
-                if (!app_state.xapi_connected) {
-                    app_state.in_call = (presence.status == "meeting" || presence.status == "busy" ||
-                                         presence.status == "call" || presence.status == "presenting");
+            if (!cloud_synced) {
+                if (app_state.embedded_app_connected) {
+                    return;
+                }
+                if (supabaseClient.isWebexTokenMissing() && app_state.wifi_connected) {
+                    Serial.println("[WEBEX] No Webex token; skipping local fallback");
+                    return;
+                }
+                if (!app_state.webex_authenticated) {
+                    static unsigned long last_local_skip_log = 0;
+                    unsigned long now = millis();
+                    if (now - last_local_skip_log > 60000) {
+                        last_local_skip_log = now;
+                        Serial.println("[WEBEX] Local API auth unavailable; skipping local fallback");
+                    }
+                    return;
+                }
+                Serial.println("[WEBEX] Cloud status failed, polling local API");
+                WebexPresence presence;
+                if (webex_client.getPresence(presence)) {
+                    app_state.webex_status = presence.status;
+                    app_state.webex_status_received = true;
+                    app_state.webex_status_source = "local";
+
+                    // Auto-populate display name with firstName if not already set
+                    if (config_manager.getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {
+                        config_manager.setDisplayName(presence.first_name);
+                        Serial.printf("[WEBEX] Auto-populated display name: %s\n", presence.first_name.c_str());
+                    }
+
+                    // Derive in_call from status if not connected to xAPI
+                    if (!app_state.xapi_connected) {
+                        app_state.in_call = (presence.status == "meeting" || presence.status == "busy" ||
+                                             presence.status == "call" || presence.status == "presenting");
+                    }
+
+                    JsonDocument payload;
+                    payload["webex_status"] = presence.status;
+                    if (!presence.display_name.isEmpty()) {
+                        payload["display_name"] = presence.display_name;
+                    } else if (!presence.first_name.isEmpty()) {
+                        payload["display_name"] = presence.first_name;
+                    }
+                    payload["camera_on"] = app_state.camera_on;
+                    payload["mic_muted"] = app_state.mic_muted;
+                    payload["in_call"] = app_state.in_call;
+
+                    String body;
+                    serializeJson(payload, body);
+
+                    String ignored;
+                    supabaseClient.syncWebexStatus(ignored, body);
                 }
             }
         }
@@ -735,6 +812,9 @@ void loop() {
 
         mqtt_client.loop();
         app_state.mqtt_connected = mqtt_client.isConnected();
+        if (!app_state.mqtt_connected) {
+            app_state.sensor_data_valid = false;
+        }
 
         // Check for sensor updates
         static String last_display_sensor;
@@ -754,6 +834,8 @@ void loop() {
                 app_state.ambient_noise = latest.ambient_noise;
                 app_state.sensor_mac = latest.sensor_mac;
                 last_display_sensor = latest.sensor_mac;
+                app_state.sensor_data_valid = latest.valid;
+                app_state.last_sensor_update = millis();
             }
         }
 
@@ -771,10 +853,13 @@ void loop() {
                 app_state.ambient_noise = selected.ambient_noise;
                 app_state.sensor_mac = configured_display_sensor;
                 last_display_sensor = configured_display_sensor;
+                app_state.sensor_data_valid = selected.valid;
+                app_state.last_sensor_update = millis();
             }
         }
     } else {
         app_state.mqtt_connected = false;
+        app_state.sensor_data_valid = false;
     }
 
     // Attempt Supabase provisioning (retry until successful)
@@ -794,7 +879,9 @@ void loop() {
         last_connection_print = current_time;
         if (app_state.wifi_connected) {
             // Determine status source for logging
-            const char* status_source = app_state.embedded_app_connected ? "Supabase/App" : "API";
+            const char* status_source = app_state.webex_status_source.isEmpty()
+                ? (app_state.embedded_app_connected ? "embedded_app" : "unknown")
+                : app_state.webex_status_source.c_str();
 
             Serial.println();
             Serial.println("=== WEBEX STATUS DISPLAY ===");
@@ -805,10 +892,10 @@ void loop() {
                           app_state.webex_status.c_str(),
                           status_source,
                           app_state.mqtt_connected ? "Yes" : "No");
-            Serial.printf("Supabase: %s | App: %s | API Auth: %s\n",
+            Serial.printf("Supabase: %s | App: %s | Webex Source: %s\n",
                           app_state.supabase_connected ? "Yes" : "No",
                           app_state.embedded_app_connected ? "Yes" : "No",
-                          app_state.webex_authenticated ? "Yes" : "No");
+                          status_source);
             Serial.println("============================");
         }
     }
@@ -820,20 +907,126 @@ void loop() {
     delay(10);
 }
 
+static String extractFirstName(const String& input) {
+    String name = input;
+    name.trim();
+    if (name.isEmpty()) {
+        return name;
+    }
+    int comma = name.indexOf(',');
+    if (comma >= 0) {
+        String after = name.substring(comma + 1);
+        after.trim();
+        if (!after.isEmpty()) {
+            name = after;
+        }
+    }
+    int space = name.indexOf(' ');
+    if (space > 0) {
+        name = name.substring(0, space);
+    }
+    return name;
+}
+
+static uint16_t parseColor565(const String& input, uint16_t fallback) {
+    String hex = input;
+    hex.trim();
+    if (hex.startsWith("#")) {
+        hex = hex.substring(1);
+    }
+    if (hex.startsWith("0x") || hex.startsWith("0X")) {
+        hex = hex.substring(2);
+    }
+    if (hex.length() == 3) {
+        String expanded;
+        expanded.reserve(6);
+        for (size_t i = 0; i < 3; i++) {
+            char c = hex[i];
+            expanded += c;
+            expanded += c;
+        }
+        hex = expanded;
+    }
+    if (hex.length() != 6) {
+        return fallback;
+    }
+    char* endptr = nullptr;
+    long value = strtol(hex.c_str(), &endptr, 16);
+    if (endptr == nullptr || *endptr != '\0') {
+        return fallback;
+    }
+    uint8_t r = (value >> 16) & 0xFF;
+    uint8_t g = (value >> 8) & 0xFF;
+    uint8_t b = value & 0xFF;
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+}
+
 /**
  * @brief Update the LED matrix display
  */
 void update_display() {
     static unsigned long last_update = 0;
+    static unsigned long last_config_refresh = 0;
+    static uint8_t last_brightness = 0;
+    static bool brightness_initialized = false;
+
+    struct DisplayConfigCache {
+        bool initialized = false;
+        uint8_t brightness = 128;
+        uint16_t scroll_speed_ms = 60;
+        uint16_t page_interval_ms = 5000;
+        uint8_t border_width = 1;
+        String display_pages;
+        String status_layout;
+        String display_metric;
+        String display_name;
+        String display_name_short;
+        String device_name;
+        String device_name_short;
+        uint16_t date_color = COLOR_CYAN;
+        uint16_t time_color = COLOR_WHITE;
+        uint16_t name_color = COLOR_ORANGE;
+        uint16_t metric_color = COLOR_BLUE;
+        bool use_24h = false;
+        uint8_t date_format = 0;
+    };
+    static DisplayConfigCache cached;
 
     // Update display at ~30 FPS
     if (millis() - last_update < 33) {
         return;
     }
     last_update = millis();
-    matrix_display.setBrightness(config_manager.getBrightness());
-    matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
-    matrix_display.setPageIntervalMs(config_manager.getPageIntervalMs());
+    const unsigned long now = millis();
+    if (!cached.initialized || now - last_config_refresh >= 1000) {
+        last_config_refresh = now;
+        cached.initialized = true;
+        cached.brightness = config_manager.getBrightness();
+        cached.scroll_speed_ms = config_manager.getScrollSpeedMs();
+        cached.page_interval_ms = config_manager.getPageIntervalMs();
+        cached.border_width = config_manager.getBorderWidth();
+        cached.display_pages = config_manager.getDisplayPages();
+        cached.status_layout = config_manager.getStatusLayout();
+        cached.display_metric = config_manager.getDisplayMetric();
+        cached.display_name = config_manager.getDisplayName();
+        cached.display_name_short = extractFirstName(cached.display_name);
+        cached.device_name = config_manager.getDeviceName();
+        cached.device_name_short = extractFirstName(cached.device_name);
+        cached.date_color = parseColor565(config_manager.getDateColor(), COLOR_CYAN);
+        cached.time_color = parseColor565(config_manager.getTimeColor(), COLOR_WHITE);
+        cached.name_color = parseColor565(config_manager.getNameColor(), COLOR_ORANGE);
+        cached.metric_color = parseColor565(config_manager.getMetricColor(), COLOR_BLUE);
+        cached.use_24h = config_manager.use24HourTime();
+        cached.date_format = config_manager.getDateFormatCode();
+    }
+
+    if (!brightness_initialized || last_brightness != cached.brightness) {
+        last_brightness = cached.brightness;
+        brightness_initialized = true;
+        matrix_display.setBrightness(cached.brightness);
+    }
+    matrix_display.setScrollSpeedMs(cached.scroll_speed_ms);
+    matrix_display.setPageIntervalMs(cached.page_interval_ms);
 
     // Show updating screen during OTA file upload
     if (web_server.isOTAUploadInProgress()) {
@@ -854,11 +1047,20 @@ void update_display() {
     }
 
     // If Webex is unavailable, keep showing a generic screen with IP
+    // Only show unconfigured screen if WiFi is connected but no services are connected
+    // Note: Even "unknown" status should be displayed on the status page, not trigger unconfigured screen
+    const bool has_app_presence = app_state.embedded_app_connected || app_state.supabase_app_connected;
     if (app_state.wifi_connected &&
         !app_state.xapi_connected &&
         !app_state.webex_authenticated &&
-        !app_state.mqtt_connected) {
-        matrix_display.showUnconfigured(WiFi.localIP().toString());
+        !app_state.mqtt_connected &&
+        !has_app_presence &&
+        !app_state.webex_status_received) {
+        // Show unconfigured screen only when truly no services are connected
+        // Status display will show "unknown" status if webex_status is "unknown"
+        const uint16_t unconfigured_scroll = cached.scroll_speed_ms < 60 ? cached.scroll_speed_ms : 60;
+        matrix_display.setScrollSpeedMs(unconfigured_scroll);
+        matrix_display.showUnconfigured(WiFi.localIP().toString(), cached.device_name);
         return;
     }
 
@@ -867,12 +1069,12 @@ void update_display() {
     data.webex_status = app_state.webex_status;
     // Prefer embedded app display name (from Webex SDK), fallback to config, then device name
     if (app_state.embedded_app_connected && !app_state.embedded_app_display_name.isEmpty()) {
-        data.display_name = app_state.embedded_app_display_name;
-    } else if (!config_manager.getDisplayName().isEmpty()) {
-        data.display_name = config_manager.getDisplayName();
+        data.display_name = extractFirstName(app_state.embedded_app_display_name);
+    } else if (!cached.display_name_short.isEmpty()) {
+        data.display_name = cached.display_name_short;
     } else {
         // Fallback to device name if no display name is configured
-        data.display_name = config_manager.getDeviceName();
+        data.display_name = cached.device_name_short;
     }
     data.camera_on = app_state.camera_on;
     data.mic_muted = app_state.mic_muted;
@@ -887,9 +1089,23 @@ void update_display() {
     data.co2_ppm = app_state.co2_ppm;
     data.pm2_5 = app_state.pm2_5;
     data.ambient_noise = app_state.ambient_noise;
-    data.right_metric = config_manager.getDisplayMetric();
-    data.show_sensors = app_state.mqtt_connected;
-    data.sensor_page_enabled = config_manager.getSensorPageEnabled();
+    data.right_metric = cached.display_metric;
+    data.show_sensors = app_state.mqtt_connected && app_state.sensor_data_valid;
+    const String& page_mode = cached.display_pages;
+    if (page_mode == "status") {
+        data.page_mode = DisplayPageMode::STATUS_ONLY;
+    } else if (page_mode == "sensors") {
+        data.page_mode = DisplayPageMode::SENSORS_ONLY;
+    } else {
+        data.page_mode = DisplayPageMode::ROTATE;
+    }
+    const String& status_layout = cached.status_layout;
+    data.status_layout = (status_layout == "name") ? StatusLayoutMode::NAME : StatusLayoutMode::SENSORS;
+    data.border_width = cached.border_width;
+    data.date_color = cached.date_color;
+    data.time_color = cached.time_color;
+    data.name_color = cached.name_color;
+    data.metric_color = cached.metric_color;
 
     // Connection indicators
     data.wifi_connected = app_state.wifi_connected;
@@ -916,8 +1132,8 @@ void update_display() {
         data.month = last_timeinfo.tm_mon + 1;  // tm_mon is 0-11
         data.time_valid = true;
     }
-    data.use_24h = config_manager.use24HourTime();
-    data.date_format = config_manager.getDateFormatCode();
+    data.use_24h = cached.use_24h;
+    data.date_format = cached.date_format;
 
     matrix_display.update(data);
 }
@@ -937,10 +1153,15 @@ bool provisionDeviceWithSupabase() {
     static unsigned long last_attempt = 0;
     static unsigned long last_time_warn = 0;
     static unsigned long last_pending_log = 0;
+    static unsigned long last_low_heap_log = 0;
     const unsigned long retry_interval_ms = 60000;  // 60 seconds
     const unsigned long pending_retry_interval_ms = 1800000;  // 30 minutes
 
     if (provisioned) {
+        return true;
+    }
+    if (supabaseClient.isAuthenticated() || app_state.supabase_connected) {
+        provisioned = true;
         return true;
     }
     if (!app_state.wifi_connected) {
@@ -972,7 +1193,16 @@ bool provisionDeviceWithSupabase() {
     if (millis() - last_attempt < retry_interval) {
         return false;
     }
-    last_attempt = millis();
+    unsigned long now = millis();
+    last_attempt = now;
+
+    if (!hasSafeTlsHeap(65000, 40000)) {
+        if (now - last_low_heap_log > 60000) {
+            last_low_heap_log = now;
+            Serial.println("[SUPABASE] Skipping provisioning - low heap for TLS");
+        }
+        return false;
+    }
 
     if (supabase_url.endsWith("/")) {
         supabase_url.remove(supabase_url.length() - 1);
@@ -994,7 +1224,7 @@ bool provisionDeviceWithSupabase() {
     http.setTimeout(15000);
     http.addHeader("Content-Type", "application/json");
 
-    JsonDocument payload;
+    StaticJsonDocument<512> payload;
     payload["serial_number"] = deviceCredentials.getSerialNumber();
     payload["key_hash"] = deviceCredentials.getKeyHash();
     payload["firmware_version"] = FIRMWARE_VERSION;
@@ -1008,6 +1238,7 @@ bool provisionDeviceWithSupabase() {
     }
 
     String body;
+    body.reserve(256);
     serializeJson(payload, body);
 
     int http_code = http.POST(body);
@@ -1076,6 +1307,20 @@ bool provisionDeviceWithSupabase() {
             config_manager.setSupabaseAnonKey(authAnonKey);
             Serial.println("[SUPABASE] Anon key updated from device-auth");
         }
+        
+        // Immediately update device_connected so embedded app knows device is online
+        if (hasSafeTlsHeap(65000, 40000)) {
+            Serial.println("[SUPABASE] Sending initial device state after provisioning...");
+            int rssi = WiFi.RSSI();
+            uint32_t freeHeap = ESP.getFreeHeap();
+            uint32_t uptime = millis() / 1000;
+            float temp = app_state.temperature;
+            SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+            if (appState.valid) {
+                DeviceInfo::applyAppState(appState);
+            }
+        }
+        
         app_state.realtime_defer_until = millis() + 8000UL;
         Serial.println("[SUPABASE] Authenticated after provisioning");
     } else {
@@ -1090,12 +1335,10 @@ bool provisionDeviceWithSupabase() {
  */
 void check_for_updates() {
     Serial.println("[OTA] Checking for updates...");
-    bool realtime_was_active = supabaseRealtime.isConnected() || supabaseRealtime.isConnecting() ||
-                               supabaseRealtimeDevices.isConnected() || supabaseRealtimeDevices.isConnecting();
+    bool realtime_was_active = supabaseRealtime.isConnected() || supabaseRealtime.isConnecting();
     if (realtime_was_active) {
         Serial.println("[OTA] Pausing realtime during OTA check");
         supabaseRealtime.disconnect();
-        supabaseRealtimeDevices.disconnect();
         app_state.realtime_defer_until = millis() + 15000UL;
     }
 
@@ -1140,129 +1383,14 @@ void check_for_updates() {
 /**
  * @brief Build JSON string with current device status
  */
-String buildStatusJson() {
-    JsonDocument doc;
-
-    doc["wifi_connected"] = app_state.wifi_connected;
-    doc["webex_authenticated"] = app_state.webex_authenticated;
-    doc["webex_status"] = app_state.webex_status;
-    doc["supabase_approval_pending"] = app_state.supabase_approval_pending;
-    doc["supabase_disabled"] = app_state.supabase_disabled;
-    doc["supabase_blacklisted"] = app_state.supabase_blacklisted;
-    doc["supabase_deleted"] = app_state.supabase_deleted;
-    doc["camera_on"] = app_state.camera_on;
-    doc["mic_muted"] = app_state.mic_muted;
-    doc["in_call"] = app_state.in_call;
-    doc["pairing_code"] = pairing_manager.getCode();
-    doc["ip_address"] = WiFi.localIP().toString();
-    doc["mac_address"] = WiFi.macAddress();
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["uptime"] = millis() / 1000;
-    doc["firmware_version"] = FIRMWARE_VERSION;
-    doc["rssi"] = WiFi.RSSI();
-
-    // Sensor data
-    doc["temperature"] = app_state.temperature;
-    doc["humidity"] = app_state.humidity;
-    doc["door_status"] = app_state.door_status;
-    doc["air_quality"] = app_state.air_quality_index;
-    doc["tvoc"] = app_state.tvoc;
-
-    String result;
-    serializeJson(doc, result);
-    return result;
-}
 
 /**
  * @brief Build JSON string with telemetry-only fields
  */
-String buildTelemetryJson() {
-    JsonDocument doc;
-
-    doc["rssi"] = WiFi.RSSI();
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["uptime"] = millis() / 1000;
-    doc["firmware_version"] = FIRMWARE_VERSION;
-    doc["temperature"] = app_state.temperature;
-    doc["ssid"] = WiFi.SSID();
-
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    if (running) {
-        doc["ota_partition"] = running->label;
-    }
-
-    String result;
-    serializeJson(doc, result);
-    return result;
-}
-
-/**
- * @brief Apply Supabase app state response to local app_state
- */
-void applySupabaseAppState(const SupabaseAppState& appState) {
-    if (!appState.valid) {
-        return;
-    }
-
-    app_state.last_supabase_sync = millis();
-    app_state.supabase_connected = true;
-    app_state.supabase_app_connected = appState.app_connected;
-
-    app_state.embedded_app_connected = appState.app_connected;
-
-    // If Supabase reports app connected, use it as source of truth
-    if (appState.app_connected) {
-        app_state.webex_status = appState.webex_status;
-
-        if (!appState.display_name.isEmpty()) {
-            app_state.embedded_app_display_name = appState.display_name;
-        }
-
-        // Only update camera/mic/call state if not using xAPI (more accurate)
-        if (!app_state.xapi_connected) {
-            app_state.camera_on = appState.camera_on;
-            app_state.mic_muted = appState.mic_muted;
-            app_state.in_call = appState.in_call;
-
-            // Fallback: derive in_call from status if not explicitly set
-            if (!appState.in_call && (appState.webex_status == "meeting" || 
-                                       appState.webex_status == "busy" ||
-                                       appState.webex_status == "call" || 
-                                       appState.webex_status == "presenting")) {
-                app_state.in_call = true;
-            }
-        }
-    }
-}
 
 /**
  * @brief Build JSON string with current device config
  */
-String buildConfigJson() {
-    JsonDocument doc;
-
-    doc["device_name"] = config_manager.getDeviceName();
-    doc["display_name"] = config_manager.getDisplayName();
-    doc["brightness"] = config_manager.getBrightness();
-    doc["scroll_speed_ms"] = config_manager.getScrollSpeedMs();
-    doc["page_interval_ms"] = config_manager.getPageIntervalMs();
-    doc["sensor_page_enabled"] = config_manager.getSensorPageEnabled();
-    doc["poll_interval"] = config_manager.getWebexPollInterval();
-    doc["time_zone"] = config_manager.getTimeZone();
-    doc["time_format"] = config_manager.getTimeFormat();
-    doc["date_format"] = config_manager.getDateFormat();
-    doc["ntp_server"] = config_manager.getNtpServer();
-    doc["has_webex_credentials"] = config_manager.hasWebexCredentials();
-    doc["has_webex_tokens"] = config_manager.hasWebexTokens();
-    doc["ota_url"] = config_manager.getOTAUrl();
-    doc["auto_update"] = config_manager.getAutoUpdate();
-    doc["pairing_code"] = pairing_manager.getCode();
-    doc["tls_verify"] = config_manager.getTlsVerify();
-
-    String result;
-    serializeJson(doc, result);
-    return result;
-}
 
 /**
  * @brief Sync device state with Supabase Edge Functions
@@ -1273,142 +1401,6 @@ String buildConfigJson() {
  * - Polls for pending commands
  * - Executes and acknowledges commands
  */
-void syncWithSupabase() {
-    static unsigned long lastSync = 0;
-    static unsigned long lastCommandPoll = 0;
-    static bool retryAuth = false;
-    static unsigned long last_time_warn = 0;
-    
-    unsigned long now = millis();
-
-    if (!app_state.time_synced) {
-        if (now - last_time_warn > 60000) {
-            last_time_warn = now;
-            Serial.println("[SUPABASE] Waiting for NTP sync before contacting server");
-        }
-        return;
-    }
-
-    if (app_state.supabase_approval_pending || app_state.supabase_disabled ||
-        app_state.supabase_blacklisted || app_state.supabase_deleted) {
-        return;
-    }
-    
-    // Telemetry cadence: every 5 minutes (or on-demand via realtime command)
-    const unsigned long syncInterval = 300000;
-    const bool realtime_active = supabaseRealtime.isConnected() || supabaseRealtimeDevices.isConnected();
-    const bool realtime_connecting = supabaseRealtime.isConnecting() || supabaseRealtimeDevices.isConnecting();
-    unsigned long commandPollInterval = (realtime_active || realtime_connecting) ? 0 :
-        (app_state.supabase_app_connected ? 5000 : 15000);
-    
-    // Handle authentication retry
-    if (retryAuth && now - lastSync > 60000) {
-        if (supabaseClient.authenticate()) {
-            app_state.supabase_connected = true;
-            retryAuth = false;
-            Serial.println("[SUPABASE] Re-authentication successful");
-
-            String authAnonKey = supabaseClient.getAnonKey();
-            if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
-                config_manager.setSupabaseAnonKey(authAnonKey);
-                Serial.println("[SUPABASE] Anon key updated from device-auth");
-            }
-            
-            // Update realtime token if realtime is initialized
-            String anonKey = config_manager.getSupabaseAnonKey();
-            if (!anonKey.isEmpty()) {
-                String newToken = supabaseClient.getAccessToken();
-                supabaseRealtime.setAccessToken(newToken);
-                supabaseRealtimeDevices.setAccessToken(newToken);
-                Serial.println("[REALTIME] Token updated after re-authentication");
-            }
-        } else {
-            SupabaseAuthError authError = supabaseClient.getLastAuthError();
-            if (authError == SupabaseAuthError::InvalidSignature) {
-                Serial.println("[SUPABASE] Invalid signature - triggering reprovision");
-                provisionDeviceWithSupabase();
-            } else if (authError == SupabaseAuthError::ApprovalRequired) {
-                app_state.supabase_approval_pending = true;
-            } else if (authError == SupabaseAuthError::Disabled) {
-                app_state.supabase_disabled = true;
-                Serial.println("[SUPABASE] Device disabled by admin");
-            } else if (authError == SupabaseAuthError::Blacklisted) {
-                app_state.supabase_blacklisted = true;
-                Serial.println("[SUPABASE] Device blacklisted by admin");
-            } else if (authError == SupabaseAuthError::Deleted) {
-                app_state.supabase_deleted = true;
-                Serial.println("[SUPABASE] Device deleted - clearing credentials");
-                deviceCredentials.resetCredentials();
-                delay(200);
-                ESP.restart();
-            }
-            lastSync = now;  // Prevent rapid retry
-            return;
-        }
-    }
-    
-    // Skip if not authenticated
-    if (!supabaseClient.isAuthenticated()) {
-        if (!retryAuth) {
-            retryAuth = true;
-            Serial.println("[SUPABASE] Not authenticated - will retry");
-        }
-        return;
-    }
-    
-    // Avoid overlapping TLS handshakes while realtime is connecting
-    if (realtime_connecting) {
-        static unsigned long last_skip_log = 0;
-        if (now - last_skip_log > 10000) {
-            last_skip_log = now;
-            Serial.println("[SUPABASE] Skipping HTTP sync while realtime connects");
-        }
-        return;
-    }
-
-    // Post device state periodically
-    if (now - lastSync >= syncInterval) {
-        lastSync = now;
-        
-        // Gather device telemetry
-        int rssi = WiFi.RSSI();
-        uint32_t freeHeap = ESP.getFreeHeap();
-        uint32_t uptime = millis() / 1000;
-        float temp = app_state.temperature;  // From sensor if available
-        
-        if (!hasSafeTlsHeap(65000, 40000)) {
-            Serial.println("[SUPABASE] Skipping state sync - low heap for TLS");
-        } else {
-        // Post state and get app status back (include firmware version)
-        SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
-        if (appState.valid) {
-            applySupabaseAppState(appState);
-        }
-        }
-    }
-    
-    // Poll for commands (can be more frequent than state sync)
-    if (commandPollInterval > 0 && now - lastCommandPoll >= commandPollInterval) {
-        lastCommandPoll = now;
-        if (!hasSafeTlsHeap(65000, 40000)) {
-            Serial.println("[SUPABASE] Skipping command poll - low heap for TLS");
-            return;
-        }
-
-        SupabaseCommand commands[10];
-        int count = supabaseClient.pollCommands(commands, 10);
-        
-        for (int i = 0; i < count; i++) {
-            if (commands[i].valid) {
-                Serial.printf("[SUPABASE] Processing command: %s (id=%s)\n",
-                              commands[i].command.c_str(), commands[i].id.c_str());
-                
-                // Handle the command
-                handleSupabaseCommand(commands[i]);
-            }
-        }
-    }
-}
 
 /**
  * @brief Handle commands received from Supabase
@@ -1421,28 +1413,33 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
     String error = "";
     
     if (cmd.command == "get_status") {
-        response = buildTelemetryJson();
+        response = DeviceInfo::buildStatusJson();
         
     } else if (cmd.command == "get_telemetry") {
         int rssi = WiFi.RSSI();
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t uptime = millis() / 1000;
         float temp = app_state.temperature;
-        SupabaseAppState appState = supabaseClient.postDeviceState(
-            rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
-        if (!appState.valid) {
+        if (!hasSafeTlsHeap(65000, 40000)) {
             success = false;
-            error = "get_telemetry failed";
+            error = "low_heap";
         } else {
-            applySupabaseAppState(appState);
-            response = buildTelemetryJson();
+            SupabaseAppState appState = supabaseClient.postDeviceState(
+                rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+            if (!appState.valid) {
+                success = false;
+                error = "get_telemetry failed";
+            } else {
+                DeviceInfo::applyAppState(appState);
+                response = DeviceInfo::buildTelemetryJson();
+            }
         }
 
     } else if (cmd.command == "get_troubleshooting_status") {
-        response = buildStatusJson();
+        response = DeviceInfo::buildStatusJson();
 
     } else if (cmd.command == "get_config") {
-        response = buildConfigJson();
+        response = DeviceInfo::buildConfigJson();
         
     } else if (cmd.command == "set_config") {
         JsonDocument doc;
@@ -1474,6 +1471,24 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
             if (doc["sensor_page_enabled"].is<bool>()) {
                 config_manager.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
             }
+            if (doc["display_pages"].is<const char*>()) {
+                config_manager.setDisplayPages(doc["display_pages"].as<const char*>());
+            }
+            if (doc["status_layout"].is<const char*>()) {
+                config_manager.setStatusLayout(doc["status_layout"].as<const char*>());
+            }
+            if (doc["date_color"].is<const char*>()) {
+                config_manager.setDateColor(doc["date_color"].as<String>());
+            }
+            if (doc["time_color"].is<const char*>()) {
+                config_manager.setTimeColor(doc["time_color"].as<String>());
+            }
+            if (doc["name_color"].is<const char*>()) {
+                config_manager.setNameColor(doc["name_color"].as<String>());
+            }
+            if (doc["metric_color"].is<const char*>()) {
+                config_manager.setMetricColor(doc["metric_color"].as<String>());
+            }
             if (doc["time_zone"].is<const char*>()) {
                 config_manager.setTimeZone(doc["time_zone"].as<String>());
                 applyTimeConfig(config_manager, &app_state);
@@ -1487,8 +1502,47 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
             if (doc["tls_verify"].is<bool>()) {
                 config_manager.setTlsVerify(doc["tls_verify"].as<bool>());
             }
+            // Update MQTT config if broker is provided (indicates MQTT update intent)
+            if (doc["mqtt_broker"].is<const char*>()) {
+                // Get current values as defaults (for fields not provided)
+                String currentBroker = config_manager.getMQTTBroker();
+                uint16_t currentPort = config_manager.getMQTTPort();
+                String currentUsername = config_manager.getMQTTUsername();
+                String currentPassword = config_manager.getMQTTPassword();
+                String currentTopic = config_manager.getMQTTTopic();
+                
+                // Update only provided fields, keep current values for others
+                String broker = doc["mqtt_broker"].as<String>();
+                // Port: use provided value if present, otherwise keep current
+                uint16_t port = doc["mqtt_port"].is<int>() ? doc["mqtt_port"].as<uint16_t>() : currentPort;
+                // Username: use provided value if present (even if empty), otherwise keep current
+                String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : currentUsername;
+                // Password: only update if explicitly provided
+                String password = doc["mqtt_password"].is<const char*>() ? doc["mqtt_password"].as<String>() : currentPassword;
+                bool updatePassword = doc["mqtt_password"].is<const char*>();
+                // Topic: use provided value if present, otherwise keep current
+                String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : currentTopic;
+                
+                config_manager.updateMQTTConfig(broker, port, username, password, updatePassword, topic);
+                Serial.println("[CMD-SB] MQTT config updated");
+                mqtt_client.invalidateConfig();  // Reconnect with new MQTT settings
+            }
+            if (doc["display_sensor_mac"].is<const char*>()) {
+                config_manager.setDisplaySensorMac(doc["display_sensor_mac"].as<String>());
+            }
+            if (doc["display_metric"].is<const char*>()) {
+                config_manager.setDisplayMetric(doc["display_metric"].as<String>());
+            }
+            if (doc["sensor_macs"].is<const char*>()) {
+                config_manager.setSensorMacs(doc["sensor_macs"].as<String>());
+            } else if (doc["sensor_serial"].is<const char*>()) {
+                config_manager.setSensorSerial(doc["sensor_serial"].as<String>());
+            }
+            if (doc["poll_interval"].is<int>()) {
+                config_manager.setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
+            }
             
-            response = buildConfigJson();
+            response = DeviceInfo::buildConfigJson();
             Serial.println("[CMD-SB] Config updated");
         }
         
@@ -1518,19 +1572,12 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         serializeJson(resp, response);
         
     } else if (cmd.command == "reboot") {
-        // Ack first, then reboot
-        supabaseClient.ackCommand(cmd.id, true, "", "");
-        delay(500);
-        ESP.restart();
-        return;  // Won't reach here
+        commandProcessor.queuePendingAction(PendingCommandAction::Reboot, cmd.id);
+        return;
         
     } else if (cmd.command == "factory_reset") {
-        // Ack first, then reset
-        supabaseClient.ackCommand(cmd.id, true, "", "");
-        config_manager.factoryReset();
-        delay(500);
-        ESP.restart();
-        return;  // Won't reach here
+        commandProcessor.queuePendingAction(PendingCommandAction::FactoryReset, cmd.id);
+        return;
         
     } else {
         success = false;
@@ -1538,7 +1585,10 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
     }
     
     // Send acknowledgment
-    supabaseClient.ackCommand(cmd.id, success, response, error);
+    const bool ackQueued = commandProcessor.sendOrQueueAck(cmd.id, success, response, error);
+    if (ackQueued) {
+        commandProcessor.markProcessed(cmd.id);
+    }
 }
 
 /**
@@ -1547,165 +1597,10 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
  * Phase B provides real-time command delivery via WebSocket instead of polling.
  * This reduces latency and server load but requires the Supabase anon key.
  */
-bool initSupabaseRealtime() {
-    // Debug: isolate realtime subscriptions (1=commands only, 2=pairings only, 0=both)
-    static const int kRealtimeSubscriptionMode = 1;
-    static unsigned long last_realtime_error_log = 0;
-    String anonKey = config_manager.getSupabaseAnonKey();
-    
-    // Skip if anon key not configured (Phase A polling will continue to work)
-    if (anonKey.isEmpty()) {
-        Serial.println("[REALTIME] Skipping - no anon key configured (Phase A polling active)");
-        app_state.realtime_error = "anon_key_missing";
-        app_state.last_realtime_error = millis();
-        return false;
-    }
-
-    if (!app_state.time_synced) {
-        Serial.println("[REALTIME] Skipping - time not synced yet");
-        app_state.realtime_error = "time_not_synced";
-        app_state.last_realtime_error = millis();
-        return false;
-    }
-
-    const uint32_t min_heap = supabaseRealtime.minHeapRequired();
-    if (ESP.getFreeHeap() < min_heap) {
-        Serial.printf("[REALTIME] Skipping - low heap (%lu < %lu)\n",
-                      ESP.getFreeHeap(), (unsigned long)min_heap);
-        logHeapStatus("realtime low heap");
-        app_state.realtime_error = "low_heap";
-        app_state.last_realtime_error = millis();
-        return false;
-    }
-    
-    String supabaseUrl = config_manager.getSupabaseUrl();
-    String accessToken = supabaseClient.getAccessToken();
-    
-    if (supabaseUrl.isEmpty() || accessToken.isEmpty()) {
-        Serial.println("[REALTIME] Cannot initialize - missing URL or token");
-        app_state.realtime_error = "missing_url_or_token";
-        app_state.last_realtime_error = millis();
-        return false;
-    }
-    
-    Serial.println("[REALTIME] Initializing Phase B realtime connection...");
-    
-    // Set message handler for realtime events
-    supabaseRealtime.setMessageHandler(handleRealtimeMessage);
-    
-    // Initialize WebSocket connection
-    supabaseRealtime.begin(supabaseUrl, anonKey, accessToken);
-    
-    // Subscribe to commands for this device's pairing code (queue if not connected yet)
-    String pairingCode = pairing_manager.getCode();
-    if (!pairingCode.isEmpty()) {
-        String filter = "pairing_code=eq." + pairingCode;
-        if (kRealtimeSubscriptionMode == 1) {
-            const String tables[] = { "commands" };
-            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
-            if (queued) {
-                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
-                              pairingCode.c_str());
-                app_state.realtime_error = "";
-                return true;
-            }
-        } else if (kRealtimeSubscriptionMode == 2) {
-            const String tables[] = { "pairings" };
-            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
-            if (queued) {
-                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
-                              pairingCode.c_str());
-                app_state.realtime_error = "";
-                return true;
-            }
-        } else {
-            const String tables[] = { "commands", "pairings" };
-            bool queued = supabaseRealtime.subscribeMultiple("display", tables, 2, filter);
-            if (queued) {
-                Serial.printf("[REALTIME] Subscription requested for pairing code: %s\n",
-                              pairingCode.c_str());
-                app_state.realtime_error = "";
-                return true;
-            }
-        }
-    }
-
-    Serial.println("[REALTIME] Connection timeout - will retry");
-    app_state.realtime_error = "connection_timeout";
-    app_state.last_realtime_error = millis();
-    unsigned long now = millis();
-    if (now - last_realtime_error_log > 600000) {  // 10 minutes
-        last_realtime_error_log = now;
-        JsonDocument meta;
-        meta["reason"] = "connection_timeout";
-        meta["heap"] = ESP.getFreeHeap();
-        meta["time"] = (unsigned long)time(nullptr);
-        String metaStr;
-        serializeJson(meta, metaStr);
-        supabaseClient.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
-    }
-    return supabaseRealtime.isSocketConnected();
-}
 
 /**
  * @brief Initialize Supabase Realtime for device updates (admin debug toggle)
  */
-bool initSupabaseRealtimeDevices() {
-    // Debug: disable device realtime to isolate pairing channel
-    static const bool kEnableDeviceRealtime = false;
-    if (!kEnableDeviceRealtime) {
-        return false;
-    }
-    String anonKey = config_manager.getSupabaseAnonKey();
-    if (anonKey.isEmpty()) {
-        app_state.realtime_devices_error = "anon_key_missing";
-        app_state.last_realtime_devices_error = millis();
-        return false;
-    }
-
-    if (!app_state.time_synced) {
-        app_state.realtime_devices_error = "time_not_synced";
-        app_state.last_realtime_devices_error = millis();
-        return false;
-    }
-
-    const uint32_t min_heap = supabaseRealtimeDevices.minHeapRequired();
-    if (ESP.getFreeHeap() < min_heap) {
-        app_state.realtime_devices_error = "low_heap";
-        app_state.last_realtime_devices_error = millis();
-        logHeapStatus("device realtime low heap");
-        return false;
-    }
-
-    String supabaseUrl = config_manager.getSupabaseUrl();
-    String accessToken = supabaseClient.getAccessToken();
-    String deviceId = deviceCredentials.getDeviceId();
-    deviceId.trim();
-
-    if (supabaseUrl.isEmpty() || accessToken.isEmpty() || deviceId.isEmpty()) {
-        app_state.realtime_devices_error = "missing_url_token_or_device_id";
-        app_state.last_realtime_devices_error = millis();
-        return false;
-    }
-
-    Serial.println("[REALTIME] Initializing device realtime connection...");
-    supabaseRealtimeDevices.setMessageHandler(handleRealtimeDeviceMessage);
-    supabaseRealtimeDevices.begin(supabaseUrl, anonKey, accessToken);
-
-    String filter = "device_id=eq." + deviceId;
-    const String tables[] = { "devices" };
-    bool queued = supabaseRealtimeDevices.subscribeMultiple("display", tables, 1, filter);
-    if (queued) {
-        Serial.printf("[REALTIME] Subscription requested for devices updates: %s\n", deviceId.c_str());
-        app_state.realtime_devices_error = "";
-        return true;
-    }
-
-    Serial.println("[REALTIME] Device realtime connection timeout - will retry");
-    app_state.realtime_devices_error = "connection_timeout";
-    app_state.last_realtime_devices_error = millis();
-    return false;
-}
 
 /**
  * @brief Handle realtime messages from Supabase
@@ -1720,6 +1615,134 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
     
     Serial.printf("[REALTIME] Received %s on %s.%s\n", 
                   msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
+
+    // Handle broadcast events (pairing channels)
+    if (msg.event == "broadcast") {
+        JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
+        JsonObject broadcast = payload["payload"];
+        if (broadcast.isNull()) {
+            Serial.println("[REALTIME] Broadcast payload missing");
+            return;
+        }
+
+        String broadcastEvent = broadcast["event"] | "";
+        JsonVariant inner = broadcast["payload"];
+        JsonObject data = inner.is<JsonObject>() ? inner.as<JsonObject>() : broadcast;
+
+        if (data.isNull()) {
+            Serial.println("[REALTIME] Broadcast data missing");
+            return;
+        }
+
+        String table = data["table"] | "";
+        String operation = data["operation"] | "";
+        JsonObject record = data["record"];
+
+        Serial.printf("[REALTIME] Broadcast %s table=%s op=%s\n",
+                      broadcastEvent.c_str(),
+                      table.c_str(),
+                      operation.c_str());
+
+        if (table == "commands" && operation == "INSERT") {
+            if (record.isNull()) {
+                Serial.println("[REALTIME] Broadcast command missing record");
+                return;
+            }
+
+            SupabaseCommand cmd;
+            cmd.valid = true;
+            cmd.id = record["id"].as<String>();
+            cmd.command = record["command"].as<String>();
+            cmd.created_at = record["created_at"].as<String>();
+
+            JsonObject cmdPayload = record["payload"];
+            if (!cmdPayload.isNull()) {
+                serializeJson(cmdPayload, cmd.payload);
+            } else {
+                cmd.payload = "{}";
+            }
+
+            if (commandProcessor.wasRecentlyProcessed(cmd.id)) {
+                Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
+                return;
+            }
+
+            String status = record["status"].as<String>();
+            if (status != "pending") {
+                Serial.printf("[REALTIME] Command %s already %s, skipping\n",
+                              cmd.id.c_str(), status.c_str());
+                return;
+            }
+
+            Serial.printf("[REALTIME] Processing command via broadcast: %s (id=%s)\n",
+                          cmd.command.c_str(), cmd.id.c_str());
+            handleSupabaseCommand(cmd);
+        }
+
+        if (table == "pairings" && operation == "UPDATE") {
+            if (record.isNull()) {
+                Serial.println("[REALTIME] Broadcast pairing missing record");
+                return;
+            }
+
+            // Extract new values
+            bool newAppConnected = record["app_connected"] | false;
+            String newWebexStatus = record["webex_status"] | "offline";
+            String newDisplayName = record["display_name"] | "";
+            bool newCameraOn = record["camera_on"] | false;
+            bool newMicMuted = record["mic_muted"] | false;
+            bool newInCall = record["in_call"] | false;
+
+            // Check if any STATUS-RELEVANT fields actually changed
+            bool statusChanged = false;
+            
+            if (newAppConnected != app_state.embedded_app_connected ||
+                newWebexStatus != app_state.webex_status ||
+                (!newDisplayName.isEmpty() && newDisplayName != app_state.embedded_app_display_name)) {
+                statusChanged = true;
+            }
+            
+            if (!app_state.xapi_connected) {
+                if (newCameraOn != app_state.camera_on ||
+                    newMicMuted != app_state.mic_muted ||
+                    newInCall != app_state.in_call) {
+                    statusChanged = true;
+                }
+            }
+            
+            // Ignore heartbeat-only updates
+            if (!statusChanged) {
+                app_state.last_supabase_sync = millis();
+                if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
+                    Serial.println("[REALTIME] Broadcast pairing update ignored (no status change)");
+                }
+                return;
+            }
+
+            // Apply changes
+            app_state.supabase_app_connected = newAppConnected;
+            app_state.embedded_app_connected = newAppConnected;
+            if (newAppConnected) {
+                app_state.webex_status = newWebexStatus;
+                app_state.webex_status_received = true;
+                app_state.webex_status_source = "embedded_app";
+                if (!newDisplayName.isEmpty()) {
+                    app_state.embedded_app_display_name = newDisplayName;
+                }
+                if (!app_state.xapi_connected) {
+                    app_state.camera_on = newCameraOn;
+                    app_state.mic_muted = newMicMuted;
+                    app_state.in_call = newInCall;
+                }
+            }
+
+            app_state.last_supabase_sync = millis();
+            Serial.printf("[REALTIME] Pairing status changed (broadcast) - app=%s, status=%s\n",
+                          newAppConnected ? "connected" : "disconnected",
+                          newWebexStatus.c_str());
+        }
+        return;
+    }
     
     // Handle command insertions (immediate command delivery)
     if (msg.table == "commands" && msg.event == "INSERT") {
@@ -1738,6 +1761,11 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         cmd.id = data["id"].as<String>();
         cmd.command = data["command"].as<String>();
         cmd.created_at = data["created_at"].as<String>();
+
+        if (commandProcessor.wasRecentlyProcessed(cmd.id)) {
+            Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
+            return;
+        }
         
         // Serialize payload to string
         JsonObject cmdPayload = data["payload"];
@@ -1768,75 +1796,99 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         JsonObject data = payload["data"]["record"];
         
         if (!data.isNull()) {
-            // Update app state from pairing record
-            bool appConnected = data["app_connected"] | false;
-            String webexStatus = data["webex_status"] | "offline";
-            String displayName = data["display_name"] | "";
-            bool cameraOn = data["camera_on"] | false;
-            bool micMuted = data["mic_muted"] | false;
-            bool inCall = data["in_call"] | false;
+            // Extract new values from realtime message
+            bool newAppConnected = data["app_connected"] | false;
+            String newWebexStatus = data["webex_status"] | "offline";
+            String newDisplayName = data["display_name"] | "";
+            bool newCameraOn = data["camera_on"] | false;
+            bool newMicMuted = data["mic_muted"] | false;
+            bool newInCall = data["in_call"] | false;
             
-            // Update app state
-            app_state.supabase_app_connected = appConnected;
-            app_state.embedded_app_connected = appConnected;
-            if (appConnected) {
-                app_state.webex_status = webexStatus;
-                
-                if (!displayName.isEmpty()) {
-                    app_state.embedded_app_display_name = displayName;
-                }
-                
-                // Only update if not using xAPI
-                if (!app_state.xapi_connected) {
-                    app_state.camera_on = cameraOn;
-                    app_state.mic_muted = micMuted;
-                    app_state.in_call = inCall;
+            // Check if any STATUS-RELEVANT fields actually changed
+            // (ignore heartbeat-only updates that only change app_last_seen/device_last_seen)
+            bool statusChanged = false;
+            
+            // Check connection state changes
+            if (newAppConnected != app_state.embedded_app_connected) {
+                statusChanged = true;
+            }
+            
+            // Check webex status change
+            if (newWebexStatus != app_state.webex_status) {
+                statusChanged = true;
+            }
+            
+            // Check display name change (only if non-empty)
+            if (!newDisplayName.isEmpty() && newDisplayName != app_state.embedded_app_display_name) {
+                statusChanged = true;
+            }
+            
+            // Check camera/mic/call state changes (only if not using xAPI)
+            if (!app_state.xapi_connected) {
+                if (newCameraOn != app_state.camera_on ||
+                    newMicMuted != app_state.mic_muted ||
+                    newInCall != app_state.in_call) {
+                    statusChanged = true;
                 }
             }
             
-            Serial.printf("[REALTIME] Pairing updated - app=%s, status=%s\n",
-                          appConnected ? "connected" : "disconnected",
-                          webexStatus.c_str());
+            // Only process and log if something actually changed
+            if (!statusChanged) {
+                app_state.last_supabase_sync = millis();
+                // Heartbeat-only update - silently ignore
+                if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
+                    Serial.println("[REALTIME] Pairing update ignored (no status change - likely heartbeat)");
+                }
+                return;
+            }
+            
+            // Apply the changes to app state
+            app_state.supabase_app_connected = newAppConnected;
+            app_state.embedded_app_connected = newAppConnected;
+            if (newAppConnected) {
+                app_state.webex_status = newWebexStatus;
+                app_state.webex_status_received = true;
+                app_state.webex_status_source = "embedded_app";
+                
+                if (!newDisplayName.isEmpty()) {
+                    app_state.embedded_app_display_name = newDisplayName;
+                }
+                
+                // Only update camera/mic/call if not using xAPI
+                if (!app_state.xapi_connected) {
+                    app_state.camera_on = newCameraOn;
+                    app_state.mic_muted = newMicMuted;
+                    app_state.in_call = newInCall;
+                }
+            }
+            
+            app_state.last_supabase_sync = millis();
+            Serial.printf("[REALTIME] Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s\n",
+                          newAppConnected ? "connected" : "disconnected",
+                          newWebexStatus.c_str(),
+                          newCameraOn ? "on" : "off",
+                          newMicMuted ? "muted" : "unmuted",
+                          newInCall ? "yes" : "no");
 
             if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
                 JsonDocument debugDoc;
-                debugDoc["app_connected"] = appConnected;
-                debugDoc["webex_status"] = webexStatus;
-                debugDoc["display_name"] = displayName;
-                debugDoc["camera_on"] = cameraOn;
-                debugDoc["mic_muted"] = micMuted;
-                debugDoc["in_call"] = inCall;
+                debugDoc["app_connected"] = newAppConnected;
+                debugDoc["webex_status"] = newWebexStatus;
+                debugDoc["display_name"] = newDisplayName;
+                debugDoc["camera_on"] = newCameraOn;
+                debugDoc["mic_muted"] = newMicMuted;
+                debugDoc["in_call"] = newInCall;
                 String debugJson;
                 serializeJson(debugDoc, debugJson);
                 Serial.printf("[REALTIME][DEBUG] Pairing payload: %s\n", debugJson.c_str());
             }
         }
     }
+
+    // Handle device updates (admin debug toggle)
+    // Device realtime handler removed - using single connection now
 }
 
 /**
  * @brief Handle realtime device updates from Supabase
  */
-void handleRealtimeDeviceMessage(const RealtimeMessage& msg) {
-    if (!msg.valid) {
-        return;
-    }
-
-    if (msg.table == "devices" && msg.event == "UPDATE") {
-        JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
-        JsonObject data = payload["data"]["record"];
-        if (data.isNull()) {
-            return;
-        }
-
-        bool debugEnabled = data["debug_enabled"] | false;
-        bool previous = supabaseClient.isRemoteDebugEnabled();
-        supabaseClient.setRemoteDebugEnabled(debugEnabled);
-        remoteLogger.setRemoteEnabled(debugEnabled);
-
-        if (previous != debugEnabled) {
-            Serial.printf("[REALTIME] Remote debug %s via devices update\n",
-                          debugEnabled ? "ENABLED" : "DISABLED");
-        }
-    }
-}

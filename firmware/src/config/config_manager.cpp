@@ -20,7 +20,7 @@ ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
       cached_brightness(DEFAULT_BRIGHTNESS), cached_scroll_speed_ms(DEFAULT_SCROLL_SPEED_MS),
       cached_page_interval_ms(DEFAULT_PAGE_INTERVAL_MS), cached_sensor_page_enabled(true),
-      cache_loaded(false) {
+      cached_border_width(DEFAULT_BORDER_WIDTH), cache_loaded(false) {
 }
 
 ConfigManager::~ConfigManager() {
@@ -107,6 +107,13 @@ void ConfigManager::loadCache() const {
     cached_scroll_speed_ms = loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
     cached_page_interval_ms = loadUInt("page_interval", DEFAULT_PAGE_INTERVAL_MS);
     cached_sensor_page_enabled = loadBool("sensor_page", true);
+    cached_display_pages = loadString("display_pages", "");
+    cached_status_layout = loadString("status_layout", DEFAULT_STATUS_LAYOUT);
+    cached_border_width = loadUInt("border_width", DEFAULT_BORDER_WIDTH);
+    cached_date_color = loadString("date_color", DEFAULT_DATE_COLOR);
+    cached_time_color = loadString("time_color", DEFAULT_TIME_COLOR);
+    cached_name_color = loadString("name_color", DEFAULT_NAME_COLOR);
+    cached_metric_color = loadString("metric_color", DEFAULT_METRIC_COLOR);
 
     // Load MQTT config using existing preferences handle
     cached_mqtt_broker = loadString("mqtt_broker");
@@ -240,7 +247,133 @@ bool ConfigManager::getSensorPageEnabled() const {
 void ConfigManager::setSensorPageEnabled(bool enabled) {
     saveBool("sensor_page", enabled);
     cached_sensor_page_enabled = enabled;
+    cached_display_pages = enabled ? String("rotate") : String("status");
+    saveString("display_pages", cached_display_pages);
     Serial.printf("[CONFIG] Sensor page %s\n", enabled ? "enabled" : "disabled");
+}
+
+String ConfigManager::getDisplayPages() const {
+    String mode;
+    if (!cache_loaded) {
+        mode = loadString("display_pages", "");
+    } else {
+        mode = cached_display_pages;
+    }
+    mode.trim();
+    mode.toLowerCase();
+    if (mode.isEmpty()) {
+        const bool sensor_enabled = cache_loaded ? cached_sensor_page_enabled : loadBool("sensor_page", true);
+        return sensor_enabled ? String(DEFAULT_DISPLAY_PAGES) : String("status");
+    }
+    if (mode != "status" && mode != "sensors" && mode != "rotate") {
+        mode = DEFAULT_DISPLAY_PAGES;
+    }
+    return mode;
+}
+
+void ConfigManager::setDisplayPages(const String& mode) {
+    String normalized = mode;
+    normalized.trim();
+    normalized.toLowerCase();
+    if (normalized != "status" && normalized != "sensors" && normalized != "rotate") {
+        normalized = DEFAULT_DISPLAY_PAGES;
+    }
+    saveString("display_pages", normalized);
+    cached_display_pages = normalized;
+    cached_sensor_page_enabled = (normalized == "rotate");
+    saveBool("sensor_page", cached_sensor_page_enabled);
+    Serial.printf("[CONFIG] Display pages set to %s\n", normalized.c_str());
+}
+
+String ConfigManager::getStatusLayout() const {
+    String layout;
+    if (!cache_loaded) {
+        layout = loadString("status_layout", DEFAULT_STATUS_LAYOUT);
+    } else {
+        layout = cached_status_layout;
+    }
+    layout.trim();
+    layout.toLowerCase();
+    if (layout != "name" && layout != "sensors") {
+        layout = DEFAULT_STATUS_LAYOUT;
+    }
+    return layout;
+}
+
+void ConfigManager::setStatusLayout(const String& layout) {
+    String normalized = layout;
+    normalized.trim();
+    normalized.toLowerCase();
+    if (normalized != "name" && normalized != "sensors") {
+        normalized = DEFAULT_STATUS_LAYOUT;
+    }
+    saveString("status_layout", normalized);
+    cached_status_layout = normalized;
+    Serial.printf("[CONFIG] Status layout set to %s\n", normalized.c_str());
+}
+
+uint8_t ConfigManager::getBorderWidth() const {
+    if (!cache_loaded) {
+        return loadUInt("border_width", DEFAULT_BORDER_WIDTH);
+    }
+    return cached_border_width;
+}
+
+void ConfigManager::setBorderWidth(uint8_t width) {
+    // Clamp to valid range: 1-3 pixels
+    if (width < 1) width = 1;
+    if (width > 3) width = 3;
+    saveUInt("border_width", width);
+    cached_border_width = width;
+    Serial.printf("[CONFIG] Border width set to %d pixels\n", width);
+}
+
+String ConfigManager::getDateColor() const {
+    if (!cache_loaded) {
+        return loadString("date_color", DEFAULT_DATE_COLOR);
+    }
+    return cached_date_color.isEmpty() ? String(DEFAULT_DATE_COLOR) : cached_date_color;
+}
+
+void ConfigManager::setDateColor(const String& color) {
+    saveString("date_color", color);
+    cached_date_color = color;
+}
+
+String ConfigManager::getTimeColor() const {
+    if (!cache_loaded) {
+        return loadString("time_color", DEFAULT_TIME_COLOR);
+    }
+    return cached_time_color.isEmpty() ? String(DEFAULT_TIME_COLOR) : cached_time_color;
+}
+
+void ConfigManager::setTimeColor(const String& color) {
+    saveString("time_color", color);
+    cached_time_color = color;
+}
+
+String ConfigManager::getNameColor() const {
+    if (!cache_loaded) {
+        return loadString("name_color", DEFAULT_NAME_COLOR);
+    }
+    return cached_name_color.isEmpty() ? String(DEFAULT_NAME_COLOR) : cached_name_color;
+}
+
+void ConfigManager::setNameColor(const String& color) {
+    saveString("name_color", color);
+    cached_name_color = color;
+}
+
+String ConfigManager::getMetricColor() const {
+    if (!cache_loaded) {
+        return loadString("metric_color", DEFAULT_METRIC_COLOR);
+    }
+    return cached_metric_color.isEmpty() ? String(DEFAULT_METRIC_COLOR) : cached_metric_color;
+}
+
+void ConfigManager::setMetricColor(const String& color) {
+    saveString("metric_color", color);
+    cached_metric_color = color;
 }
 
 // Webex Configuration
@@ -413,6 +546,37 @@ void ConfigManager::setMQTTConfig(const String& broker, uint16_t port,
     cached_mqtt_password = password;
     cached_mqtt_topic = topic;
     Serial.printf("[CONFIG] MQTT config saved: %s:%d\n", broker.c_str(), port);
+}
+
+void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
+                                     const String& username, const String& password,
+                                     bool updatePassword, const String& topic) {
+    // Always update broker (required field)
+    saveString("mqtt_broker", broker);
+    cached_mqtt_broker = broker;
+    
+    // Update port (always provided, even if same)
+    saveUInt("mqtt_port", port);
+    cached_mqtt_port = port;
+    
+    // Update username (always provided, even if empty to clear it)
+    saveString("mqtt_user", username);
+    cached_mqtt_username = username;
+    
+    // Only update password if explicitly provided
+    if (updatePassword) {
+        saveString("mqtt_pass", password);
+        cached_mqtt_password = password;
+    }
+    // else: password remains unchanged
+    
+    // Update topic (always provided)
+    saveString("mqtt_topic", topic);
+    cached_mqtt_topic = topic;
+    
+    Serial.printf("[CONFIG] MQTT config updated: %s:%d (password %s)\n", 
+                  cached_mqtt_broker.c_str(), cached_mqtt_port,
+                  updatePassword ? "updated" : "unchanged");
 }
 
 bool ConfigManager::hasMQTTConfig() const {
@@ -806,6 +970,13 @@ String ConfigManager::exportConfig() const {
     doc["scroll_speed_ms"] = getScrollSpeedMs();
     doc["page_interval_ms"] = getPageIntervalMs();
     doc["sensor_page_enabled"] = getSensorPageEnabled();
+    doc["display_pages"] = getDisplayPages();
+    doc["status_layout"] = getStatusLayout();
+    doc["border_width"] = getBorderWidth();
+    doc["date_color"] = getDateColor();
+    doc["time_color"] = getTimeColor();
+    doc["name_color"] = getNameColor();
+    doc["metric_color"] = getMetricColor();
     doc["poll_interval"] = getWebexPollInterval();
     doc["xapi_poll"] = getXAPIPollInterval();
     doc["mqtt_broker"] = getMQTTBroker();
@@ -857,6 +1028,27 @@ bool ConfigManager::importConfig(const String& json) {
     }
     if (doc["sensor_page_enabled"].is<bool>()) {
         setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
+    }
+    if (doc["display_pages"].is<const char*>()) {
+        setDisplayPages(doc["display_pages"].as<const char*>());
+    }
+    if (doc["status_layout"].is<const char*>()) {
+        setStatusLayout(doc["status_layout"].as<const char*>());
+    }
+    if (doc["border_width"].is<int>()) {
+        setBorderWidth(doc["border_width"].as<uint8_t>());
+    }
+    if (doc["date_color"].is<const char*>()) {
+        setDateColor(doc["date_color"].as<const char*>());
+    }
+    if (doc["time_color"].is<const char*>()) {
+        setTimeColor(doc["time_color"].as<const char*>());
+    }
+    if (doc["name_color"].is<const char*>()) {
+        setNameColor(doc["name_color"].as<const char*>());
+    }
+    if (doc["metric_color"].is<const char*>()) {
+        setMetricColor(doc["metric_color"].as<const char*>());
     }
     if (doc["poll_interval"].is<int>()) {
         setWebexPollInterval(doc["poll_interval"].as<uint16_t>());

@@ -115,7 +115,17 @@ void MerakiMQTTClient::loop() {
         return;
     }
 
-    if (!mqtt_client.connected()) {
+    bool currently_connected = mqtt_client.connected();
+
+    // Detect disconnection and log it
+    if (last_connected_state && !currently_connected) {
+        Serial.printf("[MQTT] Disconnected (state=%d)\n", mqtt_client.state());
+        last_connected_state = false;
+    } else if (!last_connected_state && currently_connected) {
+        last_connected_state = true;
+    }
+
+    if (!currently_connected) {
         if (millis() - last_reconnect > 30000) {
             last_reconnect = millis();
             reconnect();
@@ -204,6 +214,7 @@ void MerakiMQTTClient::invalidateConfig() {
 void MerakiMQTTClient::onMessage(char* topic, byte* payload, unsigned int length) {
     String topicStr = String(topic);
     String payloadStr;
+    payloadStr.reserve(length);
 
     for (unsigned int i = 0; i < length; i++) {
         payloadStr += (char)payload[i];
@@ -376,4 +387,3 @@ MerakiMQTTClient::SensorEntry* MerakiMQTTClient::getOrCreateSensor(const String&
     sensor_count++;
     return &sensors[sensor_count - 1];
 }
-

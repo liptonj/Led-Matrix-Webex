@@ -19,7 +19,14 @@
 #define DEFAULT_BRIGHTNESS 128      // 0-255
 #define DEFAULT_SCROLL_SPEED_MS 250 // ms per step
 #define DEFAULT_PAGE_INTERVAL_MS 5000 // ms between page switches
+#define DEFAULT_BORDER_WIDTH 1      // 1-3 pixels for status border
 #define DEFAULT_DEVICE_NAME "webex-display"
+#define DEFAULT_DATE_COLOR "#00FFFF"
+#define DEFAULT_TIME_COLOR "#FFFFFF"
+#define DEFAULT_NAME_COLOR "#FFA500"
+#define DEFAULT_METRIC_COLOR "#00BFFF"
+#define DEFAULT_DISPLAY_PAGES "rotate"
+#define DEFAULT_STATUS_LAYOUT "sensors"
 
 /**
  * @brief Configuration Manager Class
@@ -56,6 +63,20 @@ public:
     void setPageIntervalMs(uint16_t interval_ms);
     bool getSensorPageEnabled() const;
     void setSensorPageEnabled(bool enabled);
+    String getDisplayPages() const;
+    void setDisplayPages(const String& mode);
+    String getStatusLayout() const;
+    void setStatusLayout(const String& layout);
+    uint8_t getBorderWidth() const;
+    void setBorderWidth(uint8_t width);
+    String getDateColor() const;
+    void setDateColor(const String& color);
+    String getTimeColor() const;
+    void setTimeColor(const String& color);
+    String getNameColor() const;
+    void setNameColor(const String& color);
+    String getMetricColor() const;
+    void setMetricColor(const String& color);
 
     // Webex Configuration
     String getWebexClientId() const;
@@ -94,6 +115,9 @@ public:
     void setMQTTConfig(const String& broker, uint16_t port,
                        const String& username, const String& password,
                        const String& topic);
+    void updateMQTTConfig(const String& broker, uint16_t port,
+                          const String& username, const String& password,
+                          bool updatePassword, const String& topic);
     void setSensorSerial(const String& serial);
     void setSensorMacs(const String& macs);
     void setDisplaySensorMac(const String& mac);
@@ -168,6 +192,13 @@ private:
     mutable uint16_t cached_scroll_speed_ms;
     mutable uint16_t cached_page_interval_ms;
     mutable bool cached_sensor_page_enabled;
+    mutable String cached_display_pages;
+    mutable String cached_status_layout;
+    mutable uint8_t cached_border_width;
+    mutable String cached_date_color;
+    mutable String cached_time_color;
+    mutable String cached_name_color;
+    mutable String cached_metric_color;
     mutable String cached_mqtt_broker;
     mutable uint16_t cached_mqtt_port;
     mutable String cached_mqtt_username;

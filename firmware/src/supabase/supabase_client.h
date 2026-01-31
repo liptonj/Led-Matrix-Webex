@@ -149,11 +149,11 @@ public:
                     const String& response = "", const String& error = "");
 
     /**
-     * @brief Insert a device log entry into Supabase
+     * @brief Broadcast a device log via Supabase Realtime (no DB storage)
      * @param level Log level (debug, info, warn, error)
      * @param message Log message
      * @param metadata Optional JSON metadata string
-     * @return true if inserted successfully
+     * @return true if sent successfully
      */
     bool insertDeviceLog(const String& level, const String& message, const String& metadata = "");
     bool isRequestInFlight() const { return _requestInFlight; }
@@ -219,6 +219,15 @@ public:
     String getSupabaseUrl() const { return _supabaseUrl; }
     SupabaseAuthError getLastAuthError() const { return _lastAuthError; }
 
+    /**
+     * @brief Sync Webex status via cloud edge function
+     * @param webexStatus Output: normalized webex status if available
+     * @param payload Optional JSON payload to send (e.g., local fallback data)
+     * @return true if request succeeded and status parsed
+     */
+    bool syncWebexStatus(String& webexStatus, const String& payload = "");
+    bool isWebexTokenMissing() const { return _webexTokenMissing; }
+
 private:
     String _supabaseUrl;
     String _pairingCode;
@@ -231,6 +240,7 @@ private:
     SupabaseAppState _lastAppState;
     SupabaseCommandHandler _commandHandler;
     SupabaseAuthError _lastAuthError = SupabaseAuthError::None;
+    bool _webexTokenMissing = false;
 
     /**
      * @brief Ensure we have a valid token (refresh if needed)

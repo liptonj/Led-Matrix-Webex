@@ -195,6 +195,43 @@
                             <input type="range" id="brightness" min="10" max="255" value="128">
                         </div>
                         <div class="form-group">
+                            <label for="display-pages">Pages to Show:</label>
+                            <select id="display-pages">
+                                <option value="status">Status only</option>
+                                <option value="sensors">Sensors only</option>
+                                <option value="rotate">Rotate status &amp; sensors</option>
+                            </select>
+                            <p class="help-text">Sensors only requires MQTT data; otherwise it falls back to status</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="status-layout">Status Layout:</label>
+                            <select id="status-layout">
+                                <option value="name">Name large, sensors separate</option>
+                                <option value="sensors">Sensors large, name small</option>
+                            </select>
+                            <p class="help-text">Controls which line is larger on the status page</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="date-color">Date Color:</label>
+                            <input type="color" id="date-color" value="#00ffff">
+                            <p class="help-text">Date text color (independent of status)</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="time-color">Time Color:</label>
+                            <input type="color" id="time-color" value="#ffffff">
+                            <p class="help-text">Time text color (independent of status)</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="name-color">Name Color:</label>
+                            <input type="color" id="name-color" value="#ffa500">
+                            <p class="help-text">Name text color (independent of status)</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="metric-color">MQTT Metric Color:</label>
+                            <input type="color" id="metric-color" value="#00bfff">
+                            <p class="help-text">Sensor metric text color (independent of status)</p>
+                        </div>
+                        <div class="form-group">
                             <label for="poll-interval">Status Poll Interval (seconds):</label>
                             <input type="number" id="poll-interval" min="20" max="300" value="30">
                             <p class="help-text">How often to check Webex status (min 20s)</p>

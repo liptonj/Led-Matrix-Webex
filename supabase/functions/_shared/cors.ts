@@ -66,7 +66,7 @@ export function getCorsHeaders(requestOrigin?: string | null): Record<string, st
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type, x-device-serial, x-timestamp, x-signature",
+      "authorization, x-client-info, x-supabase-client-platform, x-supabase-api-version, x-debug-auth, apikey, content-type, x-device-serial, x-timestamp, x-signature",
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     // Only add Vary header when using dynamic origin
     ...(allowedOrigins ? { "Vary": "Origin" } : {}),
@@ -80,6 +80,6 @@ export function getCorsHeaders(requestOrigin?: string | null): Record<string, st
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-device-serial, x-timestamp, x-signature",
+    "authorization, x-client-info, x-supabase-client-platform, x-supabase-api-version, x-debug-auth, apikey, content-type, x-device-serial, x-timestamp, x-signature",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
 };

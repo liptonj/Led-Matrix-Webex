@@ -4,26 +4,28 @@
  *
  * Contains the main update() method and page-specific drawing functions.
  * Uses a line-key caching system to minimize redraws and reduce flicker.
+ * Status is indicated by a colored border around the entire display.
  */
 
 #include "matrix_display.h"
+#include "../debug.h"
 
-// Constants for layout
-static const int INDICATOR_X = 1;
-static const int INDICATOR_Y = 1;
-static const int TEXT_START_X = 8;  // After 6px indicator + 2px gap
-
-// Line positions
-static const int LINE_0_Y = 0;
-static const int LINE_1_Y = 8;
-static const int LINE_2_Y = 16;
-static const int LINE_3_Y = 24;
+// Line height constant
 static const int LINE_HEIGHT = 8;
+
+// Cache key for border (to avoid redrawing every frame)
+static String last_border_key;
+static StatusLayoutMode last_status_layout = StatusLayoutMode::SENSORS;
+static int clampBorderWidth(int width) {
+    if (width < 1) return 1;
+    if (width > 3) return 3;
+    return width;
+}
 
 /**
  * @brief Build a cache key for date/time line
  */
-static String buildDateTimeKey(const DisplayData& data, uint16_t status_color) {
+static String buildDateTimeKey(const DisplayData& data, uint16_t date_color, uint16_t time_color) {
     String key = "time|";
     if (data.time_valid) {
         key += String(data.month) + "/" + String(data.day) + "|";
@@ -33,7 +35,8 @@ static String buildDateTimeKey(const DisplayData& data, uint16_t status_color) {
     } else {
         key += "none";
     }
-    key += "|" + String(status_color);
+    key += "|" + String(date_color);
+    key += "|" + String(time_color);
     return key;
 }
 
@@ -48,99 +51,316 @@ static String buildSensorKey(const DisplayData& data, const String& prefix) {
     } else {
         key += "none";
     }
+    key += "|" + String(data.metric_color);
     return key;
 }
 
 void MatrixDisplay::drawStatusPage(const DisplayData& data) {
-    // Status Page Layout (64x32):
-    // Line 0 (y=0):  [●] AVAILABLE     <- 6x6 indicator + scrolling status text
-    // Line 1 (y=8):  JAN20  12:30PM    <- Date and time
-    // Line 2 (y=16): (display name)    <- Optional display name (scrolls if long)
-    // Line 3 (y=24): 72°F 45% T125     <- Compact sensors if available
+    // Status Page Layout (64x32) with colored border:
+    // Border: Status-colored border around entire display (1-3 pixels)
+    // Line 0: AVAILABLE           <- Centered status text
+    // Line 1: JAN20  12:30PM      <- Date and time (custom colors) - with extra spacing
+    // Line 2: (display name)      <- Optional display name (scrolls if long)
+    // Line 3: 72°F 45% T125       <- Compact sensors if available
 
     uint16_t status_color = getStatusColor(data.webex_status);
     String status_text = getStatusText(data.webex_status);
+    const uint16_t date_color = data.date_color;
+    const uint16_t time_color = data.time_color;
+    const uint16_t name_color = data.name_color;
 
-    // Line 0: Status indicator (cached) + status text (always updated for scrolling)
-    const String line0_key = String("indicator|") + data.webex_status;
-    if (line0_key != last_line_keys[0]) {
-        last_line_keys[0] = line0_key;
-        // Only redraw indicator when status changes
-        fillRect(0, LINE_0_Y, TEXT_START_X, LINE_HEIGHT, COLOR_BLACK);
-        drawStatusIndicator(INDICATOR_X, INDICATOR_Y, data.webex_status);
+    // Calculate content area based on border width
+    const int border = clampBorderWidth(data.border_width);
+    const int content_x = border;
+    const int content_width = MATRIX_WIDTH - 2 * border;
+
+    // Line positions offset by border with extra spacing only after status line
+    const int available_height = MATRIX_HEIGHT - (2 * border);
+    const int max_lines = available_height / LINE_HEIGHT;
+
+    // Only add extra spacing if we have room for 4 lines (needed room: 4*8 + 2 = 34px)
+    // With 1px border: available = 30px, so we can't fit 4 lines + 2px spacing
+    // Solution: use 1px spacing when tight on space, 2px when there's room
+    const bool tight_fit = (available_height < 34); // Less than 34px means can't fit 4 lines + 2px spacing
+    const int extra_date_spacing = tight_fit ? 0 : 2; // No spacing if tight, 2px if room
+
+    const int line0_y = border + LINE_HEIGHT * 0;
+    const int line1_y = border + LINE_HEIGHT * 1 + extra_date_spacing;
+    const int line2_y = border + LINE_HEIGHT * 2 + extra_date_spacing; // Shift down by spacing to prevent overlap
+    const int line3_y = border + LINE_HEIGHT * 3 + extra_date_spacing; // Shift down by spacing to prevent overlap
+
+    // Draw border (cached - only redraw when status or width changes)
+    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    bool border_changed = (border_key != last_border_key);
+    bool layout_changed = (data.status_layout != last_status_layout);
+    if (layout_changed) {
+        last_status_layout = data.status_layout;
     }
-    // Always update status text (scrolling handles its own timing)
-    drawScrollingStatusText(LINE_0_Y, status_text, status_color, TEXT_START_X);
+    if (border_changed || layout_changed) {
+        last_border_key = border_key;
+        // Clear entire screen and redraw border when border changes
+        dma_display->clearScreen();
+        drawStatusBorder(status_color, border);
+        // Force redraw of all content when border changes
+        for (int i = 0; i < 4; i++) {
+            last_line_keys[i].clear();
+        }
+        // Clear scroll states to force redraw of scrolling text
+        status_scroll.text.clear();
+        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+            if (scroll_states[i].active) {
+                scroll_states[i].state.text.clear();
+            }
+        }
+    }
 
-    // Line 1: Date and time
-    const String line1_key = buildDateTimeKey(data, status_color);
-    if (line1_key != last_line_keys[1]) {
+    // Line 0: Status text (centered, scrolls if too long)
+    // Always draw status text (it handles its own caching)
+    drawScrollingText(line0_y, status_text, status_color, content_x, content_width, "status_text");
+
+    // Line 1: Date and time (date=tiny, time=regular for better visibility)
+    const String line1_key = buildDateTimeKey(data, date_color, time_color);
+    if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
-        fillRect(0, LINE_1_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line1_y, content_width, LINE_HEIGHT, COLOR_BLACK);
         if (data.time_valid) {
-            drawDateTimeLine(LINE_1_Y, data, status_color);
+            // Format date (tiny text, 4px per char) and time (regular text, 6px per char)
+            String date_text = formatDate(data.month, data.day, data.date_format);
+            String time_text = data.use_24h
+                ? formatTime24(data.hour, data.minute)
+                : formatTime(data.hour, data.minute);
+
+            int date_width = tinyTextWidth(date_text);
+            int time_width = time_text.length() * 6;  // Regular text
+            const int min_gap = 4;
+
+            // Draw date (tiny) on left, time (regular) on right
+            if (date_width + min_gap + time_width <= content_width) {
+                drawTinyText(content_x, line1_y, date_text, date_color);
+                int time_x = content_x + content_width - time_width;
+                drawSmallText(time_x, line1_y, time_text, time_color);
+            } else {
+                // If doesn't fit, try shorter date format
+                date_text = String(data.month) + "/" + String(data.day);
+                date_width = tinyTextWidth(date_text);
+                if (date_width + min_gap + time_width <= content_width) {
+                    drawTinyText(content_x, line1_y, date_text, date_color);
+                    int time_x = content_x + content_width - time_width;
+                    drawSmallText(time_x, line1_y, time_text, time_color);
+                } else {
+                    // Last resort: just show time
+                    int time_x = content_x + content_width - time_width;
+                    if (time_x < content_x) time_x = content_x;
+                    drawSmallText(time_x, line1_y, time_text, time_color);
+                }
+            }
         }
     }
 
-    // Line 2: Display name (scrolls if long)
-    if (!data.display_name.isEmpty()) {
-        drawScrollingText(LINE_2_Y, data.display_name, COLOR_WHITE, MATRIX_WIDTH, "display_name");
-    } else {
-        const String line2_key = "name|empty";
-        if (line2_key != last_line_keys[2]) {
+    const bool show_inline_sensors =
+        data.show_sensors && (data.status_layout == StatusLayoutMode::SENSORS);
+
+    // Log layout mode and content on first draw or when layout changes
+    static bool first_draw = true;
+    static String last_status_logged = "";
+    static String last_name_logged = "";
+    bool content_changed = (status_text != last_status_logged) ||
+                          (data.display_name != last_name_logged);
+
+    if (first_draw || layout_changed || content_changed) {
+        first_draw = false;
+        last_status_logged = status_text;
+        last_name_logged = data.display_name;
+
+        Serial.println("[DISPLAY] ========== Status Page ==========");
+        Serial.printf("[DISPLAY] Border: %dpx, Content: %dx%d, Max lines: %d\n",
+                     border, content_width, available_height, max_lines);
+        Serial.printf("[DISPLAY] Line 0 (y=%d): %s (status)\n", line0_y, status_text.c_str());
+
+        if (data.time_valid) {
+            String date_str = formatDate(data.month, data.day, data.date_format);
+            String time_str = data.use_24h ? formatTime24(data.hour, data.minute) : formatTime(data.hour, data.minute);
+            Serial.printf("[DISPLAY] Line 1 (y=%d): %s  %s (date/time)\n", line1_y, date_str.c_str(), time_str.c_str());
+        } else {
+            Serial.printf("[DISPLAY] Line 1 (y=%d): (no time)\n", line1_y);
+        }
+
+        if (show_inline_sensors) {
+            Serial.println("[DISPLAY] Layout: SENSORS (sensors large, name tiny)");
+            if (data.show_sensors) {
+                Serial.printf("[DISPLAY] Line 2 (y=%d): %dF %d%% (sensors)\n",
+                             line2_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
+            }
+            if (!data.display_name.isEmpty() && max_lines >= 4) {
+                Serial.printf("[DISPLAY] Line 3 (y=%d): %s (name, tiny)\n", line3_y, data.display_name.c_str());
+            } else if (!data.display_name.isEmpty()) {
+                Serial.printf("[DISPLAY] Line 3 (y=%d): %s (name, tiny) - NOT DRAWN, no space\n", line3_y, data.display_name.c_str());
+            }
+        } else {
+            Serial.println("[DISPLAY] Layout: NAME (name large, sensors bottom)");
+            if (!data.display_name.isEmpty()) {
+                Serial.printf("[DISPLAY] Line 2 (y=%d): %s (name)\n", line2_y, data.display_name.c_str());
+            }
+            if (data.show_sensors && max_lines >= 4) {
+                Serial.printf("[DISPLAY] Line 3 (y=%d): %dF %d%% (sensors)\n",
+                             line3_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
+            } else if (data.show_sensors) {
+                Serial.printf("[DISPLAY] Line 3 (y=%d): %dF %d%% (sensors) - NOT DRAWN, no space\n",
+                             line3_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
+            }
+        }
+        Serial.println("[DISPLAY] ===============================");
+    }
+
+    if (show_inline_sensors) {
+        // Line 2: Compact sensor bar
+        const String line2_key = buildSensorKey(data, "sensors_inline");
+        if (line2_key != last_line_keys[2] || border_changed) {
             last_line_keys[2] = line2_key;
-            fillRect(0, LINE_2_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
+            fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+            drawSensorBar(data, line2_y, content_x, content_width);
         }
-    }
 
-    // Line 3: Compact sensor bar (if sensors available)
-    const String line3_key = buildSensorKey(data, "sensors");
-    if (line3_key != last_line_keys[3]) {
-        last_line_keys[3] = line3_key;
-        fillRect(0, LINE_3_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        if (data.show_sensors) {
-            drawSensorBar(data, LINE_3_Y);
+        // Line 3 (tiny): Display name if space allows
+        const int used_height = LINE_HEIGHT * 3 + extra_date_spacing;
+        const int leftover = available_height - used_height;
+        const int tiny_height = 6;
+        if (!data.display_name.isEmpty() && leftover >= tiny_height) {
+            const int name_y = border + used_height + (leftover - tiny_height) / 2;
+            const String line3_key = String("name_tiny|") + data.display_name + "|" + String(name_color) + "|" + String(name_y);
+            if (line3_key != last_line_keys[3] || border_changed) {
+                last_line_keys[3] = line3_key;
+                fillRect(content_x, name_y, content_width, tiny_height, COLOR_BLACK);
+            }
+            drawTinyScrollingText(name_y, data.display_name, name_color, content_x, content_width, "display_name_tiny");
+        } else {
+            const String line3_key = "name_tiny|hidden";
+            if (line3_key != last_line_keys[3] || border_changed) {
+                last_line_keys[3] = line3_key;
+                const int clear_y = border + used_height;
+                const int clear_h = available_height - used_height;
+                if (clear_h > 0) {
+                    fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
+                }
+            }
+        }
+    } else {
+        // Line 2: Display name (scrolls if long)
+        if (!data.display_name.isEmpty()) {
+            // Always draw display name (it handles its own caching)
+            drawScrollingText(line2_y, data.display_name, name_color, content_x, content_width, "display_name");
+        } else {
+            const String line2_key = "name|empty";
+            if (line2_key != last_line_keys[2] || border_changed) {
+                last_line_keys[2] = line2_key;
+                fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+            }
+        }
+
+        // Line 3: Compact sensor bar (if sensors available)
+        if (max_lines >= 4) {
+            const String line3_key = buildSensorKey(data, "sensors");
+            if (line3_key != last_line_keys[3] || border_changed) {
+                last_line_keys[3] = line3_key;
+                fillRect(content_x, line3_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+                if (data.show_sensors) {
+                    drawSensorBar(data, line3_y, content_x, content_width);
+                }
+            }
+        } else {
+            const String line3_key = "sensors|hidden";
+            if (line3_key != last_line_keys[3] || border_changed) {
+                last_line_keys[3] = line3_key;
+                const int clear_y = border + (LINE_HEIGHT * max_lines);
+                const int clear_h = MATRIX_HEIGHT - border - clear_y;
+                if (clear_h > 0) {
+                    fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
+                }
+            }
         }
     }
 }
 
 void MatrixDisplay::drawSensorPage(const DisplayData& data) {
-    // Sensor Page Layout (64x32):
-    // Line 0 (y=0):  [●] TMP: 72F      <- 4x4 indicator + temperature
-    // Line 1 (y=8):  HUM: 45%          <- Humidity
-    // Line 2 (y=16): TVOC: 125         <- TVOC or selected metric
-    // Line 3 (y=24): IAQ: 35           <- Air quality index
-    // All text uses status color to match indicator
+    // Sensor Page Layout (64x32) with colored border:
+    // Border: Status-colored border around entire display (1-3 pixels)
+    // Line 0: TMP: 72F           <- Temperature
+    // Line 1: HUM: 45%           <- Humidity
+    // Line 2: TVOC: 125          <- TVOC or selected metric
+    // Line 3: IAQ: 35            <- Air quality index
+    // All text uses configured metric color (independent of status)
+
+    // Log sensor page content on first draw
+    static bool sensor_first_draw = true;
+    if (sensor_first_draw) {
+        sensor_first_draw = false;
+        int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
+        Serial.println("[DISPLAY] ========== Sensor Page ==========");
+        Serial.printf("[DISPLAY] Line 0: TMP: %dF\n", temp_f);
+        Serial.printf("[DISPLAY] Line 1: HUM: %d%%\n", (int)data.humidity);
+        Serial.printf("[DISPLAY] Line 2: TVOC: %d\n", (int)data.tvoc);
+        Serial.printf("[DISPLAY] Line 3: IAQ: %d\n", data.air_quality_index);
+        Serial.println("[DISPLAY] ===============================");
+    }
 
     uint16_t status_color = getStatusColor(data.webex_status);
+    const uint16_t metric_color = data.metric_color;
     int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
 
-    // Smaller indicator position (4x4, centered in 8px line height)
-    const int small_indicator_x = 1;
-    const int small_indicator_y = 2;  // Vertically centered
-    const int sensor_text_x = 6;      // After 4px indicator + 2px gap
+    // Calculate content area based on border width
+    const int border = clampBorderWidth(data.border_width);
+    const int content_x = border;
+    const int content_width = MATRIX_WIDTH - 2 * border;
 
-    // Line 0: Small status indicator + Temperature
+    // Line positions offset by border
+    const int available_height = MATRIX_HEIGHT - (2 * border);
+    const int max_lines = available_height / LINE_HEIGHT;
+    const int line0_y = border + LINE_HEIGHT * 0;
+    const int line1_y = border + LINE_HEIGHT * 1;
+    const int line2_y = border + LINE_HEIGHT * 2;
+    const int line3_y = border + LINE_HEIGHT * 3;
+
+    // Draw border (cached - only redraw when status or width changes)
+    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    bool border_changed = (border_key != last_border_key);
+    if (border_changed) {
+        last_border_key = border_key;
+        // Clear entire screen and redraw border when border changes
+        dma_display->clearScreen();
+        drawStatusBorder(status_color, border);
+        // Force redraw of all content when border changes
+        for (int i = 0; i < 4; i++) {
+            last_line_keys[i].clear();
+        }
+        // Clear scroll states to force redraw of scrolling text
+        status_scroll.text.clear();
+        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+            if (scroll_states[i].active) {
+                scroll_states[i].state.text.clear();
+            }
+        }
+    }
+
+    // Line 0: Temperature
     char temp_str[16];
     snprintf(temp_str, sizeof(temp_str), "TMP: %dF", temp_f);
 
-    const String line0_key = String("sensor0|") + data.webex_status + "|" + String(temp_f);
-    if (line0_key != last_line_keys[0]) {
+    const String line0_key = String("sensor0|") + data.webex_status + "|" + String(temp_f)
+        + "|" + String(metric_color);
+    if (line0_key != last_line_keys[0] || border_changed) {
         last_line_keys[0] = line0_key;
-        fillRect(0, LINE_0_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        drawSmallStatusIndicator(small_indicator_x, small_indicator_y, data.webex_status);
-        drawSmallText(sensor_text_x, LINE_0_Y, temp_str, status_color);
+        drawTextAutoScroll(line0_y, temp_str, metric_color, content_x, content_width, "sensor_temp");
     }
 
     // Line 1: Humidity
     char humid_str[16];
     snprintf(humid_str, sizeof(humid_str), "HUM: %d%%", (int)data.humidity);
 
-    const String line1_key = String("sensor1|") + data.webex_status + "|" + String((int)data.humidity);
-    if (line1_key != last_line_keys[1]) {
+    const String line1_key = String("sensor1|") + data.webex_status + "|" + String((int)data.humidity)
+        + "|" + String(metric_color);
+    if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
-        fillRect(0, LINE_1_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        drawSmallText(0, LINE_1_Y, humid_str, status_color);
+        drawTextAutoScroll(line1_y, humid_str, metric_color, content_x, content_width, "sensor_humid");
     }
 
     // Line 2: TVOC or selected metric
@@ -158,41 +378,110 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
         snprintf(metric_str, sizeof(metric_str), "TVOC: %d", (int)data.tvoc);
     }
 
-    const String line2_key = String("sensor2|") + data.webex_status + "|" + metric + "|" + String((int)data.tvoc);
-    if (line2_key != last_line_keys[2]) {
+    const String line2_key = String("sensor2|") + data.webex_status + "|" + metric + "|" + String((int)data.tvoc)
+        + "|" + String(metric_color);
+    if (line2_key != last_line_keys[2] || border_changed) {
         last_line_keys[2] = line2_key;
-        fillRect(0, LINE_2_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        drawSmallText(0, LINE_2_Y, metric_str, status_color);
+        drawTextAutoScroll(line2_y, metric_str, metric_color, content_x, content_width, "sensor_metric");
     }
 
     // Line 3: Air Quality Index
     char iaq_str[16];
     snprintf(iaq_str, sizeof(iaq_str), "IAQ: %d", data.air_quality_index);
 
-    const String line3_key = String("sensor3|") + data.webex_status + "|" + String(data.air_quality_index);
-    if (line3_key != last_line_keys[3]) {
-        last_line_keys[3] = line3_key;
-        fillRect(0, LINE_3_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        drawSmallText(0, LINE_3_Y, iaq_str, status_color);
+    if (max_lines >= 4) {
+        const String line3_key = String("sensor3|") + data.webex_status + "|" + String(data.air_quality_index)
+            + "|" + String(metric_color);
+        if (line3_key != last_line_keys[3] || border_changed) {
+            last_line_keys[3] = line3_key;
+            drawTextAutoScroll(line3_y, iaq_str, metric_color, content_x, content_width, "sensor_iaq");
+        }
+    } else {
+        const String line3_key = "sensor3|hidden";
+        if (line3_key != last_line_keys[3] || border_changed) {
+            last_line_keys[3] = line3_key;
+            const int clear_y = border + (LINE_HEIGHT * max_lines);
+            const int clear_h = MATRIX_HEIGHT - border - clear_y;
+            if (clear_h > 0) {
+                fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
+            }
+        }
     }
 }
 
 void MatrixDisplay::drawInCallPage(const DisplayData& data) {
-    // In-Call Page Layout (64x32):
-    // Line 0 (y=0):  [●] IN A CALL     <- 6x6 indicator + call text
-    // Line 1 (y=8):  📷 ON  🎤 OFF     <- Camera and mic status
-    // Line 2 (y=16): JAN20  12:30PM    <- Date/time
-    // Line 3 (y=24): 72°F 45% T125     <- Compact sensors
+    // In-Call Page Layout (64x32) with colored border:
+    // Border: Status-colored border around entire display (1-3 pixels)
+    // Line 0: IN A CALL           <- Call status text
+    // Line 1: 📷 ON  🎤 OFF       <- Camera and mic status
+    // Line 2: JAN20  12:30PM      <- Date/time - with extra spacing
+    // Line 3: 72°F 45% T125       <- Compact sensors
+
+    // Log in-call page content on first draw
+    static bool call_first_draw = true;
+    if (call_first_draw) {
+        call_first_draw = false;
+        Serial.println("[DISPLAY] ========== In-Call Page ==========");
+        Serial.println("[DISPLAY] Line 0: IN A CALL");
+        Serial.printf("[DISPLAY] Line 1: Camera: %s  Mic: %s\n",
+                     data.camera_on ? "ON" : "OFF",
+                     data.mic_muted ? "MUTED" : "ON");
+        if (data.time_valid) {
+            String date_str = formatDate(data.month, data.day, data.date_format);
+            String time_str = data.use_24h ? formatTime24(data.hour, data.minute) : formatTime(data.hour, data.minute);
+            Serial.printf("[DISPLAY] Line 2: %s  %s (date/time)\n", date_str.c_str(), time_str.c_str());
+        }
+        if (data.show_sensors) {
+            Serial.printf("[DISPLAY] Line 3: %dF %d%% (sensors)\n",
+                         (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
+        }
+        Serial.println("[DISPLAY] ===============================");
+    }
 
     uint16_t status_color = getStatusColor(data.webex_status);
+    const uint16_t date_color = data.date_color;
+    const uint16_t time_color = data.time_color;
 
-    // Line 0: Status indicator + "IN A CALL"
+    // Calculate content area based on border width
+    const int border = clampBorderWidth(data.border_width);
+    const int content_x = border;
+    const int content_width = MATRIX_WIDTH - 2 * border;
+
+    // Line positions offset by border with extra spacing only after call status
+    const int available_height = MATRIX_HEIGHT - (2 * border);
+    const int max_lines = available_height / LINE_HEIGHT;
+    const int extra_date_spacing = 2; // Extra pixels between status and camera/mic line
+    const int line0_y = border + LINE_HEIGHT * 0;
+    const int line1_y = border + LINE_HEIGHT * 1 + extra_date_spacing;
+    const int line2_y = border + LINE_HEIGHT * 2; // No extra spacing - keep normal position
+    const int line3_y = border + LINE_HEIGHT * 3; // No extra spacing - keep normal position
+
+    // Draw border (cached - only redraw when status or width changes)
+    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    bool border_changed = (border_key != last_border_key);
+    if (border_changed) {
+        last_border_key = border_key;
+        // Clear entire screen and redraw border when border changes
+        dma_display->clearScreen();
+        drawStatusBorder(status_color, border);
+        // Force redraw of all content when border changes
+        for (int i = 0; i < 4; i++) {
+            last_line_keys[i].clear();
+        }
+        // Clear scroll states to force redraw of scrolling text
+        status_scroll.text.clear();
+        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
+            if (scroll_states[i].active) {
+                scroll_states[i].state.text.clear();
+            }
+        }
+    }
+
+    // Line 0: "IN A CALL" text
     const String line0_key = String("call0|") + data.webex_status;
-    if (line0_key != last_line_keys[0]) {
+    if (line0_key != last_line_keys[0] || border_changed) {
         last_line_keys[0] = line0_key;
-        fillRect(0, LINE_0_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        drawStatusIndicator(INDICATOR_X, INDICATOR_Y, data.webex_status);
-        drawSmallText(TEXT_START_X, LINE_0_Y, "IN A CALL", status_color);
+        drawTextAutoScroll(line0_y, "IN A CALL", status_color, content_x, content_width, "call_status");
     }
 
     // Line 1: Camera and Mic status
@@ -200,40 +489,81 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
         + (data.camera_on ? "1" : "0")
         + (data.mic_muted ? "1" : "0");
 
-    if (line1_key != last_line_keys[1]) {
+    if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
-        fillRect(0, LINE_1_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line1_y, content_width, LINE_HEIGHT, COLOR_BLACK);
 
-        // Camera icon and status on left
-        const int camera_x = 2;
-        drawCameraIcon(camera_x, LINE_1_Y, data.camera_on);
-        drawSmallText(camera_x + 10, LINE_1_Y, data.camera_on ? "ON" : "OFF",
+        // Camera icon and status on left (offset by border)
+        const int camera_x = content_x + 2;
+        drawCameraIcon(camera_x, line1_y, data.camera_on);
+        drawSmallText(camera_x + 10, line1_y, data.camera_on ? "ON" : "OFF",
                       data.camera_on ? COLOR_GREEN : COLOR_RED);
 
         // Mic icon and status on right
-        const int mic_x = 36;
-        drawMicIcon(mic_x, LINE_1_Y, data.mic_muted);
-        drawSmallText(mic_x + 7, LINE_1_Y, data.mic_muted ? "OFF" : "ON",
+        const int mic_x = content_x + 34;
+        drawMicIcon(mic_x, line1_y, data.mic_muted);
+        drawSmallText(mic_x + 7, line1_y, data.mic_muted ? "OFF" : "ON",
                       data.mic_muted ? COLOR_RED : COLOR_GREEN);
     }
 
-    // Line 2: Date/time (reuse helper)
-    const String line2_key = "call2|" + buildDateTimeKey(data, status_color);
-    if (line2_key != last_line_keys[2]) {
+    // Line 2: Date/time (date=tiny, time=regular for better visibility)
+    const String line2_key = "call2|" + buildDateTimeKey(data, date_color, time_color);
+    if (line2_key != last_line_keys[2] || border_changed) {
         last_line_keys[2] = line2_key;
-        fillRect(0, LINE_2_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
         if (data.time_valid) {
-            drawDateTimeLine(LINE_2_Y, data, status_color);
+            // Format date (tiny text, 4px per char) and time (regular text, 6px per char)
+            String date_text = formatDate(data.month, data.day, data.date_format);
+            String time_text = data.use_24h
+                ? formatTime24(data.hour, data.minute)
+                : formatTime(data.hour, data.minute);
+
+            int date_width = tinyTextWidth(date_text);
+            int time_width = time_text.length() * 6;  // Regular text
+            const int min_gap = 4;
+
+            // Draw date (tiny) on left, time (regular) on right
+            if (date_width + min_gap + time_width <= content_width) {
+                drawTinyText(content_x, line2_y, date_text, date_color);
+                int time_x = content_x + content_width - time_width;
+                drawSmallText(time_x, line2_y, time_text, time_color);
+            } else {
+                // If doesn't fit, try shorter date format
+                date_text = String(data.month) + "/" + String(data.day);
+                date_width = tinyTextWidth(date_text);
+                if (date_width + min_gap + time_width <= content_width) {
+                    drawTinyText(content_x, line2_y, date_text, date_color);
+                    int time_x = content_x + content_width - time_width;
+                    drawSmallText(time_x, line2_y, time_text, time_color);
+                } else {
+                    // Last resort: just show time
+                    int time_x = content_x + content_width - time_width;
+                    if (time_x < content_x) time_x = content_x;
+                    drawSmallText(time_x, line2_y, time_text, time_color);
+                }
+            }
         }
     }
 
     // Line 3: Compact sensor bar (reuse helper)
-    const String line3_key = buildSensorKey(data, "call3");
-    if (line3_key != last_line_keys[3]) {
-        last_line_keys[3] = line3_key;
-        fillRect(0, LINE_3_Y, MATRIX_WIDTH, LINE_HEIGHT, COLOR_BLACK);
-        if (data.show_sensors) {
-            drawSensorBar(data, LINE_3_Y);
+    if (max_lines >= 4) {
+        const String line3_key = buildSensorKey(data, "call3");
+        if (line3_key != last_line_keys[3] || border_changed) {
+            last_line_keys[3] = line3_key;
+            fillRect(content_x, line3_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+            if (data.show_sensors) {
+                drawSensorBar(data, line3_y, content_x, content_width);
+            }
+        }
+    } else {
+        const String line3_key = "call3|hidden";
+        if (line3_key != last_line_keys[3] || border_changed) {
+            last_line_keys[3] = line3_key;
+            const int clear_y = border + (LINE_HEIGHT * max_lines);
+            const int clear_h = MATRIX_HEIGHT - border - clear_y;
+            if (clear_h > 0) {
+                fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
+            }
         }
     }
 }
@@ -244,6 +574,13 @@ void MatrixDisplay::update(const DisplayData& data) {
     // Don't override display during OTA updates
     if (ota_in_progress) return;
 
+    // Clear static screen state when switching to dynamic status display
+    // This ensures proper transition from static screens (startup, unconfigured, etc.)
+    if (!last_static_key.isEmpty()) {
+        last_static_key.clear();
+        dma_display->clearScreen();
+    }
+
     const unsigned long now = millis();
 
     // Determine which page to show
@@ -252,18 +589,30 @@ void MatrixDisplay::update(const DisplayData& data) {
     // In-call overrides page rotation
     if (data.show_call_status && data.in_call) {
         target_page = DisplayPage::IN_CALL;
-    } else if (data.show_sensors && data.sensor_page_enabled) {
-        // Page rotation between status and sensors (only if sensor page is enabled)
-        if (now - last_page_change_ms >= page_interval_ms) {
-            last_page_change_ms = now;
-            current_page = (current_page == DisplayPage::STATUS)
-                ? DisplayPage::SENSORS
-                : DisplayPage::STATUS;
-        }
-        target_page = current_page;
     } else {
-        // No sensors or sensor page disabled, just show status
-        target_page = DisplayPage::STATUS;
+        switch (data.page_mode) {
+            case DisplayPageMode::SENSORS_ONLY:
+                target_page = data.show_sensors ? DisplayPage::SENSORS : DisplayPage::STATUS;
+                break;
+            case DisplayPageMode::ROTATE:
+                if (data.show_sensors) {
+                    // Page rotation between status and sensors
+                    if (now - last_page_change_ms >= page_interval_ms) {
+                        last_page_change_ms = now;
+                        current_page = (current_page == DisplayPage::STATUS)
+                            ? DisplayPage::SENSORS
+                            : DisplayPage::STATUS;
+                    }
+                    target_page = current_page;
+                } else {
+                    target_page = DisplayPage::STATUS;
+                }
+                break;
+            case DisplayPageMode::STATUS_ONLY:
+            default:
+                target_page = DisplayPage::STATUS;
+                break;
+        }
     }
 
     // Check if page changed - clear screen and reset line keys
@@ -272,6 +621,8 @@ void MatrixDisplay::update(const DisplayData& data) {
         for (int i = 0; i < 4; i++) {
             last_line_keys[i].clear();
         }
+        // Reset border key to force redraw on page change
+        last_border_key.clear();
         // Reset scroll states to force redraw of scrolling text on page change
         status_scroll.text.clear();
         for (int i = 0; i < MAX_SCROLL_STATES; i++) {
@@ -279,6 +630,14 @@ void MatrixDisplay::update(const DisplayData& data) {
                 scroll_states[i].state.text.clear();
             }
         }
+
+        // Log page change
+        const char* page_name = (target_page == DisplayPage::STATUS) ? "STATUS" :
+                                (target_page == DisplayPage::SENSORS) ? "SENSORS" : "IN_CALL";
+        Serial.println("[DISPLAY] ==========================================");
+        Serial.printf("[DISPLAY] PAGE SWITCH: %s\n", page_name);
+        Serial.println("[DISPLAY] ==========================================");
+
         last_page = target_page;
     }
 

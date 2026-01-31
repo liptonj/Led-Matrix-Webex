@@ -5,8 +5,13 @@
 
 #include "web_server.h"
 #include "../webex/oauth_handler.h"
+#include "../auth/device_credentials.h"
+#include "../common/pairing_manager.h"
+#include "../supabase/supabase_client.h"
 #include <ArduinoJson.h>
 #include <ctype.h>
+
+extern PairingManager pairing_manager;
 
 namespace {
 String urlEncode(const String& str) {
@@ -43,32 +48,34 @@ String urlEncode(const String& str) {
 }  // namespace
 
 void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
-    String client_id = config_manager->getWebexClientId();
+    const String pairing_code = pairing_manager.getCode();
+    const String serial = deviceCredentials.getSerialNumber();
+    const String token = supabaseClient.getAccessToken();
+    const uint32_t ts = DeviceCredentials::getTimestamp();
+    const String sig = deviceCredentials.signRequest(ts, "");
 
-    if (client_id.isEmpty()) {
-        request->send(400, "application/json", "{\"error\":\"Webex client ID not configured\"}");
+    if (pairing_code.isEmpty() || serial.isEmpty()) {
+        request->send(400, "application/json", "{\"error\":\"Device not ready\"}");
+        return;
+    }
+    if (sig.isEmpty()) {
+        request->send(400, "application/json", "{\"error\":\"Device not provisioned\"}");
+        return;
+    }
+    if (token.isEmpty()) {
+        request->send(400, "application/json", "{\"error\":\"Device auth token not available\"}");
         return;
     }
 
-    // Build OAuth authorization URL
-    String redirect_uri = buildRedirectUri();
-    String state = String(random(100000, 999999));
-
-    String auth_url = WEBEX_AUTH_URL;
-    auth_url += "?client_id=" + urlEncode(client_id);
-    auth_url += "&response_type=code";
-    auth_url += "&redirect_uri=" + urlEncode(redirect_uri);
-    auth_url += "&scope=" + urlEncode(String(WEBEX_SCOPE_PEOPLE) + " " + String(WEBEX_SCOPE_XAPI));
-    auth_url += "&state=" + state;
-
-    // Store state for verification
-    last_oauth_state = state;
-    last_oauth_redirect_uri = redirect_uri;
+    String auth_url = "https://display.5ls.us/webexauth";
+    auth_url += "?pairing_code=" + urlEncode(pairing_code);
+    auth_url += "&serial=" + urlEncode(serial);
+    auth_url += "&ts=" + String(ts);
+    auth_url += "&sig=" + urlEncode(sig);
+    auth_url += "&token=" + urlEncode(token);
 
     JsonDocument doc;
     doc["auth_url"] = auth_url;
-    doc["state"] = state;
-    doc["redirect_uri"] = redirect_uri;
 
     String response;
     serializeJson(doc, response);

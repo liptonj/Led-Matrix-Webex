@@ -29,6 +29,12 @@ bool MatrixDisplay::begin() {
     // Don't call Serial.begin() here - main.cpp already did it
     delay(10);
 
+    if (dma_display) {
+        delete dma_display;
+        dma_display = nullptr;
+        initialized = false;
+    }
+
     Serial.println("===============================================");
     Serial.println("[DISPLAY] Initialization starting...");
     Serial.flush();

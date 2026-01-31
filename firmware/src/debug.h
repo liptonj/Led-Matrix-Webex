@@ -14,6 +14,11 @@
 // External reference to debug mode flag (set from config in main.cpp)
 extern bool g_debug_mode;
 
+// Compile-time debug toggle for Supabase auth payload logging (dev-only)
+#ifndef SUPABASE_AUTH_DEBUG
+#define SUPABASE_AUTH_DEBUG 1
+#endif
+
 /**
  * Debug logging macro - only logs when debug mode is enabled
  * Usage: DEBUG_LOG("BRIDGE", "Connecting to %s:%d", host.c_str(), port);

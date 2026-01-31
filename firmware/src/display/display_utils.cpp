@@ -15,21 +15,25 @@ uint16_t MatrixDisplay::getStatusColor(const String& status) {
     if (status == "busy" || status == "meeting" || status == "call") return COLOR_BUSY;
     if (status == "presenting") return COLOR_PRESENTING;
     if (status == "OutOfOffice" || status == "ooo") return COLOR_OOO;
-    return COLOR_OFFLINE;
+    if (status == "offline" || status.isEmpty()) return COLOR_OFFLINE;
+    // Unknown status - use neutral gray color
+    return 0x7BEF;  // Light gray for unknown statuses
 }
 
 String MatrixDisplay::getStatusText(const String& status) {
     if (status == "active") return "AVAILABLE";
     if (status == "inactive" || status == "away") return "AWAY";
-    if (status == "DoNotDisturb" || status == "dnd") return "DND";
+    if (status == "DoNotDisturb" || status == "dnd") return "DO NOT DISTURB";
     if (status == "busy") return "BUSY";
     if (status == "meeting") return "IN A CALL";
     if (status == "call") return "ON A CALL";
     if (status == "presenting") return "PRESENTING";
-    if (status == "OutOfOffice" || status == "ooo") return "OOO";
+    if (status == "OutOfOffice" || status == "ooo") return "OUT OF OFFICE";
     if (status == "pending") return "PENDING";
-    if (status == "unknown") return "UNKNOWN";
-    return "OFFLINE";
+    if (status == "offline" || status.isEmpty()) return "OFFLINE";
+
+    // For any other status, display it exactly as received
+    return status;
 }
 
 String MatrixDisplay::formatTime(int hour, int minute) {

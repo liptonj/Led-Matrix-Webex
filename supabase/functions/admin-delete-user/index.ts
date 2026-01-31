@@ -7,23 +7,10 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { requireAdminUser } from "../_shared/admin_auth.ts";
 
 interface DeleteUserRequest {
   user_id: string;
-}
-
-async function isRequesterAdmin(
-  serviceClient: ReturnType<typeof createClient>,
-  requesterId: string,
-): Promise<boolean> {
-  const { data, error } = await serviceClient
-    .schema("display")
-    .from("admin_users")
-    .select("user_id")
-    .eq("user_id", requesterId)
-    .maybeSingle();
-
-  return !error && !!data;
 }
 
 async function isTargetAdmin(
@@ -66,36 +53,15 @@ serve(async (req: Request) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    const authHeader = req.headers.get("Authorization") || "";
-
-    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: authHeader,
-        },
-      },
+    const auth = await requireAdminUser(req, {
+      corsHeaders,
+      logPrefix: "admin-delete-user",
+      allowServiceRole: true,
     });
+    if (auth.response) return auth.response;
 
-    const { data: userData, error: userError } = await authClient.auth.getUser();
-    if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const requesterId = userData.user.id;
-    const serviceClient = createClient(supabaseUrl, serviceKey);
-
-    if (!(await isRequesterAdmin(serviceClient, requesterId))) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const serviceClient = auth.serviceClient ?? createClient(supabaseUrl, serviceKey);
 
     const body: DeleteUserRequest = await req.json();
 

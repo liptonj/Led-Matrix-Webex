@@ -22,6 +22,8 @@ struct AppState {
     bool xapi_connected = false;
     bool mqtt_connected = false;
     String webex_status = "unknown";
+    bool webex_status_received = false;  // Set true after first status payload is received
+    String webex_status_source = "unknown";  // embedded_app | cloud | local | unknown
     String embedded_app_display_name = "";  // Display name from embedded app user
     bool camera_on = false;
     bool mic_muted = false;
@@ -35,6 +37,8 @@ struct AppState {
     float pm2_5 = 0.0f;
     float ambient_noise = 0.0f;
     String sensor_mac = "";
+    bool sensor_data_valid = false;
+    unsigned long last_sensor_update = 0;
     unsigned long last_poll_time = 0;
     unsigned long last_ota_check = 0;
     // Supabase state sync (Phase A)

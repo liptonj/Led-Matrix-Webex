@@ -21,6 +21,17 @@ void MatrixDisplay::drawPixel(int x, int y, uint16_t color) {
     dma_display->drawPixel(x, y, color);
 }
 
+void MatrixDisplay::drawStatusBorder(uint16_t color, uint8_t width) {
+    // Clamp width to valid range
+    if (width < 1) width = 1;
+    if (width > 3) width = 3;
+    
+    // Draw concentric rectangles for the border
+    for (uint8_t i = 0; i < width; i++) {
+        drawRect(i, i, MATRIX_WIDTH - 2 * i, MATRIX_HEIGHT - 2 * i, color);
+    }
+}
+
 void MatrixDisplay::drawText(int x, int y, const String& text, uint16_t color) {
     String safe_text = sanitizeSingleLine(text);
     dma_display->setTextColor(color);
@@ -97,6 +108,28 @@ MatrixDisplay::ScrollState* MatrixDisplay::getScrollState(const String& key) {
 }
 
 void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key) {
+    // Call overloaded version with start_x=0 for backward compatibility
+    drawScrollingText(y, text, color, 0, max_width, key);
+}
+
+void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color, int start_x, int max_width, const String& key) {
+    if (max_width <= 0) {
+        return;
+    }
+    if (start_x < 0) {
+        max_width += start_x;
+        start_x = 0;
+    }
+    if (start_x >= MATRIX_WIDTH) {
+        return;
+    }
+    if (start_x + max_width > MATRIX_WIDTH) {
+        max_width = MATRIX_WIDTH - start_x;
+        if (max_width <= 0) {
+            return;
+        }
+    }
+
     String safe_text = sanitizeSingleLine(text);
     const int char_width = 6;
     const int max_chars = max_width / char_width;
@@ -106,8 +139,12 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
     bool force_redraw = false;
     if (state->text != safe_text) {
         state->text = safe_text;
-        state->offset = 0;
+        state->offset = max_width;
         state->last_ms = 0;
+        force_redraw = true;
+    }
+    if (state->color != color) {
+        state->color = color;
         force_redraw = true;
     }
 
@@ -120,11 +157,11 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
         if (!force_redraw) {
             return;  // No change, skip redraw
         }
-        dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
-        // Center the text
+        fillRect(start_x, y, max_width, 8, COLOR_BLACK);
+        // Center the text within the content area
         int text_width = safe_text.length() * char_width;
-        int x = (MATRIX_WIDTH - text_width) / 2;
-        if (x < 2) x = 2;
+        int x = start_x + (max_width - text_width) / 2;
+        if (x < start_x) x = start_x;
         drawSmallText(x, y, safe_text, color);
         return;
     }
@@ -146,9 +183,117 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
         state->offset = 0;
     }
 
-    dma_display->fillRect(0, y, MATRIX_WIDTH, 8, COLOR_BLACK);
-    const int x = 2 + max_width - state->offset;
+    fillRect(start_x, y, max_width, 8, COLOR_BLACK);
+    const int x = start_x + max_width - state->offset;
     drawSmallText(x, y, scroll_text, color);
+}
+
+void MatrixDisplay::drawTextAutoScroll(int y, const String& text, uint16_t color, int content_x, int content_width, const String& key) {
+    if (content_width <= 0) {
+        return;
+    }
+    if (content_x < 0) {
+        content_width += content_x;
+        content_x = 0;
+    }
+    if (content_x >= MATRIX_WIDTH) {
+        return;
+    }
+    if (content_x + content_width > MATRIX_WIDTH) {
+        content_width = MATRIX_WIDTH - content_x;
+        if (content_width <= 0) {
+            return;
+        }
+    }
+
+    String safe_text = sanitizeSingleLine(text);
+    const int char_width = 6;
+    const int text_width = safe_text.length() * char_width;
+    
+    // If text fits in content area, draw it centered as static text
+    if (text_width <= content_width) {
+        fillRect(content_x, y, content_width, 8, COLOR_BLACK);
+        int x = content_x + (content_width - text_width) / 2;
+        if (x < content_x) x = content_x;
+        drawSmallText(x, y, safe_text, color);
+    } else {
+        // Text too long, use scrolling
+        drawScrollingText(y, safe_text, color, content_x, content_width, key);
+    }
+}
+
+void MatrixDisplay::drawTinyScrollingText(int y, const String& text, uint16_t color, int start_x, int max_width, const String& key) {
+    if (max_width <= 0) {
+        return;
+    }
+    if (start_x < 0) {
+        max_width += start_x;
+        start_x = 0;
+    }
+    if (start_x >= MATRIX_WIDTH) {
+        return;
+    }
+    if (start_x + max_width > MATRIX_WIDTH) {
+        max_width = MATRIX_WIDTH - start_x;
+        if (max_width <= 0) {
+            return;
+        }
+    }
+
+    String safe_text = sanitizeSingleLine(text);
+    const int char_width = 4;  // tiny glyph width (3px + 1px spacing)
+    const int text_height = 6; // 5px glyph + 1px breathing room
+    const int max_chars = max_width / char_width;
+
+    ScrollState* state = getScrollState(key);
+
+    bool force_redraw = false;
+    if (state->text != safe_text) {
+        state->text = safe_text;
+        state->offset = max_width;
+        state->last_ms = 0;
+        force_redraw = true;
+    }
+    if (state->color != color) {
+        state->color = color;
+        force_redraw = true;
+    }
+
+    if ((int)safe_text.length() <= max_chars) {
+        if (state->offset != 0) {
+            state->offset = 0;
+            force_redraw = true;
+        }
+        if (!force_redraw) {
+            return;
+        }
+        fillRect(start_x, y, max_width, text_height, COLOR_BLACK);
+        int text_width = tinyTextWidth(safe_text);
+        int x = start_x + (max_width - text_width) / 2;
+        if (x < start_x) x = start_x;
+        drawTinyText(x, y, safe_text, color);
+        return;
+    }
+
+    const unsigned long now = millis();
+    if (!force_redraw) {
+        if (now - state->last_ms <= scroll_speed_ms) {
+            return;
+        }
+        state->offset++;
+    }
+    state->last_ms = now;
+
+    const String scroll_text = safe_text + "   ";
+    const int text_width = tinyTextWidth(scroll_text);
+    const int wrap_width = text_width + max_width;
+    if (state->offset > wrap_width) {
+        state->offset = 0;
+    }
+
+    fillRect(start_x, y, max_width, text_height, COLOR_BLACK);
+    const int x = start_x + max_width - state->offset;
+    drawTinyText(x, y, scroll_text, color);
 }
 
 void MatrixDisplay::drawStatusIndicator(int x, int y, const String& status) {
@@ -211,7 +356,7 @@ void MatrixDisplay::drawScrollingStatusText(int y, const String& text, uint16_t 
     bool force_redraw = false;
     if (state->text != safe_text) {
         state->text = safe_text;
-        state->offset = 0;
+        state->offset = available_width;
         state->last_ms = 0;
         force_redraw = true;
     }
@@ -387,50 +532,28 @@ void MatrixDisplay::drawWifiIcon(int x, int y, bool connected) {
 }
 
 void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
+    // Call overloaded version with full width for backward compatibility
+    drawSensorBar(data, y, 0, MATRIX_WIDTH);
+}
+
+void MatrixDisplay::drawSensorBar(const DisplayData& data, int y, int content_x, int content_width) {
     const int char_width = 6;
-    
-    // Temperature left
-    char temp_str[8];
+    String temp_text, humid_text, right_text;
+
     int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
-    snprintf(temp_str, sizeof(temp_str), "%dF", temp_f);
-    String temp_text = String(temp_str);
-    if (temp_text.length() > 3) {
-        temp_text = String(temp_f);
-    }
+    temp_text = String(temp_f) + "F";
 
-    // Humidity center
-    char humid_str[8];
-    snprintf(humid_str, sizeof(humid_str), "%d%%", (int)data.humidity);
-    String humid_text = String(humid_str);
-    if (humid_text.length() > 3) {
-        humid_text = String((int)data.humidity);
-    }
+    humid_text = String((int)data.humidity) + "%";
 
-    // Configurable right metric
     String metric = data.right_metric;
     metric.toLowerCase();
-    char right_str[8];
-    String right_text;
-
-    if (metric == "iaq" || metric == "iaqindex") {
-        int value = data.air_quality_index;
-        if (value > 999) value = 999;
-        snprintf(right_str, sizeof(right_str), "A%d", value);
-    } else if (metric == "co2") {
-        int value = (int)data.co2_ppm;
-        if (value >= 1000) {
-            int value_k = (value + 500) / 1000;
-            snprintf(right_str, sizeof(right_str), "C%dk", value_k);
-        } else {
-            snprintf(right_str, sizeof(right_str), "C%d", value);
-        }
+    char right_str[16];
+    if (metric == "co2") {
+        snprintf(right_str, sizeof(right_str), "C%d", (int)data.co2_ppm);
     } else if (metric == "pm2_5" || metric == "pm2.5") {
-        int value = (int)data.pm2_5;
-        if (value > 999) value = 999;
-        snprintf(right_str, sizeof(right_str), "P%d", value);
-    } else if (metric == "noise" || metric == "ambientnoise") {
+        snprintf(right_str, sizeof(right_str), "P%d", (int)data.pm2_5);
+    } else if (metric == "noise") {
         int value = (int)data.ambient_noise;
-        if (value > 999) value = 999;
         snprintf(right_str, sizeof(right_str), "N%d", value);
     } else {
         if (data.tvoc >= 1000.0f) {
@@ -446,9 +569,9 @@ void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
     int humid_width = humid_text.length() * char_width;
     int right_width = right_text.length() * char_width;
 
-    int left_x = 0;
-    int right_x = MATRIX_WIDTH - right_width;
-    int mid_x = (MATRIX_WIDTH - humid_width) / 2;
+    int left_x = content_x;
+    int right_x = content_x + content_width - right_width;
+    int mid_x = content_x + (content_width - humid_width) / 2;
     int min_mid_x = left_x + temp_width + 2;
     int max_mid_x = right_x - humid_width - 2;
     if (mid_x < min_mid_x) {
@@ -457,20 +580,26 @@ void MatrixDisplay::drawSensorBar(const DisplayData& data, int y) {
     if (mid_x > max_mid_x) {
         mid_x = max_mid_x;
     }
-    if (mid_x < 0) {
-        mid_x = 0;
+    if (mid_x < content_x) {
+        mid_x = content_x;
     }
 
-    drawSmallText(left_x, y, temp_text, COLOR_CYAN);
-    if (mid_x + humid_width <= MATRIX_WIDTH) {
-        drawSmallText(mid_x, y, humid_text, COLOR_CYAN);
+    drawSmallText(left_x, y, temp_text, data.metric_color);
+    if (mid_x + humid_width <= content_x + content_width) {
+        drawSmallText(mid_x, y, humid_text, data.metric_color);
     }
-    if (right_x >= 0) {
-        drawSmallText(right_x, y, right_text, COLOR_CYAN);
+    if (right_x >= content_x) {
+        drawSmallText(right_x, y, right_text, data.metric_color);
     }
 }
 
-void MatrixDisplay::drawDateTimeLine(int y, const DisplayData& data, uint16_t color) {
+void MatrixDisplay::drawDateTimeLine(int y, const DisplayData& data, uint16_t date_color, uint16_t time_color) {
+    // Call overloaded version with full width for backward compatibility
+    drawDateTimeLine(y, data, date_color, time_color, 0, MATRIX_WIDTH);
+}
+
+void MatrixDisplay::drawDateTimeLine(int y, const DisplayData& data, uint16_t date_color, uint16_t time_color,
+                                     int content_x, int content_width) {
     String date_text = formatDate(data.month, data.day, data.date_format);
     if (!isTinyRenderable(date_text)) {
         date_text = String(data.month) + "/" + String(data.day);
@@ -487,22 +616,22 @@ void MatrixDisplay::drawDateTimeLine(int y, const DisplayData& data, uint16_t co
     int date_width = tinyTextWidth(date_text);
     const int min_gap = 4;
 
-    if (date_width + min_gap + time_width <= MATRIX_WIDTH) {
-        drawTinyText(0, y, date_text, color);
-        int time_x = MATRIX_WIDTH - time_width;
-        drawTinyText(time_x, y, time_text, color);
+    if (date_width + min_gap + time_width <= content_width) {
+        drawTinyText(content_x, y, date_text, date_color);
+        int time_x = content_x + content_width - time_width;
+        drawTinyText(time_x, y, time_text, time_color);
     } else {
         date_text = String(data.month) + "/" + String(data.day);
         date_width = tinyTextWidth(date_text);
 
-        if (date_width + min_gap + time_width <= MATRIX_WIDTH) {
-            drawTinyText(0, y, date_text, color);
-            int time_x = MATRIX_WIDTH - time_width;
-            drawTinyText(time_x, y, time_text, color);
+        if (date_width + min_gap + time_width <= content_width) {
+            drawTinyText(content_x, y, date_text, date_color);
+            int time_x = content_x + content_width - time_width;
+            drawTinyText(time_x, y, time_text, time_color);
         } else {
-            int time_x = MATRIX_WIDTH - time_width;
-            if (time_x < 0) time_x = 0;
-            drawTinyText(time_x, y, time_text, color);
+            int time_x = content_x + content_width - time_width;
+            if (time_x < content_x) time_x = content_x;
+            drawTinyText(time_x, y, time_text, time_color);
         }
     }
 }

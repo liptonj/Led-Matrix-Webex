@@ -13,6 +13,7 @@
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
+#include "../debug.h"
 
 extern ConfigManager config_manager;
 
@@ -137,6 +138,19 @@ bool SupabaseClient::authenticate() {
     _targetFirmwareVersion = result.target_firmware_version;
     _remoteDebugEnabled = result.debug_enabled;
     _supabaseAnonKey = result.anon_key;
+
+    // Debug: log auth response summary without secrets
+#if SUPABASE_AUTH_DEBUG
+    Serial.printf("[SUPABASE] Auth response summary: pairing=%s device_id=%s expires_at=%lu debug=%d\n",
+                  result.pairing_code.c_str(),
+                  result.device_id.c_str(),
+                  result.expires_at,
+                  result.debug_enabled ? 1 : 0);
+    if (!result.target_firmware_version.isEmpty()) {
+        Serial.printf("[SUPABASE] Auth response target firmware: %s\n",
+                      result.target_firmware_version.c_str());
+    }
+#endif
     
     Serial.printf("[SUPABASE] Authenticated successfully (expires in %lu seconds)\n",
                   _tokenExpiresAt - (unsigned long)(time(nullptr)));
@@ -449,7 +463,63 @@ bool SupabaseClient::insertDeviceLog(const String& level, const String& message,
         }
     }
 
-    return httpCode == 200;
+    if (httpCode != 200) {
+        static unsigned long last_log_error = 0;
+        unsigned long now = millis();
+        if (now - last_log_error > 10000) {
+            last_log_error = now;
+            Serial.printf("[SUPABASE] insert-device-log failed: HTTP %d\n", httpCode);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool SupabaseClient::syncWebexStatus(String& webexStatus, const String& payload) {
+    if (!ensureAuthenticated()) {
+        return false;
+    }
+
+    _webexTokenMissing = false;
+
+    String body = payload;
+    if (body.isEmpty()) {
+        body = "{}";
+    }
+
+    String response;
+    int httpCode = makeRequest("webex-status", "POST", body, response, false, true);
+    if (httpCode <= 0) {
+        return false;
+    }
+
+    if (httpCode != 200) {
+        if (httpCode == 404 && response.indexOf("Webex token not found") >= 0) {
+            _webexTokenMissing = true;
+        }
+        if (!response.isEmpty()) {
+            Serial.printf("[SUPABASE] webex-status failed (%d): %s\n", httpCode, response.c_str());
+        } else {
+            Serial.printf("[SUPABASE] webex-status failed (%d)\n", httpCode);
+        }
+        return false;
+    }
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, response);
+    if (err) {
+        Serial.printf("[SUPABASE] webex-status parse error: %s\n", err.c_str());
+        return false;
+    }
+
+    const char* status = doc["webex_status"];
+    if (status) {
+        webexStatus = String(status);
+        return true;
+    }
+
+    return false;
 }
 
 bool SupabaseClient::beginRequestSlot(bool allowImmediate) {
@@ -491,6 +561,8 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     
     // Set headers
     http.addHeader("Content-Type", "application/json");
+    uint32_t hmacTimestamp = 0;
+    bool hmacUsed = false;
     
     if (useHmac) {
         // Add HMAC authentication headers
@@ -500,11 +572,12 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
             return 0;
         }
         
-        uint32_t timestamp = DeviceCredentials::getTimestamp();
-        String signature = deviceCredentials.signRequest(timestamp, body);
+        hmacTimestamp = DeviceCredentials::getTimestamp();
+        hmacUsed = true;
+        String signature = deviceCredentials.signRequest(hmacTimestamp, body);
         
         http.addHeader("X-Device-Serial", deviceCredentials.getSerialNumber());
-        http.addHeader("X-Timestamp", String(timestamp));
+        http.addHeader("X-Timestamp", String(hmacTimestamp));
         http.addHeader("X-Signature", signature);
     } else {
         // Add Bearer token
@@ -512,6 +585,27 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
             http.addHeader("Authorization", "Bearer " + _token);
         }
     }
+
+#if SUPABASE_AUTH_DEBUG
+    if (endpoint == "device-auth") {
+        Serial.printf("[SUPABASE] Request debug: %s %s\n", method.c_str(), url.c_str());
+        Serial.println("[SUPABASE] Request headers: Content-Type=application/json");
+        if (hmacUsed) {
+            Serial.printf("[SUPABASE] Request headers: X-Device-Serial=%s\n",
+                          deviceCredentials.getSerialNumber().c_str());
+            Serial.printf("[SUPABASE] Request headers: X-Timestamp=%lu\n",
+                          (unsigned long)hmacTimestamp);
+            Serial.println("[SUPABASE] Request headers: X-Signature=<redacted>");
+        } else if (!_token.isEmpty()) {
+            Serial.println("[SUPABASE] Request headers: Authorization=Bearer <redacted>");
+        }
+        if (body.isEmpty()) {
+            Serial.println("[SUPABASE] Request payload: (empty)");
+        } else {
+            Serial.printf("[SUPABASE] Request payload: %s\n", body.c_str());
+        }
+    }
+#endif
     
     // Make request
     int httpCode;

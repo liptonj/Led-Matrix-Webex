@@ -16,6 +16,7 @@ import {
   assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
+import { requireAdminUser } from "../_shared/admin_auth.ts";
 
 // ============================================================================
 // HMAC Helper Tests
@@ -416,4 +417,40 @@ Deno.test("ValidationResult: failure structure", () => {
   assertEquals(result.valid, false);
   assertExists(result.error);
   assertEquals(result.device, undefined);
+});
+
+// ============================================================================
+// Admin Auth Helper Tests
+// ============================================================================
+
+Deno.test("Admin auth: allows service role token when enabled", async () => {
+  Deno.env.set("SUPABASE_URL", "http://localhost");
+  Deno.env.set("SUPABASE_ANON_KEY", "anon-key");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "service-role-key");
+
+  const req = new Request("http://localhost/admin", {
+    headers: { Authorization: "Bearer service-role-key" },
+  });
+
+  const result = await requireAdminUser(req, { allowServiceRole: true });
+  assertEquals(result.response, undefined);
+  assertEquals(result.requesterId, null);
+  assertExists(result.serviceClient);
+});
+
+Deno.test("Admin auth: missing Authorization returns 401", async () => {
+  Deno.env.set("SUPABASE_URL", "http://localhost");
+  Deno.env.set("SUPABASE_ANON_KEY", "anon-key");
+  Deno.env.set("SUPABASE_SERVICE_ROLE_KEY", "service-role-key");
+
+  const req = new Request("http://localhost/admin");
+  const result = await requireAdminUser(req, {
+    corsHeaders: { "x-test": "1" },
+  });
+
+  assertExists(result.response);
+  assertEquals(result.response?.status, 401);
+  assertEquals(result.response?.headers.get("x-test"), "1");
+  const body = await result.response?.json();
+  assertEquals(body?.error, "Unauthorized");
 });

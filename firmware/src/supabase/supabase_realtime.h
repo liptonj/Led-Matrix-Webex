@@ -27,7 +27,7 @@
 
 // Phoenix protocol constants
 #define PHOENIX_HEARTBEAT_INTERVAL_MS 30000
-#define PHOENIX_HEARTBEAT_TIMEOUT_MS 10000
+#define PHOENIX_HEARTBEAT_TIMEOUT_MS 60000
 #define PHOENIX_RECONNECT_MIN_MS 1000
 #define PHOENIX_RECONNECT_MAX_MS 60000
 
@@ -93,6 +93,12 @@ public:
      */
     bool subscribe(const String& schema, const String& table, 
                    const String& filter = "");
+
+    /**
+     * @brief Set channel topic for subscriptions
+     * @param topic Channel topic (must not be "realtime")
+     */
+    void setChannelTopic(const String& topic);
     
     /**
      * @brief Subscribe to multiple tables on a single channel
@@ -100,10 +106,18 @@ public:
      * @param tables Array of table names
      * @param tableCount Number of tables
      * @param filter Filter to apply to all tables (e.g., "pairing_code=eq.ABC123")
+     * @param includePostgresChanges Whether to include postgres_changes config
      * @return true if subscription request sent
      */
     bool subscribeMultiple(const String& schema, const String tables[], 
-                           int tableCount, const String& filter = "");
+                           int tableCount, const String& filter = "",
+                           bool includePostgresChanges = true);
+
+    /**
+     * @brief Subscribe to broadcast-only channel (no postgres_changes)
+     * @return true if subscription request sent
+     */
+    bool subscribeBroadcast();
 
     /**
      * @brief Unsubscribe from current channel
@@ -154,6 +168,7 @@ private:
     String _accessToken;
     String _wsHeaders;
     String _channelTopic;
+    bool _privateChannel;
     bool _connected;
     bool _subscribed;
     bool _connecting;
@@ -164,6 +179,7 @@ private:
     String _pendingJoinMessage;
     bool _pendingJoin;
     bool _messagePending;
+    String _lastJoinPayload;
     int _joinRef;
     int _msgRef;
     unsigned long _lastHeartbeat;
@@ -199,6 +215,11 @@ private:
      * @brief Send heartbeat
      */
     void sendHeartbeat();
+
+    /**
+     * @brief Send access token refresh message on the channel
+     */
+    void sendAccessToken();
 
     /**
      * @brief Handle WebSocket events

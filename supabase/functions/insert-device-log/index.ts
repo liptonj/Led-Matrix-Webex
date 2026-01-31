@@ -13,9 +13,9 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
+import { verifyDeviceToken } from "../_shared/jwt.ts";
 
 const MAX_LOGS_PER_MINUTE = 60;
 const RATE_WINDOW_SECONDS = 60;
@@ -50,14 +50,7 @@ async function validateBearerToken(
   const token = authHeader.substring(7);
 
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(tokenSecret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign", "verify"],
-    );
-    const payload = (await verify(token, key)) as unknown as TokenPayload;
+    const payload = await verifyDeviceToken(token, tokenSecret);
 
     if (payload.token_type !== "device") {
       return { valid: false, error: "Invalid token type" };
@@ -156,7 +149,11 @@ Deno.serve(async (req) => {
     }
 
     const validLevels: LogLevel[] = ["debug", "info", "warn", "error"];
-    if (!logData.level || !validLevels.includes(logData.level)) {
+    const normalizedLevel =
+      typeof logData.level === "string"
+        ? (logData.level.toLowerCase() as LogLevel)
+        : logData.level;
+    if (!normalizedLevel || !validLevels.includes(normalizedLevel)) {
       return new Response(JSON.stringify({ success: false, error: "Invalid log level" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -172,7 +169,7 @@ Deno.serve(async (req) => {
 
     // Gate high-volume levels unless debug is enabled.
     // Always keep warn/error so we don't miss real issues.
-    if (!isDebugEnabled && (logData.level === "debug" || logData.level === "info")) {
+    if (!isDebugEnabled && (normalizedLevel === "debug" || normalizedLevel === "info")) {
       return new Response(JSON.stringify({ success: true, dropped: true }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -186,30 +183,67 @@ Deno.serve(async (req) => {
       max_requests: MAX_LOGS_PER_MINUTE,
       window_seconds: RATE_WINDOW_SECONDS,
     });
-    if (!rateErr && allowed === false && (logData.level === "debug" || logData.level === "info")) {
+    if (!rateErr && allowed === false && (normalizedLevel === "debug" || normalizedLevel === "info")) {
       return new Response(JSON.stringify({ success: false, error: "Rate limit exceeded" }), {
         status: 429,
         headers: { ...corsHeaders, "Content-Type": "application/json", "Retry-After": "5" },
       });
     }
 
-    const { error: insertErr } = await supabase
-      .schema("display")
-      .from("device_logs")
-      .insert({
-        serial_number: serialNumber,
-        device_id: deviceId,
-        level: logData.level,
-        message: logData.message,
-        metadata: logData.metadata || {},
-      });
+    // BROADCAST-ONLY MODE: Skip database persistence to avoid storage costs
+    // Logs are only sent via Realtime broadcast for live viewing in admin UI
+    // Historical logs are NOT saved - only real-time streaming is supported
 
-    if (insertErr) {
-      console.error("Failed to insert device log:", insertErr);
-      return new Response(JSON.stringify({ success: false, error: "Failed to insert log" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // const { error: insertErr } = await supabase
+    //   .schema("display")
+    //   .from("device_logs")
+    //   .insert({
+    //     serial_number: serialNumber,
+    //     device_id: deviceId,
+    //     level: normalizedLevel,
+    //     message: logData.message,
+    //     metadata: logData.metadata || {},
+    //   });
+    //
+    // if (insertErr) {
+    //   console.error("Failed to insert device log:", insertErr);
+    //   return new Response(JSON.stringify({ success: false, error: "Failed to insert log" }), {
+    //     status: 500,
+    //     headers: { ...corsHeaders, "Content-Type": "application/json" },
+    //   });
+    // }
+
+    const payload = {
+      serial_number: serialNumber,
+      device_id: deviceId,
+      level: normalizedLevel,
+      message: logData.message,
+      metadata: logData.metadata || {},
+      ts: Date.now(),
+    };
+    const realtimeUrl = `${supabaseUrl.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
+    const broadcastBody = {
+      messages: [
+        {
+          topic: `device_logs:${serialNumber}`,
+          event: "log",
+          payload,
+        },
+      ],
+    };
+
+    const broadcastResp = await fetch(realtimeUrl, {
+      method: "POST",
+      headers: {
+        apikey: supabaseKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(broadcastBody),
+    });
+
+    if (!broadcastResp.ok) {
+      const errText = await broadcastResp.text();
+      console.error("Broadcast send failed:", broadcastResp.status, errText);
     }
 
     return new Response(JSON.stringify({ success: true }), {
@@ -224,4 +258,3 @@ Deno.serve(async (req) => {
     });
   }
 });
-

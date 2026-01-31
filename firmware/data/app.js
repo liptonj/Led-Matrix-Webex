@@ -157,6 +157,7 @@ function ensureSelectOption(selectEl, value) {
 }
 
 // Load Status
+let currentPairingCode = '';
 async function loadStatus() {
     try {
         const response = await fetch(API.status);
@@ -178,6 +179,7 @@ function updateStatusDisplay(data) {
     const pairingCodeEl = document.getElementById('pairing-code');
     if (pairingCodeEl && data.pairing_code) {
         pairingCodeEl.textContent = data.pairing_code;
+        currentPairingCode = data.pairing_code;
     }
     
     const appStatusEl = document.getElementById('app-status');
@@ -292,11 +294,26 @@ async function loadConfig() {
         document.getElementById('scroll-speed').value = config.scroll_speed_ms || 250;
         document.getElementById('scroll-speed-value').textContent = config.scroll_speed_ms || 250;
         
-        // Sensor page settings
-        document.getElementById('sensor-page-enabled').checked = config.sensor_page_enabled !== false;
+        // Page/layout settings
+        const displayPagesEl = document.getElementById('display-pages');
+        if (displayPagesEl) {
+            const pagesValue = config.display_pages || (config.sensor_page_enabled === false ? 'status' : 'rotate');
+            displayPagesEl.value = pagesValue;
+        }
+        const statusLayoutEl = document.getElementById('status-layout');
+        if (statusLayoutEl) {
+            statusLayoutEl.value = config.status_layout || 'sensors';
+        }
         const pageIntervalSec = Math.round((config.page_interval_ms || 5000) / 1000);
         document.getElementById('page-interval').value = pageIntervalSec;
         document.getElementById('page-interval-value').textContent = pageIntervalSec;
+        
+        // Border width setting
+        document.getElementById('border-width').value = config.border_width || 1;
+        document.getElementById('date-color').value = config.date_color || '#00ffff';
+        document.getElementById('time-color').value = config.time_color || '#ffffff';
+        document.getElementById('name-color').value = config.name_color || '#ffa500';
+        document.getElementById('metric-color').value = config.metric_color || '#00bfff';
         
         document.getElementById('poll-interval').value = config.poll_interval || 30;
         document.getElementById('xapi-device-id').value = config.xapi_device_id || '';
@@ -361,9 +378,10 @@ async function loadConfig() {
         clientIdInput.value = '';
         clientSecretInput.value = '';
 
-        // Update auth status
+        // Update auth status - check actual authentication state (Supabase or local)
         const authStatus = document.getElementById('webex-auth-status');
-        if (config.has_webex_tokens) {
+        if (config.webex_authenticated) {
+            // Connected via Supabase OAuth or local tokens
             authStatus.textContent = 'Connected';
             authStatus.style.color = '#6cc04a';
         } else if (config.has_webex_credentials) {
@@ -627,11 +645,11 @@ async function startWebexAuth() {
         if (data.auth_url) {
             const redirectField = document.getElementById('webex-redirect-uri');
             const redirectNote = document.getElementById('webex-redirect-note');
-            if (redirectField && data.redirect_uri) {
-                redirectField.value = data.redirect_uri;
+            if (redirectField) {
+                redirectField.value = data.auth_url;
             }
-            if (redirectNote && data.redirect_uri) {
-                redirectNote.textContent = `Add this redirect URI to your Webex Integration: ${data.redirect_uri}`;
+            if (redirectNote) {
+                redirectNote.textContent = 'Authorize Webex via display.5ls.us.';
             }
             window.open(data.auth_url, '_blank');
         } else {
@@ -738,8 +756,15 @@ async function saveDisplaySettings(e) {
         brightness: parseInt(document.getElementById('brightness').value),
         poll_interval: parseInt(document.getElementById('poll-interval').value),
         scroll_speed_ms: parseInt(document.getElementById('scroll-speed').value),
-        sensor_page_enabled: document.getElementById('sensor-page-enabled').checked,
+        display_pages: document.getElementById('display-pages').value,
+        status_layout: document.getElementById('status-layout').value,
+        sensor_page_enabled: document.getElementById('display-pages').value === 'rotate',
         page_interval_ms: parseInt(document.getElementById('page-interval').value) * 1000,
+        border_width: parseInt(document.getElementById('border-width').value),
+        date_color: document.getElementById('date-color').value,
+        time_color: document.getElementById('time-color').value,
+        name_color: document.getElementById('name-color').value,
+        metric_color: document.getElementById('metric-color').value,
         time_format: document.getElementById('time-format').value,
         date_format: document.getElementById('date-format').value,
         time_zone: document.getElementById('time-zone').value,
