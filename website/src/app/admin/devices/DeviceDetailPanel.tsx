@@ -332,9 +332,7 @@ export default function DeviceDetailPanel({
         try {
             setCommandSubmitting(true);
             const result = await insertCommand(device.pairing_code, device.serial_number, command, {});
-            if (result?.id) {
-                setPendingCommandIds((prev) => new Set(prev).add(result.id));
-            }
+            void result;
         } catch (err) {
             setCommandError(err instanceof Error ? err.message : 'Failed to send command.');
         } finally {
