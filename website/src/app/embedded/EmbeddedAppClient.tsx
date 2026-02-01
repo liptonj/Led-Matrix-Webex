@@ -364,12 +364,14 @@ export function EmbeddedAppClient() {
     if (!supabaseUrl || !supabaseAnonKey) {
       throw new Error('Supabase not configured (missing NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY)');
     }
-    if (supabaseRef.current) {
-      if (supabaseAuthRef.current !== token) {
-        supabaseAuthRef.current = token;
-        supabaseRef.current.realtime.setAuth(token);
-      }
+    // If token changed, we need to recreate the client to update REST API headers
+    // The global.headers are set at client creation and cannot be updated afterwards
+    if (supabaseRef.current && supabaseAuthRef.current === token) {
       return supabaseRef.current;
+    }
+    // Clean up old client if exists
+    if (supabaseRef.current) {
+      supabaseRef.current.removeAllChannels();
     }
     const client = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {

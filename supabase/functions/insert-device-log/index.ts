@@ -222,20 +222,24 @@ Deno.serve(async (req) => {
       ts: Date.now(),
     };
     const realtimeUrl = `${supabaseUrl.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
+    const channelTopic = `device_logs:${serialNumber}`;
     const broadcastBody = {
       messages: [
         {
-          topic: `device_logs:${serialNumber}`,
+          topic: channelTopic,
           event: "log",
           payload,
         },
       ],
     };
 
+    console.log(`[insert-device-log] Broadcasting to topic: ${channelTopic}, level: ${normalizedLevel}`);
+
     const broadcastResp = await fetch(realtimeUrl, {
       method: "POST",
       headers: {
-        apikey: supabaseKey,
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(broadcastBody),
@@ -243,9 +247,14 @@ Deno.serve(async (req) => {
 
     if (!broadcastResp.ok) {
       const errText = await broadcastResp.text();
-      console.error("Broadcast send failed:", broadcastResp.status, errText);
+      console.error(`[insert-device-log] Broadcast failed: HTTP ${broadcastResp.status}`, errText);
+      return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
+    console.log(`[insert-device-log] Broadcast successful to ${channelTopic}`);
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

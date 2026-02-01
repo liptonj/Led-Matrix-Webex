@@ -212,7 +212,8 @@ Deno.serve(async (req) => {
     const broadcastResp = await fetch(realtimeUrl, {
       method: "POST",
       headers: {
-        apikey: supabaseKey,
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(broadcastBody),
