@@ -91,12 +91,23 @@ jobs:
       - name: Create merged binary for web installer
         run: |
           BUILD_DIR=".pio/build/esp32s3"
-          # Locate boot_app0.bin from framework
-          BOOT_APP0="$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin"
+          
+          # Dynamically locate boot_app0.bin from the Arduino ESP32 framework
+          # The path may vary based on PlatformIO/framework version
+          BOOT_APP0=$(find "$HOME/.platformio/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          
+          if [ -z "$BOOT_APP0" ]; then
+            echo "ERROR: Could not find boot_app0.bin in PlatformIO packages"
+            echo "Searching in: $HOME/.platformio/packages"
+            find "$HOME/.platformio/packages" -name "*.bin" -path "*/partitions/*" 2>/dev/null || echo "No partition binaries found"
+            exit 1
+          fi
+          
+          echo "Found boot_app0.bin at: $BOOT_APP0"
 
           # Create a merged binary that includes bootloader, partition table, boot_app0, and app
           # This is what web installer needs to flash a new device from scratch
-          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BOOT_APP0" ]; then
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BUILD_DIR/bootloader.bin" ]; then
             esptool.py --chip esp32s3 merge_bin \
               -o artifacts/firmware-merged-esp32s3.bin \
               --flash_mode dio \
@@ -111,7 +122,9 @@ jobs:
           else
             echo "ERROR: Missing required files for merged binary"
             ls -la $BUILD_DIR/
-            test -f "$BOOT_APP0" && echo "boot_app0.bin: found" || echo "boot_app0.bin: MISSING"
+            test -f "$BUILD_DIR/bootloader.bin" && echo "bootloader.bin: found" || echo "bootloader.bin: MISSING"
+            test -f "$BUILD_DIR/partitions.bin" && echo "partitions.bin: found" || echo "partitions.bin: MISSING"
+            test -f "$BUILD_DIR/firmware.bin" && echo "firmware.bin: found" || echo "firmware.bin: MISSING"
             exit 1
           fi
 
