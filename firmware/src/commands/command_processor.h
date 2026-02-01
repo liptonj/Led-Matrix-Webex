@@ -1,4 +1,4 @@
-t/**
+/**
  * @file command_processor.h
  * @brief Command processing and queue management
  *
