@@ -26,8 +26,8 @@ The WiFi scan functionality in the captive portal was not working - when users c
 **Issue:** The JavaScript scan function had minimal error handling and didn't support async polling patterns.
 
 **Location:** 
-- `firmware/data/app.js`
-- `firmware/data/embedded/app.js`
+- `firmware/data/app.js` (device configuration UI)
+- `website/src/app/embedded/` (cloud-hosted Webex embedded app)
 
 ### 4. WiFi Power Save Causing Display Interference (NEW)
 **Issue:** WiFi power save mode was not explicitly disabled, allowing the ESP32 to use default power management. WiFi radio activity interferes with the I2S DMA timing used by the LED matrix, causing:
@@ -148,10 +148,9 @@ Added intelligent polling logic in JavaScript:
    - Created `displayNetworks()` helper function
    - Improved error handling and user feedback
 
-4. **firmware/data/embedded/app.js**
-   - Same polling pattern as regular UI
-   - Created `displayEmbeddedNetworks()` helper function
-   - Consistent error handling
+4. **website/src/app/embedded/** (cloud-hosted embedded app)
+   - WiFi scanning implemented in Next.js/React components
+   - Consistent polling pattern and error handling
 
 ## Technical Details
 
@@ -363,7 +362,7 @@ pio device monitor
 If issues occur, revert these commits:
 - `firmware/src/web/api_wifi.cpp`
 - `firmware/data/app.js`
-- `firmware/data/embedded/app.js`
+- `website/src/app/embedded/` (if modified)
 
 Old blocking scan will work (slowly) as fallback.
 

@@ -14,6 +14,10 @@
 // External reference to debug mode flag (set from config in main.cpp)
 extern bool g_debug_mode;
 
+// External debug flags for specific subsystems (set from config in main.cpp)
+extern bool g_debug_display;   // Display rendering debug logs
+extern bool g_debug_realtime;  // Realtime/WebSocket debug logs
+
 // Compile-time debug toggle for Supabase auth payload logging (dev-only)
 #ifndef SUPABASE_AUTH_DEBUG
 #define SUPABASE_AUTH_DEBUG 1
@@ -27,6 +31,28 @@ extern bool g_debug_mode;
     do { \
         if (g_debug_mode) { \
             Serial.printf("[DEBUG][%s] " fmt "\n", tag, ##__VA_ARGS__); \
+        } \
+    } while(0)
+
+/**
+ * Display debug logging - only logs when display debugging is enabled
+ * Usage: DEBUG_DISPLAY("Rendering status page");
+ */
+#define DEBUG_DISPLAY(fmt, ...) \
+    do { \
+        if (g_debug_display) { \
+            Serial.printf("[DEBUG][DISPLAY] " fmt "\n", ##__VA_ARGS__); \
+        } \
+    } while(0)
+
+/**
+ * Realtime debug logging - only logs when realtime debugging is enabled
+ * Usage: DEBUG_REALTIME("WebSocket message: %s", msg.c_str());
+ */
+#define DEBUG_REALTIME(fmt, ...) \
+    do { \
+        if (g_debug_realtime) { \
+            Serial.printf("[DEBUG][REALTIME] " fmt "\n", ##__VA_ARGS__); \
         } \
     } while(0)
 

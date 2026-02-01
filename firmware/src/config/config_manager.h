@@ -107,6 +107,7 @@ public:
     String getMQTTUsername() const;
     String getMQTTPassword() const;
     String getMQTTTopic() const;
+    bool getMQTTUseTLS() const;
     String getSensorSerial() const;
     String getSensorMacs() const;
     String getSensorMacsRaw() const;
@@ -114,10 +115,11 @@ public:
     String getDisplayMetric() const;
     void setMQTTConfig(const String& broker, uint16_t port,
                        const String& username, const String& password,
-                       const String& topic);
+                       const String& topic, bool use_tls = false);
     void updateMQTTConfig(const String& broker, uint16_t port,
                           const String& username, const String& password,
-                          bool updatePassword, const String& topic);
+                          bool updatePassword, const String& topic, bool use_tls = false);
+    void setMQTTUseTLS(bool use_tls);
     void setSensorSerial(const String& serial);
     void setSensorMacs(const String& macs);
     void setDisplaySensorMac(const String& mac);
@@ -149,6 +151,10 @@ public:
     void setDebugMode(bool enabled);
     bool getPairingRealtimeDebug() const;
     void setPairingRealtimeDebug(bool enabled);
+    bool getDebugDisplay() const;
+    void setDebugDisplay(bool enabled);
+    bool getDebugRealtime() const;
+    void setDebugRealtime(bool enabled);
 
     // TLS Configuration
     bool getTlsVerify() const;
@@ -204,6 +210,7 @@ private:
     mutable String cached_mqtt_username;
     mutable String cached_mqtt_password;
     mutable String cached_mqtt_topic;
+    mutable bool cached_mqtt_use_tls;
     mutable String cached_sensor_macs;
     mutable String cached_display_sensor_mac;
     mutable String cached_display_metric;
@@ -214,6 +221,8 @@ private:
     mutable String cached_supabase_url;
     mutable String cached_supabase_anon_key;
     mutable bool cached_tls_verify;
+    mutable bool cached_debug_display;
+    mutable bool cached_debug_realtime;
     mutable bool cache_loaded;
 
     void loadCache() const;

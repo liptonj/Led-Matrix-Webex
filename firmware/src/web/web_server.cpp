@@ -479,7 +479,9 @@ bool WebServerManager::checkPendingReboot() {
         return false;
     }
     
-    if (millis() < pending_reboot_time) {
+    // Fix millis() wraparound: use signed comparison for time deltas
+    unsigned long now = millis();
+    if ((long)(now - pending_reboot_time) < 0) {
         return false;
     }
     

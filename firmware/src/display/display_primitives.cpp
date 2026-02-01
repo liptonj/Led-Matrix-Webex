@@ -176,7 +176,10 @@ void MatrixDisplay::drawScrollingText(int y, const String& text, uint16_t color,
     }
     state->last_ms = now;
 
-    const String scroll_text = safe_text + "   ";
+    // Use String::reserve() to pre-allocate memory before concatenation
+    String scroll_text;
+    scroll_text.reserve(safe_text.length() + 3);
+    scroll_text = safe_text + "   ";
     const int text_width = scroll_text.length() * char_width;
     const int wrap_width = text_width + max_width;
     if (state->offset > wrap_width) {
@@ -284,7 +287,10 @@ void MatrixDisplay::drawTinyScrollingText(int y, const String& text, uint16_t co
     }
     state->last_ms = now;
 
-    const String scroll_text = safe_text + "   ";
+    // Use String::reserve() to pre-allocate memory before concatenation
+    String scroll_text;
+    scroll_text.reserve(safe_text.length() + 3);
+    scroll_text = safe_text + "   ";
     const int text_width = tinyTextWidth(scroll_text);
     const int wrap_width = text_width + max_width;
     if (state->offset > wrap_width) {
@@ -386,7 +392,10 @@ void MatrixDisplay::drawScrollingStatusText(int y, const String& text, uint16_t 
     }
     state->last_ms = now;
     
-    const String scroll_text = safe_text + "   ";
+    // Use String::reserve() to pre-allocate memory before concatenation
+    String scroll_text;
+    scroll_text.reserve(safe_text.length() + 3);
+    scroll_text = safe_text + "   ";
     const int text_width = scroll_text.length() * char_width;
     const int wrap_width = text_width + available_width;
     if (state->offset > wrap_width) {

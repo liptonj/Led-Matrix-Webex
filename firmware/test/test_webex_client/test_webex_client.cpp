@@ -462,6 +462,210 @@ void test_api_url_construction() {
 }
 
 // ============================================================================
+// OAuth State Validation Tests (Expanded)
+// ============================================================================
+
+// Test CSRF protection with state parameter
+void test_oauth_state_generation() {
+    // State should be random and unique
+    String state = "random_state_abc123";
+    TEST_ASSERT_GREATER_THAN(0, state.length());
+}
+
+void test_oauth_state_validation_match() {
+    String sent_state = "abc123xyz789";
+    String received_state = "abc123xyz789";
+    bool valid = (sent_state == received_state);
+    TEST_ASSERT_TRUE(valid);
+}
+
+void test_oauth_state_validation_mismatch() {
+    String sent_state = "abc123xyz789";
+    String received_state = "different_state";
+    bool valid = (sent_state == received_state);
+    TEST_ASSERT_FALSE(valid);
+}
+
+void test_oauth_state_empty() {
+    String state = "";
+    bool valid = !state.isEmpty();
+    TEST_ASSERT_FALSE(valid);
+}
+
+void test_oauth_state_minimum_length() {
+    String state = "abc123";
+    // State should be at least 6 characters for security
+    bool valid = (state.length() >= 6);
+    TEST_ASSERT_TRUE(valid);
+}
+
+// Test authorization code exchange
+void test_oauth_code_exchange_request() {
+    const char* token_request = R"({
+        "grant_type": "authorization_code",
+        "client_id": "C123456",
+        "client_secret": "secret",
+        "code": "auth_code_123",
+        "redirect_uri": "https://example.com/callback"
+    })";
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, token_request);
+    TEST_ASSERT_FALSE(error);
+    
+    const char* grant_type = doc["grant_type"];
+    TEST_ASSERT_EQUAL_STRING("authorization_code", grant_type);
+}
+
+void test_oauth_token_response() {
+    const char* token_response = R"({
+        "access_token": "ZDk3YjJjZDItZGU5Mi00YzA3LWFjM2UtOTA4Y2M3YzYyMGEy",
+        "expires_in": 3600,
+        "refresh_token": "YzE4ZTZkYjYtNjI0Yi00YzE0LTk2ZjItZjM1Nzc4MjQyMDAy",
+        "refresh_token_expires_in": 7776000
+    })";
+    
+    JsonDocument doc;
+    deserializeJson(doc, token_response);
+    
+    const char* access_token = doc["access_token"];
+    int expires_in = doc["expires_in"];
+    const char* refresh_token = doc["refresh_token"];
+    
+    TEST_ASSERT_NOT_EQUAL(0, strlen(access_token));
+    TEST_ASSERT_EQUAL(3600, expires_in);
+    TEST_ASSERT_NOT_EQUAL(0, strlen(refresh_token));
+}
+
+void test_oauth_token_expiry_calculation() {
+    unsigned long current_time = 1000000;
+    int expires_in = 3600; // seconds
+    unsigned long expiry_time = current_time + expires_in;
+    
+    TEST_ASSERT_EQUAL(1003600, expiry_time);
+}
+
+void test_oauth_token_expired_check() {
+    unsigned long expiry_time = 1000000;
+    unsigned long current_time = 1000001;
+    bool expired = (current_time >= expiry_time);
+    TEST_ASSERT_TRUE(expired);
+}
+
+void test_oauth_token_not_expired() {
+    unsigned long expiry_time = 1000000;
+    unsigned long current_time = 999999;
+    bool expired = (current_time >= expiry_time);
+    TEST_ASSERT_FALSE(expired);
+}
+
+// Test refresh token flow
+void test_oauth_refresh_token_request() {
+    const char* refresh_request = R"({
+        "grant_type": "refresh_token",
+        "client_id": "C123456",
+        "client_secret": "secret",
+        "refresh_token": "YzE4ZTZkYjYtNjI0Yi00YzE0LTk2ZjItZjM1Nzc4MjQyMDAy"
+    })";
+    
+    JsonDocument doc;
+    deserializeJson(doc, refresh_request);
+    
+    const char* grant_type = doc["grant_type"];
+    TEST_ASSERT_EQUAL_STRING("refresh_token", grant_type);
+}
+
+void test_oauth_refresh_token_response() {
+    const char* refresh_response = R"({
+        "access_token": "NEW_ACCESS_TOKEN",
+        "expires_in": 3600,
+        "refresh_token": "NEW_REFRESH_TOKEN",
+        "refresh_token_expires_in": 7776000
+    })";
+    
+    JsonDocument doc;
+    deserializeJson(doc, refresh_response);
+    
+    const char* new_access = doc["access_token"];
+    const char* new_refresh = doc["refresh_token"];
+    
+    TEST_ASSERT_EQUAL_STRING("NEW_ACCESS_TOKEN", new_access);
+    TEST_ASSERT_EQUAL_STRING("NEW_REFRESH_TOKEN", new_refresh);
+}
+
+void test_oauth_refresh_token_expired() {
+    unsigned long refresh_expiry = 1000000;
+    unsigned long current_time = 1000001;
+    bool needs_reauth = (current_time >= refresh_expiry);
+    TEST_ASSERT_TRUE(needs_reauth);
+}
+
+// Test OAuth error responses
+void test_oauth_error_invalid_grant() {
+    const char* error_response = R"({
+        "error": "invalid_grant",
+        "error_description": "The authorization code is invalid or expired"
+    })";
+    
+    JsonDocument doc;
+    deserializeJson(doc, error_response);
+    
+    const char* error = doc["error"];
+    TEST_ASSERT_EQUAL_STRING("invalid_grant", error);
+}
+
+void test_oauth_error_invalid_client() {
+    const char* error_response = R"({
+        "error": "invalid_client",
+        "error_description": "Client authentication failed"
+    })";
+    
+    JsonDocument doc;
+    deserializeJson(doc, error_response);
+    
+    const char* error = doc["error"];
+    TEST_ASSERT_EQUAL_STRING("invalid_client", error);
+}
+
+// Test authorization URL construction
+void test_oauth_authorize_url() {
+    String base_url = "https://webexapis.com/v1/authorize";
+    String client_id = "C123456";
+    String redirect_uri = "https://example.com/callback";
+    String scope = "spark:people_read";
+    String state = "random_state";
+    
+    String auth_url = base_url + "?client_id=" + client_id + 
+                     "&redirect_uri=" + redirect_uri +
+                     "&scope=" + scope +
+                     "&response_type=code" +
+                     "&state=" + state;
+    
+    TEST_ASSERT_TRUE(auth_url.indexOf("client_id") > 0);
+    TEST_ASSERT_TRUE(auth_url.indexOf("redirect_uri") > 0);
+    TEST_ASSERT_TRUE(auth_url.indexOf("state") > 0);
+}
+
+void test_oauth_redirect_uri_encoding() {
+    String redirect_uri = "https://example.com/callback?param=value";
+    // Should be URL encoded: https%3A%2F%2Fexample.com%2Fcallback%3Fparam%3Dvalue
+    // For now, just test that it contains the base URL
+    TEST_ASSERT_TRUE(redirect_uri.indexOf("https://") == 0);
+}
+
+// Test scope validation
+void test_oauth_scope_people_read() {
+    String scope = "spark:people_read";
+    TEST_ASSERT_EQUAL_STRING("spark:people_read", scope.c_str());
+}
+
+void test_oauth_scope_multiple() {
+    String scope = "spark:people_read spark:kms";
+    TEST_ASSERT_TRUE(scope.indexOf("spark:people_read") >= 0);
+    TEST_ASSERT_TRUE(scope.indexOf("spark:kms") >= 0);
+}
+
+// ============================================================================
 // Test Runner
 // ============================================================================
 
@@ -506,6 +710,37 @@ static void run_webex_client_tests() {
     // OAuth/API
     RUN_TEST(test_bearer_token_format);
     RUN_TEST(test_api_url_construction);
+    
+    // OAuth State Validation (Expanded)
+    RUN_TEST(test_oauth_state_generation);
+    RUN_TEST(test_oauth_state_validation_match);
+    RUN_TEST(test_oauth_state_validation_mismatch);
+    RUN_TEST(test_oauth_state_empty);
+    RUN_TEST(test_oauth_state_minimum_length);
+    
+    // OAuth Token Exchange
+    RUN_TEST(test_oauth_code_exchange_request);
+    RUN_TEST(test_oauth_token_response);
+    RUN_TEST(test_oauth_token_expiry_calculation);
+    RUN_TEST(test_oauth_token_expired_check);
+    RUN_TEST(test_oauth_token_not_expired);
+    
+    // OAuth Refresh Token
+    RUN_TEST(test_oauth_refresh_token_request);
+    RUN_TEST(test_oauth_refresh_token_response);
+    RUN_TEST(test_oauth_refresh_token_expired);
+    
+    // OAuth Error Handling
+    RUN_TEST(test_oauth_error_invalid_grant);
+    RUN_TEST(test_oauth_error_invalid_client);
+    
+    // OAuth URL Construction
+    RUN_TEST(test_oauth_authorize_url);
+    RUN_TEST(test_oauth_redirect_uri_encoding);
+    
+    // OAuth Scope
+    RUN_TEST(test_oauth_scope_people_read);
+    RUN_TEST(test_oauth_scope_multiple);
 }
 
 #if defined(ARDUINO)

@@ -4,6 +4,7 @@
  */
 
 #include "web_server.h"
+#include "web_helpers.h"
 #include "../time/time_manager.h"
 #include "../meraki/mqtt_client.h"
 #include "../auth/device_credentials.h"
@@ -182,12 +183,8 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["firmware_build_id"] = "unknown";
     #endif
 
-    String responseStr;
-    serializeJson(doc, responseStr);
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    // Use helper to send JSON response with CORS
+    sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
@@ -274,25 +271,41 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["pairing_realtime_debug"] = config_manager->getPairingRealtimeDebug();
     doc["tls_verify"] = config_manager->getTlsVerify();
 
-    String responseStr;
-    serializeJson(doc, responseStr);
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    // Use helper to send JSON response with CORS
+    sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len,
                                         size_t index, size_t total) {
+    // Security: Limit body size to prevent DoS attacks
+    const size_t MAX_CONFIG_BODY_SIZE = 8192;  // 8KB max config
+    
     if (index == 0) {
         config_body_buffer = "";
         config_body_expected = total;
+        
+        // Reject oversized requests early
+        if (total > MAX_CONFIG_BODY_SIZE) {
+            Serial.printf("[WEB] Config body too large: %zu bytes (max %d)\n", total, MAX_CONFIG_BODY_SIZE);
+            sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+            return;
+        }
+        
         if (total > 0) {
             config_body_buffer.reserve(total);
         }
     }
 
     if (len > 0) {
+        // Prevent buffer overflow during accumulation
+        if (config_body_buffer.length() + len > MAX_CONFIG_BODY_SIZE) {
+            Serial.printf("[WEB] Config buffer overflow prevented: %zu + %zu > %d\n",
+                          config_body_buffer.length(), len, MAX_CONFIG_BODY_SIZE);
+            sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+            config_body_buffer = "";  // Reset buffer
+            return;
+        }
+        
         String chunk(reinterpret_cast<char*>(data), len);
         config_body_buffer += chunk;
     }
@@ -304,35 +317,93 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     const String body = config_body_buffer;
 
     Serial.printf("[WEB] Received config save request (length: %d bytes)\n", body.length());
-    Serial.printf("[WEB] Body: %s\n", body.c_str());
+
+    // Final size check (defense in depth)
+    if (body.length() > MAX_CONFIG_BODY_SIZE) {
+        Serial.printf("[WEB] Config body too large: %d bytes (max %d)\n", body.length(), MAX_CONFIG_BODY_SIZE);
+        sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+        return;
+    }
 
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
 
     if (error) {
         Serial.printf("[WEB] Failed to parse JSON: %s\n", error.c_str());
-        AsyncWebServerResponse* errResponse = request->beginResponse(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        addCorsHeaders(errResponse);
-        request->send(errResponse);
+        sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
 
-    // Update configuration
+    // Update configuration with input validation
     bool time_config_updated = false;
     if (doc["device_name"].is<const char*>()) {
-        config_manager->setDeviceName(doc["device_name"].as<const char*>());
+        String device_name = doc["device_name"].as<String>();
+        // Validate: max 64 chars, printable ASCII
+        if (device_name.length() <= 64 && device_name.length() > 0) {
+            bool valid = true;
+            for (size_t i = 0; i < device_name.length(); i++) {
+                char c = device_name.charAt(i);
+                if (c < 32 || c > 126) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                config_manager->setDeviceName(device_name);
+            } else {
+                Serial.println("[WEB] Invalid device_name: non-printable characters");
+            }
+        } else {
+            Serial.printf("[WEB] Invalid device_name length: %d (max 64)\n", device_name.length());
+        }
     }
     if (doc["display_name"].is<const char*>()) {
-        config_manager->setDisplayName(doc["display_name"].as<const char*>());
+        String display_name = doc["display_name"].as<String>();
+        // Validate: max 64 chars, printable ASCII
+        if (display_name.length() <= 64 && display_name.length() > 0) {
+            bool valid = true;
+            for (size_t i = 0; i < display_name.length(); i++) {
+                char c = display_name.charAt(i);
+                if (c < 32 || c > 126) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                config_manager->setDisplayName(display_name);
+            } else {
+                Serial.println("[WEB] Invalid display_name: non-printable characters");
+            }
+        } else {
+            Serial.printf("[WEB] Invalid display_name length: %d (max 64)\n", display_name.length());
+        }
     }
     if (doc["brightness"].is<int>()) {
-        config_manager->setBrightness(doc["brightness"].as<uint8_t>());
+        int brightness = doc["brightness"].as<int>();
+        // Validate: 0-255
+        if (brightness >= 0 && brightness <= 255) {
+            config_manager->setBrightness(static_cast<uint8_t>(brightness));
+        } else {
+            Serial.printf("[WEB] Invalid brightness: %d (must be 0-255)\n", brightness);
+        }
     }
     if (doc["scroll_speed_ms"].is<int>()) {
-        config_manager->setScrollSpeedMs(doc["scroll_speed_ms"].as<uint16_t>());
+        int scroll_speed = doc["scroll_speed_ms"].as<int>();
+        // Validate: 10-10000ms (10ms to 10 seconds)
+        if (scroll_speed >= 10 && scroll_speed <= 10000) {
+            config_manager->setScrollSpeedMs(static_cast<uint16_t>(scroll_speed));
+        } else {
+            Serial.printf("[WEB] Invalid scroll_speed_ms: %d (must be 10-10000)\n", scroll_speed);
+        }
     }
     if (doc["page_interval_ms"].is<int>()) {
-        config_manager->setPageIntervalMs(doc["page_interval_ms"].as<uint16_t>());
+        int page_interval = doc["page_interval_ms"].as<int>();
+        // Validate: 100-60000ms (100ms to 60 seconds)
+        if (page_interval >= 100 && page_interval <= 60000) {
+            config_manager->setPageIntervalMs(static_cast<uint16_t>(page_interval));
+        } else {
+            Serial.printf("[WEB] Invalid page_interval_ms: %d (must be 100-60000)\n", page_interval);
+        }
     }
     if (doc["sensor_page_enabled"].is<bool>()) {
         config_manager->setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
@@ -356,13 +427,31 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         config_manager->setMetricColor(doc["metric_color"].as<const char*>());
     }
     if (doc["poll_interval"].is<int>()) {
-        config_manager->setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
+        int poll_interval = doc["poll_interval"].as<int>();
+        // Validate: 5-300 seconds
+        if (poll_interval >= 5 && poll_interval <= 300) {
+            config_manager->setWebexPollInterval(static_cast<uint16_t>(poll_interval));
+        } else {
+            Serial.printf("[WEB] Invalid poll_interval: %d (must be 5-300)\n", poll_interval);
+        }
     }
     if (doc["xapi_poll_interval"].is<int>()) {
-        config_manager->setXAPIPollInterval(doc["xapi_poll_interval"].as<uint16_t>());
+        int xapi_poll_interval = doc["xapi_poll_interval"].as<int>();
+        // Validate: 1-60 seconds
+        if (xapi_poll_interval >= 1 && xapi_poll_interval <= 60) {
+            config_manager->setXAPIPollInterval(static_cast<uint16_t>(xapi_poll_interval));
+        } else {
+            Serial.printf("[WEB] Invalid xapi_poll_interval: %d (must be 1-60)\n", xapi_poll_interval);
+        }
     }
     if (doc["xapi_device_id"].is<const char*>()) {
-        config_manager->setXAPIDeviceId(doc["xapi_device_id"].as<const char*>());
+        String device_id = doc["xapi_device_id"].as<String>();
+        // Validate: max 128 chars, alphanumeric + hyphens
+        if (device_id.length() <= 128) {
+            config_manager->setXAPIDeviceId(device_id);
+        } else {
+            Serial.printf("[WEB] Invalid xapi_device_id length: %d (max 128)\n", device_id.length());
+        }
     }
     // Webex credentials - only save if both fields provided
     if (doc["webex_client_id"].is<const char*>() && doc["webex_client_secret"].is<const char*>()) {
@@ -379,35 +468,51 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         }
     }
 
-    // MQTT configuration
+    // MQTT configuration with validation
     if (doc["mqtt_broker"].is<const char*>()) {
         String broker = doc["mqtt_broker"].as<String>();
-        uint16_t port = doc["mqtt_port"].is<int>() ? doc["mqtt_port"].as<uint16_t>() : 1883;
+        uint16_t port = 1883;
+        
+        // Validate port
+        if (doc["mqtt_port"].is<int>()) {
+            int port_val = doc["mqtt_port"].as<int>();
+            if (port_val >= 1 && port_val <= 65535) {
+                port = static_cast<uint16_t>(port_val);
+            } else {
+                Serial.printf("[WEB] Invalid mqtt_port: %d (must be 1-65535), using default 1883\n", port_val);
+            }
+        }
+        
         String username = doc["mqtt_username"].is<const char*>() ? doc["mqtt_username"].as<String>() : "";
         String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : "meraki/v1/mt/#";
 
-        // Handle password - only overwrite if non-empty password provided
-        String password;
-        if (doc["mqtt_password"].is<const char*>()) {
-            String newPassword = doc["mqtt_password"].as<String>();
-            if (!newPassword.isEmpty()) {
-                password = newPassword;
-                Serial.println("[WEB] MQTT password updated");
+        // Validate broker: max 256 chars, hostname/IP format
+        if (broker.length() > 0 && broker.length() <= 256) {
+            // Handle password - only overwrite if non-empty password provided
+            String password;
+            if (doc["mqtt_password"].is<const char*>()) {
+                String newPassword = doc["mqtt_password"].as<String>();
+                if (!newPassword.isEmpty()) {
+                    password = newPassword;
+                    Serial.println("[WEB] MQTT password updated");
+                } else {
+                    // Empty string provided - keep existing password
+                    password = config_manager->getMQTTPassword();
+                    Serial.println("[WEB] Empty MQTT password provided - keeping existing");
+                }
             } else {
-                // Empty string provided - keep existing password
+                // Field not provided - keep existing password
                 password = config_manager->getMQTTPassword();
-                Serial.println("[WEB] Empty MQTT password provided - keeping existing");
+                Serial.println("[WEB] MQTT password not provided - keeping existing");
             }
-        } else {
-            // Field not provided - keep existing password
-            password = config_manager->getMQTTPassword();
-            Serial.println("[WEB] MQTT password not provided - keeping existing");
-        }
 
-        config_manager->setMQTTConfig(broker, port, username, password, topic);
-        mqtt_client.invalidateConfig();  // Force reconnect with new settings
-        Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n",
-                     broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
+            config_manager->setMQTTConfig(broker, port, username, password, topic);
+            mqtt_client.invalidateConfig();  // Force reconnect with new settings
+            Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n",
+                         broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
+        } else {
+            Serial.printf("[WEB] Invalid mqtt_broker length: %d (must be 1-256)\n", broker.length());
+        }
     }
 
     // Sensor MAC filter list (comma/semicolon separated)
@@ -505,15 +610,11 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
 
     Serial.println("[WEB] Configuration save complete");
 
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true}");
-    addCorsHeaders(response);
-    request->send(response);
+    sendSuccessResponse(request, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"Rebooting...\"}");
-    addCorsHeaders(response);
-    request->send(response);
+    sendSuccessResponse(request, "Rebooting...", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
     // Schedule reboot for 500ms from now to allow response to be sent
     pending_reboot = true;
     pending_reboot_time = millis() + 500;
@@ -522,24 +623,18 @@ void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
-    config_manager->factoryReset();
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"Factory reset complete. Rebooting...\"}");
-    addCorsHeaders(response);
-    request->send(response);
-    // Schedule reboot
-    pending_reboot = true;
-    pending_reboot_time = millis() + 500;
-    pending_boot_partition = nullptr;
-    Serial.println("[WEB] Factory reset reboot scheduled");
+    // Factory reset is disabled for web API - must be done locally via serial console
+    // This prevents accidentally breaking the connection to Supabase
+    Serial.println("[WEB] Factory reset rejected - must be performed locally via serial");
+    sendErrorResponse(request, 403, "Factory reset must be performed locally via serial console",
+                      [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
     config_manager->setMQTTConfig("", 1883, "", "", "");
     mqtt_client.invalidateConfig();  // Clear cached config
     Serial.println("[WEB] MQTT configuration cleared");
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", "{\"success\":true,\"message\":\"MQTT configuration cleared\"}");
-    addCorsHeaders(response);
-    request->send(response);
+    sendSuccessResponse(request, "MQTT configuration cleared", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
@@ -547,10 +642,7 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
     DeserializationError error = deserializeJson(doc, data, len);
 
     if (error) {
-        AsyncWebServerResponse* response = request->beginResponse(400, "application/json",
-            "{\"success\":false,\"message\":\"Invalid JSON\"}");
-        addCorsHeaders(response);
-        request->send(response);
+        sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
 
@@ -563,28 +655,18 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
     resp["success"] = true;
     resp["debug_enabled"] = mqtt_client.isDebugEnabled();
 
-    String responseStr;
-    serializeJson(resp, responseStr);
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    sendJsonResponse(request, 200, resp, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* request) {
     String newCode = pairing_manager.generateCode(true);
     supabaseClient.setPairingCode(newCode);
     app_state->supabase_realtime_resubscribe = true;
-    Serial.printf("[WEB] New pairing code generated: %s\n", newCode.c_str());
+    Serial.println("[WEB] New pairing code generated");
 
     JsonDocument doc;
     doc["success"] = true;
     doc["code"] = newCode;
 
-    String responseStr;
-    serializeJson(doc, responseStr);
-
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }

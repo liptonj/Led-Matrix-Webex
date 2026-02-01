@@ -4,7 +4,7 @@
  */
 
 #include "boot_validator.h"
-#include <Preferences.h>
+#include "common/nvs_utils.h"
 #include <esp_ota_ops.h>
 
 // Global instance
@@ -100,10 +100,7 @@ void BootValidator::rollbackToLastKnownGood() {
     Serial.printf("[BOOT] Currently running from: %s\n", running->label);
     
     // Read last attempted partition from NVS to prevent ping-ponging
-    Preferences prefs;
-    prefs.begin(BOOT_NVS_NAMESPACE, false);
-    String lastPartition = prefs.getString(LAST_PARTITION_KEY, "");
-    prefs.end();
+    String lastPartition = nvsReadString(BOOT_NVS_NAMESPACE, LAST_PARTITION_KEY, "");
     
     // Determine target partition (switch between ota_0 and ota_1)
     const esp_partition_t* target = nullptr;
@@ -131,25 +128,34 @@ void BootValidator::rollbackToLastKnownGood() {
             // Don't reboot - allow boot to continue for recovery
             return;
         }
+        // Still in recovery mode - try factory partition instead
+        rollbackToFactoryFallback();
+        return;
     }
     
     if (target) {
         Serial.printf("[BOOT] Found target partition: %s (address: 0x%x, size: %d)\n",
                       target->label, target->address, target->size);
         
+        // FIXED: Store label string before using pointer (prevent dangling pointer)
+        String targetLabel = String(target->label);
+        
         // Store target partition in NVS before switching
-        prefs.begin(BOOT_NVS_NAMESPACE, false);
-        prefs.putString(LAST_PARTITION_KEY, target->label);
-        // Reset boot count for the new partition
-        prefs.putInt(BOOT_COUNTER_KEY, 0);
-        prefs.end();
+        {
+            NvsScope nvs(BOOT_NVS_NAMESPACE);
+            if (nvs.isOpen()) {
+                nvs.putString(LAST_PARTITION_KEY, targetLabel);
+                // Reset boot count for the new partition
+                nvs.putInt(BOOT_COUNTER_KEY, 0);
+            }
+        }
         
         // Set boot partition to target
         esp_err_t err = esp_ota_set_boot_partition(target);
         if (err == ESP_OK) {
             // Verify partition switch
             const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
-            if (boot_partition && strcmp(boot_partition->label, target->label) == 0) {
+            if (boot_partition && strcmp(boot_partition->label, targetLabel.c_str()) == 0) {
                 Serial.printf("[BOOT] Boot partition verified: %s\n", boot_partition->label);
                 Serial.println("[BOOT] Rebooting to last known good partition...");
                 delay(1000);
@@ -238,18 +244,18 @@ void BootValidator::onCriticalFailure(const String& component, const String& err
 }
 
 void BootValidator::incrementBootCount() {
-    Preferences prefs;
-    prefs.begin(BOOT_NVS_NAMESPACE, false);
-    boot_count = prefs.getInt(BOOT_COUNTER_KEY, 0) + 1;
-    prefs.putInt(BOOT_COUNTER_KEY, boot_count);
-    prefs.end();
+    NvsScope nvs(BOOT_NVS_NAMESPACE);
+    if (nvs.isOpen()) {
+        boot_count = nvs.getInt(BOOT_COUNTER_KEY, 0) + 1;
+        nvs.putInt(BOOT_COUNTER_KEY, boot_count);
+    }
 }
 
 void BootValidator::resetBootCount() {
-    Preferences prefs;
-    prefs.begin(BOOT_NVS_NAMESPACE, false);
-    prefs.putInt(BOOT_COUNTER_KEY, 0);
-    boot_count = 0;
-    prefs.end();
+    NvsScope nvs(BOOT_NVS_NAMESPACE);
+    if (nvs.isOpen()) {
+        nvs.putInt(BOOT_COUNTER_KEY, 0);
+        boot_count = 0;
+    }
     Serial.println("[BOOT] Boot counter reset");
 }

@@ -26,33 +26,31 @@ static int clampBorderWidth(int width) {
  * @brief Build a cache key for date/time line
  */
 static String buildDateTimeKey(const DisplayData& data, uint16_t date_color, uint16_t time_color) {
-    String key = "time|";
+    char buffer[64];
     if (data.time_valid) {
-        key += String(data.month) + "/" + String(data.day) + "|";
-        key += String(data.hour) + ":" + String(data.minute);
-        key += data.use_24h ? "|24" : "|12";
-        key += "|" + String(data.date_format);
+        snprintf(buffer, sizeof(buffer), "time|%d/%d|%d:%d|%s|%d|%d|%d",
+                 data.month, data.day, data.hour, data.minute,
+                 data.use_24h ? "24" : "12",
+                 data.date_format, date_color, time_color);
     } else {
-        key += "none";
+        snprintf(buffer, sizeof(buffer), "time|none|%d|%d", date_color, time_color);
     }
-    key += "|" + String(date_color);
-    key += "|" + String(time_color);
-    return key;
+    return String(buffer);
 }
 
 /**
  * @brief Build a cache key for sensor bar
  */
 static String buildSensorKey(const DisplayData& data, const String& prefix) {
-    String key = prefix + "|";
+    char buffer[128];
     if (data.show_sensors) {
-        key += String((int)data.temperature) + "/" + String((int)data.humidity);
-        key += "/" + String((int)data.tvoc) + "/" + data.right_metric;
+        snprintf(buffer, sizeof(buffer), "%s|%d/%d/%d/%s|%d",
+                 prefix.c_str(), (int)data.temperature, (int)data.humidity,
+                 (int)data.tvoc, data.right_metric.c_str(), data.metric_color);
     } else {
-        key += "none";
+        snprintf(buffer, sizeof(buffer), "%s|none|%d", prefix.c_str(), data.metric_color);
     }
-    key += "|" + String(data.metric_color);
-    return key;
+    return String(buffer);
 }
 
 void MatrixDisplay::drawStatusPage(const DisplayData& data) {
@@ -90,7 +88,9 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     const int line3_y = border + LINE_HEIGHT * 3 + extra_date_spacing; // Shift down by spacing to prevent overlap
 
     // Draw border (cached - only redraw when status or width changes)
-    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    char border_key_buf[64];
+    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
+    const String border_key = String(border_key_buf);
     bool border_changed = (border_key != last_border_key);
     bool layout_changed = (data.status_layout != last_status_layout);
     if (layout_changed) {
@@ -141,7 +141,9 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
                 drawSmallText(time_x, line1_y, time_text, time_color);
             } else {
                 // If doesn't fit, try shorter date format
-                date_text = String(data.month) + "/" + String(data.day);
+                char short_date[16];
+                snprintf(short_date, sizeof(short_date), "%d/%d", data.month, data.day);
+                date_text = String(short_date);
                 date_width = tinyTextWidth(date_text);
                 if (date_width + min_gap + time_width <= content_width) {
                     drawTinyText(content_x, line1_y, date_text, date_color);
@@ -172,44 +174,44 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
         last_status_logged = status_text;
         last_name_logged = data.display_name;
 
-        Serial.println("[DISPLAY] ========== Status Page ==========");
-        Serial.printf("[DISPLAY] Border: %dpx, Content: %dx%d, Max lines: %d\n",
+        DEBUG_DISPLAY("========== Status Page ==========");
+        DEBUG_DISPLAY("Border: %dpx, Content: %dx%d, Max lines: %d",
                      border, content_width, available_height, max_lines);
-        Serial.printf("[DISPLAY] Line 0 (y=%d): %s (status)\n", line0_y, status_text.c_str());
+        DEBUG_DISPLAY("Line 0 (y=%d): %s (status)", line0_y, status_text.c_str());
 
         if (data.time_valid) {
             String date_str = formatDate(data.month, data.day, data.date_format);
             String time_str = data.use_24h ? formatTime24(data.hour, data.minute) : formatTime(data.hour, data.minute);
-            Serial.printf("[DISPLAY] Line 1 (y=%d): %s  %s (date/time)\n", line1_y, date_str.c_str(), time_str.c_str());
+            DEBUG_DISPLAY("Line 1 (y=%d): %s  %s (date/time)", line1_y, date_str.c_str(), time_str.c_str());
         } else {
-            Serial.printf("[DISPLAY] Line 1 (y=%d): (no time)\n", line1_y);
+            DEBUG_DISPLAY("Line 1 (y=%d): (no time)", line1_y);
         }
 
         if (show_inline_sensors) {
-            Serial.println("[DISPLAY] Layout: SENSORS (sensors large, name tiny)");
+            DEBUG_DISPLAY("Layout: SENSORS (sensors large, name tiny)");
             if (data.show_sensors) {
-                Serial.printf("[DISPLAY] Line 2 (y=%d): %dF %d%% (sensors)\n",
+                DEBUG_DISPLAY("Line 2 (y=%d): %dF %d%% (sensors)",
                              line2_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
             }
             if (!data.display_name.isEmpty() && max_lines >= 4) {
-                Serial.printf("[DISPLAY] Line 3 (y=%d): %s (name, tiny)\n", line3_y, data.display_name.c_str());
+                DEBUG_DISPLAY("Line 3 (y=%d): %s (name, tiny)", line3_y, data.display_name.c_str());
             } else if (!data.display_name.isEmpty()) {
-                Serial.printf("[DISPLAY] Line 3 (y=%d): %s (name, tiny) - NOT DRAWN, no space\n", line3_y, data.display_name.c_str());
+                DEBUG_DISPLAY("Line 3 (y=%d): %s (name, tiny) - NOT DRAWN, no space", line3_y, data.display_name.c_str());
             }
         } else {
-            Serial.println("[DISPLAY] Layout: NAME (name large, sensors bottom)");
+            DEBUG_DISPLAY("Layout: NAME (name large, sensors bottom)");
             if (!data.display_name.isEmpty()) {
-                Serial.printf("[DISPLAY] Line 2 (y=%d): %s (name)\n", line2_y, data.display_name.c_str());
+                DEBUG_DISPLAY("Line 2 (y=%d): %s (name)", line2_y, data.display_name.c_str());
             }
             if (data.show_sensors && max_lines >= 4) {
-                Serial.printf("[DISPLAY] Line 3 (y=%d): %dF %d%% (sensors)\n",
+                DEBUG_DISPLAY("Line 3 (y=%d): %dF %d%% (sensors)",
                              line3_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
             } else if (data.show_sensors) {
-                Serial.printf("[DISPLAY] Line 3 (y=%d): %dF %d%% (sensors) - NOT DRAWN, no space\n",
+                DEBUG_DISPLAY("Line 3 (y=%d): %dF %d%% (sensors) - NOT DRAWN, no space",
                              line3_y, (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
             }
         }
-        Serial.println("[DISPLAY] ===============================");
+        DEBUG_DISPLAY("===============================");
     }
 
     if (show_inline_sensors) {
@@ -227,7 +229,10 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
         const int tiny_height = 6;
         if (!data.display_name.isEmpty() && leftover >= tiny_height) {
             const int name_y = border + used_height + (leftover - tiny_height) / 2;
-            const String line3_key = String("name_tiny|") + data.display_name + "|" + String(name_color) + "|" + String(name_y);
+            char line3_key_buf[128];
+            snprintf(line3_key_buf, sizeof(line3_key_buf), "name_tiny|%s|%d|%d", 
+                     data.display_name.c_str(), name_color, name_y);
+            const String line3_key = String(line3_key_buf);
             if (line3_key != last_line_keys[3] || border_changed) {
                 last_line_keys[3] = line3_key;
                 fillRect(content_x, name_y, content_width, tiny_height, COLOR_BLACK);
@@ -295,12 +300,12 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
     if (sensor_first_draw) {
         sensor_first_draw = false;
         int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
-        Serial.println("[DISPLAY] ========== Sensor Page ==========");
-        Serial.printf("[DISPLAY] Line 0: TMP: %dF\n", temp_f);
-        Serial.printf("[DISPLAY] Line 1: HUM: %d%%\n", (int)data.humidity);
-        Serial.printf("[DISPLAY] Line 2: TVOC: %d\n", (int)data.tvoc);
-        Serial.printf("[DISPLAY] Line 3: IAQ: %d\n", data.air_quality_index);
-        Serial.println("[DISPLAY] ===============================");
+        DEBUG_DISPLAY("========== Sensor Page ==========");
+        DEBUG_DISPLAY("Line 0: TMP: %dF", temp_f);
+        DEBUG_DISPLAY("Line 1: HUM: %d%%", (int)data.humidity);
+        DEBUG_DISPLAY("Line 2: TVOC: %d", (int)data.tvoc);
+        DEBUG_DISPLAY("Line 3: IAQ: %d", data.air_quality_index);
+        DEBUG_DISPLAY("===============================");
     }
 
     uint16_t status_color = getStatusColor(data.webex_status);
@@ -321,7 +326,9 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
     const int line3_y = border + LINE_HEIGHT * 3;
 
     // Draw border (cached - only redraw when status or width changes)
-    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    char border_key_buf[64];
+    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
+    const String border_key = String(border_key_buf);
     bool border_changed = (border_key != last_border_key);
     if (border_changed) {
         last_border_key = border_key;
@@ -345,8 +352,10 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
     char temp_str[16];
     snprintf(temp_str, sizeof(temp_str), "TMP: %dF", temp_f);
 
-    const String line0_key = String("sensor0|") + data.webex_status + "|" + String(temp_f)
-        + "|" + String(metric_color);
+    char line0_key_buf[96];
+    snprintf(line0_key_buf, sizeof(line0_key_buf), "sensor0|%s|%d|%d", 
+             data.webex_status.c_str(), temp_f, metric_color);
+    const String line0_key = String(line0_key_buf);
     if (line0_key != last_line_keys[0] || border_changed) {
         last_line_keys[0] = line0_key;
         drawTextAutoScroll(line0_y, temp_str, metric_color, content_x, content_width, "sensor_temp");
@@ -356,8 +365,10 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
     char humid_str[16];
     snprintf(humid_str, sizeof(humid_str), "HUM: %d%%", (int)data.humidity);
 
-    const String line1_key = String("sensor1|") + data.webex_status + "|" + String((int)data.humidity)
-        + "|" + String(metric_color);
+    char line1_key_buf[96];
+    snprintf(line1_key_buf, sizeof(line1_key_buf), "sensor1|%s|%d|%d",
+             data.webex_status.c_str(), (int)data.humidity, metric_color);
+    const String line1_key = String(line1_key_buf);
     if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
         drawTextAutoScroll(line1_y, humid_str, metric_color, content_x, content_width, "sensor_humid");
@@ -378,23 +389,27 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
         snprintf(metric_str, sizeof(metric_str), "TVOC: %d", (int)data.tvoc);
     }
 
-    const String line2_key = String("sensor2|") + data.webex_status + "|" + metric + "|" + String((int)data.tvoc)
-        + "|" + String(metric_color);
+    char line2_key_buf[128];
+    snprintf(line2_key_buf, sizeof(line2_key_buf), "sensor2|%s|%s|%d|%d",
+             data.webex_status.c_str(), metric.c_str(), (int)data.tvoc, metric_color);
+    const String line2_key = String(line2_key_buf);
     if (line2_key != last_line_keys[2] || border_changed) {
         last_line_keys[2] = line2_key;
         drawTextAutoScroll(line2_y, metric_str, metric_color, content_x, content_width, "sensor_metric");
     }
 
     // Line 3: Air Quality Index
-    char iaq_str[16];
-    snprintf(iaq_str, sizeof(iaq_str), "IAQ: %d", data.air_quality_index);
+    char aqi_str[20];
+    snprintf(aqi_str, sizeof(aqi_str), "AQI: %d", data.air_quality_index);
 
     if (max_lines >= 4) {
-        const String line3_key = String("sensor3|") + data.webex_status + "|" + String(data.air_quality_index)
-            + "|" + String(metric_color);
+        char line3_key_buf[96];
+        snprintf(line3_key_buf, sizeof(line3_key_buf), "sensor3|%s|%d|%d",
+                 data.webex_status.c_str(), data.air_quality_index, metric_color);
+        const String line3_key = String(line3_key_buf);
         if (line3_key != last_line_keys[3] || border_changed) {
             last_line_keys[3] = line3_key;
-            drawTextAutoScroll(line3_y, iaq_str, metric_color, content_x, content_width, "sensor_iaq");
+            drawTextAutoScroll(line3_y, aqi_str, metric_color, content_x, content_width, "sensor_aqi");
         }
     } else {
         const String line3_key = "sensor3|hidden";
@@ -421,21 +436,21 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     static bool call_first_draw = true;
     if (call_first_draw) {
         call_first_draw = false;
-        Serial.println("[DISPLAY] ========== In-Call Page ==========");
-        Serial.println("[DISPLAY] Line 0: IN A CALL");
-        Serial.printf("[DISPLAY] Line 1: Camera: %s  Mic: %s\n",
+        DEBUG_DISPLAY("========== In-Call Page ==========");
+        DEBUG_DISPLAY("Line 0: IN A CALL");
+        DEBUG_DISPLAY("Line 1: Camera: %s  Mic: %s",
                      data.camera_on ? "ON" : "OFF",
                      data.mic_muted ? "MUTED" : "ON");
         if (data.time_valid) {
             String date_str = formatDate(data.month, data.day, data.date_format);
             String time_str = data.use_24h ? formatTime24(data.hour, data.minute) : formatTime(data.hour, data.minute);
-            Serial.printf("[DISPLAY] Line 2: %s  %s (date/time)\n", date_str.c_str(), time_str.c_str());
+            DEBUG_DISPLAY("Line 2: %s  %s (date/time)", date_str.c_str(), time_str.c_str());
         }
         if (data.show_sensors) {
             Serial.printf("[DISPLAY] Line 3: %dF %d%% (sensors)\n",
                          (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
         }
-        Serial.println("[DISPLAY] ===============================");
+        DEBUG_DISPLAY("===============================");
     }
 
     uint16_t status_color = getStatusColor(data.webex_status);
@@ -457,7 +472,9 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     const int line3_y = border + LINE_HEIGHT * 3; // No extra spacing - keep normal position
 
     // Draw border (cached - only redraw when status or width changes)
-    const String border_key = String("border|") + data.webex_status + "|" + String(border);
+    char border_key_buf[64];
+    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
+    const String border_key = String(border_key_buf);
     bool border_changed = (border_key != last_border_key);
     if (border_changed) {
         last_border_key = border_key;
@@ -478,16 +495,19 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     }
 
     // Line 0: "IN A CALL" text
-    const String line0_key = String("call0|") + data.webex_status;
+    char line0_key_buf[64];
+    snprintf(line0_key_buf, sizeof(line0_key_buf), "call0|%s", data.webex_status.c_str());
+    const String line0_key = String(line0_key_buf);
     if (line0_key != last_line_keys[0] || border_changed) {
         last_line_keys[0] = line0_key;
         drawTextAutoScroll(line0_y, "IN A CALL", status_color, content_x, content_width, "call_status");
     }
 
     // Line 1: Camera and Mic status
-    const String line1_key = String("call1|")
-        + (data.camera_on ? "1" : "0")
-        + (data.mic_muted ? "1" : "0");
+    char line1_key_buf[32];
+    snprintf(line1_key_buf, sizeof(line1_key_buf), "call1|%d%d",
+             data.camera_on ? 1 : 0, data.mic_muted ? 1 : 0);
+    const String line1_key = String(line1_key_buf);
 
     if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
@@ -507,7 +527,10 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     }
 
     // Line 2: Date/time (date=tiny, time=regular for better visibility)
-    const String line2_key = "call2|" + buildDateTimeKey(data, date_color, time_color);
+    char line2_key_buf[128];
+    String datetime_key = buildDateTimeKey(data, date_color, time_color);
+    snprintf(line2_key_buf, sizeof(line2_key_buf), "call2|%s", datetime_key.c_str());
+    const String line2_key = String(line2_key_buf);
     if (line2_key != last_line_keys[2] || border_changed) {
         last_line_keys[2] = line2_key;
         fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
@@ -529,7 +552,9 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
                 drawSmallText(time_x, line2_y, time_text, time_color);
             } else {
                 // If doesn't fit, try shorter date format
-                date_text = String(data.month) + "/" + String(data.day);
+                char short_date[16];
+                snprintf(short_date, sizeof(short_date), "%d/%d", data.month, data.day);
+                date_text = String(short_date);
                 date_width = tinyTextWidth(date_text);
                 if (date_width + min_gap + time_width <= content_width) {
                     drawTinyText(content_x, line2_y, date_text, date_color);
@@ -634,9 +659,9 @@ void MatrixDisplay::update(const DisplayData& data) {
         // Log page change
         const char* page_name = (target_page == DisplayPage::STATUS) ? "STATUS" :
                                 (target_page == DisplayPage::SENSORS) ? "SENSORS" : "IN_CALL";
-        Serial.println("[DISPLAY] ==========================================");
-        Serial.printf("[DISPLAY] PAGE SWITCH: %s\n", page_name);
-        Serial.println("[DISPLAY] ==========================================");
+        DEBUG_DISPLAY("==========================================");
+        DEBUG_DISPLAY("PAGE SWITCH: %s", page_name);
+        DEBUG_DISPLAY("==========================================");
 
         last_page = target_page;
     }

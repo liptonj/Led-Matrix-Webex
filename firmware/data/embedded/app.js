@@ -67,7 +67,7 @@ async function initializeApp() {
     logActivity('info', 'Initializing Webex Embedded App...');
     
     // Initialize tabs
-    initTabs();
+    initTabs(); // from common.js
     
     // Load stored displays
     loadAdditionalDisplays();
@@ -112,25 +112,8 @@ async function initializeApp() {
     setupEventListeners();
 }
 
-// ============================================================
-// Tab Navigation
-// ============================================================
-function initTabs() {
-    const tabs = document.querySelectorAll('.tab-btn');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            const tabId = tab.dataset.tab;
-            
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(tabId).classList.add('active');
-        });
-    });
-}
+// Tab Navigation (use common.js)
+// initTabs is in common.js
 
 // ============================================================
 // Webex SDK Integration
@@ -396,9 +379,9 @@ async function loadDisplayStatus() {
         document.getElementById('uptime').textContent = formatUptime(data.uptime);
         
         // Connection status
-        updateConnectionItem('conn-wifi', data.wifi_connected);
-        updateConnectionItem('conn-webex', data.webex_authenticated);
-        updateConnectionItem('conn-mqtt', data.mqtt_connected);
+        updateConnectionItem('conn-wifi', data.wifi_connected); // from common.js
+        updateConnectionItem('conn-webex', data.webex_authenticated); // from common.js
+        updateConnectionItem('conn-mqtt', data.mqtt_connected); // from common.js
         
     } catch (error) {
         console.error('Failed to load status:', error);
@@ -485,14 +468,8 @@ async function loadDisplayConfig() {
     }
 }
 
-function updateConnectionItem(id, connected) {
-    const el = document.getElementById(id);
-    if (connected) {
-        el.classList.add('connected');
-    } else {
-        el.classList.remove('connected');
-    }
-}
+// Connection status helpers (use common.js)
+// updateConnectionItem is in common.js
 
 // ============================================================
 // Configuration Forms
@@ -579,18 +556,51 @@ function setupEventListeners() {
     });
     
     // WiFi scan
-    document.getElementById('scan-wifi').addEventListener('click', scanWifi);
+    document.getElementById('scan-wifi').addEventListener('click', () => {
+        scanWifi({ // from common.js
+            scanBtnId: 'scan-wifi',
+            listElId: 'wifi-networks',
+            ssidInputId: 'wifi-ssid',
+            endpoint: CONFIG.wifiScanEndpoint
+        });
+    });
     
     // WiFi form
     document.getElementById('wifi-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        await saveWifi();
+        await saveWifi({ // from common.js
+            ssidInputId: 'wifi-ssid',
+            passwordInputId: 'wifi-password',
+            endpoint: CONFIG.wifiSaveEndpoint,
+            onSuccess: () => {
+                logActivity('success', 'WiFi saved - rebooting...');
+            }
+        });
     });
     
     // OTA form and buttons
     document.getElementById('ota-form').addEventListener('submit', saveOTASettings);
-    document.getElementById('check-update').addEventListener('click', checkForUpdate);
-    document.getElementById('perform-update').addEventListener('click', performUpdate);
+    document.getElementById('check-update').addEventListener('click', () => {
+        checkForUpdate({ // from common.js
+            btnId: 'check-update',
+            latestElId: 'latest-version',
+            updateBtnId: 'perform-update',
+            endpoint: CONFIG.otaCheckEndpoint,
+            onSuccess: (data) => {
+                if (data.update_available) {
+                    logActivity('info', 'Update available!');
+                }
+            }
+        });
+    });
+    document.getElementById('perform-update').addEventListener('click', () => {
+        performUpdate({ // from common.js
+            endpoint: CONFIG.otaUpdateEndpoint,
+            onSuccess: () => {
+                logActivity('info', 'Update started...');
+            }
+        });
+    });
     
     // Clear failed OTA button
     const clearFailedBtn = document.getElementById('clear-failed-ota');
@@ -599,8 +609,22 @@ function setupEventListeners() {
     }
     
     // System buttons
-    document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
-    document.getElementById('factory-reset-btn').addEventListener('click', factoryReset);
+    document.getElementById('reboot-btn').addEventListener('click', () => {
+        rebootDevice({ // from common.js
+            endpoint: CONFIG.rebootEndpoint,
+            onSuccess: () => {
+                logActivity('info', 'Rebooting...');
+            }
+        });
+    });
+    document.getElementById('factory-reset-btn').addEventListener('click', () => {
+        factoryReset({ // from common.js
+            endpoint: CONFIG.factoryResetEndpoint,
+            onSuccess: () => {
+                logActivity('info', 'Factory reset...');
+            }
+        });
+    });
     
     // Auto-sync toggle
     document.getElementById('auto-sync').addEventListener('change', (e) => {
@@ -635,6 +659,7 @@ function setupEventListeners() {
     });
 }
 
+// Configuration save (use common.js wrapper)
 async function saveConfig(data) {
     try {
         const response = await fetch(CONFIG.configEndpoint, {
@@ -653,6 +678,7 @@ async function saveConfig(data) {
     }
 }
 
+// Webex auth (use common.js wrapper)
 async function startWebexAuth() {
     try {
         const response = await fetch(CONFIG.webexAuthEndpoint);
@@ -666,102 +692,9 @@ async function startWebexAuth() {
     }
 }
 
-async function scanWifi() {
-    const btn = document.getElementById('scan-wifi');
-    const listEl = document.getElementById('wifi-networks');
-    
-    btn.disabled = true;
-    btn.textContent = 'Scanning...';
-    listEl.innerHTML = '<div class="network-item">Scanning...</div>';
-    
-    try {
-        // Start the scan
-        const startResponse = await fetch(CONFIG.wifiScanEndpoint);
-        const startData = await startResponse.json();
-        
-        // If scan is already complete (results available immediately)
-        if (startResponse.status === 200 && startData.networks) {
-            displayEmbeddedNetworks(startData.networks, listEl);
-            btn.disabled = false;
-            btn.textContent = 'Scan Networks';
-            return;
-        }
-        
-        // If scan started or in progress, poll for results
-        if (startResponse.status === 202) {
-            // Poll every 500ms for up to 10 seconds
-            const maxAttempts = 20;
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                const pollResponse = await fetch(CONFIG.wifiScanEndpoint);
-                const pollData = await pollResponse.json();
-                
-                if (pollResponse.status === 200 && pollData.networks) {
-                    displayEmbeddedNetworks(pollData.networks, listEl);
-                    btn.disabled = false;
-                    btn.textContent = 'Scan Networks';
-                    return;
-                }
-            }
-            
-            // Timeout after 10 seconds
-            listEl.innerHTML = '<div class="network-item">Scan timeout - please try again</div>';
-        } else {
-            listEl.innerHTML = '<div class="network-item">Scan failed</div>';
-        }
-    } catch (error) {
-        console.error('WiFi scan error:', error);
-        listEl.innerHTML = '<div class="network-item">Scan failed - ' + error.message + '</div>';
-    }
-    
-    btn.disabled = false;
-    btn.textContent = 'Scan Networks';
-}
+// WiFi functions (removed - use common.js)
 
-function displayEmbeddedNetworks(networks, listEl) {
-    if (!networks || networks.length === 0) {
-        listEl.innerHTML = '<div class="network-item">No networks found</div>';
-        return;
-    }
-    
-    listEl.innerHTML = networks.map(n => `
-        <div class="network-item" data-ssid="${n.ssid || ''}">
-            <span class="ssid">${n.ssid || '(hidden)'}</span>
-            <span class="signal">${n.rssi} dBm ${n.encrypted ? '🔒' : ''}</span>
-        </div>
-    `).join('');
-    
-    listEl.querySelectorAll('.network-item').forEach(item => {
-        const ssid = item.dataset.ssid;
-        if (ssid) {
-            item.addEventListener('click', () => {
-                document.getElementById('wifi-ssid').value = ssid;
-            });
-        }
-    });
-}
-
-async function saveWifi() {
-    const ssid = document.getElementById('wifi-ssid').value;
-    const password = document.getElementById('wifi-password').value;
-    
-    if (!ssid) {
-        logActivity('error', 'SSID required');
-        return;
-    }
-    
-    try {
-        const formData = new FormData();
-        formData.append('ssid', ssid);
-        formData.append('password', password);
-        
-        await fetch(CONFIG.wifiSaveEndpoint, { method: 'POST', body: formData });
-        logActivity('success', 'WiFi saved - rebooting...');
-    } catch (error) {
-        logActivity('error', 'Failed to save WiFi');
-    }
-}
+// OTA and system functions (removed - use common.js)
 
 async function saveOTASettings(e) {
     e.preventDefault();
@@ -787,38 +720,6 @@ async function saveOTASettings(e) {
     }
 }
 
-async function checkForUpdate() {
-    const btn = document.getElementById('check-update');
-    btn.disabled = true;
-    btn.textContent = 'Checking...';
-    
-    try {
-        const response = await fetch(CONFIG.otaCheckEndpoint);
-        const data = await response.json();
-        document.getElementById('latest-version').textContent = data.latest_version || 'Unknown';
-        if (data.update_available) {
-            document.getElementById('perform-update').disabled = false;
-            logActivity('info', 'Update available!');
-        }
-    } catch (error) {
-        logActivity('error', 'Update check failed');
-    }
-    
-    btn.disabled = false;
-    btn.textContent = 'Check for Updates';
-}
-
-async function performUpdate() {
-    if (!confirm('Install update? Device will restart.')) return;
-    
-    try {
-        await fetch(CONFIG.otaUpdateEndpoint, { method: 'POST' });
-        logActivity('info', 'Update started...');
-    } catch (error) {
-        logActivity('error', 'Update failed');
-    }
-}
-
 async function clearFailedOTA() {
     try {
         const response = await fetch(CONFIG.configEndpoint, {
@@ -837,29 +738,6 @@ async function clearFailedOTA() {
         }
     } catch (error) {
         logActivity('error', 'Failed to clear OTA marker');
-    }
-}
-
-async function rebootDevice() {
-    if (!confirm('Reboot the display?')) return;
-    
-    try {
-        await fetch(CONFIG.rebootEndpoint, { method: 'POST' });
-        logActivity('info', 'Rebooting...');
-    } catch (error) {
-        logActivity('error', 'Reboot failed');
-    }
-}
-
-async function factoryReset() {
-    if (!confirm('Factory reset? All settings will be erased!')) return;
-    if (!confirm('This cannot be undone. Continue?')) return;
-    
-    try {
-        await fetch(CONFIG.factoryResetEndpoint, { method: 'POST' });
-        logActivity('info', 'Factory reset...');
-    } catch (error) {
-        logActivity('error', 'Reset failed');
     }
 }
 
@@ -1254,8 +1132,10 @@ function encodeId(host) {
 }
 
 // ============================================================
-// Utilities
+// Utilities (use common.js)
 // ============================================================
+// formatBytes, formatUptime, fetchWithTimeout are in common.js
+
 function updateConnectionStatus(status) {
     const indicator = document.getElementById('connection-status');
     const text = indicator.querySelector('.text');
@@ -1263,34 +1143,7 @@ function updateConnectionStatus(status) {
     text.textContent = status === 'connected' ? 'Connected' : status === 'error' ? 'Offline Mode' : 'Disconnected';
 }
 
-async function fetchWithTimeout(url, options, timeout = 5000) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
-        clearTimeout(id);
-        return response;
-    } catch (error) {
-        clearTimeout(id);
-        throw error;
-    }
-}
-
-function formatBytes(bytes) {
-    if (!bytes) return '--';
-    return (bytes / 1024).toFixed(1) + ' KB';
-}
-
-function formatUptime(seconds) {
-    if (!seconds) return '--';
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (d > 0) return `${d}d ${h}h`;
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-}
-
+// logActivity function (keep - specific to embedded)
 function logActivity(type, message) {
     const logEl = document.getElementById('activity-log');
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });

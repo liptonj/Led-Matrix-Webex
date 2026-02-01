@@ -80,17 +80,6 @@ public:
      */
     void setUpdateUrl(const String& url) { update_url = url; }
     
-    /**
-     * @brief Get the latest build ID from manifest
-     * @return Build ID string (commit SHA or timestamp)
-     */
-    String getLatestBuildId() const { return latest_build_id; }
-    
-    /**
-     * @brief Get the latest build date from manifest
-     * @return Build date ISO string
-     */
-    String getLatestBuildDate() const { return latest_build_date; }
 
 private:
     String update_url;

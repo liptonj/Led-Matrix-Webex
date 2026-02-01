@@ -10,11 +10,14 @@
 #define PAIRING_MANAGER_H
 
 #include <Arduino.h>
-#include <Preferences.h>
 
 // Pairing code configuration
 #define PAIRING_CODE_LENGTH 6
 #define PAIRING_CODE_CHARSET "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  // Excluding confusing chars: I, O, 0, 1
+
+// NVS namespace and key for pairing (must match exactly for backward compatibility)
+#define PAIRING_NVS_NAMESPACE "pairing"
+#define PAIRING_NVS_KEY_CODE "code"
 
 /**
  * @brief Pairing Code Manager Class
@@ -22,7 +25,7 @@
 class PairingManager {
 public:
     PairingManager();
-    ~PairingManager();
+    ~PairingManager() = default;
     
     /**
      * @brief Initialize the pairing manager
@@ -81,7 +84,6 @@ public:
     static bool isValidCode(const String& code);
 
 private:
-    Preferences preferences;
     String pairing_code;
     
     /**

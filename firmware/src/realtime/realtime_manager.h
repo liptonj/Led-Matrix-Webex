@@ -62,4 +62,14 @@ private:
 // Global instance
 extern RealtimeManager realtimeManager;
 
+/**
+ * @brief Handle realtime messages from Supabase
+ *
+ * Called when a postgres_changes event is received via WebSocket.
+ * For INSERT events on the commands table, immediately process the command.
+ *
+ * @param msg The realtime message to process
+ */
+void handleRealtimeMessage(const RealtimeMessage& msg);
+
 #endif // REALTIME_MANAGER_H

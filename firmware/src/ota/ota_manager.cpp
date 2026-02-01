@@ -4,6 +4,7 @@
  */
 
 #include "ota_manager.h"
+#include "ota_helpers.h"
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
 #include "../display/matrix_display.h"
@@ -20,9 +21,6 @@
 #ifndef NATIVE_BUILD
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
-#include <esp_task_wdt.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #endif
 
 // External reference to display for progress updates
@@ -32,13 +30,6 @@ extern SupabaseRealtime supabaseRealtime;
 extern AppState app_state;
 
 namespace {
-void configureHttpClient(HTTPClient& http) {
-    // Enable following redirects - required for GitHub release downloads
-    // GitHub redirects asset URLs to CDN (returns 302)
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    http.setTimeout(30000);  // 30 second timeout for large downloads
-}
-
 // Add HMAC authentication headers if device is provisioned
 void addAuthHeaders(HTTPClient& http) {
     if (deviceCredentials.isProvisioned()) {
@@ -95,22 +86,13 @@ bool OTAManager::checkUpdateFromManifest() {
     }
 
     Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
-    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    } else {
-        client.setInsecure();
-    }
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), manifest_url);
 
     HTTPClient http;
     http.begin(client, manifest_url);
-    configureHttpClient(http);
-    http.addHeader("User-Agent", "ESP32-Webex-Display");
+    OTAHelpers::configureHttpClient(http);
 
     // Add HMAC authentication for authenticated manifest access
     addAuthHeaders(http);
@@ -199,22 +181,13 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     }
 
     Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
-    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  update_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
 
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    } else {
-        client.setInsecure();
-    }
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), update_url);
 
     HTTPClient http;
     http.begin(client, update_url);
-    configureHttpClient(http);
-    http.addHeader("User-Agent", "ESP32-Webex-Display");
+    OTAHelpers::configureHttpClient(http);
     http.addHeader("Accept", "application/vnd.github.v3+json");
 
     int httpCode = http.GET();
@@ -447,65 +420,15 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     Serial.printf("[OTA] Heap before download: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
 
-#ifndef NATIVE_BUILD
-    // Properly disable task watchdog during OTA
-    // We need to unsubscribe ALL tasks from WDT before calling deinit
-
-    // First, delete the current task from WDT (if subscribed)
-    esp_err_t err = esp_task_wdt_delete(nullptr);  // nullptr = current task
-    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
-        Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(err));
-    }
-
-    // Delete async_tcp task from WDT if it exists
-    // This task is created by the AsyncTCP library and may be subscribed to WDT
-    TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
-    if (async_tcp_task != nullptr) {
-        err = esp_task_wdt_delete(async_tcp_task);
-        if (err == ESP_OK) {
-            Serial.println("[OTA] Removed async_tcp task from watchdog");
-        } else if (err != ESP_ERR_NOT_FOUND) {
-            Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(err));
-        }
-    }
-
-    // Delete IDLE tasks from WDT (they are subscribed by default)
-    TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
-    TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
-    if (idle0) esp_task_wdt_delete(idle0);
-    if (idle1) esp_task_wdt_delete(idle1);
-
-    // Now we can safely reconfigure WDT with longer timeout
-    err = esp_task_wdt_deinit();
-    if (err != ESP_OK) {
-        Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(err));
-    }
-
-    // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
-    err = esp_task_wdt_init(120, false);
-    if (err != ESP_OK) {
-        Serial.printf("[OTA] Warning: WDT init failed: %s\n", esp_err_to_name(err));
-    } else {
-        Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
-    }
-#endif
-
-    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
+    // Disable watchdog for OTA
+    OTAHelpers::disableWatchdogForOTA();
 
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    } else {
-        client.setInsecure();
-    }
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), url);
 
     HTTPClient http;
     http.begin(client, url);
-    configureHttpClient(http);
-    http.addHeader("User-Agent", "ESP32-Webex-Display");
+    OTAHelpers::configureHttpClient(http);
 
     int httpCode = http.GET();
 
@@ -576,85 +499,60 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     Serial.printf("[OTA] Flashing %s...\n", label);
 
-    // Show initial progress on display
-    // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
-    int initialProgress = (update_type == U_FLASH) ? 0 : 85;
-    String statusText = String("Downloading ") + label;
-    matrix_display.showUpdatingProgress(latest_version, initialProgress, statusText);
-
     // Use chunked download with watchdog feeding to prevent timeout
-    WiFiClient* stream = http.getStreamPtr();
-    size_t written = 0;
-    uint8_t buffer[4096];
-    int lastProgress = -1;
-
-    while (written < static_cast<size_t>(contentLength)) {
-        // Yield to other FreeRTOS tasks - use proper delay to allow async_tcp task to run
-#ifndef NATIVE_BUILD
-        vTaskDelay(pdMS_TO_TICKS(5));  // 5ms delay to properly yield to other tasks
-#else
-        yield();
-#endif
-
-        size_t available = stream->available();
-        if (available == 0) {
-            // Wait for more data with timeout
-            unsigned long waitStart = millis();
-            while (stream->available() == 0 && stream->connected()) {
-                if (millis() - waitStart > 60000) {  // 60 second timeout for slow/congested connections
-                    Serial.printf("[OTA] Stream timeout waiting for data (60s)\n");
-                    Update.abort();
-                    http.end();
-                    return false;
-                }
-#ifndef NATIVE_BUILD
-                vTaskDelay(pdMS_TO_TICKS(20));  // Wait 20ms, yield to other tasks including async_tcp
-#else
-                delay(20);
-#endif
-            }
-            available = stream->available();
-        }
-
-        if (available == 0 && !stream->connected()) {
-            break;  // Connection closed
-        }
-
-        size_t toRead = min(available, sizeof(buffer));
-        int bytesRead = stream->readBytes(buffer, toRead);
-
-        if (bytesRead > 0) {
-            size_t bytesWritten = Update.write(buffer, bytesRead);
-            if (bytesWritten != static_cast<size_t>(bytesRead)) {
-                Serial.printf("[OTA] Write failed: wrote %d of %d bytes\n", bytesWritten, bytesRead);
-                Update.abort();
-                http.end();
-                return false;
-            }
-            written += bytesWritten;
-
-            // Update progress every 5%
-            int progress = (written * 100) / contentLength;
-            if (progress / 5 > lastProgress / 5) {
-                lastProgress = progress;
-                Serial.printf("[OTA] %s: %d%%\n", label, progress);
-
-                // Update display with progress
-                // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
-                int displayProgress = (update_type == U_FLASH) ?
-                    (progress * 85) / 100 : 85 + ((progress * 15) / 100);
-                String statusText = String(label) + " " + String(progress) + "%";
-                matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
-            }
-        }
-    }
-
-    if (written != static_cast<size_t>(contentLength)) {
-        Serial.printf("[OTA] Written only %d of %d bytes for %s\n", written, contentLength, label);
+    // Move buffer to heap to avoid stack overflow (4KB is too large for stack)
+    uint8_t* buffer = (uint8_t*)malloc(4096);
+    if (!buffer) {
+        Serial.printf("[OTA] Failed to allocate download buffer for %s\n", label);
         Update.abort();
         http.end();
         return false;
     }
+    
+    WiFiClient* stream = http.getStreamPtr();
+    if (!stream) {
+        Serial.printf("[OTA] Failed to get stream for %s\n", label);
+        free(buffer);
+        http.end();
+        return false;
+    }
+    
+    // Define write callback for Update.write
+    auto writeCallback = [&label](const uint8_t* data, size_t len) -> size_t {
+        // Update.write expects non-const pointer, but doesn't modify the data
+        size_t written = Update.write(const_cast<uint8_t*>(data), len);
+        if (written != len) {
+            Serial.printf("[OTA] Write failed: wrote %zu of %zu bytes\n", written, len);
+        }
+        return written;
+    };
+
+    // Define progress callback for display updates
+    auto progressCallback = [this, &label, update_type](int progress) {
+        Serial.printf("[OTA] %s: %d%%\n", label, progress);
+
+        // Update display with progress
+        // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
+        int displayProgress = (update_type == U_FLASH) ?
+            (progress * 85) / 100 : 85 + ((progress * 15) / 100);
+        String statusText = String(label) + " " + String(progress) + "%";
+        matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
+    };
+
+    // Use helper to download stream
+    size_t written = OTAHelpers::downloadStream(stream, buffer, 4096, 
+                                                 contentLength, writeCallback, progressCallback);
+
+    if (written != static_cast<size_t>(contentLength)) {
+        Serial.printf("[OTA] Written only %zu of %d bytes for %s\n", written, contentLength, label);
+        Update.abort();
+        free(buffer);
+        http.end();
+        return false;
+    }
+    
+    // Free buffer after successful download
+    free(buffer);
 
     if (!Update.end()) {
         Serial.printf("[OTA] %s update failed: %s\n", label, Update.errorString());
@@ -686,66 +584,15 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 bool OTAManager::downloadAndInstallBundle(const String& url) {
     Serial.printf("[OTA] Downloading LMWB bundle from %s\n", url.c_str());
 
-#ifndef NATIVE_BUILD
-    // Properly disable task watchdog during OTA
-    // We need to unsubscribe ALL tasks from WDT before calling deinit
-    {
-        // First, delete the current task from WDT (if subscribed)
-        esp_err_t wdt_err = esp_task_wdt_delete(nullptr);  // nullptr = current task
-        if (wdt_err != ESP_OK && wdt_err != ESP_ERR_NOT_FOUND) {
-            Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(wdt_err));
-        }
-
-        // Delete async_tcp task from WDT if it exists
-        // This task is created by the AsyncTCP library and may be subscribed to WDT
-        TaskHandle_t async_tcp_task = xTaskGetHandle("async_tcp");
-        if (async_tcp_task != nullptr) {
-            wdt_err = esp_task_wdt_delete(async_tcp_task);
-            if (wdt_err == ESP_OK) {
-                Serial.println("[OTA] Removed async_tcp task from watchdog");
-            } else if (wdt_err != ESP_ERR_NOT_FOUND) {
-                Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(wdt_err));
-            }
-        }
-
-        // Delete IDLE tasks from WDT (they are subscribed by default)
-        TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
-        TaskHandle_t idle1 = xTaskGetIdleTaskHandleForCPU(1);
-        if (idle0) esp_task_wdt_delete(idle0);
-        if (idle1) esp_task_wdt_delete(idle1);
-
-        // Now we can safely reconfigure WDT with longer timeout
-        wdt_err = esp_task_wdt_deinit();
-        if (wdt_err != ESP_OK) {
-            Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(wdt_err));
-        }
-
-        // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
-        wdt_err = esp_task_wdt_init(120, false);
-        if (wdt_err != ESP_OK) {
-            Serial.printf("[OTA] Warning: WDT init failed: %s\n", esp_err_to_name(wdt_err));
-        } else {
-            Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
-        }
-    }
-#endif
-
-    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
+    // Disable watchdog for OTA
+    OTAHelpers::disableWatchdogForOTA();
 
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);  // DigiCert + GTS for GitHub and display.5ls.us
-    } else {
-        client.setInsecure();
-    }
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), url);
 
     HTTPClient http;
     http.begin(client, url);
-    configureHttpClient(http);
-    http.addHeader("User-Agent", "ESP32-Webex-Display");
+    OTAHelpers::configureHttpClient(http);
 
     int httpCode = http.GET();
 
@@ -765,28 +612,18 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
 
     WiFiClient* stream = http.getStreamPtr();
+    if (!stream) {
+        Serial.println("[OTA] Failed to get stream for bundle");
+        http.end();
+        return false;
+    }
 
-    // Read LMWB header (16 bytes)
+    // Read LMWB header (16 bytes) using helper
     uint8_t header[16];
-    size_t headerRead = 0;
-    unsigned long headerStart = millis();
-    while (headerRead < 16) {
-        if (millis() - headerStart > 10000) {
-            Serial.println("[OTA] Timeout reading bundle header");
-            http.end();
-            return false;
-        }
-        if (stream->available()) {
-            int bytesRead = stream->readBytes(header + headerRead, 16 - headerRead);
-            if (bytesRead > 0) {
-                headerRead += bytesRead;
-            }
-        }
-#ifndef NATIVE_BUILD
-        vTaskDelay(pdMS_TO_TICKS(5));
-#else
-        delay(5);
-#endif
+    if (!OTAHelpers::readExactBytes(stream, header, 16)) {
+        Serial.println("[OTA] Timeout reading bundle header");
+        http.end();
+        return false;
     }
 
     // Verify LMWB magic
@@ -861,8 +698,15 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
 #endif
 
-    // Use smaller buffer to reduce heap pressure during download
-    uint8_t buffer[2048];
+    // Move buffer to heap to reduce stack usage (2KB is too large for stack)
+    uint8_t* buffer = (uint8_t*)malloc(2048);
+    if (!buffer) {
+        Serial.println("[OTA] Failed to allocate download buffer");
+        Update.abort();
+        http.end();
+        return false;
+    }
+    
     size_t app_written = 0;
     int lastProgress = -1;
 
@@ -889,6 +733,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                               static_cast<unsigned>(app_size));
                 Serial.flush();
                 Update.abort();
+                free(buffer);
                 http.end();
                 return false;
             }
@@ -899,6 +744,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                               (app_written * 100) / app_size);
                 Serial.flush();
                 Update.abort();
+                free(buffer);
                 http.end();
                 return false;
             }
@@ -938,6 +784,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             if (bytesWritten != static_cast<size_t>(bytesRead)) {
                 Serial.printf("[OTA] App write failed: wrote %d of %d\n", bytesWritten, bytesRead);
                 Update.abort();
+                free(buffer);
                 http.end();
                 return false;
             }
@@ -954,6 +801,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
                 if (freeHeap < 50000) {
                     Serial.println("[OTA] CRITICAL: Heap too low, aborting update");
                     Update.abort();
+                    free(buffer);
                     http.end();
                     return false;
                 }
@@ -969,9 +817,14 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
         Serial.printf("[OTA] App incomplete: wrote %u of %u\n",
                       static_cast<unsigned>(app_written), static_cast<unsigned>(app_size));
         Update.abort();
+        free(buffer);
         http.end();
         return false;
     }
+    
+    // Free buffer after firmware phase complete
+    free(buffer);
+    buffer = nullptr;
 
     Serial.println("[OTA] Firmware write complete, finalizing...");
     Serial.flush();
@@ -1031,70 +884,47 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     }
     Serial.println("[OTA] Update.begin FS succeeded");
 
-    size_t fs_written = 0;
-    lastProgress = -1;
-
-    while (fs_written < fs_size) {
-#ifndef NATIVE_BUILD
-        vTaskDelay(pdMS_TO_TICKS(5));
-#else
-        yield();
-#endif
-        size_t available = stream->available();
-        if (available == 0) {
-            unsigned long waitStart = millis();
-            while (stream->available() == 0 && stream->connected()) {
-                if (millis() - waitStart > 30000) {
-                    Serial.println("[OTA] Stream timeout during FS download");
-                    Update.abort();
-                    http.end();
-                    return false;
-                }
-#ifndef NATIVE_BUILD
-                vTaskDelay(pdMS_TO_TICKS(20));
-#else
-                delay(20);
-#endif
-            }
-            available = stream->available();
-        }
-
-        if (available == 0 && !stream->connected()) {
-            break;
-        }
-
-        size_t remaining = fs_size - fs_written;
-        size_t toRead = min(min(available, sizeof(buffer)), remaining);
-        int bytesRead = stream->readBytes(buffer, toRead);
-
-        if (bytesRead > 0) {
-            size_t bytesWritten = Update.write(buffer, bytesRead);
-            if (bytesWritten != static_cast<size_t>(bytesRead)) {
-                Serial.printf("[OTA] FS write failed: wrote %d of %d\n", bytesWritten, bytesRead);
-                Update.abort();
-                http.end();
-                return false;
-            }
-            fs_written += bytesWritten;
-
-            int progress = (fs_written * 100) / fs_size;
-            if (progress / 5 > lastProgress / 5) {
-                lastProgress = progress;
-                Serial.printf("[OTA] filesystem: %d%%\n", progress);
-                int displayProgress = 85 + ((progress * 15) / 100);
-                matrix_display.showUpdatingProgress(latest_version, displayProgress,
-                    String("Filesystem ") + String(progress) + "%");
-            }
-        }
-    }
-
-    if (fs_written != fs_size) {
-        Serial.printf("[OTA] FS incomplete: wrote %u of %u\n",
-                      static_cast<unsigned>(fs_written), static_cast<unsigned>(fs_size));
+    // Allocate buffer for filesystem phase
+    buffer = (uint8_t*)malloc(2048);
+    if (!buffer) {
+        Serial.println("[OTA] Failed to allocate FS buffer");
         Update.abort();
         http.end();
         return false;
     }
+    
+    // Define write callback for Update.write
+    auto fsWriteCallback = [](const uint8_t* data, size_t len) -> size_t {
+        // Update.write expects non-const pointer, but doesn't modify the data
+        size_t written = Update.write(const_cast<uint8_t*>(data), len);
+        if (written != len) {
+            Serial.printf("[OTA] FS write failed: wrote %zu of %zu bytes\n", written, len);
+        }
+        return written;
+    };
+
+    // Define progress callback for display updates
+    auto fsProgressCallback = [this](int progress) {
+        Serial.printf("[OTA] filesystem: %d%%\n", progress);
+        int displayProgress = 85 + ((progress * 15) / 100);
+        matrix_display.showUpdatingProgress(latest_version, displayProgress,
+            String("Filesystem ") + String(progress) + "%");
+    };
+
+    // Use helper to download filesystem
+    size_t fs_written = OTAHelpers::downloadStream(stream, buffer, 2048, 
+                                                    fs_size, fsWriteCallback, fsProgressCallback);
+
+    if (fs_written != fs_size) {
+        Serial.printf("[OTA] FS incomplete: wrote %zu of %zu\n", fs_written, fs_size);
+        Update.abort();
+        free(buffer);
+        http.end();
+        return false;
+    }
+    
+    // Free buffer after filesystem phase complete
+    free(buffer);
 
     if (!Update.end(true)) {
         Serial.printf("[OTA] FS update failed: %s\n", Update.errorString());

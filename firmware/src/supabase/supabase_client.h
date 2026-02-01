@@ -18,6 +18,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 
 // Token configuration
 #define SUPABASE_TOKEN_REFRESH_MARGIN 600  // Refresh 10 minutes before expiry (in seconds)
@@ -259,15 +260,39 @@ private:
      */
     int makeRequest(const String& endpoint, const String& method,
                     const String& body, String& response, bool useHmac = false, bool allowImmediate = false);
+    
+    /**
+     * @brief Make an HTTP request with automatic 401 retry handling
+     * 
+     * Wraps makeRequest() to automatically handle 401 Unauthorized by:
+     * 1. Invalidating the current token
+     * 2. Re-authenticating to get a new token
+     * 3. Retrying the original request once
+     * 
+     * This consolidates the 401 retry pattern used in:
+     * - postDeviceState()
+     * - pollCommands()
+     * - ackCommand()
+     * - insertDeviceLog()
+     * 
+     * @param endpoint Function name (e.g., "post-device-state")
+     * @param method HTTP method ("GET" or "POST")
+     * @param body Request body (empty for GET)
+     * @param response Output: response body
+     * @return HTTP status code (0 on connection failure, -2 if rate limited)
+     */
+    int makeRequestWithRetry(const String& endpoint, const String& method,
+                            const String& body, String& response);
+    
     bool beginRequestSlot(bool allowImmediate);
 
     /**
      * @brief Add HMAC authentication headers
-     * @param client WiFiClientSecure reference
      * @param http HTTPClient reference
      * @param body Request body for signature
+     * @return true if headers added successfully, false if not provisioned
      */
-    void addHmacHeaders(const String& body);
+    bool addHmacHeaders(HTTPClient& http, const String& body);
 
     /**
      * @brief Parse auth response
@@ -275,11 +300,6 @@ private:
      * @return SupabaseAuthResult
      */
     SupabaseAuthResult parseAuthResponse(const String& json);
-
-    // Internal state for HMAC headers
-    String _hmacSerial;
-    String _hmacTimestamp;
-    String _hmacSignature;
 
     WiFiClientSecure _client;
     bool _requestInFlight = false;

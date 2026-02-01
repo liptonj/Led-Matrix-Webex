@@ -45,7 +45,7 @@ void SupabaseClient::begin(const String& supabase_url, const String& pairing_cod
     _pairingCode.toUpperCase();
     
     Serial.printf("[SUPABASE] Initialized with URL: %s\n", _supabaseUrl.c_str());
-    Serial.printf("[SUPABASE] Pairing code: %s\n", _pairingCode.c_str());
+    Serial.println("[SUPABASE] Pairing code configured");
 }
 
 void SupabaseClient::setPairingCode(const String& code) {
@@ -142,7 +142,7 @@ bool SupabaseClient::authenticate() {
     // Debug: log auth response summary without secrets
 #if SUPABASE_AUTH_DEBUG
     Serial.printf("[SUPABASE] Auth response summary: pairing=%s device_id=%s expires_at=%lu debug=%d\n",
-                  result.pairing_code.c_str(),
+                  result.pairing_code.isEmpty() ? "(none)" : "***",
                   result.device_id.c_str(),
                   result.expires_at,
                   result.debug_enabled ? 1 : 0);
@@ -163,6 +163,22 @@ bool SupabaseClient::authenticate() {
     if (_remoteDebugEnabled) {
         Serial.println("[SUPABASE] Remote debug logging enabled by server");
     }
+    
+    return true;
+}
+
+bool SupabaseClient::addHmacHeaders(HTTPClient& http, const String& body) {
+    if (!deviceCredentials.isProvisioned()) {
+        Serial.println("[SUPABASE] Cannot add HMAC headers - not provisioned");
+        return false;
+    }
+    
+    uint32_t timestamp = DeviceCredentials::getTimestamp();
+    String signature = deviceCredentials.signRequest(timestamp, body);
+    
+    http.addHeader("X-Device-Serial", deviceCredentials.getSerialNumber());
+    http.addHeader("X-Timestamp", String(timestamp));
+    http.addHeader("X-Signature", signature);
     
     return true;
 }
@@ -200,11 +216,27 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     String expiresAtStr = doc["expires_at"] | "";
     if (!expiresAtStr.isEmpty()) {
         // Parse ISO 8601 format (e.g., "2026-01-28T13:00:00Z")
+        // Remove 'Z' suffix if present (strptime doesn't handle it)
+        String parseStr = expiresAtStr;
+        if (parseStr.endsWith("Z")) {
+            parseStr = parseStr.substring(0, parseStr.length() - 1);
+        }
+        
         struct tm tm_expires = {};
-        if (strptime(expiresAtStr.c_str(), "%Y-%m-%dT%H:%M:%S", &tm_expires) != nullptr) {
-            result.expires_at = mktime(&tm_expires);
+        if (strptime(parseStr.c_str(), "%Y-%m-%dT%H:%M:%S", &tm_expires) != nullptr) {
+            // FIXED: Use timegm() instead of mktime() for UTC timestamps
+            // timegm() interprets tm as UTC, mktime() interprets as local time
+            // ISO 8601 with 'Z' suffix is always UTC
+            #ifdef ESP_PLATFORM
+                // ESP32: Use mktime() but ensure UTC (time() on ESP32 is already UTC)
+                result.expires_at = mktime(&tm_expires);
+            #else
+                // Other platforms: Use timegm() for proper UTC handling
+                result.expires_at = timegm(&tm_expires);
+            #endif
         } else {
             // If parsing fails, set to 24 hours from now
+            Serial.printf("[SUPABASE] Failed to parse expires_at: %s\n", expiresAtStr.c_str());
             result.expires_at = (unsigned long)time(nullptr) + 86400;
         }
     } else {
@@ -252,19 +284,7 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     serializeJson(doc, body);
     
     String response;
-    int httpCode = makeRequest("post-device-state", "POST", body, response, false);
-    if (httpCode == -2) {
-        return state;
-    }
-    
-    if (httpCode == 401) {
-        // Token expired - re-authenticate and retry
-        Serial.println("[SUPABASE] Token expired, re-authenticating...");
-        invalidateToken();
-        if (ensureAuthenticated()) {
-            httpCode = makeRequest("post-device-state", "POST", body, response, false);
-        }
-    }
+    int httpCode = makeRequestWithRetry("post-device-state", "POST", body, response);
     
     if (httpCode != 200) {
         Serial.printf("[SUPABASE] Post state failed: HTTP %d\n", httpCode);
@@ -316,18 +336,7 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     }
     
     String response;
-    int httpCode = makeRequest("poll-commands", "GET", "", response, false);
-    if (httpCode == -2) {
-        return 0;
-    }
-    
-    if (httpCode == 401) {
-        // Token expired - re-authenticate and retry
-        invalidateToken();
-        if (ensureAuthenticated()) {
-            httpCode = makeRequest("poll-commands", "GET", "", response, false);
-        }
-    }
+    int httpCode = makeRequestWithRetry("poll-commands", "GET", "", response);
     
     if (httpCode != 200) {
         if (httpCode != 0) {  // Don't log connection failures
@@ -407,18 +416,7 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     serializeJson(doc, body);
     
     String response;
-    int httpCode = makeRequest("ack-command", "POST", body, response, false);
-    if (httpCode == -2) {
-        return false;
-    }
-    
-    if (httpCode == 401) {
-        // Token expired - re-authenticate and retry
-        invalidateToken();
-        if (ensureAuthenticated()) {
-            httpCode = makeRequest("ack-command", "POST", body, response, false);
-        }
-    }
+    int httpCode = makeRequestWithRetry("ack-command", "POST", body, response);
     
     if (httpCode != 200) {
         Serial.printf("[SUPABASE] Ack command failed: HTTP %d\n", httpCode);
@@ -451,22 +449,14 @@ bool SupabaseClient::insertDeviceLog(const String& level, const String& message,
     serializeJson(doc, body);
 
     String response;
-    int httpCode = makeRequest("insert-device-log", "POST", body, response, false);
-    if (httpCode == -2) {
-        return false;
-    }
-
-    if (httpCode == 401) {
-        invalidateToken();
-        if (ensureAuthenticated()) {
-            httpCode = makeRequest("insert-device-log", "POST", body, response, false);
-        }
-    }
+    int httpCode = makeRequestWithRetry("insert-device-log", "POST", body, response);
 
     if (httpCode != 200) {
         static unsigned long last_log_error = 0;
         unsigned long now = millis();
-        if (now - last_log_error > 10000) {
+        // FIXED: Handle millis() wraparound properly
+        unsigned long elapsed = now - last_log_error;
+        if (elapsed > 10000) {
             last_log_error = now;
             Serial.printf("[SUPABASE] insert-device-log failed: HTTP %d\n", httpCode);
         }
@@ -527,7 +517,9 @@ bool SupabaseClient::beginRequestSlot(bool allowImmediate) {
         return false;
     }
     unsigned long now = millis();
-    if (!allowImmediate && (now - _lastRequestMs) < _minRequestIntervalMs) {
+    // FIXED: Handle millis() wraparound properly
+    unsigned long elapsed = now - _lastRequestMs;
+    if (!allowImmediate && elapsed < _minRequestIntervalMs) {
         return false;
     }
     _requestInFlight = true;
@@ -548,12 +540,8 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
     _client.stop();
-    configureSecureClient(_client, 2048, 2048);
-    if (config_manager.getTlsVerify()) {
-        _client.setCACert(CA_CERT_BUNDLE_SUPABASE);
-    } else {
-        _client.setInsecure();
-    }
+    configureSecureClientWithTls(_client, CA_CERT_BUNDLE_SUPABASE, 
+                                 config_manager.getTlsVerify(), 2048, 2048);
     
     HTTPClient http;
     http.begin(_client, url);
@@ -565,20 +553,13 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     bool hmacUsed = false;
     
     if (useHmac) {
-        // Add HMAC authentication headers
-        if (!deviceCredentials.isProvisioned()) {
-            Serial.println("[SUPABASE] Cannot add HMAC headers - not provisioned");
+        // Add HMAC authentication headers using helper
+        if (!addHmacHeaders(http, body)) {
             http.end();
             return 0;
         }
-        
-        hmacTimestamp = DeviceCredentials::getTimestamp();
         hmacUsed = true;
-        String signature = deviceCredentials.signRequest(hmacTimestamp, body);
-        
-        http.addHeader("X-Device-Serial", deviceCredentials.getSerialNumber());
-        http.addHeader("X-Timestamp", String(hmacTimestamp));
-        http.addHeader("X-Signature", signature);
+        hmacTimestamp = DeviceCredentials::getTimestamp(); // For debug logging
     } else {
         // Add Bearer token
         if (!_token.isEmpty()) {
@@ -631,5 +612,25 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     
     http.end();
     _requestInFlight = false;
+    return httpCode;
+}
+
+int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& method,
+                                         const String& body, String& response) {
+    // First attempt
+    int httpCode = makeRequest(endpoint, method, body, response, false);
+    if (httpCode == -2) {
+        return httpCode;  // Rate limited - don't retry
+    }
+    
+    // Handle 401 by re-authenticating and retrying once
+    if (httpCode == 401) {
+        Serial.println("[SUPABASE] Token expired, re-authenticating...");
+        invalidateToken();
+        if (ensureAuthenticated()) {
+            httpCode = makeRequest(endpoint, method, body, response, false);
+        }
+    }
+    
     return httpCode;
 }

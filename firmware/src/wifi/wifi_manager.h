@@ -89,6 +89,16 @@ public:
     void disableAP();
 
 private:
+    /**
+     * @brief Start AP mode for configuration
+     * 
+     * Starts AP mode only if not already active (prevents duplication).
+     * Updates app state to reflect WiFi disconnection.
+     * 
+     * @param reason Reason for starting AP mode (for logging)
+     */
+    void startAPMode(const String& reason);
+
     ConfigManager* config_manager;
     AppState* app_state;
     MatrixDisplay* matrix_display;
@@ -98,8 +108,14 @@ private:
     bool ap_mode_active;
     uint8_t reconnect_attempts = 0;  // Counter for failed reconnection attempts
     
+    // Async WiFi scan state
+    unsigned long scan_start_time = 0;
+    bool scan_in_progress = false;
+    bool scan_completed = false;
+    
     static const unsigned long CONNECTION_CHECK_INTERVAL = 10000;  // 10 seconds
     static const unsigned long MDNS_RETRY_INTERVAL = 30000;  // 30 seconds
+    static const unsigned long SCAN_TIMEOUT_MS = 10000;  // 10 second timeout for scan
 };
 
 #endif // WIFI_MANAGER_H

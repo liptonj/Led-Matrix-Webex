@@ -88,12 +88,6 @@ public:
     String getDeviceId() const;
 
     /**
-     * @brief Check if eFuse secret is burned (non-recoverable)
-     * @return true if using eFuse storage
-     */
-    bool isEfuseBurned() const { return _efuseBurned; }
-
-    /**
      * @brief Factory reset credentials (if not eFuse burned)
      * @return true if reset successful
      */
@@ -101,7 +95,6 @@ public:
 
 private:
     bool _provisioned;
-    bool _efuseBurned;
     String _serialNumber;
     String _keyHash;
     uint8_t _secret[DEVICE_SECRET_SIZE];

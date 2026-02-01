@@ -64,4 +64,14 @@ private:
 
 extern CommandProcessor commandProcessor;
 
+/**
+ * @brief Handle commands received from Supabase
+ * 
+ * Processes get_status, get_config, set_config, reboot, factory_reset, etc.
+ * This function is called from realtime message handlers.
+ * 
+ * @param cmd The command to process
+ */
+void handleSupabaseCommand(const SupabaseCommand& cmd);
+
 #endif // COMMAND_PROCESSOR_H

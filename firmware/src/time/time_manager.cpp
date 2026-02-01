@@ -34,7 +34,7 @@ bool looksLikePosixTimeZone(const String& value) {
 }
 }
 
-void applyTimeConfig(const ConfigManager& config, AppState* state) {
+bool applyTimeConfig(const ConfigManager& config, AppState* state) {
     String time_zone_id = config.getTimeZone();
     time_zone_id.trim();
     const char* posix_tz = resolvePosixTimeZone(time_zone_id);
@@ -57,7 +57,7 @@ void applyTimeConfig(const ConfigManager& config, AppState* state) {
     }
 
     configTzTime(posix_tz, ntp_server.c_str(), "time.nist.gov", "time.google.com");
-    syncTime(state);
+    return syncTime(state);
 }
 
 bool syncTime(AppState* state) {

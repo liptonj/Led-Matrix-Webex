@@ -60,4 +60,10 @@ private:
 // Global instance
 extern SyncManager syncManager;
 
+/**
+ * @brief Register device with Supabase (called on first boot + retries)
+ * @return true if provisioned successfully
+ */
+bool provisionDeviceWithSupabase();
+
 #endif // SYNC_MANAGER_H

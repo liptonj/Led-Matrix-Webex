@@ -22,12 +22,13 @@ Import("env")  # noqa: F821
 # Get the project directory
 project_dir = env.get("PROJECT_DIR", "")  # noqa: F821
 
-# Add config manager and mock globals to the build
+# Add config manager, nvs utils, and mock globals to the build
 env.Append(  # noqa: F821
     SRC_FILTER=[
         "+<config/config_manager.cpp>",
+        "+<common/nvs_utils.cpp>",
         "+<../simulation/mocks/globals.cpp>",
     ]
 )
 
-print("[TEST] Added config_manager.cpp and globals.cpp to test build")
+print("[TEST] Added config_manager.cpp, nvs_utils.cpp and globals.cpp to test build")

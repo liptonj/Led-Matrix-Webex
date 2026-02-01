@@ -185,6 +185,7 @@ jobs:
   # ============================================================================
   # Firmware Unit Tests
   # Runs Unity tests for firmware components
+  # CRITICAL: This job blocks merges if tests fail
   # ============================================================================
   firmware-unit-tests:
     name: Firmware Unit Tests
@@ -200,10 +201,71 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Unity tests
-        run: pio test -e native_test --verbose
+      - name: Run Unity tests (ALL TESTS MUST PASS)
+        id: run_tests
+        run: |
+          echo "Running all firmware unit tests..."
+          pio test -e native_test --verbose
+          TEST_RESULT=$?
+          
+          echo "Test suite completed with exit code: $TEST_RESULT"
+          
+          if [ $TEST_RESULT -ne 0 ]; then
+            echo "ERROR: Tests failed! Pull request cannot be merged."
+            echo "Please fix failing tests before merging."
+            exit 1
+          fi
+          
+          echo "All tests passed successfully!"
+          exit 0
+
+      - name: Generate test coverage report
+        if: always()
+        run: |
+          echo "Test coverage summary:"
+          echo "====================="
+          
+          # Count test files
+          TEST_COUNT=$(find test -name "test_*.cpp" -type f | wc -l)
+          echo "Total test suites: $TEST_COUNT"
+          
+          # List all test files
+          echo ""
+          echo "Test suites:"
+          find test -name "test_*.cpp" -type f | sort | while read file; do
+            echo "  - $(basename $file .cpp)"
+          done
+          
+          echo ""
+          echo "Note: Detailed coverage metrics require gcov/lcov integration"
+          echo "Current test suites cover: OTA, Boot, Config, WiFi, Web API,"
+          echo "Pairing, Display, Serial Commands, Webex Client, Supabase,"
+          echo "MQTT, and Realtime subscriptions"
+
+      - name: Post test results to PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            const message = `## ❌ Firmware Unit Tests Failed
+            
+            The firmware unit tests have failed. Please review the test output above and fix the failing tests before merging.
+            
+            **Test suite**: \`pio test -e native_test\`
+            **Action**: [View test results](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            
+            All previously-passing tests must continue to pass. No regressions are allowed.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: message
+            });
 
       - name: Fix permissions after tests
+        if: always()
         working-directory: ${{ github.workspace }}
         run: chmod -R a+rw . || true
 

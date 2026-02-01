@@ -18,7 +18,34 @@ bool mdnsMemoryOk() {
 
 WiFiManager::WiFiManager()
     : config_manager(nullptr), app_state(nullptr), matrix_display(nullptr),
-      last_connection_check(0), last_mdns_start_attempt(0), ap_mode_active(false) {
+      last_connection_check(0), last_mdns_start_attempt(0), ap_mode_active(false),
+      scan_start_time(0), scan_in_progress(false), scan_completed(false) {
+}
+
+void WiFiManager::startAPMode(const String& reason) {
+    if (ap_mode_active) {
+        Serial.println("[WIFI] AP mode already active");
+        return;
+    }
+    
+    Serial.printf("[WIFI] Starting AP mode: %s\n", reason.c_str());
+    
+    // Use AP+STA mode instead of AP-only to allow WiFi scanning while AP is active
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP("Webex-Display-Setup");
+    ap_mode_active = true;
+    
+    // Update app state to reflect WiFi disconnection
+    if (app_state) {
+        app_state->wifi_connected = false;
+    }
+    
+    Serial.printf("[WIFI] AP started (open): SSID='Webex-Display-Setup', IP=%s\n",
+                  WiFi.softAPIP().toString().c_str());
+    
+    if (matrix_display) {
+        matrix_display->showAPMode(WiFi.softAPIP().toString());
+    }
 }
 
 void WiFiManager::begin(ConfigManager* config, AppState* state, MatrixDisplay* display) {
@@ -45,30 +72,58 @@ void WiFiManager::setupWiFi() {
         matrix_display->setScrollSpeedMs(config_manager->getScrollSpeedMs());
     }
 
-    // Always scan for networks first so they're available in the web interface
-    Serial.println("[WIFI] Scanning for networks...");
+    // Start async network scan (non-blocking)
+    Serial.println("[WIFI] Starting async network scan...");
     WiFi.mode(WIFI_STA);
-    delay(100);
-    int network_count = WiFi.scanNetworks();
-    Serial.printf("[WIFI] Found %d networks\n", network_count);
-
-    // List networks found
-    for (int i = 0; i < min(network_count, 10); i++) {
-        Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+    vTaskDelay(pdMS_TO_TICKS(100));  // Brief delay for mode switch
+    int16_t result = WiFi.scanNetworks(true, false);  // Async scan, no hidden networks
+    if (result == WIFI_SCAN_RUNNING) {
+        Serial.println("[WIFI] Network scan started (async)");
+        scan_in_progress = true;
+        scan_start_time = millis();
+    } else if (result < 0) {
+        Serial.printf("[WIFI] Scan failed to start: %d\n", result);
+        scan_in_progress = false;
+        scan_completed = false;
     }
 
+    // Wait for scan completion with timeout (non-blocking poll)
+    while (scan_in_progress && !scan_completed) {
+        int16_t scan_result = WiFi.scanComplete();
+        if (scan_result >= 0) {
+            // Scan completed successfully
+            Serial.printf("[WIFI] Found %d networks\n", scan_result);
+            scan_completed = true;
+            scan_in_progress = false;
+            
+            // List networks found
+            int max_to_show = (scan_result < 10) ? scan_result : 10;
+            for (int i = 0; i < max_to_show; i++) {
+                Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+            }
+        } else if (scan_result == WIFI_SCAN_FAILED) {
+            Serial.println("[WIFI] Scan failed");
+            scan_in_progress = false;
+            scan_completed = false;
+            break;
+        } else if (millis() - scan_start_time > SCAN_TIMEOUT_MS) {
+            Serial.println("[WIFI] Scan timeout");
+            scan_in_progress = false;
+            scan_completed = false;
+            break;
+        } else {
+            // Still running, yield to other tasks
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    // Get scan result count
+    int network_count = scan_completed ? WiFi.scanComplete() : 0;
+    if (network_count < 0) network_count = 0;  // Handle error codes
+    
     if (ssid.isEmpty()) {
         // Start AP+STA mode for configuration
-        // Using AP_STA instead of AP-only allows WiFi scanning while AP is active
-        Serial.println("[WIFI] No WiFi configured, starting AP mode...");
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup");
-        ap_mode_active = true;
-        Serial.printf("[WIFI] AP started (open): SSID='Webex-Display-Setup', IP=%s\n",
-                      WiFi.softAPIP().toString().c_str());
-        if (matrix_display) {
-            matrix_display->showAPMode(WiFi.softAPIP().toString());
-        }
+        startAPMode("No WiFi configured");
         return;
     }
 
@@ -84,14 +139,8 @@ void WiFiManager::setupWiFi() {
     }
 
     if (!network_found) {
-        Serial.printf("[WIFI] Configured network '%s' NOT found! Starting AP mode...\n", ssid.c_str());
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup");
-        ap_mode_active = true;
-        Serial.printf("[WIFI] AP started (open) for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
-        if (matrix_display) {
-            matrix_display->showAPMode(WiFi.softAPIP().toString());
-        }
+        Serial.printf("[WIFI] Configured network '%s' NOT found!\n", ssid.c_str());
+        startAPMode("Configured network not found");
         return;
     }
 
@@ -100,16 +149,35 @@ void WiFiManager::setupWiFi() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
 
+    // Use event-driven approach: check connection status without blocking
+    // Allow up to 15 seconds for connection (non-blocking checks every 500ms)
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
-        delay(500);
+    const int max_attempts = 30;
+    unsigned long connect_start = millis();
+    
+    while (WiFi.status() != WL_CONNECTED && attempts < max_attempts) {
+        // Use non-blocking delay to allow other tasks to run
+        unsigned long delay_start = millis();
+        while (millis() - delay_start < 500) {
+            yield();  // Allow other tasks and WiFi stack to run
+            delay(10);  // Small delay to prevent tight loop
+        }
         Serial.print(".");
         attempts++;
+        
+        // Check for timeout (extra safety)
+        if (millis() - connect_start > 15000) {
+            Serial.println("\n[WIFI] Connection timeout");
+            break;
+        }
     }
     Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
-        app_state->wifi_connected = true;
+        // Synchronize app state with actual WiFi status
+        if (app_state) {
+            app_state->wifi_connected = true;
+        }
         
         // Disable AP mode now that we're connected
         if (ap_mode_active) {
@@ -125,14 +193,8 @@ void WiFiManager::setupWiFi() {
             matrix_display->showUnconfigured(WiFi.localIP().toString(), "");
         }
     } else {
-        Serial.println("[WIFI] Connection failed, starting AP mode for reconfiguration...");
-        WiFi.mode(WIFI_AP_STA);
-        WiFi.softAP("Webex-Display-Setup");
-        ap_mode_active = true;
-        Serial.printf("[WIFI] AP started (open): IP=%s\n", WiFi.softAPIP().toString().c_str());
-        if (matrix_display) {
-            matrix_display->showAPMode(WiFi.softAPIP().toString());
-        }
+        Serial.println("[WIFI] Connection failed");
+        startAPMode("Connection failed");
     }
 }
 
@@ -141,30 +203,35 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
         return;
     }
     
-    if (millis() - last_connection_check < CONNECTION_CHECK_INTERVAL) {
+    unsigned long now = millis();
+    // FIXED: Handle millis() wraparound properly
+    unsigned long elapsed = now - last_connection_check;
+    if (elapsed < CONNECTION_CHECK_INTERVAL) {
         return;
     }
-    last_connection_check = millis();
+    last_connection_check = now;
 
-    if (WiFi.status() != WL_CONNECTED && !config_manager->getWiFiSSID().isEmpty()) {
+    // Check current WiFi status
+    wl_status_t wifi_status = WiFi.status();
+    bool is_connected = (wifi_status == WL_CONNECTED);
+    
+    // Synchronize app state with actual WiFi status
+    bool state_changed = (app_state->wifi_connected != is_connected);
+    if (state_changed) {
+        app_state->wifi_connected = is_connected;
+        Serial.printf("[WIFI] State synchronized: %s\n", is_connected ? "connected" : "disconnected");
+    }
+
+    if (!is_connected && !config_manager->getWiFiSSID().isEmpty()) {
         reconnect_attempts++;
         
         if (reconnect_attempts == 1) {
             Serial.println("[WIFI] Connection lost, reconnecting...");
         }
         
-        app_state->wifi_connected = false;
-        
         // After 5 failed attempts (about 50 seconds), start AP mode for reconfiguration
         if (reconnect_attempts >= 5 && !ap_mode_active) {
-            Serial.println("[WIFI] Multiple reconnection attempts failed, starting AP mode...");
-            WiFi.mode(WIFI_AP_STA);  // Keep trying to connect while AP is active
-            WiFi.softAP("Webex-Display-Setup");
-            ap_mode_active = true;
-            Serial.printf("[WIFI] AP started for reconfiguration: IP=%s\n", WiFi.softAPIP().toString().c_str());
-            if (matrix_display) {
-                matrix_display->showAPMode(WiFi.softAPIP().toString());
-            }
+            startAPMode("Multiple reconnection attempts failed");
         }
         
         WiFi.reconnect();
@@ -173,12 +240,11 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             Serial.println("[MDNS] Stopping mDNS due to WiFi disconnect...");
             mdns_manager->end();
         }
-    } else if (WiFi.status() == WL_CONNECTED) {
-        const bool was_connected = app_state->wifi_connected;
-        if (!was_connected) {
+    } else if (is_connected) {
+        const bool was_connected = !state_changed || app_state->wifi_connected;
+        if (state_changed && !was_connected) {
             Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
         }
-        app_state->wifi_connected = true;
         reconnect_attempts = 0;  // Reset counter on successful connection
         
         // Disable AP mode after successful connection/reconnection
@@ -189,12 +255,14 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             ap_mode_active = false;
         }
 
-        if (mdns_manager && (!mdns_manager->isInitialized() || !was_connected)) {
-            const unsigned long now = millis();
-            if (now - last_mdns_start_attempt < MDNS_RETRY_INTERVAL) {
+        if (mdns_manager && (!mdns_manager->isInitialized() || state_changed)) {
+            const unsigned long now_mdns = millis();
+            // FIXED: Handle millis() wraparound properly
+            unsigned long elapsed_mdns = now_mdns - last_mdns_start_attempt;
+            if (elapsed_mdns < MDNS_RETRY_INTERVAL) {
                 return;
             }
-            last_mdns_start_attempt = now;
+            last_mdns_start_attempt = now_mdns;
 
             if (!mdnsMemoryOk()) {
                 Serial.printf("[MDNS] Skipping start (heap=%lu, largest=%lu)\n",

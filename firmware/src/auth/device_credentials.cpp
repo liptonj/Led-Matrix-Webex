@@ -4,7 +4,7 @@
  */
 
 #include "device_credentials.h"
-#include <Preferences.h>
+#include "common/nvs_utils.h"
 #include <time.h>
 
 #ifndef NATIVE_BUILD
@@ -19,16 +19,15 @@
 #include <cstdlib>
 #endif
 
-// NVS namespace for device credentials
-static const char* NVS_NAMESPACE = "device_auth";
-static const char* NVS_KEY_SECRET = "secret";
-static const char* NVS_KEY_SERIAL = "serial";
+// NVS namespace for device credentials (must match exactly for backward compatibility)
+static const char* CREDS_NVS_NAMESPACE = "device_auth";
+static const char* CREDS_NVS_KEY_SECRET = "secret";
 
 // Global instance
 DeviceCredentials deviceCredentials;
 
 DeviceCredentials::DeviceCredentials()
-    : _provisioned(false), _efuseBurned(false) {
+    : _provisioned(false) {
     memset(_secret, 0, DEVICE_SECRET_SIZE);
 }
 
@@ -85,33 +84,28 @@ void DeviceCredentials::generateSecret() {
 }
 
 bool DeviceCredentials::loadSecretFromNVS() {
-    Preferences prefs;
-    if (!prefs.begin(NVS_NAMESPACE, true)) {  // Read-only
+    NvsScope nvs(CREDS_NVS_NAMESPACE, true);  // Read-only
+    if (!nvs.isOpen()) {
         return false;
     }
 
-    size_t len = prefs.getBytesLength(NVS_KEY_SECRET);
+    size_t len = nvs.getBytesLength(CREDS_NVS_KEY_SECRET);
     if (len != DEVICE_SECRET_SIZE) {
-        prefs.end();
         return false;
     }
 
-    size_t readLen = prefs.getBytes(NVS_KEY_SECRET, _secret, DEVICE_SECRET_SIZE);
-    prefs.end();
-
+    size_t readLen = nvs.getBytes(CREDS_NVS_KEY_SECRET, _secret, DEVICE_SECRET_SIZE);
     return readLen == DEVICE_SECRET_SIZE;
 }
 
 bool DeviceCredentials::saveSecretToNVS() {
-    Preferences prefs;
-    if (!prefs.begin(NVS_NAMESPACE, false)) {  // Read-write
+    NvsScope nvs(CREDS_NVS_NAMESPACE);  // Read-write
+    if (!nvs.isOpen()) {
         return false;
     }
 
-    size_t written = prefs.putBytes(NVS_KEY_SECRET, _secret, DEVICE_SECRET_SIZE);
-    prefs.end();
-
-    return written == DEVICE_SECRET_SIZE;
+    NvsResult result = nvs.putBytes(CREDS_NVS_KEY_SECRET, _secret, DEVICE_SECRET_SIZE);
+    return result == NvsResult::OK;
 }
 
 void DeviceCredentials::computeSerialNumber() {
@@ -260,18 +254,15 @@ String DeviceCredentials::getDeviceId() const {
 }
 
 bool DeviceCredentials::resetCredentials() {
-    if (_efuseBurned) {
-        Serial.println("[CREDS] Cannot reset - eFuse burned");
+    NvsScope nvs(CREDS_NVS_NAMESPACE);
+    if (!nvs.isOpen()) {
         return false;
     }
 
-    Preferences prefs;
-    if (!prefs.begin(NVS_NAMESPACE, false)) {
+    NvsResult result = nvs.clear();
+    if (result != NvsResult::OK) {
         return false;
     }
-
-    prefs.clear();
-    prefs.end();
 
     clearSecret();
     _provisioned = false;

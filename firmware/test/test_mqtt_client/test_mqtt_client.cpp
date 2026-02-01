@@ -462,9 +462,7 @@ void test_sensor_data_initial_values() {
         float temperature = 0.0f;
         float humidity = 0.0f;
         String door_status;
-        String water_status;
         float tvoc = 0.0f;
-        int iaq = 0;
         int air_quality_index = 0;
         float co2_ppm = 0.0f;
         float pm2_5 = 0.0f;

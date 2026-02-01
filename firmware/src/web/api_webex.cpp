@@ -8,44 +8,12 @@
 #include "../auth/device_credentials.h"
 #include "../common/pairing_manager.h"
 #include "../supabase/supabase_client.h"
+#include "../common/url_utils.h"
 #include <ArduinoJson.h>
-#include <ctype.h>
 
 extern PairingManager pairing_manager;
 
-namespace {
-String urlEncode(const String& str) {
-    String encoded = "";
-    char c;
-    char code0;
-    char code1;
-
-    for (unsigned int i = 0; i < str.length(); i++) {
-        c = str.charAt(i);
-
-        if (c == ' ') {
-            encoded += "%20";
-        } else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            encoded += c;
-        } else {
-            code1 = (c & 0xf) + '0';
-            if ((c & 0xf) > 9) {
-                code1 = (c & 0xf) - 10 + 'A';
-            }
-            c = (c >> 4) & 0xf;
-            code0 = c + '0';
-            if (c > 9) {
-                code0 = c - 10 + 'A';
-            }
-            encoded += '%';
-            encoded += code0;
-            encoded += code1;
-        }
-    }
-
-    return encoded;
-}
-}  // namespace
+// Note: urlEncode() removed from anonymous namespace - now using common/url_utils.h
 
 void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
     const String pairing_code = pairing_manager.getCode();

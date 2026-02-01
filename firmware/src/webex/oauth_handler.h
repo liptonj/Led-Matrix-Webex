@@ -49,6 +49,13 @@ public:
     String buildAuthUrl(const String& redirect_uri);
     
     /**
+     * @brief Validate OAuth state parameter (CSRF protection)
+     * @param state State parameter from callback
+     * @return true if state is valid
+     */
+    bool validateState(const String& state) const;
+    
+    /**
      * @brief Exchange authorization code for tokens
      * @param code Authorization code from callback
      * @param redirect_uri Callback URL used in authorization
@@ -90,9 +97,10 @@ private:
     String access_token;
     String refresh_token;
     unsigned long token_expiry;
+    String oauth_state;  // Store state for CSRF validation
     
     bool parseTokenResponse(const String& response);
-    String urlEncode(const String& str);
+    // Note: urlEncode() moved to common/url_utils.h for reuse
 };
 
 #endif // OAUTH_HANDLER_H

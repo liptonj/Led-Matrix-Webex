@@ -68,12 +68,11 @@ bool isAllowedSensor(const String& sensor_id, const String& allowed_list) {
 MerakiMQTTClient* g_mqtt_instance = nullptr;
 
 MerakiMQTTClient::MerakiMQTTClient()
-    : mqtt_client(wifi_client), config_manager(nullptr), update_pending(false), last_reconnect(0) {
+    : mqtt_client(wifi_client), config_manager(nullptr), update_pending(false), last_reconnect(0), using_tls(false) {
     sensor_data.valid = false;
     sensor_data.temperature = 0;
     sensor_data.humidity = 0;
     sensor_data.tvoc = 0;
-    sensor_data.iaq = 0;
     sensor_data.air_quality_index = 0;
     sensor_data.co2_ppm = 0;
     sensor_data.pm2_5 = 0;
@@ -92,13 +91,25 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
     cached_broker = config_manager->getMQTTBroker();
     cached_topic = config_manager->getMQTTTopic();
     uint16_t port = config_manager->getMQTTPort();
+    bool use_tls = config_manager->getMQTTUseTLS();
 
     if (cached_broker.isEmpty()) {
         Serial.println("[MQTT] No broker configured - MQTT module disabled");
         return;
     }
 
-    Serial.printf("[MQTT] Connecting to %s:%d\n", cached_broker.c_str(), port);
+    Serial.printf("[MQTT] Connecting to %s:%d (TLS: %s)\n", 
+                  cached_broker.c_str(), port, use_tls ? "enabled" : "disabled");
+
+    // Configure TLS client if needed
+    if (use_tls) {
+        wifi_client_secure.setInsecure();  // Skip certificate verification for simplicity
+        mqtt_client.setClient(wifi_client_secure);
+        using_tls = true;
+    } else {
+        mqtt_client.setClient(wifi_client);
+        using_tls = false;
+    }
 
     mqtt_client.setServer(cached_broker.c_str(), port);
     mqtt_client.setCallback([](char* topic, byte* payload, unsigned int length) {
@@ -166,9 +177,22 @@ void MerakiMQTTClient::reconnect() {
         cached_broker = config_manager->getMQTTBroker();
         cached_topic = config_manager->getMQTTTopic();
         cached_port = config_manager->getMQTTPort();
+        bool use_tls = config_manager->getMQTTUseTLS();
         
         if (cached_broker.isEmpty()) {
             return;  // Still no broker configured
+        }
+        
+        // Update TLS setting if needed
+        if (use_tls != using_tls) {
+            if (use_tls) {
+                wifi_client_secure.setInsecure();
+                mqtt_client.setClient(wifi_client_secure);
+                using_tls = true;
+            } else {
+                mqtt_client.setClient(wifi_client);
+                using_tls = false;
+            }
         }
         
         // Set server once when we get a valid broker
@@ -179,7 +203,8 @@ void MerakiMQTTClient::reconnect() {
     String username = config_manager->getMQTTUsername();
     String password = config_manager->getMQTTPassword();
 
-    Serial.printf("[MQTT] Attempting connection to %s:%d...\n", cached_broker.c_str(), cached_port);
+    Serial.printf("[MQTT] Attempting connection to %s:%d (TLS: %s)...\n", 
+                  cached_broker.c_str(), cached_port, using_tls ? "enabled" : "disabled");
 
     bool connected = false;
     if (username.isEmpty()) {
@@ -317,12 +342,6 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         update_pending = true;
         if (debug_enabled) Serial.printf("[MQTT] Door: %s\n", sensor.door_status.c_str());
 
-    } else if (metric == "water") {
-        bool wet = doc["value"] | false;
-        sensor.water_status = wet ? "wet" : "dry";
-        update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] Water: %s\n", sensor.water_status.c_str());
-
     } else if (metric == "tvoc") {
         if (doc["tvoc"].is<float>()) {
             sensor.tvoc = doc["tvoc"] | 0.0f;
@@ -337,11 +356,6 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         update_pending = true;
         if (debug_enabled) Serial.printf("[MQTT] IAQ Index: %d\n", sensor.air_quality_index);
 
-    } else if (metric == "iaq") {
-        sensor.iaq = doc["value"] | 0;
-        sensor.air_quality_index = sensor.iaq;
-        update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] IAQ: %d\n", sensor.iaq);
     } else if (metric == "CO2") {
         sensor.co2_ppm = doc["CO2"] | doc["value"] | 0.0f;
         update_pending = true;
@@ -378,7 +392,6 @@ MerakiMQTTClient::SensorEntry* MerakiMQTTClient::getOrCreateSensor(const String&
     sensors[sensor_count].data.temperature = 0.0f;
     sensors[sensor_count].data.humidity = 0.0f;
     sensors[sensor_count].data.tvoc = 0.0f;
-    sensors[sensor_count].data.iaq = 0;
     sensors[sensor_count].data.air_quality_index = 0;
     sensors[sensor_count].data.co2_ppm = 0.0f;
     sensors[sensor_count].data.pm2_5 = 0.0f;

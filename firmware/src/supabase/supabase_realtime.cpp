@@ -11,6 +11,7 @@
 
 #include "supabase_realtime.h"
 #include "../common/ca_certs.h"
+#include "../common/url_utils.h"
 #include "../config/config_manager.h"
 
 extern ConfigManager config_manager;
@@ -24,22 +25,7 @@ constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 60000;  // Increased from 45000
 constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 50000;   // Increased from 35000
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
 
-String urlEncode(const String& str) {
-    String encoded = "";
-    for (unsigned int i = 0; i < str.length(); i++) {
-        char c = str.charAt(i);
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            encoded += c;
-        } else {
-            encoded += '%';
-            if (c < 16) encoded += '0';
-            char hex[3];
-            sprintf(hex, "%02X", (unsigned char)c);
-            encoded += hex;
-        }
-    }
-    return encoded;
-}
+// Note: urlEncode() removed from anonymous namespace - now using common/url_utils.h
 
 String normalizeJwt(const String& token) {
     String trimmed = token;
@@ -719,6 +705,16 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         }
 
         portENTER_CRITICAL(&instance->_rxMux);
+        
+        // Check buffer size limit before appending
+        if (instance->_rxBuffer.length() + data->data_len > REALTIME_RX_BUFFER_MAX) {
+            Serial.printf("[REALTIME] RX buffer overflow prevented: %zu + %d > %d\n",
+                          instance->_rxBuffer.length(), data->data_len, REALTIME_RX_BUFFER_MAX);
+            instance->_rxBuffer = "";  // Reset buffer on overflow
+            portEXIT_CRITICAL(&instance->_rxMux);
+            return;
+        }
+        
         instance->_rxBuffer.concat(String(data->data_ptr, data->data_len));
         if (data->payload_offset + data->data_len >= data->payload_len) {
             instance->_pendingMessage = instance->_rxBuffer;

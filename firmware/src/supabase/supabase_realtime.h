@@ -31,6 +31,9 @@
 #define PHOENIX_RECONNECT_MIN_MS 1000
 #define PHOENIX_RECONNECT_MAX_MS 60000
 
+// Buffer size limits to prevent unbounded growth
+#define REALTIME_RX_BUFFER_MAX 65536  // 64KB max for WebSocket messages
+
 /**
  * @brief Realtime message received from Supabase
  */

@@ -80,7 +80,7 @@ private:
     unsigned long last_request_time;
     int rate_limit_backoff;
     
-    String makeApiRequest(const String& endpoint);
+    String makeApiRequest(const String& endpoint, bool is_retry = false);
     void handleRateLimit(int httpCode);
 };
 

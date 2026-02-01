@@ -7,8 +7,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+#include <esp_random.h>
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
+#include "../common/url_utils.h"
 
 OAuthHandler::OAuthHandler()
     : config_manager(nullptr), token_expiry(0) {
@@ -38,8 +40,17 @@ String OAuthHandler::buildAuthUrl(const String& redirect_uri) {
         return "";
     }
     
-    // Generate state for CSRF protection
-    String state = String(random(100000, 999999));
+    // Generate cryptographically secure state for CSRF protection
+    // Use esp_random() for better entropy
+    char state_chars[13];  // 12 hex chars + null terminator
+    for (int i = 0; i < 6; i++) {
+        uint32_t rand = esp_random();
+        snprintf(&state_chars[i * 2], 3, "%02x", (rand >> 16) & 0xFF);
+    }
+    String state = String(state_chars);
+    
+    // Store state for validation (in production, this should be session-based)
+    oauth_state = state;
     
     String url = WEBEX_AUTH_URL;
     url += "?client_id=" + urlEncode(client_id);
@@ -49,6 +60,20 @@ String OAuthHandler::buildAuthUrl(const String& redirect_uri) {
     url += "&state=" + state;
     
     return url;
+}
+
+bool OAuthHandler::validateState(const String& state) const {
+    if (oauth_state.isEmpty()) {
+        Serial.println("[OAUTH] No stored state - possible CSRF attack");
+        return false;
+    }
+    
+    if (state != oauth_state) {
+        Serial.println("[OAUTH] State mismatch - possible CSRF attack");
+        return false;
+    }
+    
+    return true;
 }
 
 bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) {
@@ -61,12 +86,7 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     }
     
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager->getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_WEBEX);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_WEBEX, config_manager->getTlsVerify());
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);
@@ -122,12 +142,7 @@ bool OAuthHandler::refreshAccessToken() {
     }
     
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager->getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_WEBEX);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_WEBEX, config_manager->getTlsVerify());
     
     HTTPClient http;
     http.begin(client, WEBEX_TOKEN_URL);
@@ -227,34 +242,5 @@ bool OAuthHandler::parseTokenResponse(const String& response) {
     return true;
 }
 
-String OAuthHandler::urlEncode(const String& str) {
-    String encoded = "";
-    char c;
-    char code0;
-    char code1;
-    
-    for (unsigned int i = 0; i < str.length(); i++) {
-        c = str.charAt(i);
-        
-        if (c == ' ') {
-            encoded += "%20";
-        } else if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            encoded += c;
-        } else {
-            code1 = (c & 0xf) + '0';
-            if ((c & 0xf) > 9) {
-                code1 = (c & 0xf) - 10 + 'A';
-            }
-            c = (c >> 4) & 0xf;
-            code0 = c + '0';
-            if (c > 9) {
-                code0 = c - 10 + 'A';
-            }
-            encoded += '%';
-            encoded += code0;
-            encoded += code1;
-        }
-    }
-    
-    return encoded;
-}
+// Note: urlEncode() implementation moved to common/url_utils.h
+// This eliminates duplication across oauth_handler.cpp, api_webex.cpp, and supabase_realtime.cpp

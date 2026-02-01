@@ -4,21 +4,14 @@
  */
 
 #include "pairing_manager.h"
+#include "nvs_utils.h"
 #include <esp_random.h>
-
-// NVS namespace and key
-#define NVS_NAMESPACE "pairing"
-#define NVS_KEY_CODE "code"
 
 // Character set for pairing codes (excluding confusing chars)
 static const char CHARSET[] = PAIRING_CODE_CHARSET;
 static const size_t CHARSET_LEN = sizeof(CHARSET) - 1;  // Exclude null terminator
 
 PairingManager::PairingManager() : pairing_code("") {
-}
-
-PairingManager::~PairingManager() {
-    preferences.end();
 }
 
 void PairingManager::begin() {
@@ -28,7 +21,7 @@ void PairingManager::begin() {
         generateCode(true);
         Serial.println("[PAIRING] Generated new pairing code");
     } else {
-        Serial.printf("[PAIRING] Loaded pairing code: %s\n", pairing_code.c_str());
+        Serial.println("[PAIRING] Loaded existing pairing code from NVS");
     }
 }
 
@@ -39,7 +32,7 @@ String PairingManager::generateCode(bool save) {
         pairing_code += randomChar();
     }
     
-    Serial.printf("[PAIRING] Generated code: %s\n", pairing_code.c_str());
+    Serial.println("[PAIRING] Generated new pairing code");
     
     if (save) {
         saveCode();
@@ -53,7 +46,7 @@ bool PairingManager::setCode(const String& code, bool save) {
     upperCode.toUpperCase();
     
     if (!isValidCode(upperCode)) {
-        Serial.printf("[PAIRING] Invalid code format: %s\n", code.c_str());
+        Serial.println("[PAIRING] Invalid code format");
         return false;
     }
     
@@ -63,35 +56,39 @@ bool PairingManager::setCode(const String& code, bool save) {
         saveCode();
     }
     
-    Serial.printf("[PAIRING] Code set to: %s\n", pairing_code.c_str());
+    Serial.println("[PAIRING] Code updated");
     return true;
 }
 
 void PairingManager::clearCode() {
     pairing_code = "";
     
-    if (preferences.begin(NVS_NAMESPACE, false)) {
-        preferences.remove(NVS_KEY_CODE);
-        preferences.end();
+    NvsScope nvs(PAIRING_NVS_NAMESPACE);
+    if (nvs.isOpen()) {
+        nvs.remove(PAIRING_NVS_KEY_CODE);
     }
     
     Serial.println("[PAIRING] Code cleared");
 }
 
 void PairingManager::saveCode() {
-    if (preferences.begin(NVS_NAMESPACE, false)) {
-        preferences.putString(NVS_KEY_CODE, pairing_code);
-        preferences.end();
-        Serial.printf("[PAIRING] Code saved to NVS: %s\n", pairing_code.c_str());
+    NvsScope nvs(PAIRING_NVS_NAMESPACE);
+    if (nvs.isOpen()) {
+        NvsResult result = nvs.putString(PAIRING_NVS_KEY_CODE, pairing_code);
+        if (result == NvsResult::OK) {
+            Serial.println("[PAIRING] Code saved to NVS");
+        } else {
+            Serial.printf("[PAIRING] Failed to save code: %s\n", nvsResultToString(result));
+        }
     } else {
         Serial.println("[PAIRING] Failed to open NVS for writing");
     }
 }
 
 bool PairingManager::loadCode() {
-    if (preferences.begin(NVS_NAMESPACE, true)) {
-        String savedCode = preferences.getString(NVS_KEY_CODE, "");
-        preferences.end();
+    NvsScope nvs(PAIRING_NVS_NAMESPACE, true);  // Read-only
+    if (nvs.isOpen()) {
+        String savedCode = nvs.getString(PAIRING_NVS_KEY_CODE, "");
         
         if (!savedCode.isEmpty() && isValidCode(savedCode)) {
             pairing_code = savedCode;

@@ -6,7 +6,6 @@
 #include "serial_commands.h"
 #include "../config/config_manager.h"
 #include <WiFi.h>
-#include <Preferences.h>
 
 // External references
 extern ConfigManager config_manager;
@@ -123,12 +122,38 @@ static void handle_wifi_command(const String& command) {
         }
     }
     
+    // Security: Validate SSID length (WiFi standard: max 32 bytes)
     if (ssid.isEmpty()) {
         Serial.println("[SERIAL] Error: SSID cannot be empty");
         return;
     }
+    if (ssid.length() > 32) {
+        Serial.printf("[SERIAL] Error: SSID too long (%d bytes, max 32)\n", ssid.length());
+        return;
+    }
     
-    Serial.printf("[SERIAL] Configuring WiFi: SSID='%s'\n", ssid.c_str());
+    // Security: Validate password length (WiFi WPA2: 8-63 characters, WEP/Open: 0-63)
+    // Allow empty password for open networks
+    if (password.length() > 63) {
+        Serial.printf("[SERIAL] Error: Password too long (%d chars, max 63)\n", password.length());
+        return;
+    }
+    
+    // Security: Check for null bytes in SSID/password (command injection)
+    for (size_t i = 0; i < ssid.length(); i++) {
+        if (ssid.charAt(i) == '\0') {
+            Serial.println("[SERIAL] Error: SSID contains null byte");
+            return;
+        }
+    }
+    for (size_t i = 0; i < password.length(); i++) {
+        if (password.charAt(i) == '\0') {
+            Serial.println("[SERIAL] Error: Password contains null byte");
+            return;
+        }
+    }
+    
+    Serial.printf("[SERIAL] Configuring WiFi: SSID='%s' (len=%d)\n", ssid.c_str(), ssid.length());
     
     // Save credentials using config manager
     config_manager.setWiFiCredentials(ssid, password);
@@ -204,8 +229,8 @@ static void handle_status_command() {
  * @brief Handle FACTORY_RESET command - clear all settings
  */
 static void handle_factory_reset_command() {
-    Serial.println("[SERIAL] ⚠️  FACTORY RESET requested!");
-    Serial.println("[SERIAL] This will erase all settings (WiFi, Webex, etc.)");
+    Serial.println("[SERIAL] FACTORY RESET requested!");
+    Serial.println("[SERIAL] This will erase all settings and partitions.");
     Serial.println("[SERIAL] Device will reboot in 3 seconds...");
     
     delay(1000);
@@ -214,21 +239,10 @@ static void handle_factory_reset_command() {
     Serial.println("[SERIAL] 1...");
     delay(1000);
     
-    // Clear all preferences
-    Preferences prefs;
-    prefs.begin("config", false);
-    prefs.clear();
-    prefs.end();
+    // Use ConfigManager's factory reset (clears correct namespace + partitions)
+    config_manager.factoryReset();
     
-    prefs.begin("wifi", false);
-    prefs.clear();
-    prefs.end();
-    
-    prefs.begin("webex", false);
-    prefs.clear();
-    prefs.end();
-    
-    Serial.println("[SERIAL] Settings cleared. Rebooting...");
+    Serial.println("[SERIAL] Rebooting...");
     delay(500);
     
     ESP.restart();

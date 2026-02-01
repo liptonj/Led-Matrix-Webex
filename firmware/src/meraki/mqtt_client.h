@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <PubSubClient.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include "../config/config_manager.h"
 
 /**
@@ -19,9 +20,7 @@ struct MerakiSensorData {
     float temperature;       // Celsius
     float humidity;          // Percentage
     String door_status;      // "open" or "closed"
-    String water_status;     // "wet" or "dry"
     float tvoc;              // TVOC in ppb
-    int iaq;                 // Indoor Air Quality index (legacy)
     int air_quality_index;   // Air quality as numeric index (0-500)
     float co2_ppm;
     float pm2_5;
@@ -105,6 +104,7 @@ public:
 private:
     bool debug_enabled = false;  // MQTT message logging disabled by default
     WiFiClient wifi_client;
+    WiFiClientSecure wifi_client_secure;
     PubSubClient mqtt_client;
     ConfigManager* config_manager;
     MerakiSensorData sensor_data;
@@ -112,6 +112,7 @@ private:
     unsigned long last_reconnect;
     String latest_sensor_id;
     bool last_connected_state = false;  // Track connection state for disconnect logging
+    bool using_tls = false;  // Track which client is in use
     
     // Persistent storage for broker/topic - PubSubClient stores pointers, not copies
     String cached_broker;

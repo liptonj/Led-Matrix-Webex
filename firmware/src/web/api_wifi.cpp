@@ -4,6 +4,8 @@
  */
 
 #include "web_server.h"
+#include "web_helpers.h"
+#include "../common/url_utils.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
@@ -12,13 +14,8 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     const bool wifi_connected = (WiFi.status() == WL_CONNECTED) ||
         (app_state && app_state->wifi_connected);
     if (wifi_connected) {
-        AsyncWebServerResponse* response = request->beginResponse(
-            409,
-            "application/json",
-            "{\"error\":\"WiFi scan disabled while connected. Disconnect first to scan.\"}"
-        );
-        addCorsHeaders(response);
-        request->send(response);
+        sendErrorResponse(request, 409, "WiFi scan disabled while connected. Disconnect first to scan.", 
+                         [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
 
@@ -27,10 +24,8 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     
     if (scan_status == WIFI_SCAN_RUNNING) {
         // Scan already in progress, return 202 Accepted
-        AsyncWebServerResponse* response = request->beginResponse(202, "application/json", 
-            "{\"status\":\"scanning\",\"message\":\"Scan in progress\"}");
-        addCorsHeaders(response);
-        request->send(response);
+        sendJsonResponse(request, 202, "{\"status\":\"scanning\",\"message\":\"Scan in progress\"}",
+                        [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
     
@@ -55,11 +50,7 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
         // Clean up scan results after sending
         WiFi.scanDelete();
         
-        String responseStr;
-        serializeJson(doc, responseStr);
-        AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-        addCorsHeaders(response);
-        request->send(response);
+        sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
     
@@ -68,16 +59,12 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     
     if (result == WIFI_SCAN_RUNNING) {
         // Scan started successfully
-        AsyncWebServerResponse* response = request->beginResponse(202, "application/json", 
-            "{\"status\":\"scanning\",\"message\":\"Scan started\"}");
-        addCorsHeaders(response);
-        request->send(response);
+        sendJsonResponse(request, 202, "{\"status\":\"scanning\",\"message\":\"Scan started\"}",
+                        [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
     } else {
         // Scan failed to start
-        AsyncWebServerResponse* response = request->beginResponse(500, "application/json", 
-            "{\"error\":\"Failed to start WiFi scan\"}");
-        addCorsHeaders(response);
-        request->send(response);
+        sendErrorResponse(request, 500, "Failed to start WiFi scan",
+                         [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
     }
 }
 
@@ -93,26 +80,7 @@ void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* d
         WiFi.scanDelete();
     }
 
-    // Helper to URL-decode form values
-    auto urlDecode = [](const String& input) -> String {
-        String out;
-        out.reserve(input.length());
-        for (size_t i = 0; i < input.length(); i++) {
-            char c = input[i];
-            if (c == '+') {
-                out += ' ';
-                continue;
-            }
-            if (c == '%' && i + 2 < input.length()) {
-                char hex[3] = { input[i + 1], input[i + 2], 0 };
-                out += static_cast<char>(strtol(hex, nullptr, 16));
-                i += 2;
-                continue;
-            }
-            out += c;
-        }
-        return out;
-    };
+    // Note: urlDecode() helper function now from common/url_utils.h
 
     // Prefer JSON body if provided
     if (len > 0) {
@@ -152,18 +120,13 @@ void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* d
     }
 
     if (ssid.isEmpty()) {
-        AsyncWebServerResponse* response = request->beginResponse(400, "application/json", "{\"error\":\"Missing ssid\"}");
-        addCorsHeaders(response);
-        request->send(response);
+        sendErrorResponse(request, 400, "Missing ssid", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
 
     config_manager->setWiFiCredentials(ssid, password);
 
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", 
-        "{\"success\":true,\"message\":\"WiFi saved. Rebooting...\"}");
-    addCorsHeaders(response);
-    request->send(response);
+    sendSuccessResponse(request, "WiFi saved. Rebooting...", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 
     // Schedule reboot with longer delay to allow display DMA to complete
     // This helps prevent display corruption on reboot

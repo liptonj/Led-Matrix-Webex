@@ -42,7 +42,10 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     // Check rate limit backoff
     if (rate_limit_backoff > 0) {
         unsigned long backoff_ms = rate_limit_backoff * 1000UL;
-        if (millis() - last_request_time < backoff_ms) {
+        unsigned long now = millis();
+        // FIXED: Handle millis() wraparound properly
+        unsigned long elapsed = now - last_request_time;
+        if (elapsed < backoff_ms) {
             Serial.println("[WEBEX] Rate limit backoff active, skipping request");
             return false;
         }
@@ -95,7 +98,7 @@ bool WebexClient::handleOAuthCallback(const String& code, const String& redirect
     return oauth_handler.exchangeCode(code, redirect_uri);
 }
 
-String WebexClient::makeApiRequest(const String& endpoint) {
+String WebexClient::makeApiRequest(const String& endpoint, bool is_retry) {
     String access_token = oauth_handler.getAccessToken();
     
     if (access_token.isEmpty()) {
@@ -104,12 +107,8 @@ String WebexClient::makeApiRequest(const String& endpoint) {
     }
     
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager && config_manager->getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_WEBEX);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_WEBEX, 
+                                config_manager && config_manager->getTlsVerify());
     
     HTTPClient http;
     String url = String(WEBEX_API_BASE) + endpoint;
@@ -130,17 +129,26 @@ String WebexClient::makeApiRequest(const String& endpoint) {
     // Handle errors
     handleRateLimit(httpCode);
     
-    if (httpCode == 401) {
-        Serial.println("[WEBEX] Unauthorized - token may be expired");
-        // Try to refresh and retry once
+    // Handle 401 Unauthorized - try refresh once (prevent infinite recursion)
+    if (httpCode == 401 && !is_retry) {
+        Serial.println("[WEBEX] Unauthorized - attempting token refresh");
+        http.end();
+        
         if (oauth_handler.refreshAccessToken()) {
-            http.end();
-            return makeApiRequest(endpoint);
+            Serial.println("[WEBEX] Token refreshed, retrying request");
+            // Retry request with new token (pass is_retry=true)
+            return makeApiRequest(endpoint, true);
+        } else {
+            Serial.println("[WEBEX] Token refresh failed - re-authorization required");
+            return "";
         }
     }
     
     Serial.printf("[WEBEX] API request failed with code: %d\n", httpCode);
-    Serial.println(http.getString());
+    String errorBody = http.getString();
+    if (!errorBody.isEmpty()) {
+        Serial.printf("[WEBEX] Error response: %s\n", errorBody.c_str());
+    }
     http.end();
     
     return "";

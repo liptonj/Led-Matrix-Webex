@@ -22,6 +22,11 @@ XAPIWebSocket::~XAPIWebSocket() {
 }
 
 void XAPIWebSocket::begin(ConfigManager* config) {
+    if (!config) {
+        Serial.println("[XAPI] ERROR: Cannot initialize with null config");
+        return;
+    }
+    
     config_manager = config;
     g_xapi_instance = this;
     
@@ -36,7 +41,7 @@ void XAPIWebSocket::begin(ConfigManager* config) {
     // 2. Use the access token for authentication
     // For now, this is a simplified implementation
     
-    Serial.printf("[XAPI] Connecting to device: %s\n", device_id.c_str());
+    Serial.printf("[XAPI] Configuring for device: %s\n", device_id.c_str());
     
     // Configure WebSocket client
     // The actual implementation would connect to the device's specific endpoint
@@ -49,18 +54,23 @@ void XAPIWebSocket::begin(ConfigManager* config) {
     });
     
     // In production, you would get the actual WebSocket URL from the Webex API
-    // ws_client.beginSSL(host, port, path);
+    // Example: GET https://webexapis.com/v1/devices/{deviceId}
+    // Response includes: { "websocketUrl": "wss://..." }
+    // Then: ws_client.beginSSL(host, port, path);
     
-    Serial.println("[XAPI] WebSocket client configured");
+    Serial.println("[XAPI] WebSocket client configured (connection deferred until URL available)");
 }
 
 void XAPIWebSocket::loop() {
     ws_client.loop();
     
     // Handle reconnection
-    if (!connected && config_manager->hasXAPIDevice()) {
-        if (millis() - last_reconnect > 30000) {
-            last_reconnect = millis();
+    if (!connected && config_manager && config_manager->hasXAPIDevice()) {
+        unsigned long now = millis();
+        // FIXED: Handle millis() wraparound properly
+        unsigned long elapsed = now - last_reconnect;
+        if (elapsed > 30000) {
+            last_reconnect = now;
             reconnect();
         }
     }
@@ -77,12 +87,30 @@ void XAPIWebSocket::disconnect() {
 }
 
 void XAPIWebSocket::reconnect() {
+    if (!config_manager) {
+        Serial.println("[XAPI] Cannot reconnect - not initialized");
+        return;
+    }
+    
+    String device_id = config_manager->getXAPIDeviceId();
+    if (device_id.isEmpty()) {
+        Serial.println("[XAPI] Cannot reconnect - no device ID");
+        return;
+    }
+    
     Serial.println("[XAPI] Attempting to reconnect...");
     
+    // FIXED: Add proper implementation notes and error handling
     // In production implementation, this would:
-    // 1. Get fresh access token
-    // 2. Query Webex API for device WebSocket URL
-    // 3. Connect with proper authentication
+    // 1. Get fresh access token from oauth_handler
+    // 2. Query Webex API for device WebSocket URL (/devices/{deviceId})
+    // 3. Extract websocketUrl from response
+    // 4. Connect with proper authentication (Bearer token)
+    // 5. Wait for connection confirmation
+    
+    // For now, log what's needed
+    Serial.printf("[XAPI] TODO: Implement full connection for device: %s\n", device_id.c_str());
+    Serial.println("[XAPI] Required: OAuth token, device WebSocket URL lookup");
 }
 
 void XAPIWebSocket::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {

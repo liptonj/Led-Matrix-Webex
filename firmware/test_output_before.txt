@@ -1,0 +1,142 @@
+Verbosity level can be increased via `-v, -vv, or -vvv` option
+Collected 15 tests
+
+Processing test_mqtt_client in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+----------- native_test:test_mqtt_client [ERRORED] Took 0.03 seconds -----------
+
+Processing test_serial_commands in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+--------- native_test:test_serial_commands [ERRORED] Took 0.00 seconds ---------
+
+Processing test_sync_manager in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+---------- native_test:test_sync_manager [ERRORED] Took 0.00 seconds ----------
+
+Processing test_ota_manager in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+----------- native_test:test_ota_manager [ERRORED] Took 0.00 seconds -----------
+
+Processing test_config_manager in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+--------- native_test:test_config_manager [ERRORED] Took 0.00 seconds ---------
+
+Processing test_boot_validator in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+--------- native_test:test_boot_validator [ERRORED] Took 0.00 seconds ---------
+
+Processing test_display_primitives in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+------- native_test:test_display_primitives [ERRORED] Took 0.00 seconds -------
+
+Processing test_supabase_realtime in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+-------- native_test:test_supabase_realtime [ERRORED] Took 0.00 seconds --------
+
+Processing test_supabase_client in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+--------- native_test:test_supabase_client [ERRORED] Took 0.00 seconds ---------
+
+Processing test_pairing_manager in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+--------- native_test:test_pairing_manager [ERRORED] Took 0.00 seconds ---------
+
+Processing test_wifi_manager in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+---------- native_test:test_wifi_manager [ERRORED] Took 0.00 seconds ----------
+
+Processing test_web_api in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+------------- native_test:test_web_api [ERRORED] Took 0.00 seconds -------------
+
+Processing test_webex_client in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+---------- native_test:test_webex_client [ERRORED] Took 0.00 seconds ----------
+
+Processing test_device_credentials in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+------- native_test:test_device_credentials [ERRORED] Took 0.00 seconds -------
+
+Processing test_display_data in native_test environment
+--------------------------------------------------------------------------------
+Building...
+Can not remove temporary directory `/Users/jolipton/Projects/Led-Matrix-Webex/firmware/.pio/build`. Please remove it manually to avoid build issues
+[Errno 1] Operation not permitted: '/Users/jolipton/.platformio/platforms.lock'
+---------- native_test:test_display_data [ERRORED] Took 0.00 seconds ----------
+
+=================================== SUMMARY ===================================
+Environment    Test                     Status    Duration
+-------------  -----------------------  --------  ------------
+native_test    test_mqtt_client         ERRORED   00:00:00.027
+native_test    test_serial_commands     ERRORED   00:00:00.003
+native_test    test_sync_manager        ERRORED   00:00:00.003
+native_test    test_ota_manager         ERRORED   00:00:00.003
+native_test    test_config_manager      ERRORED   00:00:00.004
+native_test    test_boot_validator      ERRORED   00:00:00.003
+native_test    test_display_primitives  ERRORED   00:00:00.003
+native_test    test_supabase_realtime   ERRORED   00:00:00.003
+native_test    test_supabase_client     ERRORED   00:00:00.003
+native_test    test_pairing_manager     ERRORED   00:00:00.003
+native_test    test_wifi_manager        ERRORED   00:00:00.003
+native_test    test_web_api             ERRORED   00:00:00.003
+native_test    test_webex_client        ERRORED   00:00:00.003
+native_test    test_device_credentials  ERRORED   00:00:00.003
+native_test    test_display_data        ERRORED   00:00:00.003
+================== 15 test cases: 0 succeeded in 00:00:00.070 ==================
+Exception ignored in atexit callback <function _finalize at 0x10767c460>:
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/platformio/6.1.18_6/libexec/lib/python3.14/site-packages/platformio/telemetry.py", line 323, in _finalize
+    postpone_events(telemetry.get_unsent_events())
+  File "/opt/homebrew/Cellar/platformio/6.1.18_6/libexec/lib/python3.14/site-packages/platformio/telemetry.py", line 361, in postpone_events
+    save_postponed_events(postponed_events[KEEP_MAX_REPORTS * -1 :])
+  File "/opt/homebrew/Cellar/platformio/6.1.18_6/libexec/lib/python3.14/site-packages/platformio/telemetry.py", line 346, in save_postponed_events
+    with app.State(state_path, lock=True) as state:
+  File "/opt/homebrew/Cellar/platformio/6.1.18_6/libexec/lib/python3.14/site-packages/platformio/app.py", line 95, in __enter__
+    self._lock_state_file()
+  File "/opt/homebrew/Cellar/platformio/6.1.18_6/libexec/lib/python3.14/site-packages/platformio/app.py", line 126, in _lock_state_file
+    raise exception.HomeDirPermissionsError(os.path.dirname(self.path)) from exc
+platformio.exception.HomeDirPermissionsError: The directory `/Users/jolipton/.platformio/.cache` or its parent directory is not owned by the current user and PlatformIO can not store configuration data.
+Please check the permissions and owner of that directory.
+Otherwise, please remove manually `/Users/jolipton/.platformio/.cache` directory and PlatformIO will create new from the current user.

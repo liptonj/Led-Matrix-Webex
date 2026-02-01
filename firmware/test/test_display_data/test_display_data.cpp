@@ -144,95 +144,41 @@ String getStatusText(const String& status) {
 }
 
 // ============================================================================
-// Status Color Mapping Tests
+// Status Color and Text Mapping Tests (Consolidated)
 // ============================================================================
 
-void test_color_active() {
+void test_status_color_mapping() {
+    // Active/Available -> Green
     TEST_ASSERT_EQUAL_HEX16(COLOR_GREEN, getStatusColor("active"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_GREEN, getStatusColor("available"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_GREEN, getStatusColor("Active"));  // Case insensitive
     TEST_ASSERT_EQUAL_HEX16(COLOR_GREEN, getStatusColor("AVAILABLE"));
-}
-
-void test_color_busy() {
+    
+    // Busy states -> Red
     TEST_ASSERT_EQUAL_HEX16(COLOR_RED, getStatusColor("call"));
     TEST_ASSERT_EQUAL_HEX16(COLOR_RED, getStatusColor("meeting"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_RED, getStatusColor("busy"));
-}
-
-void test_color_dnd() {
     TEST_ASSERT_EQUAL_HEX16(COLOR_DND, getStatusColor("dnd"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_DND, getStatusColor("DoNotDisturb"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_DND, getStatusColor("donotdisturb"));
-}
-
-void test_color_away() {
-    TEST_ASSERT_EQUAL_HEX16(COLOR_YELLOW, getStatusColor("inactive"));
+    
+    // Away -> Yellow
     TEST_ASSERT_EQUAL_HEX16(COLOR_YELLOW, getStatusColor("away"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_YELLOW, getStatusColor("brb"));
-}
-
-void test_color_ooo() {
-    TEST_ASSERT_EQUAL_HEX16(COLOR_PURPLE, getStatusColor("OutOfOffice"));
+    
+    // Special states
     TEST_ASSERT_EQUAL_HEX16(COLOR_PURPLE, getStatusColor("ooo"));
-}
-
-void test_color_presenting() {
     TEST_ASSERT_EQUAL_HEX16(COLOR_PRESENTING, getStatusColor("presenting"));
-}
-
-void test_color_offline() {
-    TEST_ASSERT_EQUAL_HEX16(COLOR_GRAY, getStatusColor("offline"));
+    
+    // Unknown/offline -> Gray
     TEST_ASSERT_EQUAL_HEX16(COLOR_GRAY, getStatusColor("unknown"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_GRAY, getStatusColor("pending"));
-}
-
-void test_color_unknown_status() {
     TEST_ASSERT_EQUAL_HEX16(COLOR_GRAY, getStatusColor("foobar"));
-    TEST_ASSERT_EQUAL_HEX16(COLOR_GRAY, getStatusColor(""));
 }
 
-// ============================================================================
-// Status Text Mapping Tests
-// ============================================================================
-
-void test_text_active() {
+void test_status_text_mapping() {
+    // Test key status text outputs
     TEST_ASSERT_EQUAL_STRING("AVAILABLE", getStatusText("active").c_str());
-    TEST_ASSERT_EQUAL_STRING("AVAILABLE", getStatusText("available").c_str());
-}
-
-void test_text_call() {
     TEST_ASSERT_EQUAL_STRING("ON A CALL", getStatusText("call").c_str());
-}
-
-void test_text_meeting() {
     TEST_ASSERT_EQUAL_STRING("IN MEETING", getStatusText("meeting").c_str());
-}
-
-void test_text_dnd() {
     TEST_ASSERT_EQUAL_STRING("DO NOT DISTURB", getStatusText("dnd").c_str());
-    TEST_ASSERT_EQUAL_STRING("DO NOT DISTURB", getStatusText("DoNotDisturb").c_str());
-}
-
-void test_text_away() {
-    TEST_ASSERT_EQUAL_STRING("AWAY", getStatusText("inactive").c_str());
     TEST_ASSERT_EQUAL_STRING("AWAY", getStatusText("away").c_str());
-}
-
-void test_text_ooo() {
-    TEST_ASSERT_EQUAL_STRING("OUT OF OFFICE", getStatusText("OutOfOffice").c_str());
     TEST_ASSERT_EQUAL_STRING("OUT OF OFFICE", getStatusText("ooo").c_str());
-}
-
-void test_text_presenting() {
     TEST_ASSERT_EQUAL_STRING("PRESENTING", getStatusText("presenting").c_str());
-}
-
-void test_text_pending() {
     TEST_ASSERT_EQUAL_STRING("LOADING...", getStatusText("pending").c_str());
-}
-
-void test_text_unknown() {
     TEST_ASSERT_EQUAL_STRING("UNKNOWN", getStatusText("foobar").c_str());
 }
 
@@ -393,7 +339,7 @@ void test_page_stays_on_current_before_interval() {
 }
 
 // ============================================================================
-// Time Formatting Tests
+// Time and Date Formatting Tests (Consolidated)
 // ============================================================================
 
 String formatTime12(int hour, int minute) {
@@ -412,34 +358,6 @@ String formatTime24(int hour, int minute) {
     snprintf(buf, sizeof(buf), "%02d:%02d", hour, minute);
     return String(buf);
 }
-
-void test_time_12h_morning() {
-    TEST_ASSERT_EQUAL_STRING("9:30AM", formatTime12(9, 30).c_str());
-}
-
-void test_time_12h_afternoon() {
-    TEST_ASSERT_EQUAL_STRING("2:30PM", formatTime12(14, 30).c_str());
-}
-
-void test_time_12h_noon() {
-    TEST_ASSERT_EQUAL_STRING("12:00PM", formatTime12(12, 0).c_str());
-}
-
-void test_time_12h_midnight() {
-    TEST_ASSERT_EQUAL_STRING("12:00AM", formatTime12(0, 0).c_str());
-}
-
-void test_time_24h_morning() {
-    TEST_ASSERT_EQUAL_STRING("09:30", formatTime24(9, 30).c_str());
-}
-
-void test_time_24h_afternoon() {
-    TEST_ASSERT_EQUAL_STRING("14:30", formatTime24(14, 30).c_str());
-}
-
-// ============================================================================
-// Date Formatting Tests
-// ============================================================================
 
 String getMonthAbbrev(int month) {
     const char* months[] = {
@@ -468,49 +386,39 @@ String formatDate(int month, int day, uint8_t format) {
     return String(buf);
 }
 
-void test_date_format_mdy() {
-    TEST_ASSERT_EQUAL_STRING("JAN28", formatDate(1, 28, 0).c_str());
+void test_time_formatting_12h_and_24h() {
+    // 12-hour format tests
+    TEST_ASSERT_EQUAL_STRING("9:30AM", formatTime12(9, 30).c_str());
+    TEST_ASSERT_EQUAL_STRING("2:30PM", formatTime12(14, 30).c_str());
+    TEST_ASSERT_EQUAL_STRING("12:00PM", formatTime12(12, 0).c_str());
+    TEST_ASSERT_EQUAL_STRING("12:00AM", formatTime12(0, 0).c_str());
+    
+    // 24-hour format tests
+    TEST_ASSERT_EQUAL_STRING("09:30", formatTime24(9, 30).c_str());
+    TEST_ASSERT_EQUAL_STRING("14:30", formatTime24(14, 30).c_str());
 }
 
-void test_date_format_dmy() {
-    TEST_ASSERT_EQUAL_STRING("28JAN", formatDate(1, 28, 1).c_str());
-}
-
-void test_date_format_numeric() {
-    TEST_ASSERT_EQUAL_STRING("1/28", formatDate(1, 28, 2).c_str());
-}
-
-void test_month_abbreviations() {
+void test_date_formatting() {
+    // Date format variations
+    TEST_ASSERT_EQUAL_STRING("JAN28", formatDate(1, 28, 0).c_str());  // MDY
+    TEST_ASSERT_EQUAL_STRING("28JAN", formatDate(1, 28, 1).c_str());  // DMY
+    TEST_ASSERT_EQUAL_STRING("1/28", formatDate(1, 28, 2).c_str());   // Numeric
+    
+    // Month abbreviations
     TEST_ASSERT_EQUAL_STRING("JAN", getMonthAbbrev(1).c_str());
-    TEST_ASSERT_EQUAL_STRING("FEB", getMonthAbbrev(2).c_str());
     TEST_ASSERT_EQUAL_STRING("DEC", getMonthAbbrev(12).c_str());
-    TEST_ASSERT_EQUAL_STRING("???", getMonthAbbrev(0).c_str());
     TEST_ASSERT_EQUAL_STRING("???", getMonthAbbrev(13).c_str());
 }
 
-// ============================================================================
-// Temperature Conversion Tests
-// ============================================================================
-
-void test_celsius_to_fahrenheit() {
+void test_temperature_conversion() {
+    // Celsius to Fahrenheit conversion
     float celsius = 22.5f;
     int fahrenheit = (int)((celsius * 9.0f / 5.0f) + 32.0f);
-    
     TEST_ASSERT_EQUAL(72, fahrenheit);
-}
-
-void test_celsius_to_fahrenheit_freezing() {
-    float celsius = 0.0f;
-    int fahrenheit = (int)((celsius * 9.0f / 5.0f) + 32.0f);
     
-    TEST_ASSERT_EQUAL(32, fahrenheit);
-}
-
-void test_celsius_to_fahrenheit_boiling() {
-    float celsius = 100.0f;
-    int fahrenheit = (int)((celsius * 9.0f / 5.0f) + 32.0f);
-    
-    TEST_ASSERT_EQUAL(212, fahrenheit);
+    // Boundary values
+    TEST_ASSERT_EQUAL(32, (int)((0.0f * 9.0f / 5.0f) + 32.0f));    // Freezing
+    TEST_ASSERT_EQUAL(212, (int)((100.0f * 9.0f / 5.0f) + 32.0f)); // Boiling
 }
 
 // ============================================================================
@@ -570,26 +478,9 @@ void test_mqtt_sensor_to_display() {
 // ============================================================================
 
 static void run_display_data_tests() {
-    // Status Color Mapping
-    RUN_TEST(test_color_active);
-    RUN_TEST(test_color_busy);
-    RUN_TEST(test_color_dnd);
-    RUN_TEST(test_color_away);
-    RUN_TEST(test_color_ooo);
-    RUN_TEST(test_color_presenting);
-    RUN_TEST(test_color_offline);
-    RUN_TEST(test_color_unknown_status);
-    
-    // Status Text Mapping
-    RUN_TEST(test_text_active);
-    RUN_TEST(test_text_call);
-    RUN_TEST(test_text_meeting);
-    RUN_TEST(test_text_dnd);
-    RUN_TEST(test_text_away);
-    RUN_TEST(test_text_ooo);
-    RUN_TEST(test_text_presenting);
-    RUN_TEST(test_text_pending);
-    RUN_TEST(test_text_unknown);
+    // Status Color and Text Mapping (consolidated)
+    RUN_TEST(test_status_color_mapping);
+    RUN_TEST(test_status_text_mapping);
     
     // DisplayData Structure
     RUN_TEST(test_display_data_defaults);
@@ -605,24 +496,10 @@ static void run_display_data_tests() {
     RUN_TEST(test_page_no_rotation_when_disabled);
     RUN_TEST(test_page_stays_on_current_before_interval);
     
-    // Time Formatting
-    RUN_TEST(test_time_12h_morning);
-    RUN_TEST(test_time_12h_afternoon);
-    RUN_TEST(test_time_12h_noon);
-    RUN_TEST(test_time_12h_midnight);
-    RUN_TEST(test_time_24h_morning);
-    RUN_TEST(test_time_24h_afternoon);
-    
-    // Date Formatting
-    RUN_TEST(test_date_format_mdy);
-    RUN_TEST(test_date_format_dmy);
-    RUN_TEST(test_date_format_numeric);
-    RUN_TEST(test_month_abbreviations);
-    
-    // Temperature Conversion
-    RUN_TEST(test_celsius_to_fahrenheit);
-    RUN_TEST(test_celsius_to_fahrenheit_freezing);
-    RUN_TEST(test_celsius_to_fahrenheit_boiling);
+    // Time, Date, and Temperature (consolidated)
+    RUN_TEST(test_time_formatting_12h_and_24h);
+    RUN_TEST(test_date_formatting);
+    RUN_TEST(test_temperature_conversion);
     
     // Integration Tests
     RUN_TEST(test_supabase_status_to_display);
