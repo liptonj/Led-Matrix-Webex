@@ -574,6 +574,28 @@ input[type="checkbox"] {
     color: var(--bg-primary);
 }
 
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.7rem;
+    margin-left: 0.5rem;
+}
+
+/* Alert banners */
+.alert {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.alert-warning {
+    background-color: rgba(255, 193, 7, 0.15);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
 .btn-icon {
     width: 28px;
     height: 28px;

@@ -439,6 +439,16 @@ async function loadDisplayConfig() {
         document.getElementById('ota-url').value = state.displayConfig.ota_url || '';
         document.getElementById('auto-update').checked = state.displayConfig.auto_update || false;
         
+        // Show failed OTA version if set (blocks auto-updates)
+        const failedOTA = state.displayConfig.failed_ota_version;
+        const failedBanner = document.getElementById('failed-ota-banner');
+        if (failedOTA && failedBanner) {
+            document.getElementById('failed-ota-version').textContent = failedOTA;
+            failedBanner.style.display = 'flex';
+        } else if (failedBanner) {
+            failedBanner.style.display = 'none';
+        }
+        
         // Auth status - check actual authentication state (Supabase or local)
         const authStatus = document.getElementById('webex-auth-status');
         if (state.webex_authenticated) {
@@ -581,6 +591,12 @@ function setupEventListeners() {
     document.getElementById('ota-form').addEventListener('submit', saveOTASettings);
     document.getElementById('check-update').addEventListener('click', checkForUpdate);
     document.getElementById('perform-update').addEventListener('click', performUpdate);
+    
+    // Clear failed OTA button
+    const clearFailedBtn = document.getElementById('clear-failed-ota');
+    if (clearFailedBtn) {
+        clearFailedBtn.addEventListener('click', clearFailedOTA);
+    }
     
     // System buttons
     document.getElementById('reboot-btn').addEventListener('click', rebootDevice);
@@ -800,6 +816,27 @@ async function performUpdate() {
         logActivity('info', 'Update started...');
     } catch (error) {
         logActivity('error', 'Update failed');
+    }
+}
+
+async function clearFailedOTA() {
+    try {
+        const response = await fetch(CONFIG.configEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clear_failed_ota: true })
+        });
+        
+        if (response.ok) {
+            logActivity('success', 'Cleared failed OTA marker - auto-updates will retry');
+            document.getElementById('failed-ota-banner').style.display = 'none';
+            // Trigger a check for updates
+            await checkForUpdate();
+        } else {
+            throw new Error('Failed to clear');
+        }
+    } catch (error) {
+        logActivity('error', 'Failed to clear OTA marker');
     }
 }
 

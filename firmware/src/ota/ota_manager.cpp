@@ -9,6 +9,8 @@
 #include "../display/matrix_display.h"
 #include "../config/config_manager.h"
 #include "../common/secure_client_config.h"
+#include "../supabase/supabase_realtime.h"
+#include "../app_state.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
@@ -26,6 +28,8 @@
 // External reference to display for progress updates
 extern MatrixDisplay matrix_display;
 extern ConfigManager config_manager;
+extern SupabaseRealtime supabaseRealtime;
+extern AppState app_state;
 
 namespace {
 void configureHttpClient(HTTPClient& http) {
@@ -432,6 +436,17 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
 bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
     Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
 
+    // Safety disconnect: ensure realtime is not running during OTA
+    // The WebSocket competes for heap and network bandwidth, causing stream timeouts
+    if (supabaseRealtime.isConnected() || supabaseRealtime.isConnecting()) {
+        Serial.println("[OTA] Safety disconnect: stopping realtime for OTA");
+        supabaseRealtime.disconnect();
+    }
+    // Defer realtime reconnection for 10 minutes to cover entire OTA process
+    app_state.realtime_defer_until = millis() + 600000UL;
+
+    Serial.printf("[OTA] Heap before download: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
+
 #ifndef NATIVE_BUILD
     // Properly disable task watchdog during OTA
     // We need to unsubscribe ALL tasks from WDT before calling deinit
@@ -586,8 +601,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             // Wait for more data with timeout
             unsigned long waitStart = millis();
             while (stream->available() == 0 && stream->connected()) {
-                if (millis() - waitStart > 30000) {  // 30 second timeout for slow connections
-                    Serial.printf("[OTA] Stream timeout waiting for data\n");
+                if (millis() - waitStart > 60000) {  // 60 second timeout for slow/congested connections
+                    Serial.printf("[OTA] Stream timeout waiting for data (60s)\n");
                     Update.abort();
                     http.end();
                     return false;
@@ -879,8 +894,8 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
             }
 
             // Check for timeout
-            if (millis() - lastDataTime > 30000) {
-                Serial.printf("[OTA] Stream timeout at %d%% - no data for 30s\n",
+            if (millis() - lastDataTime > 60000) {
+                Serial.printf("[OTA] Stream timeout at %d%% - no data for 60s\n",
                               (app_written * 100) / app_size);
                 Serial.flush();
                 Update.abort();

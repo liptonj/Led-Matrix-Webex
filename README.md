@@ -330,6 +330,11 @@ Supported sensor data:
 - **Air Quality**: Good/Moderate/Poor
 
 ## Development
+ 
+ ### CI/CD Runners
+ 
+ All GitHub Actions workflows run on a self-hosted runner. See
+ `docs/self_hosted_runner.md` for setup requirements and dependencies.
 
 ### Version Management
 

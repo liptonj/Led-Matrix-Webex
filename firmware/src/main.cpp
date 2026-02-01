@@ -1224,7 +1224,7 @@ bool provisionDeviceWithSupabase() {
     http.setTimeout(15000);
     http.addHeader("Content-Type", "application/json");
 
-    StaticJsonDocument<512> payload;
+    JsonDocument payload;
     payload["serial_number"] = deviceCredentials.getSerialNumber();
     payload["key_hash"] = deviceCredentials.getKeyHash();
     payload["firmware_version"] = FIRMWARE_VERSION;
@@ -1339,8 +1339,9 @@ void check_for_updates() {
     if (realtime_was_active) {
         Serial.println("[OTA] Pausing realtime during OTA check");
         supabaseRealtime.disconnect();
-        app_state.realtime_defer_until = millis() + 15000UL;
     }
+    // Defer realtime for check phase - will extend if update starts
+    app_state.realtime_defer_until = millis() + 30000UL;
 
     if (ota_manager.checkForUpdate()) {
         String new_version = ota_manager.getLatestVersion();
@@ -1357,6 +1358,14 @@ void check_for_updates() {
 
             Serial.println("[OTA] Auto-update enabled, installing...");
             matrix_display.showUpdating(new_version);
+
+            // Disconnect realtime and defer for 10 minutes to cover the entire download
+            // This is critical to free memory and prevent network contention during OTA
+            if (supabaseRealtime.isConnected() || supabaseRealtime.isConnecting()) {
+                Serial.println("[OTA] Disconnecting realtime for update");
+                supabaseRealtime.disconnect();
+            }
+            app_state.realtime_defer_until = millis() + 600000UL;  // 10 minutes
 
             if (ota_manager.performUpdate()) {
                 Serial.println("[OTA] Update successful, rebooting...");

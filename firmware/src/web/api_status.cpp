@@ -259,6 +259,9 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["supabase_url"] = config_manager->getSupabaseUrl().isEmpty() ? "" : config_manager->getSupabaseUrl();
     // Boolean flag - always include as explicit boolean
     doc["auto_update"] = config_manager->getAutoUpdate();
+    // Failed OTA version - if set, auto-update will skip this version
+    String failedOTA = config_manager->getFailedOTAVersion();
+    doc["failed_ota_version"] = failedOTA.isEmpty() ? "" : failedOTA;
     doc["time_zone"] = config_manager->getTimeZone().isEmpty() ? "UTC" : config_manager->getTimeZone();
     doc["ntp_server"] = config_manager->getNtpServer().isEmpty() ? "pool.ntp.org" : config_manager->getNtpServer();
     doc["time_format"] = config_manager->getTimeFormat().isEmpty() ? "24h" : config_manager->getTimeFormat();
@@ -434,6 +437,11 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     }
     if (doc["auto_update"].is<bool>()) {
         config_manager->setAutoUpdate(doc["auto_update"].as<bool>());
+    }
+    // Allow clearing the failed OTA version to retry auto-updates
+    if (doc["clear_failed_ota"].is<bool>() && doc["clear_failed_ota"].as<bool>()) {
+        config_manager->clearFailedOTAVersion();
+        Serial.println("[CONFIG] Cleared failed OTA version marker");
     }
     if (doc["supabase_url"].is<const char*>()) {
         config_manager->setSupabaseUrl(doc["supabase_url"].as<const char*>());

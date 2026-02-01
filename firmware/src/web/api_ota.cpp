@@ -6,12 +6,16 @@
 #include "web_server.h"
 #include "../ota/ota_manager.h"
 #include "../display/matrix_display.h"
+#include "../supabase/supabase_realtime.h"
+#include "../app_state.h"
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 
 // External references for update functionality
 extern OTAManager ota_manager;
 extern MatrixDisplay matrix_display;
+extern SupabaseRealtime supabaseRealtime;
+extern AppState app_state;
 
 void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
     JsonDocument doc;
@@ -84,6 +88,14 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     
     // Give the response time to be sent
     delay(200);
+    
+    // Disconnect realtime to free memory and prevent network contention during OTA
+    // The realtime WebSocket competes for heap and network bandwidth
+    if (supabaseRealtime.isConnected() || supabaseRealtime.isConnecting()) {
+        Serial.println("[WEB] Disconnecting realtime for OTA...");
+        supabaseRealtime.disconnect();
+    }
+    app_state->realtime_defer_until = millis() + 600000UL;  // 10 minutes
     
     // Stop the web server before OTA to prevent LittleFS conflicts
     // The async web server's serveStatic() handlers keep references to LittleFS

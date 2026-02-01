@@ -530,6 +530,10 @@
                         </div>
                         <button type="submit" class="btn">Save OTA Settings</button>
                     </form>
+                    <div id="failed-ota-banner" class="alert alert-warning" style="display: none; margin-top: 1rem;">
+                        <span>Auto-update blocked for version <strong id="failed-ota-version"></strong></span>
+                        <button id="clear-failed-ota" class="btn btn-sm">Clear & Retry</button>
+                    </div>
                     <button id="check-update" class="btn">Check for Updates</button>
                     <button id="perform-update" class="btn btn-warning" disabled>Install Update</button>
                 </div>
