@@ -4,6 +4,8 @@
  */
 
 #include "web_server.h"
+#include "web_helpers.h"
+#include "common/lookup_tables.h"
 #include <ArduinoJson.h>
 
 void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
@@ -18,26 +20,41 @@ void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
     doc["hostname"] = config_manager->getDeviceName() + ".local";
     doc["embedded_app_enabled"] = true;
     
-    String responseStr;
-    serializeJson(doc, responseStr);
-    
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len,
                                             size_t index, size_t total) {
     // Receive status update from Webex Embedded App
+    // Security: Limit body size to prevent DoS attacks
+    const size_t MAX_EMBEDDED_BODY_SIZE = 4096;  // 4KB max for status updates
+    
     if (index == 0) {
         embedded_body_buffer = "";
         embedded_body_expected = total;
+        
+        // Reject oversized requests early
+        if (total > MAX_EMBEDDED_BODY_SIZE) {
+            Serial.printf("[WEB] Embedded body too large: %zu bytes (max %d)\n", total, MAX_EMBEDDED_BODY_SIZE);
+            sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+            return;
+        }
+        
         if (total > 0) {
             embedded_body_buffer.reserve(total);
         }
     }
 
     if (len > 0) {
+        // Prevent buffer overflow during accumulation
+        if (embedded_body_buffer.length() + len > MAX_EMBEDDED_BODY_SIZE) {
+            Serial.printf("[WEB] Embedded buffer overflow prevented: %zu + %zu > %d\n",
+                          embedded_body_buffer.length(), len, MAX_EMBEDDED_BODY_SIZE);
+            sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+            embedded_body_buffer = "";  // Reset buffer
+            return;
+        }
+        
         String chunk(reinterpret_cast<char*>(data), len);
         embedded_body_buffer += chunk;
     }
@@ -52,40 +69,21 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        AsyncWebServerResponse* errResponse = request->beginResponse(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-        addCorsHeaders(errResponse);
-        request->send(errResponse);
+        sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
     
-    // Update app state from embedded app
+    // Update app state from embedded app using lookup table
     if (doc["status"].is<const char*>()) {
         String newStatus = doc["status"].as<String>();
         
-        // Map embedded app status to internal status
-        if (newStatus == "active" || newStatus == "available") {
-            app_state->webex_status = "active";
-        } else if (newStatus == "away" || newStatus == "inactive") {
-            app_state->webex_status = "away";
-        } else if (newStatus == "dnd" || newStatus == "donotdisturb" || newStatus == "DoNotDisturb") {
-            app_state->webex_status = "dnd";
-        } else if (newStatus == "presenting") {
-            app_state->webex_status = "presenting";
+        // Map embedded app status to internal status using lookup table
+        EmbeddedStatusLookup::NormalizedStatus normalized = 
+            EmbeddedStatusLookup::normalize(newStatus.c_str());
+        
+        app_state->webex_status = normalized.status;
+        if (normalized.sets_in_call) {
             app_state->in_call = true;
-        } else if (newStatus == "call") {
-            app_state->webex_status = "call";
-            app_state->in_call = true;
-        } else if (newStatus == "meeting" || newStatus == "busy") {
-            app_state->webex_status = "meeting";
-            app_state->in_call = true;
-        } else if (newStatus == "ooo" || newStatus == "outofoffice" || newStatus == "OutOfOffice") {
-            app_state->webex_status = "ooo";
-        } else if (newStatus == "offline") {
-            app_state->webex_status = "offline";
-        } else if (newStatus == "unknown") {
-            app_state->webex_status = "unknown";
-        } else {
-            app_state->webex_status = newStatus;
         }
         
         Serial.printf("[WEB] Embedded app status update: %s\n", app_state->webex_status.c_str());
@@ -119,10 +117,5 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     responseDoc["status"] = app_state->webex_status;
     responseDoc["message"] = "Status updated from embedded app";
     
-    String responseStr;
-    serializeJson(responseDoc, responseStr);
-    
-    AsyncWebServerResponse* response = request->beginResponse(200, "application/json", responseStr);
-    addCorsHeaders(response);
-    request->send(response);
+    sendJsonResponse(request, 200, responseDoc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }

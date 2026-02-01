@@ -8,6 +8,7 @@
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
+#include "../common/lookup_tables.h"
 #include "../config/config_manager.h"
 #include <time.h>
 
@@ -43,12 +44,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                                        OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
     
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
@@ -106,11 +102,17 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                 auto& p = manifest.paths[manifest.path_count];
                 
                 String type = path["type"] | "full";
-                if (type == "full") p.type = OTAUpdateType::FULL_IMAGE;
-                else if (type == "compressed") p.type = OTAUpdateType::COMPRESSED;
-                else if (type == "delta") p.type = OTAUpdateType::DELTA_PATCH;
-                else if (type == "module") p.type = OTAUpdateType::MODULE_ONLY;
-                else continue;
+                OTALookup::UpdateType lookup_type = OTALookup::getUpdateType(type.c_str());
+                if (lookup_type == OTALookup::UpdateType::INVALID) continue;
+                
+                // Map lookup type to OTAUpdateType enum
+                switch (lookup_type) {
+                    case OTALookup::UpdateType::FULL_IMAGE:  p.type = OTAUpdateType::FULL_IMAGE; break;
+                    case OTALookup::UpdateType::COMPRESSED:  p.type = OTAUpdateType::COMPRESSED; break;
+                    case OTALookup::UpdateType::DELTA_PATCH: p.type = OTAUpdateType::DELTA_PATCH; break;
+                    case OTALookup::UpdateType::MODULE_ONLY: p.type = OTAUpdateType::MODULE_ONLY; break;
+                    default: continue;
+                }
                 
                 p.url = base_url + "/" + (path["file"] | "");
                 p.size = path["size"] | 0;
@@ -151,12 +153,7 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
                                      OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
     
     String manifest_url = base_url + "/ota-manifest.json";
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
@@ -273,16 +270,9 @@ size_t DeltaOTAManager::estimateDownloadSize(const String& from_variant,
     uint8_t from_modules = 0x01;  // Core
     uint8_t to_modules = 0x01;
     
-    // Simple variant to modules mapping
-    if (from_variant == "embedded") from_modules = 0x21;
-    else if (from_variant == "standard") from_modules = 0x23;
-    else if (from_variant == "sensors") from_modules = 0x25;
-    else if (from_variant == "full") from_modules = 0x37;
-    
-    if (to_variant == "embedded") to_modules = 0x21;
-    else if (to_variant == "standard") to_modules = 0x23;
-    else if (to_variant == "sensors") to_modules = 0x25;
-    else if (to_variant == "full") to_modules = 0x37;
+    // Use lookup table for variant to modules mapping
+    from_modules = OTALookup::getVariantModules(from_variant.c_str());
+    to_modules = OTALookup::getVariantModules(to_variant.c_str());
     
     ModuleDelta delta = calculateModuleDelta(from_modules, to_modules);
     return estimatePatchSize(delta);
@@ -292,12 +282,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
                                             void (*progress)(int)) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClient(client);
-    if (config_manager.getTlsVerify()) {
-        client.setCACert(CA_CERT_BUNDLE_OTA);
-    } else {
-        client.setInsecure();
-    }
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
                   url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
                   config_manager.getTlsVerify() ? "on" : "off");

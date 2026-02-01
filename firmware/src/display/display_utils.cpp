@@ -7,33 +7,20 @@
 
 #include "matrix_display.h"
 #include "display_fonts.h"
+#include "common/lookup_tables.h"
 
 uint16_t MatrixDisplay::getStatusColor(const String& status) {
-    if (status == "active") return COLOR_ACTIVE;
-    if (status == "inactive" || status == "away") return COLOR_AWAY;
-    if (status == "DoNotDisturb" || status == "dnd") return COLOR_DND;
-    if (status == "busy" || status == "meeting" || status == "call") return COLOR_BUSY;
-    if (status == "presenting") return COLOR_PRESENTING;
-    if (status == "OutOfOffice" || status == "ooo") return COLOR_OOO;
-    if (status == "offline" || status.isEmpty()) return COLOR_OFFLINE;
-    // Unknown status - use neutral gray color
-    return 0x7BEF;  // Light gray for unknown statuses
+    if (status.isEmpty()) {
+        return COLOR_OFFLINE;
+    }
+    return StatusLookup::getStatusColor(status.c_str());
 }
 
 String MatrixDisplay::getStatusText(const String& status) {
-    if (status == "active") return "AVAILABLE";
-    if (status == "inactive" || status == "away") return "AWAY";
-    if (status == "DoNotDisturb" || status == "dnd") return "DO NOT DISTURB";
-    if (status == "busy") return "BUSY";
-    if (status == "meeting") return "IN A CALL";
-    if (status == "call") return "ON A CALL";
-    if (status == "presenting") return "PRESENTING";
-    if (status == "OutOfOffice" || status == "ooo") return "OUT OF OFFICE";
-    if (status == "pending") return "PENDING";
-    if (status == "offline" || status.isEmpty()) return "OFFLINE";
-
-    // For any other status, display it exactly as received
-    return status;
+    if (status.isEmpty()) {
+        return "OFFLINE";
+    }
+    return String(StatusLookup::getStatusText(status.c_str()));
 }
 
 String MatrixDisplay::formatTime(int hour, int minute) {
@@ -68,21 +55,7 @@ String MatrixDisplay::formatDate(int month, int day, uint8_t format) {
 }
 
 String MatrixDisplay::getMonthAbbrev(int month) {
-    switch (month) {
-        case 1: return "JAN";
-        case 2: return "FEB";
-        case 3: return "MAR";
-        case 4: return "APR";
-        case 5: return "MAY";
-        case 6: return "JUN";
-        case 7: return "JUL";
-        case 8: return "AUG";
-        case 9: return "SEP";
-        case 10: return "OCT";
-        case 11: return "NOV";
-        case 12: return "DEC";
-        default: return "???";
-    }
+    return String(MonthLookup::getAbbrev(month));
 }
 
 String MatrixDisplay::normalizeIpText(const String& input) {

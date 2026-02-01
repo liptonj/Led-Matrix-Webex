@@ -4,6 +4,8 @@
  */
 
 #include "config_manager.h"
+#include "config_macros.h"
+#include "common/lookup_tables.h"
 #include <ArduinoJson.h>
 #include <cstring>
 #if __has_include("secrets.h")
@@ -121,6 +123,7 @@ void ConfigManager::loadCache() const {
     cached_mqtt_username = loadString("mqtt_user");
     cached_mqtt_password = loadString("mqtt_pass");
     cached_mqtt_topic = loadString("mqtt_topic");
+    cached_mqtt_use_tls = loadBool("mqtt_tls", false);
     cached_sensor_macs = loadString("sensor_macs");
     cached_display_sensor_mac = loadString("display_sensor_mac");
     cached_display_metric = loadString("display_metric", "tvoc");
@@ -135,25 +138,18 @@ void ConfigManager::loadCache() const {
     cached_supabase_url = loadString("supabase_url", "");
     cached_supabase_anon_key = loadString("supabase_anon", "");
     cached_tls_verify = loadBool("tls_verify", true);
+    
+    // Load debug flags
+    cached_debug_display = loadBool("debug_display", false);
+    cached_debug_realtime = loadBool("debug_realtime", false);
 
     cache_loaded = true;
 }
 
 // WiFi Configuration
 
-String ConfigManager::getWiFiSSID() const {
-    if (!cache_loaded) {
-        return loadString("wifi_ssid");
-    }
-    return cached_ssid;
-}
-
-String ConfigManager::getWiFiPassword() const {
-    if (!cache_loaded) {
-        return loadString("wifi_pass");
-    }
-    return cached_password;
-}
+CONFIG_CACHED_STRING_GETTER(WiFiSSID, "wifi_ssid", cached_ssid, "")
+CONFIG_CACHED_STRING_GETTER(WiFiPassword, "wifi_pass", cached_password, "")
 
 void ConfigManager::setWiFiCredentials(const String& ssid, const String& password) {
     saveString("wifi_ssid", ssid);
@@ -169,60 +165,27 @@ bool ConfigManager::hasWiFiCredentials() const {
 
 // Device Configuration
 
-String ConfigManager::getDeviceName() const {
-    if (!cache_loaded) {
-        return loadString("device_name", DEFAULT_DEVICE_NAME);
-    }
-    return cached_device_name;
-}
+CONFIG_CACHED_STRING_GETTER(DeviceName, "device_name", cached_device_name, DEFAULT_DEVICE_NAME)
 
 void ConfigManager::setDeviceName(const String& name) {
     saveString("device_name", name);
     cached_device_name = name;
 }
 
-String ConfigManager::getDisplayName() const {
-    if (!cache_loaded) {
-        return loadString("display_name");
-    }
-    return cached_display_name;
-}
+CONFIG_CACHED_STRING_GETTER(DisplayName, "display_name", cached_display_name, "")
 
 void ConfigManager::setDisplayName(const String& name) {
     saveString("display_name", name);
     cached_display_name = name;
 }
 
-uint8_t ConfigManager::getBrightness() const {
-    if (!cache_loaded) {
-        return loadUInt("brightness", DEFAULT_BRIGHTNESS);
-    }
-    return cached_brightness;
-}
+CONFIG_CACHED_UINT8_GETTER(Brightness, "brightness", cached_brightness, DEFAULT_BRIGHTNESS)
+CONFIG_CACHED_UINT8_SETTER(Brightness, "brightness", cached_brightness)
 
-void ConfigManager::setBrightness(uint8_t brightness) {
-    saveUInt("brightness", brightness);
-    cached_brightness = brightness;
-}
+CONFIG_CACHED_UINT16_GETTER(ScrollSpeedMs, "scroll_speed_ms", cached_scroll_speed_ms, DEFAULT_SCROLL_SPEED_MS)
+CONFIG_CACHED_UINT16_SETTER(ScrollSpeedMs, "scroll_speed_ms", cached_scroll_speed_ms)
 
-uint16_t ConfigManager::getScrollSpeedMs() const {
-    if (!cache_loaded) {
-        return loadUInt("scroll_speed_ms", DEFAULT_SCROLL_SPEED_MS);
-    }
-    return cached_scroll_speed_ms;
-}
-
-void ConfigManager::setScrollSpeedMs(uint16_t speed_ms) {
-    saveUInt("scroll_speed_ms", speed_ms);
-    cached_scroll_speed_ms = speed_ms;
-}
-
-uint16_t ConfigManager::getPageIntervalMs() const {
-    if (!cache_loaded) {
-        return loadUInt("page_interval", DEFAULT_PAGE_INTERVAL_MS);
-    }
-    return cached_page_interval_ms;
-}
+CONFIG_CACHED_UINT16_GETTER(PageIntervalMs, "page_interval", cached_page_interval_ms, DEFAULT_PAGE_INTERVAL_MS)
 
 void ConfigManager::setPageIntervalMs(uint16_t interval_ms) {
     // Enforce minimum of 3 seconds, maximum of 30 seconds
@@ -237,12 +200,7 @@ void ConfigManager::setPageIntervalMs(uint16_t interval_ms) {
     Serial.printf("[CONFIG] Page interval set to %d ms\n", interval_ms);
 }
 
-bool ConfigManager::getSensorPageEnabled() const {
-    if (!cache_loaded) {
-        return loadBool("sensor_page", true);
-    }
-    return cached_sensor_page_enabled;
-}
+CONFIG_CACHED_BOOL_GETTER(SensorPageEnabled, "sensor_page", cached_sensor_page_enabled, true)
 
 void ConfigManager::setSensorPageEnabled(bool enabled) {
     saveBool("sensor_page", enabled);
@@ -312,12 +270,7 @@ void ConfigManager::setStatusLayout(const String& layout) {
     Serial.printf("[CONFIG] Status layout set to %s\n", normalized.c_str());
 }
 
-uint8_t ConfigManager::getBorderWidth() const {
-    if (!cache_loaded) {
-        return loadUInt("border_width", DEFAULT_BORDER_WIDTH);
-    }
-    return cached_border_width;
-}
+CONFIG_CACHED_UINT8_GETTER(BorderWidth, "border_width", cached_border_width, DEFAULT_BORDER_WIDTH)
 
 void ConfigManager::setBorderWidth(uint8_t width) {
     // Clamp to valid range: 1-3 pixels
@@ -328,69 +281,22 @@ void ConfigManager::setBorderWidth(uint8_t width) {
     Serial.printf("[CONFIG] Border width set to %d pixels\n", width);
 }
 
-String ConfigManager::getDateColor() const {
-    if (!cache_loaded) {
-        return loadString("date_color", DEFAULT_DATE_COLOR);
-    }
-    return cached_date_color.isEmpty() ? String(DEFAULT_DATE_COLOR) : cached_date_color;
-}
+CONFIG_CACHED_STRING_GETTER_WITH_DEFAULT(DateColor, "date_color", cached_date_color, DEFAULT_DATE_COLOR)
+CONFIG_CACHED_STRING_SETTER(DateColor, "date_color", cached_date_color)
 
-void ConfigManager::setDateColor(const String& color) {
-    saveString("date_color", color);
-    cached_date_color = color;
-}
+CONFIG_CACHED_STRING_GETTER_WITH_DEFAULT(TimeColor, "time_color", cached_time_color, DEFAULT_TIME_COLOR)
+CONFIG_CACHED_STRING_SETTER(TimeColor, "time_color", cached_time_color)
 
-String ConfigManager::getTimeColor() const {
-    if (!cache_loaded) {
-        return loadString("time_color", DEFAULT_TIME_COLOR);
-    }
-    return cached_time_color.isEmpty() ? String(DEFAULT_TIME_COLOR) : cached_time_color;
-}
+CONFIG_CACHED_STRING_GETTER_WITH_DEFAULT(NameColor, "name_color", cached_name_color, DEFAULT_NAME_COLOR)
+CONFIG_CACHED_STRING_SETTER(NameColor, "name_color", cached_name_color)
 
-void ConfigManager::setTimeColor(const String& color) {
-    saveString("time_color", color);
-    cached_time_color = color;
-}
-
-String ConfigManager::getNameColor() const {
-    if (!cache_loaded) {
-        return loadString("name_color", DEFAULT_NAME_COLOR);
-    }
-    return cached_name_color.isEmpty() ? String(DEFAULT_NAME_COLOR) : cached_name_color;
-}
-
-void ConfigManager::setNameColor(const String& color) {
-    saveString("name_color", color);
-    cached_name_color = color;
-}
-
-String ConfigManager::getMetricColor() const {
-    if (!cache_loaded) {
-        return loadString("metric_color", DEFAULT_METRIC_COLOR);
-    }
-    return cached_metric_color.isEmpty() ? String(DEFAULT_METRIC_COLOR) : cached_metric_color;
-}
-
-void ConfigManager::setMetricColor(const String& color) {
-    saveString("metric_color", color);
-    cached_metric_color = color;
-}
+CONFIG_CACHED_STRING_GETTER_WITH_DEFAULT(MetricColor, "metric_color", cached_metric_color, DEFAULT_METRIC_COLOR)
+CONFIG_CACHED_STRING_SETTER(MetricColor, "metric_color", cached_metric_color)
 
 // Webex Configuration
 
-String ConfigManager::getWebexClientId() const {
-    if (!cache_loaded) {
-        return loadString("webex_client");
-    }
-    return cached_client_id;
-}
-
-String ConfigManager::getWebexClientSecret() const {
-    if (!cache_loaded) {
-        return loadString("webex_secret");
-    }
-    return cached_client_secret;
-}
+CONFIG_CACHED_STRING_GETTER(WebexClientId, "webex_client", cached_client_id, "")
+CONFIG_CACHED_STRING_GETTER(WebexClientSecret, "webex_secret", cached_client_secret, "")
 
 void ConfigManager::setWebexCredentials(const String& client_id, const String& client_secret) {
     saveString("webex_client", client_id);
@@ -404,26 +310,9 @@ bool ConfigManager::hasWebexCredentials() const {
     return !getWebexClientId().isEmpty() && !getWebexClientSecret().isEmpty();
 }
 
-String ConfigManager::getWebexAccessToken() const {
-    if (!cache_loaded) {
-        return loadString("webex_access");
-    }
-    return cached_access_token;
-}
-
-String ConfigManager::getWebexRefreshToken() const {
-    if (!cache_loaded) {
-        return loadString("webex_refresh");
-    }
-    return cached_refresh_token;
-}
-
-unsigned long ConfigManager::getWebexTokenExpiry() const {
-    if (!cache_loaded) {
-        return loadUInt("webex_expiry", 0);
-    }
-    return cached_token_expiry;
-}
+CONFIG_CACHED_STRING_GETTER(WebexAccessToken, "webex_access", cached_access_token, "")
+CONFIG_CACHED_STRING_GETTER(WebexRefreshToken, "webex_refresh", cached_refresh_token, "")
+CONFIG_CACHED_ULONG_GETTER(WebexTokenExpiry, "webex_expiry", cached_token_expiry, 0)
 
 void ConfigManager::setWebexTokens(const String& access_token, const String& refresh_token, unsigned long expiry) {
     saveString("webex_access", access_token);
@@ -449,12 +338,7 @@ void ConfigManager::clearWebexTokens() {
     Serial.println("[CONFIG] Webex tokens cleared");
 }
 
-uint16_t ConfigManager::getWebexPollInterval() const {
-    if (!cache_loaded) {
-        return loadUInt("poll_interval", DEFAULT_POLL_INTERVAL);
-    }
-    return cached_poll_interval;
-}
+CONFIG_CACHED_UINT16_GETTER(WebexPollInterval, "poll_interval", cached_poll_interval, DEFAULT_POLL_INTERVAL)
 
 void ConfigManager::setWebexPollInterval(uint16_t seconds) {
     // Enforce minimum interval
@@ -473,21 +357,14 @@ void ConfigManager::setWebexPollInterval(uint16_t seconds) {
 
 // xAPI Configuration
 
-String ConfigManager::getXAPIDeviceId() const {
-    return loadString("xapi_device");
-}
-
-void ConfigManager::setXAPIDeviceId(const String& device_id) {
-    saveString("xapi_device", device_id);
-}
+CONFIG_UNCACHED_STRING_GETTER(XAPIDeviceId, "xapi_device", "")
+CONFIG_UNCACHED_STRING_SETTER(XAPIDeviceId, "xapi_device")
 
 bool ConfigManager::hasXAPIDevice() const {
     return !getXAPIDeviceId().isEmpty();
 }
 
-uint16_t ConfigManager::getXAPIPollInterval() const {
-    return loadUInt("xapi_poll", 10);
-}
+CONFIG_UNCACHED_UINT16_GETTER(XAPIPollInterval, "xapi_poll", 10)
 
 void ConfigManager::setXAPIPollInterval(uint16_t seconds) {
     if (seconds < 5) seconds = 5;
@@ -497,33 +374,10 @@ void ConfigManager::setXAPIPollInterval(uint16_t seconds) {
 
 // MQTT Configuration
 
-String ConfigManager::getMQTTBroker() const {
-    if (!cache_loaded) {
-        loadCache();
-    }
-    return cached_mqtt_broker;
-}
-
-uint16_t ConfigManager::getMQTTPort() const {
-    if (!cache_loaded) {
-        loadCache();
-    }
-    return cached_mqtt_port;
-}
-
-String ConfigManager::getMQTTUsername() const {
-    if (!cache_loaded) {
-        loadCache();
-    }
-    return cached_mqtt_username;
-}
-
-String ConfigManager::getMQTTPassword() const {
-    if (!cache_loaded) {
-        loadCache();
-    }
-    return cached_mqtt_password;
-}
+CONFIG_LAZY_CACHED_STRING_GETTER(MQTTBroker, cached_mqtt_broker)
+CONFIG_LAZY_CACHED_UINT16_GETTER(MQTTPort, cached_mqtt_port)
+CONFIG_LAZY_CACHED_STRING_GETTER(MQTTUsername, cached_mqtt_username)
+CONFIG_LAZY_CACHED_STRING_GETTER(MQTTPassword, cached_mqtt_password)
 
 String ConfigManager::getMQTTTopic() const {
     if (!cache_loaded) {
@@ -532,25 +386,29 @@ String ConfigManager::getMQTTTopic() const {
     return cached_mqtt_topic.isEmpty() ? "meraki/v1/mt/#" : cached_mqtt_topic;
 }
 
+CONFIG_LAZY_CACHED_BOOL_GETTER(MQTTUseTLS, cached_mqtt_use_tls)
+
 void ConfigManager::setMQTTConfig(const String& broker, uint16_t port,
                                   const String& username, const String& password,
-                                  const String& topic) {
+                                  const String& topic, bool use_tls) {
     saveString("mqtt_broker", broker);
     saveUInt("mqtt_port", port);
     saveString("mqtt_user", username);
     saveString("mqtt_pass", password);
     saveString("mqtt_topic", topic);
+    saveBool("mqtt_tls", use_tls);
     cached_mqtt_broker = broker;
     cached_mqtt_port = port;
     cached_mqtt_username = username;
     cached_mqtt_password = password;
     cached_mqtt_topic = topic;
-    Serial.printf("[CONFIG] MQTT config saved: %s:%d\n", broker.c_str(), port);
+    cached_mqtt_use_tls = use_tls;
+    Serial.printf("[CONFIG] MQTT config saved: %s:%d (TLS: %s)\n", broker.c_str(), port, use_tls ? "enabled" : "disabled");
 }
 
 void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
                                      const String& username, const String& password,
-                                     bool updatePassword, const String& topic) {
+                                     bool updatePassword, const String& topic, bool use_tls) {
     // Always update broker (required field)
     saveString("mqtt_broker", broker);
     cached_mqtt_broker = broker;
@@ -574,18 +432,27 @@ void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
     saveString("mqtt_topic", topic);
     cached_mqtt_topic = topic;
     
-    Serial.printf("[CONFIG] MQTT config updated: %s:%d (password %s)\n", 
+    // Update TLS setting
+    saveBool("mqtt_tls", use_tls);
+    cached_mqtt_use_tls = use_tls;
+    
+    Serial.printf("[CONFIG] MQTT config updated: %s:%d (TLS: %s, password %s)\n", 
                   cached_mqtt_broker.c_str(), cached_mqtt_port,
+                  use_tls ? "enabled" : "disabled",
                   updatePassword ? "updated" : "unchanged");
+}
+
+void ConfigManager::setMQTTUseTLS(bool use_tls) {
+    saveBool("mqtt_tls", use_tls);
+    cached_mqtt_use_tls = use_tls;
+    Serial.printf("[CONFIG] MQTT TLS %s\n", use_tls ? "enabled" : "disabled");
 }
 
 bool ConfigManager::hasMQTTConfig() const {
     return !getMQTTBroker().isEmpty();
 }
 
-String ConfigManager::getSensorSerial() const {
-    return loadString("sensor_serial");
-}
+CONFIG_UNCACHED_STRING_GETTER(SensorSerial, "sensor_serial", "")
 
 void ConfigManager::setSensorSerial(const String& serial) {
     saveString("sensor_serial", serial);
@@ -720,17 +587,10 @@ void ConfigManager::setSupabaseAnonKey(const String& key) {
     Serial.printf("[CONFIG] Supabase anon key saved: %s\n", key.isEmpty() ? "(empty)" : "(set)");
 }
 
-bool ConfigManager::getAutoUpdate() const {
-    return loadBool("auto_update", false);
-}
+CONFIG_UNCACHED_BOOL_GETTER(AutoUpdate, "auto_update", false)
+CONFIG_UNCACHED_BOOL_SETTER(AutoUpdate, "auto_update")
 
-void ConfigManager::setAutoUpdate(bool enabled) {
-    saveBool("auto_update", enabled);
-}
-
-String ConfigManager::getFailedOTAVersion() const {
-    return loadString("fail_ota_ver", "");
-}
+CONFIG_UNCACHED_STRING_GETTER(FailedOTAVersion, "fail_ota_ver", "")
 
 void ConfigManager::setFailedOTAVersion(const String& version) {
     saveString("fail_ota_ver", version);
@@ -760,32 +620,39 @@ void ConfigManager::clearPartitionVersion(const String& partition_label) {
 
 // Debug Configuration
 
-bool ConfigManager::getDebugMode() const {
-    return loadBool("debug_mode", false);
-}
+CONFIG_UNCACHED_BOOL_GETTER(DebugMode, "debug_mode", false)
 
 void ConfigManager::setDebugMode(bool enabled) {
     saveBool("debug_mode", enabled);
     Serial.printf("[CONFIG] Debug mode %s\n", enabled ? "enabled" : "disabled");
 }
 
-bool ConfigManager::getPairingRealtimeDebug() const {
-    return loadBool("pairing_rt_debug", false);
-}
+CONFIG_UNCACHED_BOOL_GETTER(PairingRealtimeDebug, "pairing_rt_debug", false)
 
 void ConfigManager::setPairingRealtimeDebug(bool enabled) {
     saveBool("pairing_rt_debug", enabled);
     Serial.printf("[CONFIG] Pairing realtime debug %s\n", enabled ? "enabled" : "disabled");
 }
 
+CONFIG_CACHED_BOOL_GETTER(DebugDisplay, "debug_display", cached_debug_display, false)
+
+void ConfigManager::setDebugDisplay(bool enabled) {
+    saveBool("debug_display", enabled);
+    cached_debug_display = enabled;
+    Serial.printf("[CONFIG] Display debug %s\n", enabled ? "enabled" : "disabled");
+}
+
+CONFIG_CACHED_BOOL_GETTER(DebugRealtime, "debug_realtime", cached_debug_realtime, false)
+
+void ConfigManager::setDebugRealtime(bool enabled) {
+    saveBool("debug_realtime", enabled);
+    cached_debug_realtime = enabled;
+    Serial.printf("[CONFIG] Realtime debug %s\n", enabled ? "enabled" : "disabled");
+}
+
 // TLS Configuration
 
-bool ConfigManager::getTlsVerify() const {
-    if (!cache_loaded) {
-        return loadBool("tls_verify", true);
-    }
-    return cached_tls_verify;
-}
+CONFIG_CACHED_BOOL_GETTER(TlsVerify, "tls_verify", cached_tls_verify, true)
 
 void ConfigManager::setTlsVerify(bool enabled) {
     saveBool("tls_verify", enabled);
@@ -795,75 +662,32 @@ void ConfigManager::setTlsVerify(bool enabled) {
 
 // Time Configuration
 
-String ConfigManager::getTimeZone() const {
-    if (!cache_loaded) {
-        return loadString("time_zone", "UTC");
-    }
-    return cached_time_zone;
-}
+CONFIG_CACHED_STRING_GETTER(TimeZone, "time_zone", cached_time_zone, "UTC")
+CONFIG_CACHED_STRING_SETTER(TimeZone, "time_zone", cached_time_zone)
 
-void ConfigManager::setTimeZone(const String& time_zone) {
-    saveString("time_zone", time_zone);
-    cached_time_zone = time_zone;
-}
+CONFIG_CACHED_STRING_GETTER(NtpServer, "ntp_server", cached_ntp_server, "pool.ntp.org")
+CONFIG_CACHED_STRING_SETTER(NtpServer, "ntp_server", cached_ntp_server)
 
-String ConfigManager::getNtpServer() const {
-    if (!cache_loaded) {
-        return loadString("ntp_server", "pool.ntp.org");
-    }
-    return cached_ntp_server;
-}
-
-void ConfigManager::setNtpServer(const String& server) {
-    saveString("ntp_server", server);
-    cached_ntp_server = server;
-}
-
-String ConfigManager::getTimeFormat() const {
-    if (!cache_loaded) {
-        return loadString("time_format", "24h");
-    }
-    return cached_time_format;
-}
-
-void ConfigManager::setTimeFormat(const String& format) {
-    saveString("time_format", format);
-    cached_time_format = format;
-}
+CONFIG_CACHED_STRING_GETTER(TimeFormat, "time_format", cached_time_format, "24h")
+CONFIG_CACHED_STRING_SETTER(TimeFormat, "time_format", cached_time_format)
 
 bool ConfigManager::use24HourTime() const {
     String format = getTimeFormat();
     format.toLowerCase();
     format.trim();
-    if (format == "12h" || format == "12" || format == "am/pm" || format == "ampm") {
-        return false;
-    }
-    return true;
+    // Use lookup table to check for 12-hour format
+    return !TimeFormatLookup::is12HourFormat(format.c_str());
 }
 
-String ConfigManager::getDateFormat() const {
-    if (!cache_loaded) {
-        return loadString("date_format", "mdy");
-    }
-    return cached_date_format;
-}
-
-void ConfigManager::setDateFormat(const String& format) {
-    saveString("date_format", format);
-    cached_date_format = format;
-}
+CONFIG_CACHED_STRING_GETTER(DateFormat, "date_format", cached_date_format, "mdy")
+CONFIG_CACHED_STRING_SETTER(DateFormat, "date_format", cached_date_format)
 
 uint8_t ConfigManager::getDateFormatCode() const {
     String format = getDateFormat();
     format.toLowerCase();
     format.trim();
-    if (format == "dmy" || format == "dd/mm" || format == "dd-mm") {
-        return 1;
-    }
-    if (format == "numeric" || format == "num" || format == "mm/dd" || format == "mm-dd") {
-        return 2;
-    }
-    return 0;
+    // Use lookup table for date format code
+    return DateFormatLookup::getFormatCode(format.c_str());
 }
 
 // Factory Reset
@@ -872,13 +696,41 @@ void ConfigManager::factoryReset() {
     Serial.println("[CONFIG] =========================================");
     Serial.println("[CONFIG] PERFORMING FULL FACTORY RESET");
     Serial.println("[CONFIG] =========================================");
+    Serial.println("[CONFIG] Note: Device credentials are preserved");
 
-    // Step 1: Clear all NVS configuration
-    Serial.println("[CONFIG] Step 1: Clearing NVS configuration...");
+    // Step 1: Clear main configuration namespace (webex-display)
+    // This clears: WiFi, Webex tokens, MQTT, display settings, etc.
+    // This preserves: device_auth (device secret/serial for Supabase auth)
+    Serial.println("[CONFIG] Step 1: Clearing configuration...");
     preferences.clear();
     cache_loaded = false;
     loadCache();
-    Serial.println("[CONFIG] ✓ NVS cleared");
+    Serial.println("[CONFIG] ✓ Configuration cleared");
+    
+    // Step 1b: Clear other namespaces (but NOT device_auth)
+    {
+        Preferences prefs;
+        // Clear pairing code
+        if (prefs.begin("pairing", false)) {
+            prefs.clear();
+            prefs.end();
+            Serial.println("[CONFIG] ✓ Pairing code cleared");
+        }
+        // Clear boot counter
+        if (prefs.begin("boot", false)) {
+            prefs.clear();
+            prefs.end();
+            Serial.println("[CONFIG] ✓ Boot counter cleared");
+        }
+        // Clear module preferences
+        if (prefs.begin("modules", false)) {
+            prefs.clear();
+            prefs.end();
+            Serial.println("[CONFIG] ✓ Module preferences cleared");
+        }
+        // Note: "device_auth" namespace is intentionally NOT cleared
+        // to preserve device credentials for Supabase authentication
+    }
 
 #ifndef NATIVE_BUILD
     // ESP32-specific partition operations (not available in simulation)
