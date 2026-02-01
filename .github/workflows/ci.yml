@@ -116,7 +116,7 @@ jobs:
           fi
 
       - name: Upload ESP32-S3 artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: firmware-esp32s3
           path: firmware/artifacts/
