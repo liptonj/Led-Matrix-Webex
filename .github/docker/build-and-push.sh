@@ -11,14 +11,21 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-IMAGE_NAME="ghcr.io/liptonj/led-matrix-builder"
+# Local image name (no registry prefix) for self-hosted runner
+LOCAL_IMAGE_NAME="led-matrix-builder"
+# GHCR image name for pushing to registry
+GHCR_IMAGE_NAME="ghcr.io/liptonj/led-matrix-builder"
 TAG="latest"
 
 cd "${REPO_ROOT}"
 echo "Building from repo root: ${REPO_ROOT}"
 
-echo "Building Docker image: ${IMAGE_NAME}:${TAG}"
-docker build --network=host -f .github/docker/Dockerfile -t "${IMAGE_NAME}:${TAG}" .
+echo "Building Docker image: ${LOCAL_IMAGE_NAME}:${TAG}"
+docker build --network=host -f .github/docker/Dockerfile -t "${LOCAL_IMAGE_NAME}:${TAG}" .
+
+# Also tag with GHCR name for pushing
+docker tag "${LOCAL_IMAGE_NAME}:${TAG}" "${GHCR_IMAGE_NAME}:${TAG}"
+echo "Tagged as ${GHCR_IMAGE_NAME}:${TAG}"
 
 # Also tag with date for versioning
 DATE_TAG=$(date +%Y%m%d)

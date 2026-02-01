@@ -19,7 +19,8 @@ permissions:
 env:
   PLATFORMIO_CORE_DIR: /root/.platformio
   # Container image for builds (pre-installed with PlatformIO, Node.js, etc.)
-  BUILD_CONTAINER: ghcr.io/liptonj/led-matrix-builder:latest
+  # Use local image name to avoid GHCR pull attempts on self-hosted runner
+  BUILD_CONTAINER: led-matrix-builder:latest
 
 jobs:
   # ============================================================================
@@ -29,7 +30,7 @@ jobs:
     name: Main Firmware (ESP32-S3)
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     env:
       WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
@@ -130,7 +131,7 @@ jobs:
     name: Native Simulation
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     defaults:
       run:
@@ -159,7 +160,7 @@ jobs:
     name: Create Release
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     needs: [firmware-build-esp32s3, firmware-native-test]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -235,7 +236,7 @@ jobs:
     name: Upload to Supabase
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -392,7 +393,7 @@ jobs:
     name: Deploy Website
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     needs: [release, supabase-upload]
     if: startsWith(github.ref, 'refs/tags/v')

@@ -29,7 +29,7 @@ jobs:
     name: Build Bridge
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     defaults:
       run:

@@ -15,7 +15,7 @@ jobs:
     name: Deploy to Cloudflare Pages
     runs-on: self-hosted
     container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
+      image: led-matrix-builder:latest
       options: --network host --pull never
     permissions:
       contents: read
