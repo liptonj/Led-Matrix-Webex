@@ -464,7 +464,7 @@ jobs:
 
           echo "Uploading firmware version $VERSION to Supabase Storage..."
           echo "Supabase URL: ${SUPABASE_URL}"
-          echo "Service role key: ${SUPABASE_SERVICE_ROLE_KEY:0:20}..."
+          echo "Service role key: [set]"
 
           # Upload OTA firmware
           if [ -f "firmware/firmware-esp32s3.bin" ]; then
