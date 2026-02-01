@@ -31,6 +31,9 @@ jobs:
   build-bridge:
     name: Build Bridge
     runs-on: self-hosted
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --network host
     defaults:
       run:
         working-directory: bridge
@@ -39,16 +42,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "bridge/package-lock.json"
-
       - name: Install dependencies
         # @webex/* packages report a nonstandard npm engine; npm does not fail without engine-strict
-        run: npm ci
+        run: |
+          # Try to restore from container cache first
+          if [ -d "/opt/node_modules_cache/bridge/node_modules" ]; then
+            echo "Restoring node_modules from container cache..."
+            cp -r /opt/node_modules_cache/bridge/node_modules .
+            npm ci --prefer-offline
+          else
+            npm ci
+          fi
 
       - name: Build TypeScript
         run: npm run build
@@ -92,6 +96,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -145,6 +151,7 @@ jobs:
             BUILD_FROM=${{ env.BASE_IMAGE }}
           cache-from: type=gha,scope=${{ env.ARCH }}
           cache-to: type=gha,mode=max,scope=${{ env.ARCH }}
+          network: host
 
       - name: Verify image
         if: github.event_name != 'pull_request'
