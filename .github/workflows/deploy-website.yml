@@ -19,6 +19,7 @@ jobs:
       options: --network host
     permissions:
       contents: read
+      packages: read       # For pulling container image
       deployments: write
 
     steps:

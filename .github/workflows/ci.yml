@@ -10,6 +10,12 @@ on:
   pull_request:
     branches: [main, master]
 
+# Workflow-level permissions
+permissions:
+  contents: write       # For creating releases
+  packages: read        # For pulling container images from GHCR
+  deployments: write    # For website deployments
+
 env:
   PLATFORMIO_CORE_DIR: /root/.platformio
   # Container image for builds (pre-installed with PlatformIO, Node.js, etc.)
