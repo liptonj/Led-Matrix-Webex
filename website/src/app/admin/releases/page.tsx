@@ -1,7 +1,9 @@
 'use client';
 
+import { Alert } from '@/components/ui/Alert';
+import { Spinner } from '@/components/ui/Spinner';
+import { getReleases, Release, setLatestRelease, setReleaseRollout } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
-import { getReleases, setReleaseRollout, setLatestRelease, Release } from '@/lib/supabase';
 
 export default function ReleasesPage() {
     const [releases, setReleases] = useState<Release[]>([]);
@@ -48,15 +50,15 @@ export default function ReleasesPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <Spinner size="lg" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 lg:space-y-6">
             <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                <h1 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white">
                     Releases
                 </h1>
                 <button
@@ -68,12 +70,86 @@ export default function ReleasesPage() {
             </div>
 
             {error && (
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                    <p className="text-red-600 dark:text-red-400">{error}</p>
-                </div>
+                <Alert variant="danger">
+                    {error}
+                </Alert>
             )}
 
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+            {/* Mobile Card View */}
+            <div className="lg:hidden space-y-3">
+                {releases.length === 0 ? (
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 text-center text-gray-500 dark:text-gray-400">
+                        No releases found. Upload firmware via CI/CD.
+                    </div>
+                ) : (
+                    releases.map((release) => (
+                        <div
+                            key={release.id}
+                            className="bg-white dark:bg-gray-800 rounded-lg shadow p-4"
+                        >
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                                <div>
+                                    <span className="text-sm font-mono font-medium text-gray-900 dark:text-white">
+                                        {release.version}
+                                    </span>
+                                    {release.name && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {release.name}
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                    {release.is_latest && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                                            Latest
+                                        </span>
+                                    )}
+                                    {release.is_prerelease && (
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200">
+                                            Pre-release
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                                <span>Tag: {release.tag}</span>
+                                <span className="mx-2">•</span>
+                                <span>{new Date(release.created_at).toLocaleDateString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center gap-2 flex-1">
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={release.rollout_percentage}
+                                        onChange={(e) =>
+                                            handleRolloutChange(release.version, parseInt(e.target.value))
+                                        }
+                                        disabled={updating === release.version}
+                                        className="flex-1 max-w-[120px]"
+                                    />
+                                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                                        {release.rollout_percentage}%
+                                    </span>
+                                </div>
+                                {!release.is_latest && (
+                                    <button
+                                        onClick={() => handleSetLatest(release.version)}
+                                        disabled={updating === release.version}
+                                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                                    >
+                                        {updating === release.version ? 'Updating...' : 'Set Latest'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden lg:block bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                         <thead className="bg-gray-50 dark:bg-gray-700">

@@ -1,14 +1,11 @@
-import Link from 'next/link';
 import { APP_VERSION } from '@/lib/utils';
+import Link from 'next/link';
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
   
   return (
-    <footer 
-      className="py-12 px-4 mt-12"
-      style={{ background: 'var(--footer-bg)', color: 'var(--footer-text)' }}
-    >
+    <footer className="py-12 px-4 mt-12 footer-bg">
       <div className="container mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           {/* Project Info */}

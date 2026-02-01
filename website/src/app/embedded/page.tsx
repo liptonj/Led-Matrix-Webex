@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { EmbeddedAppClient } from './EmbeddedAppClient';
+import { EmbeddedPageClient } from './EmbeddedPageClient';
 
 export const metadata: Metadata = {
   title: 'Webex Embedded App',
@@ -10,5 +10,5 @@ export const metadata: Metadata = {
 export const dynamic = 'force-static';
 
 export default function EmbeddedPage() {
-  return <EmbeddedAppClient />;
+  return <EmbeddedPageClient />;
 }

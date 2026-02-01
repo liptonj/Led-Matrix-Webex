@@ -309,7 +309,7 @@ describe("useWebSocket", () => {
       });
 
       // Extract the requestId from the sent message
-      const sentMessage = JSON.parse(wsInstance!.sentMessages[0]);
+      const sentMessage = JSON.parse(wsInstance!.sentMessages[0] ?? '{}');
       expect(sentMessage.type).toBe("command");
       expect(sentMessage.command).toBe("test_command");
       expect(sentMessage.requestId).toBeDefined();

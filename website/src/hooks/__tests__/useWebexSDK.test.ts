@@ -39,6 +39,12 @@ class MockWebexApp {
     },
   };
 
+  application = {
+    states: {
+      user: this._user,
+    },
+  };
+
   async onReady(): Promise<void> {
     if (this._shouldFailReady) {
       throw new Error("SDK failed to initialize");
@@ -119,11 +125,11 @@ const MockWebexApplication = jest.fn().mockImplementation(() => {
   return mockWebexAppInstance;
 });
 
-// Setup/teardown for window.Webex mock
+// Setup/teardown for window.webex mock
 function setupWebexSDK(available = true): void {
   if (available) {
-    // Use Object.defineProperty to set Webex on the existing window object
-    Object.defineProperty(window, "Webex", {
+    // Use Object.defineProperty to set webex on the existing window object
+    Object.defineProperty(window, "webex", {
       value: {
         Application: MockWebexApplication,
       },
@@ -131,16 +137,16 @@ function setupWebexSDK(available = true): void {
       configurable: true,
     });
   } else {
-    // Remove Webex from window
-    if ("Webex" in window) {
-      delete (window as unknown as { Webex?: unknown }).Webex;
+    // Remove webex from window
+    if ("webex" in window) {
+      delete (window as unknown as { webex?: unknown }).webex;
     }
   }
 }
 
 function cleanupWebexSDK(): void {
-  if ("Webex" in window) {
-    delete (window as unknown as { Webex?: unknown }).Webex;
+  if ("webex" in window) {
+    delete (window as unknown as { webex?: unknown }).webex;
   }
 }
 
@@ -219,10 +225,11 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
-        await Promise.resolve();
+        const initPromise = result.current.initialize();
+        await Promise.resolve(); // Let waitForWebexSDK complete
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise; // Wait for initialize to complete
+        await Promise.resolve(); // Let state updates flush
       });
 
       expect(MockWebexApplication).toHaveBeenCalled();
@@ -232,20 +239,21 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
-        await Promise.resolve();
+        const initPromise = result.current.initialize();
+        await Promise.resolve(); // Let waitForWebexSDK complete
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
-        await Promise.resolve();
+        await initPromise; // Wait for initialize to complete
+        await Promise.resolve(); // Let state updates flush
       });
 
       await waitFor(() => {
         expect(result.current.isReady).toBe(true);
-        expect(result.current.user).toEqual({
-          id: "user-1",
-          displayName: "Test User",
-          email: "test@example.com",
-        });
+      });
+      
+      expect(result.current.user).toEqual({
+        id: "user-1",
+        displayName: "Test User",
+        email: "test@example.com",
       });
     });
 
@@ -253,15 +261,14 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
-      });
-
-      mockWebexAppInstance?.setMeeting({ id: "meeting-1", title: "Team Standup" });
-
-      await act(async () => {
+        
+        // Set meeting BEFORE completeReady() since getMeeting is called after onReady()
+        mockWebexAppInstance?.setMeeting({ id: "meeting-1", title: "Team Standup" });
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -278,15 +285,14 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
-      });
-
-      mockWebexAppInstance?.setMeeting({ id: "meeting-1", title: "Standup" });
-
-      await act(async () => {
+        
+        // Set meeting BEFORE completeReady()
+        mockWebexAppInstance?.setMeeting({ id: "meeting-1", title: "Standup" });
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -300,10 +306,10 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -322,9 +328,10 @@ describe("useWebexSDK", () => {
       const { result } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -332,7 +339,7 @@ describe("useWebexSDK", () => {
 
       // Try to initialize again
       await act(async () => {
-        result.current.initialize();
+        await result.current.initialize();
         await Promise.resolve();
       });
 
@@ -346,10 +353,10 @@ describe("useWebexSDK", () => {
       const hookResult = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        hookResult.result.current.initialize();
+        const initPromise = hookResult.result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -484,10 +491,10 @@ describe("useWebexSDK", () => {
       const hookResult = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        hookResult.result.current.initialize();
+        const initPromise = hookResult.result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -563,10 +570,10 @@ describe("useWebexSDK", () => {
       const hookResult = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        hookResult.result.current.initialize();
+        const initPromise = hookResult.result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -691,16 +698,17 @@ describe("useWebexSDK", () => {
     it("should handle onReady rejection", async () => {
       const { result } = renderHook(() => useWebexSDK());
 
-      await act(async () => {
-        result.current.initialize();
-        await Promise.resolve();
-      });
-
       mockWebexAppInstance?.setFailOnReady(true);
 
       await act(async () => {
-        mockWebexAppInstance?.failReady();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
+        mockWebexAppInstance?.failReady();
+        try {
+          await initPromise;
+        } catch {
+          // Expected to fail
+        }
         await Promise.resolve();
       });
 
@@ -730,17 +738,22 @@ describe("useWebexSDK", () => {
     it("should reset isInitialized on error", async () => {
       const { result } = renderHook(() => useWebexSDK());
 
+      mockWebexAppInstance?.setFailOnReady(true);
+
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
+        await Promise.resolve();
+        mockWebexAppInstance?.failReady();
+        try {
+          await initPromise;
+        } catch {
+          // Expected to fail
+        }
         await Promise.resolve();
       });
 
-      // It gets set to true during initialization
-      expect(result.current.isInitialized).toBe(true);
-
-      // Note: getUser() is deprecated in EAF 2.x - app continues normally without user info
-      // This test is no longer relevant since getUser() is not called
-      // The app should remain initialized even without user info
+      // After error, isInitialized should be reset to false
+      expect(result.current.isInitialized).toBe(false);
     });
   });
 
@@ -749,10 +762,10 @@ describe("useWebexSDK", () => {
       const { result, unmount } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
-        await Promise.resolve();
+        await initPromise;
         await Promise.resolve();
       });
 
@@ -777,9 +790,10 @@ describe("useWebexSDK", () => {
       const { result, unmount } = renderHook(() => useWebexSDK());
 
       await act(async () => {
-        result.current.initialize();
+        const initPromise = result.current.initialize();
         await Promise.resolve();
         mockWebexAppInstance?.completeReady();
+        await initPromise;
         await Promise.resolve();
       });
 

@@ -1,30 +1,20 @@
 'use client';
 
-import { Button, Alert } from '@/components/ui';
+import { Alert, Button } from '@/components/ui';
+import { useEspWebTools } from '@/hooks/useEspWebTools';
+import {
+    SUPPORTED_BROWSERS,
+    TYPICAL_FLASH_DURATION_MAX_SECONDS,
+    TYPICAL_FLASH_DURATION_SECONDS
+} from './constants';
 import { EspWebInstallButton } from './EspWebInstallButton';
 
 interface FirmwareInstallStepProps {
-  installType?: 'fresh' | 'update';  // Kept for backwards compatibility but unused
-  onInstallTypeChange?: (type: 'fresh' | 'update') => void;  // Kept for backwards compatibility
   flashStatus: { message: string; type: 'info' | 'success' | 'error' } | null;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
   onContinue: () => void;
 }
-
-// Use Supabase Edge Function for ESP Web Tools manifest
-// Returns null if Supabase is not configured
-function getEspWebToolsManifestUrl(): string | null {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/get-manifest?format=esp-web-tools`;
-  }
-  // Supabase URL is required - no fallback available
-  return null;
-}
-
-const MANIFEST = getEspWebToolsManifestUrl();
-const SUPABASE_CONFIGURED = MANIFEST !== null;
 
 export function FirmwareInstallStep({
   flashStatus,
@@ -32,6 +22,8 @@ export function FirmwareInstallStep({
   onToggleAdvanced,
   onContinue,
 }: FirmwareInstallStepProps) {
+  const { configured, manifestUrl, loading, error } = useEspWebTools();
+
   return (
     <div className="card animate-fade-in">
       <h2 className="text-2xl font-semibold mb-2">Install Firmware</h2>
@@ -40,7 +32,7 @@ export function FirmwareInstallStep({
       </p>
 
       {/* Configuration Error */}
-      {!SUPABASE_CONFIGURED && (
+      {!configured && (
         <Alert variant="danger" className="mb-6">
           <strong>Configuration Required:</strong> Supabase is not configured. 
           Please set the <code>NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
@@ -49,8 +41,15 @@ export function FirmwareInstallStep({
         </Alert>
       )}
 
+      {/* ESP Web Tools Error */}
+      {error && (
+        <Alert variant="danger" className="mb-6">
+          {error}
+        </Alert>
+      )}
+
       {/* Info about WiFi setup */}
-      {SUPABASE_CONFIGURED && (
+      {configured && !error && (
         <Alert variant="success" className="mb-6">
           <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
           WiFi directly in the installation dialog. No separate setup required.
@@ -59,8 +58,8 @@ export function FirmwareInstallStep({
 
       {/* Install Button */}
       <div className="flex justify-center mb-6">
-        {SUPABASE_CONFIGURED && MANIFEST ? (
-          <EspWebInstallButton manifest={MANIFEST}>
+        {configured && manifestUrl && !loading && !error ? (
+          <EspWebInstallButton manifest={manifestUrl}>
             <button 
               slot="activate"
               className="bg-success text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-pointer transition-all hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
@@ -73,7 +72,7 @@ export function FirmwareInstallStep({
             disabled
             className="bg-gray-400 text-white px-8 py-4 text-lg font-semibold border-none rounded-xl cursor-not-allowed opacity-50"
           >
-            Install Firmware (Unavailable)
+            {loading ? 'Loading...' : 'Install Firmware (Unavailable)'}
           </button>
         )}
       </div>
@@ -90,18 +89,14 @@ export function FirmwareInstallStep({
 
       {/* Browser Support - Compact */}
       <div className="flex items-center justify-center gap-4 text-sm text-[var(--color-text-muted)] mb-6">
-        <span className="flex items-center gap-1">
-          <span className="text-green-600">✓</span> Chrome
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="text-green-600">✓</span> Edge
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="text-red-500">✗</span> Firefox
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="text-red-500">✗</span> Safari
-        </span>
+        {Object.entries(SUPPORTED_BROWSERS).map(([key, { name, supported }]) => (
+          <span key={key} className="flex items-center gap-1">
+            <span className={supported ? 'text-green-600' : 'text-red-500'}>
+              {supported ? '✓' : '✗'}
+            </span>
+            {name}
+          </span>
+        ))}
       </div>
 
       {/* Installation Instructions */}
@@ -111,7 +106,7 @@ export function FirmwareInstallStep({
           <ol className="list-decimal list-inside text-sm text-[var(--color-text-muted)] space-y-1">
             <li>Click &quot;Install Firmware&quot; above</li>
             <li>Select your ESP32-S3 device from the popup</li>
-            <li>Wait for the firmware to upload (about 30-60 seconds)</li>
+            <li>Wait for the firmware to upload (about {TYPICAL_FLASH_DURATION_SECONDS}-{TYPICAL_FLASH_DURATION_MAX_SECONDS} seconds)</li>
             <li><strong>Configure WiFi</strong> when the dialog prompts you</li>
             <li>Close the dialog and click the button below</li>
           </ol>

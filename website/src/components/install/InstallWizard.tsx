@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { FirmwareInstallStep } from './FirmwareInstallStep';
 import { SuccessStep } from './SuccessStep';
 
@@ -13,43 +13,6 @@ export function InstallWizard() {
   
   // Firmware installation state
   const [flashStatus, setFlashStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
-
-  // Verify ESP Web Tools custom element is registered
-  useEffect(() => {
-    let isMounted = true;
-    
-    if (customElements.get('esp-web-install-button')) {
-      return;
-    }
-
-    customElements.whenDefined('esp-web-install-button')
-      .then(() => {
-        if (!isMounted) return;
-        setFlashStatus((prev) => (prev?.type === 'error' ? null : prev));
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setFlashStatus({
-          message: 'ESP Web Tools failed to load. Please refresh the page.',
-          type: 'error',
-        });
-      });
-
-    const timeoutId = window.setTimeout(() => {
-      if (!isMounted) return;
-      if (!customElements.get('esp-web-install-button')) {
-        setFlashStatus({
-          message: 'ESP Web Tools is loading...',
-          type: 'info',
-        });
-      }
-    }, 2000);
-
-    return () => {
-      isMounted = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, []);
 
   // Navigation handler
   const handleContinueToSuccess = () => {

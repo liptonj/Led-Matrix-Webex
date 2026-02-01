@@ -135,7 +135,6 @@ export async function subscribeToDeviceLogs(
 ): Promise<() => void> {
   const supabase = await getSupabase();
   const channelName = `device_logs:${serialNumber}`;
-  console.log(`[DeviceLogs] Subscribing to broadcast channel: ${channelName}`);
 
   const channel = supabase
     .channel(channelName)
@@ -143,7 +142,6 @@ export async function subscribeToDeviceLogs(
       "broadcast",
       { event: "log" },
       (payload) => {
-        console.log(`[DeviceLogs] Received broadcast:`, payload);
         const record = payload.payload as {
           serial_number: string;
           device_id: string;
@@ -163,20 +161,16 @@ export async function subscribeToDeviceLogs(
         });
       },
     )
-    .subscribe((status, err) => {
-      console.log(`[DeviceLogs] Subscription status: ${status}`, err ? `Error: ${err.message}` : '');
+    .subscribe((status) => {
       if (status === "SUBSCRIBED") {
         onStatusChange?.(true);
       } else if (status === "CHANNEL_ERROR") {
-        console.error(`[DeviceLogs] Channel error:`, err);
         onError?.("Failed to subscribe to realtime logs");
         onStatusChange?.(false);
       } else if (status === "TIMED_OUT") {
-        console.error(`[DeviceLogs] Subscription timed out`);
         onError?.("Subscription timed out");
         onStatusChange?.(false);
       } else if (status === "CLOSED") {
-        console.log(`[DeviceLogs] Channel closed`);
         onStatusChange?.(false);
       }
     });

@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { getSession, signOut, isSupabaseConfigured, onAuthStateChange, getCachedSession } from '@/lib/supabase';
+import { getCachedSession, getSession, isSupabaseConfigured, onAuthStateChange, signOut } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 
 interface User {
   email?: string;
@@ -12,9 +12,13 @@ interface User {
 
 function getInitials(email?: string): string {
   if (!email) return '?';
-  const parts = email.split('@')[0].split(/[._-]/);
+  const parts = email.split('@')[0]?.split(/[._-]/) ?? [];
   if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+    const first = parts[0];
+    const second = parts[1];
+    if (first && second && first[0] && second[0]) {
+      return (first[0] + second[0]).toUpperCase();
+    }
   }
   return email.substring(0, 2).toUpperCase();
 }
@@ -72,13 +76,11 @@ export function Avatar() {
       } catch (err) {
         // Handle AbortError gracefully (component unmounted or request cancelled)
         if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'))) {
-          console.debug('Avatar auth check aborted (likely component unmounted)');
           if (mountedRef.current) {
             setUser(null);
           }
           return;
         }
-        console.error('Auth check failed:', err);
         if (mountedRef.current) {
           setUser(null);
         }
@@ -105,8 +107,8 @@ export function Avatar() {
         if (result?.data?.subscription) {
           subscription = result.data.subscription;
         }
-      }).catch((err) => {
-        console.error('Failed to set up auth listener:', err);
+      }).catch(() => {
+        // Auth listener setup failed - will use cached state
       });
     }
 
@@ -144,8 +146,8 @@ export function Avatar() {
       setUser(null);
       setIsOpen(false);
       router.push('/');
-    } catch (err) {
-      console.error('Logout failed:', err);
+    } catch {
+      // Logout failed - user will remain logged in
     }
   };
 

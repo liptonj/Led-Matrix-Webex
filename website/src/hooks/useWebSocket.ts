@@ -159,11 +159,10 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
           setLastMessage(message);
           onMessage?.(message);
         } catch {
-          console.error("Failed to parse WebSocket message:", event.data);
+          // Failed to parse WebSocket message - ignoring malformed message
         }
       };
-    } catch (error) {
-      console.error("Failed to create WebSocket:", error);
+    } catch {
       setStatus("error");
     }
   }, [

@@ -2,6 +2,7 @@
 
 import { Button } from '@/components/ui';
 import Link from 'next/link';
+import { WIFI_AP_IP, WIFI_AP_NAME } from './constants';
 
 interface SuccessStepProps {
   wifiConfigured: boolean;
@@ -51,9 +52,9 @@ export function SuccessStep({ wifiConfigured }: SuccessStepProps) {
               </li>
               <li>
                 <strong>Option B:</strong> If WiFi wasn&apos;t configured, connect to the 
-                device&apos;s AP: <code className="bg-[var(--color-surface)] px-1 rounded">Webex-Display-Setup</code>
+                device&apos;s AP: <code className="bg-[var(--color-surface)] px-1 rounded">{WIFI_AP_NAME}</code>
               </li>
-              <li>Navigate to <code className="bg-[var(--color-surface)] px-1 rounded">192.168.4.1</code> in your browser</li>
+              <li>Navigate to <code className="bg-[var(--color-surface)] px-1 rounded">{WIFI_AP_IP}</code> in your browser</li>
               <li>Complete WiFi and Webex configuration</li>
               <li>Your status will appear on the LED matrix!</li>
             </>

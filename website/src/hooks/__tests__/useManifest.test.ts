@@ -6,9 +6,9 @@
  * @jest-environment jsdom
  */
 
-import { renderHook, waitFor, act } from "@testing-library/react";
-import { useManifest } from "../useManifest";
 import type { FirmwareManifest } from "@/types";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { useManifest } from "../useManifest";
 
 // Store original env
 const originalEnv = process.env;
@@ -107,6 +107,7 @@ describe("useManifest", () => {
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
           "https://test.supabase.co/functions/v1/get-manifest",
+          expect.any(Object), // fetchWithTimeout adds options with signal
         );
       });
     });

@@ -23,7 +23,7 @@
   --color-ooo: #9b59b6;
   --color-offline: #8892a0;
   
-  /* Dark theme (default) */
+  /* Dark theme (default) - matches .dark class */
   --color-bg: #1a1a2e;
   --color-bg-card: #16213e;
   --color-bg-hover: #1f3460;
@@ -36,7 +36,7 @@
   --color-code-bg: #0e1116;
   --color-code-text: #e6e8eb;
   
-  /* Shadows */
+  /* Shadows - dark theme */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
@@ -48,26 +48,50 @@
   --footer-text: #e6e8eb;
 }
 
-/* Light theme */
+/* Dark theme - explicit .dark class (same as :root default) */
+html.dark,
+.dark {
+  --color-bg: #1a1a2e;
+  --color-bg-card: #16213e;
+  --color-bg-hover: #1f3460;
+  --color-surface: #16213e;
+  --color-surface-alt: #1f3460;
+  --color-text: #ffffff;
+  --color-text-muted: #8892a0;
+  --color-text-secondary: #a0a8b4;
+  --color-border: #2d3a4f;
+  --color-code-bg: #0e1116;
+  --color-code-text: #e6e8eb;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --header-gradient: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  --footer-bg: #0e1116;
+  --footer-text: #e6e8eb;
+}
+
+/* Light theme - with improved contrast */
+html.light,
 .light {
-  --color-bg: #f5f7fa;
+  --color-bg: #f8fafc;
   --color-bg-card: #ffffff;
-  --color-bg-hover: #e9ecef;
-  --color-surface: #fafbfc;
-  --color-surface-alt: #f0f2f5;
-  --color-text: #1a202c;
-  --color-text-muted: #4a5568;
-  --color-text-secondary: #718096;
-  --color-border: #e2e8f0;
-  --color-code-bg: #2d3748;
-  --color-code-text: #f7fafc;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.18);
-  --shadow-elevated: 0 2px 8px rgba(0, 0, 0, 0.12);
-  --header-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --footer-bg: #2d3748;
-  --footer-text: #ffffff;
+  --color-bg-hover: #f1f5f9;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #475569;
+  --color-text-secondary: #64748b;
+  --color-border: #cbd5e1;
+  --color-code-bg: #1e293b;
+  --color-code-text: #f1f5f9;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+  --shadow-elevated: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --header-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --footer-bg: #1e293b;
+  --footer-text: #f1f5f9;
 }
 
 /* Base styles */
@@ -117,7 +141,7 @@
   }
 }
 
-/* Component styles */
+/* Component styles - Layout */
 @layer components {
   .container {
     @apply max-w-7xl mx-auto px-4;
@@ -148,6 +172,120 @@
   }
 }
 
+/* Component styles - Alerts */
+@layer components {
+  .alert-error {
+    @apply mb-4 p-3 rounded-lg border;
+    background-color: rgb(254 242 242);
+    border-color: rgb(254 202 202);
+    color: rgb(127 29 29);
+  }
+  
+  .light .alert-error {
+    background-color: rgb(254 242 242);
+    border-color: rgb(254 202 202);
+    color: rgb(127 29 29);
+  }
+  
+  :root .alert-error,
+  .dark .alert-error {
+    background-color: rgb(127 29 29 / 0.2);
+    border-color: rgb(127 29 29);
+    color: rgb(254 202 202);
+  }
+
+  .alert-warning {
+    @apply mb-4 p-3 rounded-lg border;
+    background-color: rgb(254 252 232);
+    border-color: rgb(253 230 138);
+    color: rgb(120 53 15);
+  }
+  
+  .light .alert-warning {
+    background-color: rgb(254 252 232);
+    border-color: rgb(253 230 138);
+    color: rgb(120 53 15);
+  }
+  
+  :root .alert-warning,
+  .dark .alert-warning {
+    background-color: rgb(120 53 15 / 0.2);
+    border-color: rgb(120 53 15);
+    color: rgb(253 230 138);
+  }
+
+  .alert-success {
+    @apply mb-4 p-3 rounded-lg border;
+    background-color: rgb(240 253 244);
+    border-color: rgb(187 247 208);
+    color: rgb(21 128 61);
+  }
+  
+  .light .alert-success {
+    background-color: rgb(240 253 244);
+    border-color: rgb(187 247 208);
+    color: rgb(21 128 61);
+  }
+  
+  :root .alert-success,
+  .dark .alert-success {
+    background-color: rgb(21 128 61 / 0.2);
+    border-color: rgb(21 128 61);
+    color: rgb(187 247 208);
+  }
+}
+
+/* Component styles - Form Inputs */
+@layer components {
+  .input-field {
+    @apply rounded-md border px-3 py-2 text-sm;
+    background-color: var(--color-bg-card);
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+  
+  .input-field:focus {
+    @apply outline-none ring-2 ring-primary ring-offset-2;
+  }
+  
+  .input-field:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .input-field-sm {
+    @apply rounded-md border px-2 py-1 text-xs;
+    background-color: var(--color-bg-card);
+    border-color: var(--color-border);
+    color: var(--color-text);
+  }
+  
+  .input-field-sm:focus {
+    @apply outline-none ring-2 ring-primary;
+  }
+}
+
+/* Component styles - Tables */
+@layer components {
+  .table-header {
+    @apply px-6 py-3 text-left text-xs font-medium uppercase tracking-wider;
+    background-color: var(--color-surface-alt);
+    color: var(--color-text-muted);
+  }
+
+  .table-cell {
+    @apply px-6 py-4 text-sm;
+    color: var(--color-text);
+  }
+
+  .table-row {
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .table-row:hover {
+    background-color: var(--color-bg-hover);
+  }
+}
+
 /* Utility styles */
 @layer utilities {
   .text-gradient {
@@ -164,6 +302,14 @@
   .status-dot.away { background-color: var(--color-away); }
   .status-dot.offline { background-color: var(--color-offline); }
 
+  /* Status background colors (for avatars, badges, etc) */
+  .bg-status-active { background-color: var(--color-active); }
+  .bg-status-meeting { background-color: var(--color-meeting); }
+  .bg-status-dnd { background-color: var(--color-dnd); }
+  .bg-status-away { background-color: var(--color-away); }
+  .bg-status-ooo { background-color: var(--color-ooo); }
+  .bg-status-offline { background-color: var(--color-offline); }
+
   /* Status glow effects */
   .status-glow-active {
     filter: drop-shadow(0 0 6px rgba(108, 192, 74, 0.5));
@@ -179,6 +325,33 @@
 
   .status-glow-away {
     filter: drop-shadow(0 0 6px rgba(255, 204, 0, 0.5));
+  }
+
+  /* Panel styles */
+  .panel {
+    @apply rounded-lg p-4;
+    background-color: var(--color-surface-alt);
+  }
+
+  .panel-header {
+    @apply text-sm font-semibold;
+    color: var(--color-text);
+  }
+
+  .panel-subtext {
+    @apply text-xs;
+    color: var(--color-text-muted);
+  }
+
+  /* Header gradient */
+  .header-gradient {
+    background: var(--header-gradient);
+  }
+
+  /* Footer styling */
+  .footer-bg {
+    background: var(--footer-bg);
+    color: var(--footer-text);
   }
 }
 

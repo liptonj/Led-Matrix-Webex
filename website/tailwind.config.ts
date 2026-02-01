@@ -10,47 +10,49 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Primary colors reference CSS variables
         primary: {
-          DEFAULT: '#00bceb',
-          dark: '#0097c1',
-          light: '#33c9ef',
+          DEFAULT: 'var(--color-primary)',
+          dark: 'var(--color-primary-dark)',
+          light: 'var(--color-primary-light)',
         },
-        success: '#6cc04a',
-        warning: '#ffcc00',
-        danger: '#ff5c5c',
-        purple: '#9b59b6',
+        success: 'var(--color-success)',
+        warning: 'var(--color-warning)',
+        danger: 'var(--color-danger)',
+        purple: 'var(--color-purple)',
+        
+        // Status colors reference CSS variables
         status: {
-          active: '#6cc04a',
-          meeting: '#ff5c5c',
-          dnd: '#ff5c5c',
-          away: '#ffcc00',
-          ooo: '#9b59b6',
-          offline: '#8892a0',
+          active: 'var(--color-active)',
+          meeting: 'var(--color-meeting)',
+          dnd: 'var(--color-dnd)',
+          away: 'var(--color-away)',
+          ooo: 'var(--color-ooo)',
+          offline: 'var(--color-offline)',
         },
-        dark: {
-          bg: '#1a1a2e',
-          card: '#16213e',
-          hover: '#1f3460',
-          border: '#2d3a4f',
-          surface: '#16213e',
-          'surface-alt': '#1f3460',
-        },
-        light: {
-          bg: '#f4f6f8',
-          card: '#ffffff',
-          hover: '#e8edf2',
-          border: '#dee2e6',
-          surface: '#ffffff',
-          'surface-alt': '#f8f9fa',
-        },
+        
+        // Note: gray, green, red, yellow use Tailwind defaults
+        // This allows dark: variants to work correctly (e.g., bg-gray-50 dark:bg-gray-900)
+        
+        // Base theme colors
         text: {
           primary: 'var(--color-text)',
           muted: 'var(--color-text-muted)',
           secondary: 'var(--color-text-secondary)',
         },
+        bg: {
+          DEFAULT: 'var(--color-bg)',
+          card: 'var(--color-bg-card)',
+          hover: 'var(--color-bg-hover)',
+        },
+        surface: {
+          DEFAULT: 'var(--color-surface)',
+          alt: 'var(--color-surface-alt)',
+        },
+        border: 'var(--color-border)',
         code: {
-          bg: '#0e1116',
-          text: '#e6e8eb',
+          bg: 'var(--color-code-bg)',
+          text: 'var(--color-code-text)',
         },
       },
       fontFamily: {
@@ -66,10 +68,10 @@ const config: Config = {
         mono: ['SF Mono', 'Fira Code', 'Consolas', 'monospace'],
       },
       boxShadow: {
-        sm: '0 1px 3px rgba(0, 0, 0, 0.3)',
-        md: '0 2px 8px rgba(0, 0, 0, 0.3)',
-        lg: '0 4px 16px rgba(0, 0, 0, 0.4)',
-        elevated: '0 2px 12px rgba(0, 0, 0, 0.4)',
+        sm: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+        elevated: 'var(--shadow-elevated)',
       },
       borderRadius: {
         DEFAULT: '8px',

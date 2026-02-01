@@ -1,19 +1,22 @@
 import {
-  SUPABASE_AUTH_TIMEOUT_MS,
-  getCachedSessionFromStorage,
-  getStorageKeyForSession,
-  getSupabase,
-  isAbortError,
-  supabaseAnonKey,
-  supabaseUrl,
-  withTimeout,
+    SUPABASE_AUTH_TIMEOUT_MS,
+    getCachedSessionFromStorage,
+    getStorageKeyForSession,
+    getSupabase,
+    isAbortError,
+    withTimeout
 } from "./core";
 
+/**
+ * Cache for ongoing session check to prevent duplicate requests.
+ * Type is complex union to accommodate both Supabase AuthResponse and cached session responses.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let sessionCheckPromise: Promise<any> | null = null;
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
-  if (parts.length < 2) return null;
+  if (parts.length < 2 || !parts[1]) return null;
   try {
     const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
@@ -61,42 +64,7 @@ export async function signIn(email: string, password: string) {
       }
     }
   }
-  if (result.error && process.env.NODE_ENV !== "production") {
-    await logAuthFailure(email, password);
-  }
   return result;
-}
-
-async function logAuthFailure(email: string, password: string) {
-  if (!supabaseUrl || !supabaseAnonKey) return;
-
-  try {
-    const response = await fetch(
-      `${supabaseUrl}/auth/v1/token?grant_type=password`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json;charset=UTF-8",
-          apikey: supabaseAnonKey,
-          Authorization: `Bearer ${supabaseAnonKey}`,
-          "x-supabase-client-platform": "debug",
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          gotrue_meta_security: {},
-        }),
-      },
-    );
-    const bodyText = await response.text();
-    console.error("Supabase auth token request failed", {
-      status: response.status,
-      statusText: response.statusText,
-      body: bodyText,
-    });
-  } catch (err) {
-    console.error("Supabase auth token request failed (network error)", err);
-  }
 }
 
 export async function signOut() {
@@ -105,47 +73,37 @@ export async function signOut() {
 }
 
 export async function getSession(signal?: AbortSignal) {
-  console.log('[getSession] Starting session check');
   const supabase = await getSupabase();
 
   // If already aborted, return immediately
   if (signal?.aborted) {
-    console.log('[getSession] Signal already aborted');
     throw new DOMException('Aborted', 'AbortError');
   }
 
   if (sessionCheckPromise) {
-    console.log('[getSession] Returning existing session check promise');
     return sessionCheckPromise;
   }
 
   sessionCheckPromise = (async () => {
     const cachedSession = getCachedSessionFromStorage();
-    console.log('[getSession] Cached session from storage:', cachedSession ? 'found' : 'none');
     if (cachedSession) {
       if (typeof cachedSession.expires_at !== "number") {
-        console.log('[getSession] Cached session missing expiry; returning immediately');
         return { data: { session: cachedSession }, error: null };
       }
       const expiresAtMs = cachedSession.expires_at * 1000;
       const expiresSoon = expiresAtMs - Date.now() < 60_000;
       if (!expiresSoon) {
-        console.log('[getSession] Returning cached session immediately');
         return { data: { session: cachedSession }, error: null };
       }
-      console.log('[getSession] Cached session expires soon; refreshing');
     }
 
     try {
-      console.log('[getSession] Calling supabase.auth.getSession()');
-      const startTime = Date.now();
       const result = await withTimeout(
         supabase.auth.getSession(),
         SUPABASE_AUTH_TIMEOUT_MS,
         "Timed out while checking your session.",
         signal,
       );
-      console.log('[getSession] supabase.auth.getSession() completed in', Date.now() - startTime, 'ms');
       if (result.data?.session) {
         return result;
       }
@@ -164,8 +122,6 @@ export async function getSession(signal?: AbortSignal) {
     } catch (err) {
       // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
       if (isAbortError(err)) {
-        // Return empty session instead of throwing - component unmounted
-        console.debug("getSession aborted (likely component unmounted)");
         sessionCheckPromise = null;
         throw err;
       }
@@ -195,7 +151,7 @@ export async function getSession(signal?: AbortSignal) {
         if (cachedSession) {
           return { data: { session: cachedSession }, error: null };
         }
-        console.warn("Supabase session refresh timed out, falling back to direct session fetch.");
+        // Session refresh timed out, falling back to direct session fetch
       }
 
       try {
@@ -214,7 +170,6 @@ export async function getSession(signal?: AbortSignal) {
         if (cachedSession) {
           return { data: { session: cachedSession }, error: null };
         }
-        console.warn("Supabase session check still timing out; returning empty session.");
         return { data: { session: null }, error: new Error("Timed out while checking your session.") };
       }
     } finally {
@@ -226,38 +181,29 @@ export async function getSession(signal?: AbortSignal) {
 }
 
 export async function getUser(signal?: AbortSignal) {
-  console.log('[getUser] Starting user fetch');
   const supabase = await getSupabase();
 
   // Check if signal is already aborted
   if (signal?.aborted) {
-    console.log('[getUser] Signal already aborted');
     return null;
   }
 
   try {
-    console.log('[getUser] Calling supabase.auth.getUser()');
-    const startTime = Date.now();
     const { data: { user } } = await withTimeout(
       supabase.auth.getUser(),
       SUPABASE_AUTH_TIMEOUT_MS,
       "Timed out while fetching user details.",
       signal,
     );
-    console.log('[getUser] supabase.auth.getUser() completed in', Date.now() - startTime, 'ms');
     return user;
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
     if (isAbortError(err)) {
-      // Return null instead of throwing - component unmounted, no need to error
-      console.debug("[getUser] aborted (likely component unmounted)");
       return null;
     }
     if (err instanceof Error && err.message.includes("Timed out")) {
-      console.warn("[getUser] timed out after", SUPABASE_AUTH_TIMEOUT_MS, "ms; continuing without user details.");
       return null;
     }
-    console.error('[getUser] Unexpected error:', err);
     throw err;
   }
 }
@@ -270,11 +216,8 @@ export async function onAuthStateChange(
 }
 
 export async function isAdmin(signal?: AbortSignal): Promise<boolean> {
-  console.log('[isAdmin] Starting admin check');
-
   // Check if signal is already aborted
   if (signal?.aborted) {
-    console.log('[isAdmin] Signal already aborted');
     return false;
   }
 
@@ -282,7 +225,6 @@ export async function isAdmin(signal?: AbortSignal): Promise<boolean> {
     const cachedSession = getCachedSessionFromStorage();
     const cachedClaim = getAdminClaimFromSession(cachedSession);
     if (cachedClaim !== undefined) {
-      console.log('[isAdmin] Using cached JWT claim:', cachedClaim);
       return cachedClaim;
     }
 
@@ -290,19 +232,15 @@ export async function isAdmin(signal?: AbortSignal): Promise<boolean> {
     const sessionResult = await getSession(signal);
     const sessionClaim = getAdminClaimFromSession(sessionResult?.data?.session);
     if (sessionClaim !== undefined) {
-      console.log('[isAdmin] Using JWT claim:', sessionClaim);
       return sessionClaim;
     }
 
-    console.log('[isAdmin] JWT claim not found; skipping RPC fallback');
     return false;
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
     if (isAbortError(err)) {
-      console.debug("[isAdmin] aborted (likely component unmounted)");
       return false;
     }
-    console.error('[isAdmin] Unexpected error:', err);
     throw err;
   }
 }
