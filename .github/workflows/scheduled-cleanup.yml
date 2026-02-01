@@ -9,7 +9,7 @@ on:
 
 jobs:
   cleanup-logs:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     # Only run if Supabase is configured
     if: ${{ vars.SUPABASE_URL != '' }}
     

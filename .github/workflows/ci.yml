@@ -19,7 +19,7 @@ jobs:
   # ============================================================================
   firmware-build-esp32s3:
     name: Main Firmware (ESP32-S3)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
       WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
@@ -137,7 +137,7 @@ jobs:
   # ============================================================================
   firmware-native-test:
     name: Native Simulation
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     defaults:
       run:
         working-directory: firmware
@@ -184,7 +184,7 @@ jobs:
   # ============================================================================
   release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [firmware-build-esp32s3, firmware-native-test]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -257,7 +257,7 @@ jobs:
   # ============================================================================
   supabase-upload:
     name: Upload to Supabase
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
     env:
@@ -411,7 +411,7 @@ jobs:
   # ============================================================================
   deploy-website:
     name: Deploy Website
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [release, supabase-upload]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
