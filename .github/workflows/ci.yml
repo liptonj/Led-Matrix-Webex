@@ -93,13 +93,15 @@ jobs:
           BUILD_DIR=".pio/build/esp32s3"
           
           # Dynamically locate boot_app0.bin from the Arduino ESP32 framework
-          # The path may vary based on PlatformIO/framework version
-          BOOT_APP0=$(find "$HOME/.platformio/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          # Use PLATFORMIO_CORE_DIR (set at workflow level) since $HOME differs in container
+          PIO_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+          BOOT_APP0=$(find "$PIO_DIR/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
           
           if [ -z "$BOOT_APP0" ]; then
             echo "ERROR: Could not find boot_app0.bin in PlatformIO packages"
-            echo "Searching in: $HOME/.platformio/packages"
-            find "$HOME/.platformio/packages" -name "*.bin" -path "*/partitions/*" 2>/dev/null || echo "No partition binaries found"
+            echo "Searching in: $PIO_DIR/packages"
+            find "$PIO_DIR/packages" -name "*.bin" -path "*/partitions/*" 2>/dev/null || echo "No partition binaries found"
+            ls -la "$PIO_DIR/packages/" 2>/dev/null || echo "Packages directory not found"
             exit 1
           fi
           
