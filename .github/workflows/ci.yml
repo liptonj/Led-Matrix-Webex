@@ -30,7 +30,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
+      options: --user root
     env:
       WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
       WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
@@ -43,6 +43,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Fix workspace permissions
+        working-directory: ${{ github.workspace }}
+        run: |
+          # Ensure all files are owned by current user to avoid permission issues
+          # when runner tries to clean up after container exits
+          chown -R $(id -u):$(id -g) . || true
 
       - name: Update versions from tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -130,6 +137,10 @@ jobs:
             exit 1
           fi
 
+      - name: Fix permissions before upload
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
       - name: Upload ESP32-S3 artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -146,7 +157,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
+      options: --user root
     defaults:
       run:
         working-directory: firmware
@@ -167,6 +178,10 @@ jobs:
             echo "Native simulation binary not found, skipping"
           fi
 
+      - name: Fix permissions after build
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Firmware Unit Tests
   # Runs Unity tests for firmware components
@@ -176,6 +191,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --user root
     defaults:
       run:
         working-directory: firmware
@@ -187,6 +203,10 @@ jobs:
       - name: Run Unity tests
         run: pio test -e native_test --verbose
 
+      - name: Fix permissions after tests
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Website Unit Tests
   # Runs Jest tests for React components, hooks, and utilities
@@ -196,6 +216,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --user root
     defaults:
       run:
         working-directory: website
@@ -217,6 +238,11 @@ jobs:
           directory: ./website/coverage
           flags: website
 
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Bridge Unit Tests
   # Runs Jest tests for WebSocket server and storage
@@ -226,6 +252,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --user root
     defaults:
       run:
         working-directory: bridge
@@ -247,6 +274,11 @@ jobs:
           directory: ./bridge/coverage
           flags: bridge
 
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Supabase Edge Functions Tests
   # Runs Deno tests for Edge Functions
@@ -254,6 +286,9 @@ jobs:
   supabase-edge-functions-tests:
     name: Supabase Edge Functions Tests
     runs-on: self-hosted
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --user root
     defaults:
       run:
         working-directory: supabase/functions
@@ -270,6 +305,11 @@ jobs:
       - name: Run Deno tests
         run: deno test --allow-net --allow-env _tests/
 
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # API Health Checks
   # Verifies critical Edge Functions are accessible
@@ -277,22 +317,24 @@ jobs:
   api-health-checks:
     name: API Health Checks
     runs-on: self-hosted
-    needs: [firmware-build-esp32s3]
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+      options: --user root
+    # No dependencies - runs in parallel with other tests
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: |
-          if ! command -v jq &> /dev/null; then
-            apt-get update && apt-get install -y jq
-          fi
-
       - name: Run health checks
         run: bash scripts/api-health-check.sh
         env:
           SUPABASE_URL: https://fmultmlsevqgtnqzaylg.supabase.co
+
+      - name: Fix permissions after checks
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
 
   # ============================================================================
   # Create Release (only on version tags)
@@ -302,7 +344,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
+      options: --user root
     needs: 
       - firmware-build-esp32s3
       - firmware-native-test
@@ -377,6 +419,11 @@ jobs:
             release/firmware/firmware-esp32s3.bin
             release/firmware/firmware-merged-esp32s3.bin
 
+      - name: Fix permissions after release
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Upload to Supabase Storage (only on version tags, after release)
   # ============================================================================
@@ -385,7 +432,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
+      options: --user root
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')
     env:
@@ -534,6 +581,11 @@ jobs:
             exit 1
           fi
 
+      - name: Fix permissions after upload
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
   # ============================================================================
   # Deploy Website (only on version tags, after release, if website changed)
   # ============================================================================
@@ -542,7 +594,7 @@ jobs:
     runs-on: self-hosted
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
+      options: --user root
     needs: [release, supabase-upload]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -672,3 +724,8 @@ jobs:
         if: steps.website-changes.outputs.changed != 'true'
         run: |
           echo "⏭️ Skipping website deployment - no website changes detected in this release"
+
+      - name: Fix permissions after deploy
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
