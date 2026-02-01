@@ -4,14 +4,7 @@
 name: Deploy Bridge to Azure
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'bridge/**'
-      - '.github/workflows/deploy-bridge-azure.yml'
-  release:
-    types: [published]
+
   workflow_dispatch:
 
 env:

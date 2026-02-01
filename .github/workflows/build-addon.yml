@@ -4,15 +4,7 @@
 name: Build HA Add-on
 
 on:
-  push:
-    tags:
-      - "v*"
-  pull_request:
-    branches: [main]
-    paths:
-      - "bridge/**"
-      - "webex-bridge/**"
-      - ".github/workflows/build-addon.yml"
+
   workflow_dispatch:
     inputs:
       tag:
