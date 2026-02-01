@@ -1,34 +1,42 @@
+/**
+ * Jest Global Setup
+ *
+ * Configures the testing environment for all tests.
+ * Uses centralized test utilities to avoid duplication.
+ */
+
 import '@testing-library/jest-dom';
+import { spyOnConsole } from './src/test-utils/setup';
 
-const originalError = console.error;
-const originalWarn = console.warn;
-
+// Suppress expected errors/warnings during tests
 const suppressedPatterns = [
   'Token exchange failed:',
   'Token exchange error:',
   'Failed to fetch status:',
   'Failed to load manifest:',
+  'Not authenticated',
+  'Supabase is not configured',
+  'An update to %s inside a test was not wrapped in act(',
+  'Skipping localStorage persistence test - localStorage is not a jest mock',
 ];
 
-function shouldSuppress(args: unknown[]): boolean {
-  const first = args[0];
-  if (typeof first !== 'string') return false;
-  return suppressedPatterns.some((pattern) => first.includes(pattern));
-}
+let consoleSpies: ReturnType<typeof spyOnConsole>;
 
 beforeAll(() => {
-  console.error = (...args: unknown[]) => {
-    if (shouldSuppress(args)) return;
-    originalError(...args);
-  };
-
-  console.warn = (...args: unknown[]) => {
-    if (shouldSuppress(args)) return;
-    originalWarn(...args);
-  };
+  consoleSpies = spyOnConsole(suppressedPatterns);
 });
 
 afterAll(() => {
-  console.error = originalError;
-  console.warn = originalWarn;
+  consoleSpies.error.mockRestore();
+  consoleSpies.warn.mockRestore();
+});
+
+afterEach(() => {
+  if (!jest.isMockFunction(setTimeout)) {
+    return;
+  }
+
+  jest.runOnlyPendingTimers();
+  jest.clearAllTimers();
+  jest.useRealTimers();
 });

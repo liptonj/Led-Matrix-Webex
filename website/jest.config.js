@@ -34,6 +34,14 @@ module.exports = {
   ],
   coverageDirectory: "coverage",
   coverageReporters: ["text", "lcov", "html"],
+  coverageThreshold: {
+    global: {
+      statements: 70,
+      branches: 60,
+      functions: 70,
+      lines: 70,
+    },
+  },
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json"],
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   verbose: true,
@@ -63,7 +71,12 @@ module.exports = {
     {
       displayName: "hooks",
       testEnvironment: "jsdom",
-      testMatch: ["<rootDir>/src/hooks/**/*.test.ts", "<rootDir>/src/hooks/**/*.test.tsx"],
+      testMatch: [
+        "<rootDir>/src/hooks/**/*.test.ts",
+        "<rootDir>/src/hooks/**/*.test.tsx",
+        "<rootDir>/src/app/embedded/hooks/**/*.test.ts",
+        "<rootDir>/src/app/embedded/hooks/**/*.test.tsx",
+      ],
       transform: {
         "^.+\\.tsx?$": [
           "ts-jest",
@@ -84,7 +97,12 @@ module.exports = {
     {
       displayName: "app",
       testEnvironment: "jsdom",
-      testMatch: ["<rootDir>/src/app/**/*.test.ts", "<rootDir>/src/app/**/*.test.tsx"],
+      testMatch: [
+        "<rootDir>/src/app/**/*.test.ts",
+        "<rootDir>/src/app/**/*.test.tsx",
+        "<rootDir>/src/components/**/*.test.ts",
+        "<rootDir>/src/components/**/*.test.tsx",
+      ],
       transform: {
         "^.+\\.tsx?$": [
           "ts-jest",

@@ -153,6 +153,133 @@ jobs:
           fi
 
   # ============================================================================
+  # Firmware Unit Tests
+  # Runs Unity tests for firmware components
+  # ============================================================================
+  firmware-unit-tests:
+    name: Firmware Unit Tests
+    runs-on: self-hosted
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Unity tests
+        run: pio test -e native_test --verbose
+
+  # ============================================================================
+  # Website Unit Tests
+  # Runs Jest tests for React components, hooks, and utilities
+  # ============================================================================
+  website-unit-tests:
+    name: Website Unit Tests
+    runs-on: self-hosted
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+    defaults:
+      run:
+        working-directory: website
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          directory: ./website/coverage
+          flags: website
+
+  # ============================================================================
+  # Bridge Unit Tests
+  # Runs Jest tests for WebSocket server and storage
+  # ============================================================================
+  bridge-unit-tests:
+    name: Bridge Unit Tests
+    runs-on: self-hosted
+    container:
+      image: ghcr.io/liptonj/led-matrix-builder:latest
+    defaults:
+      run:
+        working-directory: bridge
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          directory: ./bridge/coverage
+          flags: bridge
+
+  # ============================================================================
+  # Supabase Edge Functions Tests
+  # Runs Deno tests for Edge Functions
+  # ============================================================================
+  supabase-edge-functions-tests:
+    name: Supabase Edge Functions Tests
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: supabase/functions
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Run Deno tests
+        run: deno test --allow-net --allow-env _tests/
+
+  # ============================================================================
+  # API Health Checks
+  # Verifies critical Edge Functions are accessible
+  # ============================================================================
+  api-health-checks:
+    name: API Health Checks
+    runs-on: self-hosted
+    needs: [firmware-build-esp32s3]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          if ! command -v jq &> /dev/null; then
+            apt-get update && apt-get install -y jq
+          fi
+
+      - name: Run health checks
+        run: bash scripts/api-health-check.sh
+        env:
+          SUPABASE_URL: https://fmultmlsevqgtnqzaylg.supabase.co
+
+  # ============================================================================
   # Create Release (only on version tags)
   # ============================================================================
   release:
@@ -161,7 +288,14 @@ jobs:
     container:
       image: ghcr.io/liptonj/led-matrix-builder:latest
       # Network handled by GitHub Actions runner
-    needs: [firmware-build-esp32s3, firmware-native-test]
+    needs: 
+      - firmware-build-esp32s3
+      - firmware-native-test
+      - firmware-unit-tests
+      - website-unit-tests
+      - bridge-unit-tests
+      - supabase-edge-functions-tests
+      - api-health-checks
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write

@@ -1,8 +1,10 @@
 'use client';
 
+import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
 import { useMemo, useState } from 'react';
 
 const DEFAULT_REDIRECT = 'https://display.5ls.us/callback';
+const API_TIMEOUT_MS = 15000;
 
 function getParam(name: string): string {
   if (typeof window === 'undefined') return '';
@@ -41,15 +43,19 @@ export default function WebexAuthPage() {
         throw new Error('Supabase URL not configured.');
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/webex-oauth-start`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${params.token}`,
-          'X-Device-Serial': params.serial,
-          'X-Timestamp': params.ts,
-          'X-Signature': params.sig,
+      const response = await fetchWithTimeout(
+        `${supabaseUrl}/functions/v1/webex-oauth-start`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${params.token}`,
+            'X-Device-Serial': params.serial,
+            'X-Timestamp': params.ts,
+            'X-Signature': params.sig,
+          },
         },
-      });
+        API_TIMEOUT_MS
+      );
 
       const data = await response.json();
       if (!response.ok) {
@@ -68,20 +74,20 @@ export default function WebexAuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6">
-      <div className="max-w-xl w-full bg-slate-900/70 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+    <div className="min-h-screen flex items-center justify-center px-6" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}>
+      <div className="max-w-xl w-full rounded-2xl p-8 shadow-2xl" style={{ backgroundColor: 'var(--color-bg-card)', borderColor: 'var(--color-border)', borderWidth: '1px' }}>
         <h1 className="text-2xl font-semibold">Connect your Webex account</h1>
-        <p className="mt-3 text-slate-300">
+        <p className="mt-3" style={{ color: 'var(--color-text-secondary)' }}>
           This will authorize your display to read your Webex presence and meeting status.
         </p>
 
-        <div className="mt-6 space-y-2 text-sm text-slate-300">
-          <div><span className="text-slate-400">Pairing Code:</span> {params.pairing_code || '—'}</div>
-          <div><span className="text-slate-400">Serial:</span> {params.serial || '—'}</div>
+        <div className="mt-6 space-y-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+          <div><span style={{ color: 'var(--color-text-muted)' }}>Pairing Code:</span> {params.pairing_code || '—'}</div>
+          <div><span style={{ color: 'var(--color-text-muted)' }}>Serial:</span> {params.serial || '—'}</div>
         </div>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-200">
+          <div className="alert-error mt-4">
             {error}
           </div>
         )}
@@ -94,7 +100,7 @@ export default function WebexAuthPage() {
           {submitting ? 'Redirecting…' : 'Authorize with Webex'}
         </button>
 
-        <p className="mt-4 text-xs text-slate-400">
+        <p className="mt-4 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           You will be redirected to Webex to complete authorization.
         </p>
       </div>

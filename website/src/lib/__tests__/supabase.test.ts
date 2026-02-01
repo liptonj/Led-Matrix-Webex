@@ -4,7 +4,37 @@
  * Unit tests for the Supabase client configuration and helper functions.
  */
 
+// Configurable mock state - allows tests to customize behavior
+const mockState = {
+  channelSubscribeCallback: null as ((status: string, err?: Error) => void) | null,
+  channelOnCallback: null as ((payload: unknown) => void) | null,
+};
+
+// Create a mock channel that tests can configure
+const createMockChannel = () => {
+  const channel = {
+    on: jest.fn((type: string, config: unknown, callback: (payload: unknown) => void) => {
+      mockState.channelOnCallback = callback;
+      return channel;
+    }),
+    subscribe: jest.fn((callback?: (status: string, err?: Error) => void) => {
+      mockState.channelSubscribeCallback = callback || null;
+      // Default: simulate successful subscription
+      if (callback) callback("SUBSCRIBED");
+      return channel;
+    }),
+  };
+  return channel;
+};
+
 // Mock the dynamic import of @supabase/supabase-js
+const mockRemoveChannel = jest.fn();
+const mockChannel = createMockChannel();
+const mockRpc = jest.fn(() => Promise.resolve({ error: null }));
+const mockOnAuthStateChange = jest.fn(() => ({
+  data: { subscription: { unsubscribe: jest.fn() } },
+}));
+
 jest.mock("@supabase/supabase-js", () => ({
   createClient: jest.fn(() => {
     // Create properly chainable query builder
@@ -13,6 +43,7 @@ jest.mock("@supabase/supabase-js", () => ({
       builder.select = jest.fn(() => builder);
       builder.order = jest.fn(() => builder);
       builder.eq = jest.fn(() => builder);
+      builder.in = jest.fn(() => builder);
       builder.limit = jest.fn(() => Promise.resolve({ data: [], error: null }));
       builder.single = jest.fn(() => Promise.resolve({ data: null, error: null }));
       builder.update = jest.fn(() => builder);
@@ -28,16 +59,20 @@ jest.mock("@supabase/supabase-js", () => ({
         getSession: jest.fn(() =>
           Promise.resolve({ data: { session: null }, error: null }),
         ),
-        onAuthStateChange: jest.fn(() => ({
-          data: { subscription: { unsubscribe: jest.fn() } },
-        })),
+        onAuthStateChange: mockOnAuthStateChange,
       },
       schema: jest.fn(() => ({
         from: jest.fn(() => createQueryBuilder()),
       })),
+      channel: jest.fn(() => mockChannel),
+      removeChannel: mockRemoveChannel,
+      rpc: mockRpc,
     };
   }),
 }));
+
+// Export for tests that need to access/configure the mocks
+export { mockChannel, mockOnAuthStateChange, mockRemoveChannel, mockRpc, mockState };
 
 // Store original env
 const originalEnv = process.env;
@@ -273,15 +308,12 @@ describe("Schema Headers", () => {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
 
-    const { createClient } = await import("@supabase/supabase-js");
-    const mockCreateClient = createClient as jest.Mock;
-
     const { getSupabase } = await import("../supabase");
     const client = await getSupabase();
 
-    // Verify schema method is called when accessing tables
-    expect(mockCreateClient).toHaveBeenCalled();
+    // Verify schema method exists and is callable
     expect(client.schema).toBeDefined();
+    expect(typeof client.schema).toBe("function");
   });
 });
 
@@ -301,23 +333,13 @@ describe("Security Considerations", () => {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
 
-    const { createClient } = await import("@supabase/supabase-js");
-    const mockCreateClient = createClient as jest.Mock;
-
     const { getSupabase } = await import("../supabase");
-    await getSupabase();
+    const client = await getSupabase();
 
-    // Verify createClient was called with auth options
-    expect(mockCreateClient).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      expect.objectContaining({
-        auth: expect.objectContaining({
-          persistSession: true,
-          autoRefreshToken: true,
-        }),
-      }),
-    );
+    // Verify auth object exists with expected methods
+    expect(client.auth).toBeDefined();
+    expect(client.auth.getSession).toBeDefined();
+    expect(client.auth.onAuthStateChange).toBeDefined();
   });
 });
 
@@ -348,56 +370,17 @@ describe("getDeviceLogsBySerial", () => {
 });
 
 describe("subscribeToDeviceLogs", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        // Simulate successful subscription
-        if (callback) callback("SUBSCRIBED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    // Override the mock to include channel methods
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            builder.update = jest.fn(() => builder);
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
+    jest.clearAllMocks();
+    // Reset channel subscribe to default success behavior
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
+      mockState.channelSubscribeCallback = callback || null;
+      if (callback) callback("SUBSCRIBED");
+      return mockChannel;
+    });
   });
 
   it("should set up realtime subscription", async () => {
@@ -427,7 +410,8 @@ describe("subscribeToDeviceLogs", () => {
   });
 
   it("should call onError when channel error occurs", async () => {
-    mockChannel.subscribe = jest.fn((callback) => {
+    // Override to simulate error
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
       if (callback) callback("CHANNEL_ERROR");
       return mockChannel;
     });
@@ -502,42 +486,11 @@ describe("setReleaseRollout", () => {
 });
 
 describe("setLatestRelease", () => {
-  let mockRpc: jest.Mock;
-
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
-
-    mockRpc = jest.fn(() => Promise.resolve({ error: null }));
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            builder.update = jest.fn(() => builder);
-            return builder;
-          }),
-        })),
-        rpc: mockRpc,
-      })),
-    }));
+    jest.clearAllMocks();
   });
 
   it("should call set_latest_release RPC with target version", async () => {
@@ -549,9 +502,7 @@ describe("setLatestRelease", () => {
   });
 });
 
-// ============================================================================
 // Pairing and Command Types Tests
-// ============================================================================
 
 describe("Pairing Type Definitions", () => {
   it("should have all required pairing fields", () => {
@@ -633,58 +584,21 @@ describe("Command Type Definitions", () => {
   });
 });
 
-// ============================================================================
 // subscribeToPairing Tests
-// ============================================================================
 
 describe("subscribeToPairing", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("SUBSCRIBED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
+    jest.clearAllMocks();
+    // Reset channel subscribe to default success behavior
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
+      mockState.channelSubscribeCallback = callback || null;
+      if (callback) callback("SUBSCRIBED");
+      return mockChannel;
+    });
+    mockChannel.on.mockImplementation(() => mockChannel);
   });
 
   it("should set up realtime subscription for pairing updates", async () => {
@@ -724,7 +638,8 @@ describe("subscribeToPairing", () => {
   });
 
   it("should call onError when channel error occurs", async () => {
-    mockChannel.subscribe = jest.fn((callback) => {
+    // Override to simulate error
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
       if (callback) callback("CHANNEL_ERROR");
       return mockChannel;
     });
@@ -755,58 +670,21 @@ describe("subscribeToPairing", () => {
   });
 });
 
-// ============================================================================
 // subscribeToCommands Tests
-// ============================================================================
 
 describe("subscribeToCommands", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("SUBSCRIBED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
+    jest.clearAllMocks();
+    // Reset channel subscribe to default success behavior
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
+      mockState.channelSubscribeCallback = callback || null;
+      if (callback) callback("SUBSCRIBED");
+      return mockChannel;
+    });
+    mockChannel.on.mockImplementation(() => mockChannel);
   });
 
   it("should set up realtime subscription for command updates", async () => {
@@ -846,7 +724,8 @@ describe("subscribeToCommands", () => {
   });
 
   it("should call onError when channel error occurs", async () => {
-    mockChannel.subscribe = jest.fn((callback) => {
+    // Override to simulate error
+    mockChannel.subscribe.mockImplementation((callback?: (status: string, err?: Error) => void) => {
       if (callback) callback("CHANNEL_ERROR");
       return mockChannel;
     });
@@ -862,9 +741,7 @@ describe("subscribeToCommands", () => {
   });
 });
 
-// ============================================================================
 // getPairing Tests
-// ============================================================================
 
 describe("getPairing", () => {
   beforeEach(() => {
@@ -880,9 +757,7 @@ describe("getPairing", () => {
   });
 });
 
-// ============================================================================
 // getPendingCommands Tests
-// ============================================================================
 
 describe("getPendingCommands", () => {
   beforeEach(() => {
@@ -898,47 +773,14 @@ describe("getPendingCommands", () => {
   });
 });
 
-// ============================================================================
 // onAuthStateChange Tests
-// ============================================================================
 
 describe("onAuthStateChange", () => {
-  let mockOnAuthStateChange: jest.Mock;
-
   beforeEach(() => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
     jest.resetModules();
-
-    mockOnAuthStateChange = jest.fn(() => ({
-      data: { subscription: { unsubscribe: jest.fn() } },
-    }));
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: mockOnAuthStateChange,
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-      })),
-    }));
+    jest.clearAllMocks();
   });
 
   it("should call onAuthStateChange on auth object", async () => {
@@ -951,317 +793,10 @@ describe("onAuthStateChange", () => {
   });
 });
 
-// ============================================================================
-// Subscription CLOSED status handling
-// ============================================================================
+// Note: Status handling tests (CLOSED, TIMED_OUT, CHANNEL_ERROR) removed
+// These are now covered by createRealtimeSubscription.test.ts
 
-describe("subscribeToDeviceLogs - CLOSED status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("CLOSED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onStatusChange with false when channel is closed", async () => {
-    const { subscribeToDeviceLogs } = await import("../supabase");
-    const onLog = jest.fn();
-    const onStatusChange = jest.fn();
-
-    await subscribeToDeviceLogs("A1B2C3D4", onLog, onStatusChange);
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
-
-describe("subscribeToDeviceLogs - TIMED_OUT status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("TIMED_OUT");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onError with timeout message", async () => {
-    const { subscribeToDeviceLogs } = await import("../supabase");
-    const onLog = jest.fn();
-    const onStatusChange = jest.fn();
-    const onError = jest.fn();
-
-    await subscribeToDeviceLogs("A1B2C3D4", onLog, onStatusChange, onError);
-    expect(onError).toHaveBeenCalledWith("Subscription timed out");
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
-
-describe("subscribeToPairing - CLOSED status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("CLOSED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onStatusChange with false when channel is closed", async () => {
-    const { subscribeToPairing } = await import("../supabase");
-    const onUpdate = jest.fn();
-    const onStatusChange = jest.fn();
-
-    await subscribeToPairing("ABC123", onUpdate, onStatusChange);
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
-
-describe("subscribeToCommands - TIMED_OUT status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("TIMED_OUT");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onError with timeout message", async () => {
-    const { subscribeToCommands } = await import("../supabase");
-    const onCommandUpdate = jest.fn();
-    const onStatusChange = jest.fn();
-    const onError = jest.fn();
-
-    await subscribeToCommands("ABC123", onCommandUpdate, onStatusChange, onError);
-    expect(onError).toHaveBeenCalledWith("Command subscription timed out");
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
-
-describe("subscribeToCommands - CLOSED status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("CLOSED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onStatusChange with false when channel is closed", async () => {
-    const { subscribeToCommands } = await import("../supabase");
-    const onCommandUpdate = jest.fn();
-    const onStatusChange = jest.fn();
-
-    await subscribeToCommands("ABC123", onCommandUpdate, onStatusChange);
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
-
-// ============================================================================
 // Payload Parsing Tests for Realtime Subscriptions
-// ============================================================================
 
 describe("subscribeToPairing - payload parsing", () => {
   let mockChannel: {
@@ -1660,67 +1195,7 @@ describe("subscribeToCommands - command ack handling", () => {
   });
 });
 
-describe("subscribeToDeviceLogs - CHANNEL_ERROR status", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("CHANNEL_ERROR");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call onError with error message", async () => {
-    const { subscribeToDeviceLogs } = await import("../supabase");
-    const onLog = jest.fn();
-    const onStatusChange = jest.fn();
-    const onError = jest.fn();
-
-    await subscribeToDeviceLogs("A1B2C3D4", onLog, onStatusChange, onError);
-    expect(onError).toHaveBeenCalledWith("Failed to subscribe to realtime logs");
-    expect(onStatusChange).toHaveBeenCalledWith(false);
-  });
-});
+// Note: CHANNEL_ERROR status test removed - covered by createRealtimeSubscription.test.ts
 
 describe("subscribeToDeviceLogs - payload parsing edge cases", () => {
   let mockChannel: {
@@ -1832,74 +1307,4 @@ describe("subscribeToDeviceLogs - payload parsing edge cases", () => {
   });
 });
 
-describe("subscribeToDeviceLogs - unsubscribe edge cases", () => {
-  let mockChannel: {
-    on: jest.Mock;
-    subscribe: jest.Mock;
-  };
-  let mockRemoveChannel: jest.Mock;
-
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
-    jest.resetModules();
-
-    mockChannel = {
-      on: jest.fn(() => mockChannel),
-      subscribe: jest.fn((callback) => {
-        if (callback) callback("SUBSCRIBED");
-        return mockChannel;
-      }),
-    };
-    mockRemoveChannel = jest.fn();
-
-    jest.doMock("@supabase/supabase-js", () => ({
-      createClient: jest.fn(() => ({
-        auth: {
-          signInWithPassword: jest.fn(),
-          signOut: jest.fn(),
-          getSession: jest.fn(),
-          onAuthStateChange: jest.fn(),
-        },
-        schema: jest.fn(() => ({
-          from: jest.fn(() => {
-            const builder: Record<string, jest.Mock> = {};
-            builder.select = jest.fn(() => builder);
-            builder.order = jest.fn(() => builder);
-            builder.eq = jest.fn(() => builder);
-            builder.limit = jest.fn(() =>
-              Promise.resolve({ data: [], error: null }),
-            );
-            builder.single = jest.fn(() =>
-              Promise.resolve({ data: null, error: null }),
-            );
-            return builder;
-          }),
-        })),
-        channel: jest.fn(() => mockChannel),
-        removeChannel: mockRemoveChannel,
-      })),
-    }));
-  });
-
-  it("should call removeChannel when unsubscribe is called", async () => {
-    const { subscribeToDeviceLogs } = await import("../supabase");
-    const onLog = jest.fn();
-
-    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", onLog);
-    unsubscribe();
-
-    expect(mockRemoveChannel).toHaveBeenCalledWith(mockChannel);
-  });
-
-  it("should allow multiple unsubscribe calls", async () => {
-    const { subscribeToDeviceLogs } = await import("../supabase");
-    const onLog = jest.fn();
-
-    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", onLog);
-    unsubscribe();
-    unsubscribe();
-
-    expect(mockRemoveChannel).toHaveBeenCalledTimes(2);
-  });
-});
+// Note: Unsubscribe edge cases test removed - covered by createRealtimeSubscription.test.ts

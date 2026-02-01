@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { Alert } from '@/components/ui/Alert';
+import { Spinner } from '@/components/ui/Spinner';
 import {
-    getConnectionHeartbeats,
-    getDevices,
-    getReleases,
     ConnectionHeartbeat,
     Device,
-    Release,
+    getConnectionHeartbeats,
+    getDevices,
+    getReleases
 } from '@/lib/supabase';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
 interface Stats {
     totalDevices: number;
@@ -73,27 +74,27 @@ export default function AdminDashboardPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center py-12">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <Spinner size="lg" />
             </div>
         );
     }
 
     if (error) {
         return (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                <p className="text-red-600 dark:text-red-400">{error}</p>
-            </div>
+            <Alert variant="danger">
+                {error}
+            </Alert>
         );
     }
 
     return (
-        <div className="space-y-8">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <div className="space-y-6 lg:space-y-8">
+            <h1 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white">
                 Dashboard
             </h1>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
                 <StatCard
                     title="Total Devices"
                     value={stats?.totalDevices || 0}
@@ -121,8 +122,8 @@ export default function AdminDashboardPage() {
 
             {/* Recent Devices */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-                <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-white">
+                <div className="px-4 lg:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                    <h2 className="text-base lg:text-lg font-medium text-gray-900 dark:text-white">
                         Recent Devices
                     </h2>
                     <Link
@@ -132,7 +133,45 @@ export default function AdminDashboardPage() {
                         View All
                     </Link>
                 </div>
-                <div className="overflow-x-auto">
+                
+                {/* Mobile Card View */}
+                <div className="lg:hidden p-4 space-y-3">
+                    {recentDevices.length === 0 ? (
+                        <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                            No devices registered yet
+                        </p>
+                    ) : (
+                        recentDevices.map((device) => {
+                            const lastSeen = getLastSeenValue(device, heartbeats[device.pairing_code]);
+                            const isOnline = isDeviceOnlineWithHeartbeat(device, heartbeats[device.pairing_code], Date.now());
+                            return (
+                                <div key={device.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="font-mono text-sm text-gray-900 dark:text-white">
+                                            {device.serial_number}
+                                        </span>
+                                        <span
+                                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                isOnline
+                                                    ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                                            }`}
+                                        >
+                                            {isOnline ? 'Online' : 'Offline'}
+                                        </span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                                        <p>Firmware: {device.firmware_version || 'Unknown'}</p>
+                                        <p>Last seen: {lastSeen ? new Date(lastSeen).toLocaleString() : 'Unknown'}</p>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden lg:block overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                         <thead className="bg-gray-50 dark:bg-gray-700">
                             <tr>
@@ -201,17 +240,17 @@ function StatCard({
     };
 
     const content = (
-        <div className={`${colorClasses[color]} border rounded-lg p-6`}>
-            <div className="flex items-center justify-between">
-                <div>
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+        <div className={`${colorClasses[color]} border rounded-lg p-4 lg:p-6`}>
+            <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                    <p className="text-xs lg:text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
                         {title}
                     </p>
-                    <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">
+                    <p className="mt-1 text-lg lg:text-2xl font-semibold text-gray-900 dark:text-white truncate">
                         {value}
                     </p>
                 </div>
-                <span className="text-3xl">{icon}</span>
+                <span className="text-2xl lg:text-3xl flex-shrink-0">{icon}</span>
             </div>
         </div>
     );

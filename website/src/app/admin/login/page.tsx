@@ -46,9 +46,8 @@ export default function AdminLoginPage() {
                     window.sessionStorage.setItem('admin_login_in_progress', '1');
                 }
                 router.replace('/admin');
-            } catch (profileErr) {
+            } catch {
                 // Profile check failed, but login succeeded - allow access
-                console.warn('Profile check failed, but login succeeded:', profileErr);
                 if (typeof window !== 'undefined') {
                     window.sessionStorage.setItem('admin_login_in_progress', '1');
                 }
@@ -58,14 +57,11 @@ export default function AdminLoginPage() {
             // Only ignore AbortError if it's clearly from component unmount (very rare during active login)
             // Most AbortErrors during login are real network issues and should be shown
             if (err instanceof Error && err.name === 'AbortError' && err.message.includes('cancelled')) {
-                // Only ignore if explicitly cancelled (component unmount)
-                console.debug('Login cancelled');
                 setLoading(false);
                 return;
             }
             const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.';
             setError(errorMessage);
-            console.error('Login error:', err);
             setLoading(false);
         }
     };

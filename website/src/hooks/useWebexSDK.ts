@@ -104,6 +104,12 @@ export function useWebexSDK(): UseWebexSDKReturn {
 
   const appRef = useRef<WebexApp | null>(null);
   const mountedRef = useRef(true);
+  const sdkTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearSdkTimeouts = useCallback(() => {
+    sdkTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    sdkTimeoutsRef.current = [];
+  }, []);
 
   const updateState = useCallback((updates: Partial<WebexState>) => {
     if (mountedRef.current) {
@@ -270,29 +276,43 @@ const handleCallEvent = useCallback(
     return new Promise((resolve) => {
       const startTime = Date.now();
       let attempts = 0;
+      let resolved = false;
+
+      const resolveOnce = (value: boolean) => {
+        if (resolved) return;
+        resolved = true;
+        clearSdkTimeouts();
+        resolve(value);
+      };
 
       const checkSDK = () => {
+        if (!mountedRef.current) {
+          resolveOnce(false);
+          return;
+        }
+
         attempts++;
 
         if (typeof window !== "undefined" && window.webex?.Application) {
-          resolve(true);
+          resolveOnce(true);
           return;
         }
 
         const elapsed = Date.now() - startTime;
         if (elapsed >= timeout) {
-          resolve(false);
+          resolveOnce(false);
           return;
         }
 
         // Exponential backoff: 100ms, 200ms, 400ms, 800ms, 1000ms
         const delay = Math.min(100 * Math.pow(2, attempts - 1), 1000);
-        setTimeout(checkSDK, delay);
+        const timeoutId = setTimeout(checkSDK, delay);
+        sdkTimeoutsRef.current.push(timeoutId);
       };
 
       checkSDK();
     });
-  }, []);
+  }, [clearSdkTimeouts]);
 
   const initialize = useCallback(async () => {
     if (state.isInitialized || appRef.current) {
@@ -333,10 +353,9 @@ const handleCallEvent = useCallback(
             email: userState.email,
           };
         }
-      } catch (err) {
+      } catch {
         // User info may not be available in all contexts (e.g., certain embedded app contexts)
         // This is expected behavior - app continues normally without user info
-        console.warn("Webex SDK user info unavailable:", err instanceof Error ? err.message : "user state not available");
       }
 
       if (!mountedRef.current) return;
@@ -422,7 +441,6 @@ const handleCallEvent = useCallback(
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to initialize Webex SDK";
-      console.error("Webex SDK initialization error:", err);
       setError(errorMessage);
       updateState({ isInitialized: false });
     }
@@ -444,6 +462,7 @@ const handleCallEvent = useCallback(
 
     return () => {
       mountedRef.current = false;
+      clearSdkTimeouts();
       if (appRef.current) {
         // Meeting and call events
         appRef.current.off("meeting:started");

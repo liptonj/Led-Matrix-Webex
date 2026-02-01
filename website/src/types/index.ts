@@ -85,10 +85,10 @@ export interface DeviceStatus {
 
 // Device config types
 export interface DeviceConfig {
-  device_name: string;
-  display_name: string;
-  brightness: number;
-  poll_interval: number;
+  device_name?: string;
+  display_name?: string;
+  brightness?: number;
+  poll_interval?: number;
   pairing_code?: string;
   has_webex_tokens?: boolean;
   has_webex_credentials?: boolean;
@@ -107,4 +107,70 @@ export interface NavItem {
 // Theme types
 export type Theme = "light" | "dark";
 
-export {};
+// Database entity types
+export interface Device {
+  serial_number: string;
+  pairing_code: string | null;
+  paired_user_id: string | null;
+  owner_user_id: string | null;
+  created_at: string;
+  last_seen: string | null;
+  last_ip: string | null;
+  firmware_version: string | null;
+  target_firmware_version: string | null;
+  debug_mode: boolean;
+  approval_required: boolean;
+  disabled: boolean;
+  blacklisted: boolean;
+}
+
+export interface DeviceLog {
+  id: string;
+  device_serial: string;
+  timestamp: string;
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  component: string | null;
+  created_at: string;
+}
+
+export interface Command {
+  id: string;
+  device_serial: string;
+  command: string;
+  parameters: Record<string, unknown>;
+  status: "pending" | "sent" | "acknowledged" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  response: string | null;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  full_name: string | null;
+  created_at: string;
+  updated_at: string;
+  is_admin: boolean;
+  is_disabled: boolean;
+  webex_user_id: string | null;
+  webex_access_token: string | null;
+  webex_refresh_token: string | null;
+  webex_token_expires_at: string | null;
+}
+
+export interface Release {
+  version: string;
+  created_at: string;
+  release_notes: string | null;
+  minimum_version: string | null;
+  is_beta: boolean;
+  is_deprecated: boolean;
+  file_path: string;
+  file_size: number;
+  checksum: string;
+}
+
+export { };
+

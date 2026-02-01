@@ -112,41 +112,31 @@ export async function getCurrentUserProfile(
   signal?: AbortSignal,
   options?: { skipRemote?: boolean },
 ): Promise<UserProfile | null> {
-  console.log('[getCurrentUserProfile] Starting profile fetch');
-
   // Check if signal is already aborted
   if (signal?.aborted) {
-    console.log('[getCurrentUserProfile] Signal already aborted');
     return null;
   }
 
   try {
     // Get user from session instead of making a network request
-    console.log('[getCurrentUserProfile] Getting session for user ID');
     const cachedSession = getCachedSessionFromStorage();
     const cachedUser = cachedSession?.user;
     const sessionResult = cachedUser ? null : await getSession(signal);
     const user = cachedUser ?? sessionResult?.data?.session?.user;
 
     if (!user) {
-      console.log('[getCurrentUserProfile] No user in session');
       return null;
     }
 
     // Quick check for disabled status from JWT claims (instant)
     if (user.app_metadata?.disabled === true) {
-      console.log('[getCurrentUserProfile] User is disabled (from JWT claim)');
       return null;
     }
 
-    console.log('[getCurrentUserProfile] User ID:', user.id);
     if (options?.skipRemote) {
-      console.log('[getCurrentUserProfile] Skipping remote profile fetch');
       return null;
     }
     const supabase = await getSupabase();
-    console.log('[getCurrentUserProfile] Querying user_profiles table');
-    const startTime = Date.now();
     const { data, error } = await withTimeout(
       supabase
         .schema("display")
@@ -160,25 +150,19 @@ export async function getCurrentUserProfile(
       "Timed out while loading your profile.",
       signal,
     );
-    console.log('[getCurrentUserProfile] Query completed in', Date.now() - startTime, 'ms');
 
     if (error && error.code !== "PGRST116") {
-      console.error('[getCurrentUserProfile] Query error:', error);
       throw error;
     }
-    console.log('[getCurrentUserProfile] Profile data:', data ? 'found' : 'not found');
     return data || null;
   } catch (err) {
     // Handle AbortError gracefully (can happen in React Strict Mode or component unmount)
     if (isAbortError(err)) {
-      console.debug("[getCurrentUserProfile] aborted (likely component unmounted)");
       return null;
     }
     if (err instanceof Error && err.message.includes("Timed out")) {
-      console.warn("[getCurrentUserProfile] timed out after", SUPABASE_REQUEST_TIMEOUT_MS, "ms");
       return null;
     }
-    console.error('[getCurrentUserProfile] Unexpected error:', err);
     throw err;
   }
 }

@@ -5,14 +5,18 @@
  * - app_metadata.is_admin: Whether the user is an admin
  * - app_metadata.disabled: Whether the user account is disabled
  *
- * This eliminates the need for database queries on every auth check.
+ * IMPORTANT: The hook must return ALL required claims, not just custom ones.
+ * Required claims: aud, exp, iat, sub, email, phone, role, aal, session_id, is_anonymous
+ * 
+ * The hook receives these in payload.claims and must return them with modifications.
  */
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 interface WebhookPayload {
   user_id: string;
-  claims?: Record<string, unknown>;
+  claims: Record<string, unknown>;
+  authentication_method?: string;
 }
 
 interface CustomClaims {
@@ -41,6 +45,7 @@ Deno.serve(async (req) => {
 
     const payload: WebhookPayload = await req.json();
     const userId = payload.user_id;
+    const originalClaims = payload.claims;
 
     console.log(`[auth-hook] Processing claims for user ${userId}`);
 
@@ -83,9 +88,23 @@ Deno.serve(async (req) => {
       disabled,
     };
 
+    // Merge custom claims with existing app_metadata
+    const existingAppMetadata = (originalClaims.app_metadata as Record<string, unknown>) || {};
+    const updatedAppMetadata = {
+      ...existingAppMetadata,
+      ...customClaims,
+    };
+
+    // Return ALL original claims with updated app_metadata
+    // This is required - Supabase Auth validates all required claims are present
+    const updatedClaims = {
+      ...originalClaims,
+      app_metadata: updatedAppMetadata,
+    };
+
     return new Response(
       JSON.stringify({
-        app_metadata: customClaims,
+        claims: updatedClaims,
       }),
       {
         headers: { 'Content-Type': 'application/json' },

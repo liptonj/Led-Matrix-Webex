@@ -1,7 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { getManifestUrl } from '@/lib/firmware/manifest';
+import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
 import type { FirmwareManifest, FirmwareVersion } from '@/types';
+import { useCallback, useEffect, useState } from 'react';
+
+const MANIFEST_TIMEOUT_MS = 10000;
 
 interface UseManifestResult {
   manifest: FirmwareManifest | null;
@@ -10,17 +14,6 @@ interface UseManifestResult {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
-}
-
-// Use Supabase Edge Function for dynamic manifest generation
-// Returns null if Supabase is not configured (caller must handle this)
-function getManifestUrl(): string | null {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1/get-manifest`;
-  }
-  // Supabase URL is required - no fallback available
-  return null;
 }
 
 export function useManifest(): UseManifestResult {
@@ -43,15 +36,14 @@ export function useManifest(): UseManifestResult {
     }
 
     try {
-      const response = await fetch(manifestUrl);
+      const response = await fetchWithTimeout(manifestUrl, {}, MANIFEST_TIMEOUT_MS);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       
       const data: FirmwareManifest = await response.json();
       setManifest(data);
-    } catch (err) {
-      console.error('Failed to load manifest:', err);
+    } catch {
       setError(
         'Failed to load firmware versions. Please try again later or visit GitHub Releases.'
       );

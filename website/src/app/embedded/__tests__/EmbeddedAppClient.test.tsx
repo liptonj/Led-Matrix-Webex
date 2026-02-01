@@ -28,6 +28,10 @@ const mockChannel: MockChannel = {
 const mockSupabaseClient = {
   channel: jest.fn(() => mockChannel),
   removeChannel: jest.fn(),
+  removeAllChannels: jest.fn(),
+  realtime: {
+    setAuth: jest.fn(),
+  },
   schema: jest.fn(() => ({
     from: jest.fn(() => {
       const builder: Record<string, jest.Mock> = {};

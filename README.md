@@ -331,7 +331,54 @@ Supported sensor data:
 
 ## Development
  
- ### CI/CD Runners
+### Testing
+
+[![CI/CD](https://github.com/liptonj/Led-Matrix-Webex/actions/workflows/ci.yml/badge.svg)](https://github.com/liptonj/Led-Matrix-Webex/actions/workflows/ci.yml)
+
+This project has comprehensive test coverage across all components:
+
+- **69 test files** with ~27,309 lines of test code
+- **Firmware**: 8 Unity test files (PlatformIO)
+- **Website**: 39 Jest test files + Playwright E2E
+- **Supabase Edge Functions**: 15 Deno test files
+- **Bridge**: 5 Jest test files
+
+All tests run automatically in CI/CD and **must pass** before any release or deployment.
+
+**Run tests locally:**
+
+```bash
+# Firmware tests
+cd firmware
+pio test -e native_test --verbose
+
+# Website tests
+cd website
+npm test                    # Jest unit tests
+npm run test:e2e           # Playwright E2E tests
+npm run test:smoke         # Build smoke tests
+
+# Bridge tests
+cd bridge
+npm test
+
+# Supabase Edge Functions tests
+cd supabase/functions
+deno test --allow-net --allow-env _tests/
+
+# API health checks
+bash scripts/api-health-check.sh
+```
+
+**Coverage requirements:**
+- Statements: 70%
+- Branches: 60%
+- Functions: 70%
+- Lines: 70%
+
+For detailed testing documentation, see [docs/TESTING.md](docs/TESTING.md).
+
+### CI/CD Runners
  
  All GitHub Actions workflows run on a self-hosted runner. See
  `docs/self_hosted_runner.md` for setup requirements and dependencies.

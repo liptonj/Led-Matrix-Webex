@@ -1,8 +1,8 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import { ThemeToggle } from './ThemeToggle';
-import { Navigation } from './Navigation';
 import { Avatar } from './Avatar';
+import { Navigation } from './Navigation';
+import { ThemeToggle } from './ThemeToggle';
 
 interface HeaderProps {
   title?: string;
@@ -55,7 +55,7 @@ export function Header({
 
       {/* Hero Section */}
       {showBrand && (
-        <header className="py-12 shadow-lg text-white" style={{ background: 'var(--header-gradient)' }}>
+        <header className="py-12 shadow-lg text-white header-gradient">
           <div className="container mx-auto px-4 text-center">
             <h1 className="text-3xl md:text-4xl font-bold mb-3">
               {title}

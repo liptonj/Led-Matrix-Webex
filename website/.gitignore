@@ -11,6 +11,8 @@ dist/
 
 # Testing
 coverage/
+playwright-report/
+test-results/
 
 # Production
 *.log

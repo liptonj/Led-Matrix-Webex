@@ -1,7 +1,9 @@
 'use client';
 
+import { Alert } from '@/components/ui/Alert';
+import { Spinner } from '@/components/ui/Spinner';
+import { getOAuthClients, OAuthClient, upsertOAuthClient } from '@/lib/supabase';
 import { useEffect, useMemo, useState } from 'react';
-import { getOAuthClients, upsertOAuthClient, OAuthClient } from '@/lib/supabase';
 
 const DEFAULT_REDIRECT = 'https://display.5ls.us/callback';
 
@@ -82,28 +84,28 @@ export default function AdminOAuthPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <Spinner size="lg" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-        <p className="text-red-600 dark:text-red-400">{error}</p>
-      </div>
+      <Alert variant="danger">
+        {error}
+      </Alert>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 lg:space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">OAuth Providers</h1>
+        <h1 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white">OAuth Providers</h1>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add / Update Provider</h2>
-        <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 lg:p-6">
+        <h2 className="text-base lg:text-lg font-semibold text-gray-900 dark:text-white">Add / Update Provider</h2>
+        <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Provider</label>
             <input
@@ -166,12 +168,38 @@ export default function AdminOAuthPage() {
             </button>
           </div>
           {formError && (
-            <div className="md:col-span-2 text-sm text-red-600 dark:text-red-400">{formError}</div>
+            <div className="lg:col-span-2 text-sm text-red-600 dark:text-red-400">{formError}</div>
           )}
         </form>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+      {/* Mobile Card View */}
+      <div className="lg:hidden space-y-3">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Configured Providers</h2>
+        {sortedClients.length === 0 ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 text-center text-gray-500 dark:text-gray-400">
+            No OAuth providers configured yet.
+          </div>
+        ) : (
+          sortedClients.map((client) => (
+            <div key={client.id} className="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-medium text-gray-900 dark:text-white">{client.provider}</span>
+                <span className={`text-xs px-2 py-0.5 rounded ${client.active ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>
+                  {client.active ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                <p className="truncate"><span className="text-gray-500">Client ID:</span> {client.client_id}</p>
+                <p className="truncate"><span className="text-gray-500">Redirect:</span> {client.redirect_uri}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop Table View */}
+      <div className="hidden lg:block bg-white dark:bg-gray-800 rounded-lg shadow">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Configured Providers</h2>
         </div>

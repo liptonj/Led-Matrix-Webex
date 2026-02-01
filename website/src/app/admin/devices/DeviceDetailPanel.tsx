@@ -1,25 +1,33 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Alert } from '@/components/ui/Alert';
+import { Spinner } from '@/components/ui/Spinner';
 import {
+    Command,
+    deleteDevice,
     Device,
     DeviceLog,
-    Pairing,
-    Command,
-    getDevice,
-    getDeviceLogsBySerial,
-    getPairing,
     getCommandsPage,
+    getDevice,
+    getPairing,
     insertCommand,
-    deleteDevice,
+    Pairing,
     setDeviceApprovalRequired,
     setDeviceBlacklisted,
-    setDeviceDisabled,
     setDeviceDebugMode,
+    setDeviceDisabled,
     subscribeToCommands,
     subscribeToDeviceLogs,
-    subscribeToPairing,
+    subscribeToPairing
 } from '@/lib/supabase';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import CommandResponseModal from './components/CommandResponseModal';
+import DeviceActionsPanel from './components/DeviceActionsPanel';
+import DeviceCommandsPanel from './components/DeviceCommandsPanel';
+import DeviceInfoCard from './components/DeviceInfoCard';
+import DeviceLogsPanel from './components/DeviceLogsPanel';
+import DeviceTelemetryPanel from './components/DeviceTelemetryPanel';
 
 const LOG_LIMIT = 200;
 const COMMAND_PAGE_SIZE = 10;
@@ -231,24 +239,6 @@ export default function DeviceDetailPanel({
         };
     }, [device?.pairing_code, commandFilter, commandPage, commandRefreshToken]);
 
-    const formatCommandAge = (createdAt: string) => {
-        const deltaMs = Date.now() - new Date(createdAt).getTime();
-        const minutes = Math.max(0, Math.floor(deltaMs / 60000));
-        if (minutes < 1) return 'just now';
-        if (minutes < 60) return `${minutes}m ago`;
-        const hours = Math.floor(minutes / 60);
-        if (hours < 24) return `${hours}h ago`;
-        const days = Math.floor(hours / 24);
-        return `${days}d ago`;
-    };
-
-    const getCommandStatusClasses = (status: Command['status']) => {
-        if (status === 'acked') return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
-        if (status === 'failed') return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
-        if (status === 'expired') return 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
-    };
-
     const handleToggleDebug = async () => {
         if (!device) return;
         try {
@@ -341,40 +331,6 @@ export default function DeviceDetailPanel({
 
     if (!serialNumber) return null;
 
-    const accessLabel = device
-        ? device.blacklisted
-            ? 'Blacklisted'
-            : device.disabled
-                ? 'Disabled'
-                : device.approval_required
-                    ? 'Awaiting approval'
-                    : 'Active'
-        : '';
-
-    const realtimeStatuses: SubscriptionStatus[] = [pairingStatus, commandStatus, logStatus];
-    const realtimeAllConnected = realtimeStatuses.every((status) => status === 'connected');
-    const realtimeAnyError = realtimeStatuses.some((status) => status === 'error');
-    const realtimeAnyDisconnected = realtimeStatuses.some((status) => status === 'disconnected');
-    const realtimeLabel = realtimeAllConnected
-        ? 'Connected'
-        : `P:${pairingStatus} C:${commandStatus} L:${logStatus}`;
-    const realtimeBadgeClass = realtimeAllConnected
-        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-        : realtimeAnyError
-            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-            : realtimeAnyDisconnected
-                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
-
-    const commandTotalPages = Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE));
-    const commandPageSafe = Math.min(commandPage, commandTotalPages);
-
-    useEffect(() => {
-        if (commandPage > commandTotalPages) {
-            setCommandPage(commandTotalPages);
-        }
-    }, [commandPage, commandTotalPages]);
-
     return (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-6">
             <div className="flex items-center justify-between">
@@ -393,254 +349,77 @@ export default function DeviceDetailPanel({
 
             {loading && (
                 <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    <Spinner size="lg" />
                 </div>
             )}
 
             {error && (
-                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                    <p className="text-red-600 dark:text-red-400">{error}</p>
-                </div>
+                <Alert variant="danger">
+                    {error}
+                </Alert>
             )}
 
             {!loading && device && (
                 <div className="space-y-4">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="space-y-4">
-                        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
-                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device</h3>
-                            <p className="text-sm text-gray-900 dark:text-white mt-2">{device.display_name || 'Unnamed device'}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">Firmware {device.firmware_version || 'Unknown'}</p>
-                            <div className="mt-2">
-                                <span className="text-xs text-gray-500 dark:text-gray-400">Access:</span>
-                                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-                                    {accessLabel}
-                                </span>
-                            </div>
-                            <div className="mt-2">
-                                <span className="text-xs text-gray-500 dark:text-gray-400">Realtime (Admin):</span>
-                                <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs ${realtimeBadgeClass}`}>
-                                    {realtimeLabel}
-                                </span>
-                            </div>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4 space-y-2">
-                            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Actions</h3>
-                            <button
-                                onClick={handleToggleDebug}
-                                disabled={debugUpdating}
-                                className="w-full rounded-md bg-gray-900 text-white text-xs px-3 py-2 hover:bg-gray-700 disabled:opacity-50"
-                            >
-                                {device.debug_enabled ? 'Disable debug logs' : 'Enable debug logs'}
-                            </button>
-                            {device.approval_required && (
-                                <button
-                                    onClick={handleApprove}
-                                    disabled={accessUpdating}
-                                    className="w-full rounded-md bg-green-600 text-white text-xs px-3 py-2 hover:bg-green-700 disabled:opacity-50"
-                                >
-                                    Approve device
-                                </button>
-                            )}
-                            <button
-                                onClick={handleToggleDisabled}
-                                disabled={accessUpdating}
-                                className="w-full rounded-md bg-yellow-600 text-white text-xs px-3 py-2 hover:bg-yellow-700 disabled:opacity-50"
-                            >
-                                {device.disabled ? 'Enable device' : 'Disable device'}
-                            </button>
-                            <button
-                                onClick={handleToggleBlacklisted}
-                                disabled={accessUpdating}
-                                className="w-full rounded-md bg-red-600 text-white text-xs px-3 py-2 hover:bg-red-700 disabled:opacity-50"
-                            >
-                                {device.blacklisted ? 'Remove blacklist' : 'Blacklist device'}
-                            </button>
-                            <button
-                                onClick={handleDelete}
-                                disabled={accessUpdating}
-                                className="w-full rounded-md border border-red-600 text-red-600 text-xs px-3 py-2 hover:bg-red-50 disabled:opacity-50"
-                            >
-                                Delete device
-                            </button>
-                            <button
-                                onClick={() => handleInsertCommand('reboot')}
-                                disabled={commandSubmitting || !device.pairing_code}
-                                className="w-full rounded-md bg-blue-600 text-white text-xs px-3 py-2 hover:bg-blue-700 disabled:opacity-50"
-                            >
-                                Send reboot command
-                            </button>
-                        </div>
+                            <DeviceInfoCard
+                                device={device}
+                                pairingStatus={pairingStatus}
+                                commandStatus={commandStatus}
+                                logStatus={logStatus}
+                            />
+                            <DeviceActionsPanel
+                                device={device}
+                                debugUpdating={debugUpdating}
+                                accessUpdating={accessUpdating}
+                                commandSubmitting={commandSubmitting}
+                                onToggleDebug={handleToggleDebug}
+                                onApprove={handleApprove}
+                                onToggleDisabled={handleToggleDisabled}
+                                onToggleBlacklisted={handleToggleBlacklisted}
+                                onDelete={handleDelete}
+                                onSendReboot={() => handleInsertCommand('reboot')}
+                            />
                         </div>
 
                         <div className="lg:col-span-2 space-y-4">
-                        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Telemetry</h3>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {pairingStatus}</p>
-                                </div>
-                                {pairingError && (
-                                    <span className="text-xs text-red-600 dark:text-red-400">{pairingError}</span>
-                                )}
-                            </div>
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-700 dark:text-gray-300">
-                                <div>Webex status: {pairing?.webex_status || 'unknown'}</div>
-                                <div>In call: {pairing?.in_call ? 'Yes' : 'No'}</div>
-                                <div>Camera: {pairing?.camera_on ? 'On' : 'Off'}</div>
-                                <div>Mic muted: {pairing?.mic_muted ? 'Yes' : 'No'}</div>
-                                <div>RSSI: {pairing?.rssi ?? 'n/a'}</div>
-                                <div>Temp: {pairing?.temperature ?? 'n/a'}</div>
-                            </div>
-                        </div>
-                        <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Device Logs (Live Only)</h3>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {logStatus} • Real-time streaming only, no history</p>
-                                </div>
-                                <select
-                                    value={logFilter}
-                                    onChange={(event) => setLogFilter(event.target.value as 'all' | DeviceLog['level'])}
-                                    className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-white"
-                                >
-                                    <option value="all">All</option>
-                                    <option value="info">Info</option>
-                                    <option value="warn">Warn</option>
-                                    <option value="error">Error</option>
-                                    <option value="debug">Debug</option>
-                                </select>
-                            </div>
-                            {logsError && (
-                                <p className="text-xs text-red-600 dark:text-red-400 mt-2">{logsError}</p>
-                            )}
-                            {logsLoading ? (
-                                <div className="py-6 text-xs text-gray-500">Loading logs...</div>
-                            ) : filteredLogs.length === 0 ? (
-                                <div className="py-6 text-xs text-gray-500">Waiting for live logs... (Enable debug mode on device to see more logs)</div>
-                            ) : (
-                                <div className="mt-3 max-h-72 overflow-y-auto space-y-2">
-                                    {filteredLogs.map((log) => (
-                                        <div
-                                            key={log.id}
-                                            className="rounded border border-gray-200 dark:border-gray-700 px-2 py-2 text-xs"
-                                        >
-                                            <div className="flex items-center justify-between text-[10px] text-gray-500">
-                                                <span>{log.level.toUpperCase()}</span>
-                                                <span>{new Date(log.created_at).toLocaleString()}</span>
-                                            </div>
-                                            <p className="text-gray-800 dark:text-gray-200 mt-1">{log.message}</p>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                            <DeviceTelemetryPanel
+                                pairing={pairing}
+                                pairingStatus={pairingStatus}
+                                pairingError={pairingError}
+                            />
+                            <DeviceLogsPanel
+                                logs={filteredLogs}
+                                logsLoading={logsLoading}
+                                logsError={logsError}
+                                logStatus={logStatus}
+                                logFilter={logFilter}
+                                onFilterChange={setLogFilter}
+                            />
                         </div>
                     </div>
-                    <div className="bg-gray-50 dark:bg-gray-900/40 rounded-lg p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Command Status</h3>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">Subscription: {commandStatus}</p>
-                            </div>
-                            <select
-                                value={commandFilter}
-                                onChange={(event) =>
-                                    setCommandFilter(event.target.value as 'all' | Command['status'])
-                                }
-                                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-white"
-                            >
-                                <option value="pending">Pending</option>
-                                <option value="acked">Acked</option>
-                                <option value="failed">Failed</option>
-                                <option value="expired">Expired</option>
-                                <option value="all">All</option>
-                            </select>
-                        </div>
-                        {commandError && (
-                            <p className="text-xs text-red-600 dark:text-red-400 mt-2">{commandError}</p>
-                        )}
-                        <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-2">
-                            Showing {commands.length} of {commandCount}
-                        </p>
-                        {commands.length > 0 && (
-                            <div className="mt-3 space-y-2">
-                                {commands.map((cmd) => (
-                                    <button
-                                        key={cmd.id}
-                                        onClick={() => handleShowResponse(`Command ${cmd.command}`, cmd.response || null)}
-                                        className="w-full text-left text-xs px-2 py-2 rounded border border-gray-200 dark:border-gray-700"
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <span className="font-medium text-gray-900 dark:text-gray-100">{cmd.command}</span>
-                                            <span
-                                                className={`text-[10px] px-2 py-0.5 rounded ${getCommandStatusClasses(cmd.status)}`}
-                                            >
-                                                {cmd.status}
-                                            </span>
-                                        </div>
-                                        <div className="flex items-center justify-between mt-1 text-[10px] text-gray-500 dark:text-gray-400">
-                                            <span>Created {formatCommandAge(cmd.created_at)}</span>
-                                            <span>
-                                                {cmd.acked_at ? `Acked ${formatCommandAge(cmd.acked_at)}` : 'Not acked'}
-                                            </span>
-                                        </div>
-                                        {cmd.error && (
-                                            <div className="mt-1 text-[10px] text-red-600 dark:text-red-400">
-                                                {cmd.error}
-                                            </div>
-                                        )}
-                                    </button>
-                                ))}
-                            </div>
-                        )}
-                        <div className="mt-3 flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                            <button
-                                type="button"
-                                onClick={() => setCommandPage((prev) => Math.max(1, prev - 1))}
-                                disabled={commandPageSafe <= 1}
-                                className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 disabled:opacity-50"
-                            >
-                                Prev
-                            </button>
-                            <span>
-                                Page {commandPageSafe} of {commandTotalPages}
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    setCommandPage((prev) => Math.min(commandTotalPages, prev + 1))
-                                }
-                                disabled={commandPageSafe >= commandTotalPages}
-                                className="rounded border border-gray-200 dark:border-gray-700 px-2 py-1 disabled:opacity-50"
-                            >
-                                Next
-                            </button>
-                        </div>
-                    </div>
+                    <DeviceCommandsPanel
+                        commands={commands}
+                        commandError={commandError}
+                        commandStatus={commandStatus}
+                        commandFilter={commandFilter}
+                        commandCount={commandCount}
+                        commandPage={commandPage}
+                        commandTotalPages={Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE))}
+                        onFilterChange={setCommandFilter}
+                        onPageChange={setCommandPage}
+                        onShowResponse={handleShowResponse}
+                    />
                 </div>
             )}
 
-            {responseModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-lg w-full p-6">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                                {responseModalTitle}
-                            </h3>
-                            <button
-                                onClick={() => setResponseModalOpen(false)}
-                                className="text-sm text-gray-500 hover:text-gray-700"
-                            >
-                                Close
-                            </button>
-                        </div>
-                        <pre className="text-xs bg-gray-100 dark:bg-gray-900 p-3 rounded overflow-x-auto">
-{JSON.stringify(responseModalBody, null, 2)}
-                        </pre>
-                    </div>
-                </div>
-            )}
+            <CommandResponseModal
+                isOpen={responseModalOpen}
+                title={responseModalTitle}
+                body={responseModalBody}
+                onClose={() => setResponseModalOpen(false)}
+            />
         </div>
     );
 }

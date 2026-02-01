@@ -1,67 +1,26 @@
 /**
  * Jest setup file for app tests
  *
- * This file configures the test environment for React component tests.
+ * Configures the test environment for React component tests.
+ * Uses centralized test utilities and mocks.
  */
 
-// Import jest-dom matchers
 import "@testing-library/jest-dom";
+import { setupGlobalMocks, cleanupGlobalMocks } from "@/test-utils/setup";
 
-// Mock Next.js Script component
-jest.mock("next/script", () => {
-  return function MockScript({
-    onLoad,
-    onError,
-  }: {
-    src?: string;
-    strategy?: string;
-    onLoad?: () => void;
-    onError?: (e: Error) => void;
-  }) {
-    // Simulate script loading in tests
-    if (onLoad) {
-      setTimeout(onLoad, 0);
-    }
-    return null;
-  };
-});
+// Mock Next.js modules
+jest.mock("next/script", () => require("@/__mocks__/next").Script);
+jest.mock("next/image", () => require("@/__mocks__/next").Image);
+jest.mock("next/link", () => require("@/__mocks__/next").Link);
 
-// Mock Next.js Image component
-jest.mock("next/image", () => {
-  return function MockImage({
-    src,
-    alt,
-    width,
-    height,
-    className,
-  }: {
-    src: string;
-    alt: string;
-    width?: number;
-    height?: number;
-    className?: string;
-  }) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={alt} width={width} height={height} className={className} />;
-  };
-});
-
-// Mock localStorage
-const localStorageMock = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
-};
-Object.defineProperty(window, "localStorage", { value: localStorageMock });
-
-// Mock fetch
-global.fetch = jest.fn();
-
-// Reset mocks before each test
+// Setup global mocks before each test
 beforeEach(() => {
-  jest.clearAllMocks();
-  localStorageMock.getItem.mockReturnValue(null);
+  setupGlobalMocks();
+});
+
+// Cleanup after each test
+afterEach(() => {
+  cleanupGlobalMocks();
 });
 
 export {};
