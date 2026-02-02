@@ -195,25 +195,53 @@ if [ -z "$REPO_URL" ] || [ -z "$ACCESS_TOKEN" ]; then\n\
   exit 1\n\
 fi\n\
 \n\
+# Extract owner/repo from REPO_URL\n\
+# Supports: https://github.com/owner/repo or https://github.com/owner/repo.git\n\
+REPO_PATH=$(echo "$REPO_URL" | sed -E "s|https://github.com/||" | sed -E "s|\\.git$||")\n\
+echo "Repository: $REPO_PATH"\n\
+\n\
+# Get runner registration token from GitHub API\n\
+echo "Getting runner registration token..."\n\
+REG_TOKEN_RESPONSE=$(curl -s -X POST \\\n\
+  -H "Authorization: token $ACCESS_TOKEN" \\\n\
+  -H "Accept: application/vnd.github.v3+json" \\\n\
+  "https://api.github.com/repos/${REPO_PATH}/actions/runners/registration-token")\n\
+\n\
+REG_TOKEN=$(echo "$REG_TOKEN_RESPONSE" | jq -r .token)\n\
+\n\
+if [ -z "$REG_TOKEN" ] || [ "$REG_TOKEN" = "null" ]; then\n\
+  echo "ERROR: Failed to get registration token"\n\
+  echo "Response: $REG_TOKEN_RESPONSE"\n\
+  echo ""\n\
+  echo "Make sure your ACCESS_TOKEN has repo scope permissions"\n\
+  exit 1\n\
+fi\n\
+\n\
+echo "Registration token obtained successfully"\n\
+\n\
 cd /actions-runner\n\
 \n\
 # Cleanup any previous registration\n\
-./config.sh remove --token "$ACCESS_TOKEN" 2>/dev/null || true\n\
+./config.sh remove --token "$REG_TOKEN" 2>/dev/null || true\n\
 \n\
 # Configure runner\n\
 ./config.sh \\\n\
   --url "$REPO_URL" \\\n\
-  --token "$ACCESS_TOKEN" \\\n\
+  --token "$REG_TOKEN" \\\n\
   --name "$RUNNER_NAME" \\\n\
   --work "$RUNNER_WORKDIR" \\\n\
   --labels "$LABELS" \\\n\
   --unattended \\\n\
   --replace\n\
 \n\
-# Cleanup function\n\
+# Cleanup function - get a new token for removal\n\
 cleanup() {\n\
   echo "Removing runner..."\n\
-  ./config.sh remove --token "$ACCESS_TOKEN"\n\
+  REMOVE_TOKEN=$(curl -s -X POST \\\n\
+    -H "Authorization: token $ACCESS_TOKEN" \\\n\
+    -H "Accept: application/vnd.github.v3+json" \\\n\
+    "https://api.github.com/repos/${REPO_PATH}/actions/runners/remove-token" | jq -r .token)\n\
+  ./config.sh remove --token "$REMOVE_TOKEN" || true\n\
 }\n\
 \n\
 trap cleanup EXIT\n\
