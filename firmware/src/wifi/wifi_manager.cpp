@@ -6,9 +6,14 @@
 #include "wifi_manager.h"
 #include "../display/matrix_display.h"
 #include "../discovery/mdns_manager.h"
+#include "../debug/remote_logger.h"
 #include <esp_heap_caps.h>
 
 namespace {
+// Check if we have sufficient heap to start mDNS service
+// mDNS uses network buffers which can be allocated from general heap (internal or PSRAM)
+// Unlike TLS/HTTPS which requires internal RAM for DMA, mDNS is less strict
+// Threshold: 20KB contiguous block is small enough that internal RAM should satisfy it
 bool mdnsMemoryOk() {
     const size_t free_heap = ESP.getFreeHeap();
     const size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
@@ -72,10 +77,24 @@ void WiFiManager::setupWiFi() {
         matrix_display->setScrollSpeedMs(config_manager->getScrollSpeedMs());
     }
 
+    // Clean up any stale scan state before starting new scan
+    int16_t scan_status = WiFi.scanComplete();
+    if (scan_status == WIFI_SCAN_RUNNING) {
+        Serial.println("[WIFI] Cleaning up running scan...");
+    }
+    WiFi.scanDelete();  // Clear any previous scan results
+    
+    // WiFi should already be in STA mode from initWiFiAndImprov()
+    // Only set mode if not already in STA mode
+    wifi_mode_t current_mode = WiFi.getMode();
+    if (current_mode != WIFI_STA && current_mode != WIFI_AP_STA) {
+        Serial.println("[WIFI] Setting WiFi to STA mode...");
+        WiFi.mode(WIFI_STA);
+        vTaskDelay(pdMS_TO_TICKS(100));  // Brief delay for mode switch
+    }
+
     // Start async network scan (non-blocking)
     Serial.println("[WIFI] Starting async network scan...");
-    WiFi.mode(WIFI_STA);
-    vTaskDelay(pdMS_TO_TICKS(100));  // Brief delay for mode switch
     int16_t result = WiFi.scanNetworks(true, false);  // Async scan, no hidden networks
     if (result == WIFI_SCAN_RUNNING) {
         Serial.println("[WIFI] Network scan started (async)");
@@ -114,6 +133,25 @@ void WiFiManager::setupWiFi() {
         } else {
             // Still running, yield to other tasks
             vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    // If async scan failed, try blocking scan as fallback
+    if (!scan_completed) {
+        Serial.println("[WIFI] Async scan failed, trying blocking scan...");
+        WiFi.scanDelete();  // Clear any partial results
+        int blocking_result = WiFi.scanNetworks(false, false);  // Blocking scan
+        if (blocking_result > 0) {
+            Serial.printf("[WIFI] Blocking scan found %d networks\n", blocking_result);
+            scan_completed = true;
+            
+            // List networks found
+            int max_to_show = (blocking_result < 10) ? blocking_result : 10;
+            for (int i = 0; i < max_to_show; i++) {
+                Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+            }
+        } else {
+            Serial.printf("[WIFI] Blocking scan also failed: %d\n", blocking_result);
         }
     }
 
@@ -188,12 +226,15 @@ void WiFiManager::setupWiFi() {
         }
         
         Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+        RLOG_INFO("WiFi", "Connected to network, IP: %s, RSSI: %d dBm",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
         // Note: hostname shown later after mDNS is initialized
         if (matrix_display) {
             matrix_display->showUnconfigured(WiFi.localIP().toString(), "");
         }
     } else {
         Serial.println("[WIFI] Connection failed");
+        RLOG_WARN("WiFi", "Connection failed after %d attempts", attempts);
         startAPMode("Connection failed");
     }
 }
@@ -220,6 +261,12 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
     if (state_changed) {
         app_state->wifi_connected = is_connected;
         Serial.printf("[WIFI] State synchronized: %s\n", is_connected ? "connected" : "disconnected");
+        if (is_connected) {
+            RLOG_INFO("WiFi", "Reconnected, IP: %s, RSSI: %d dBm",
+                      WiFi.localIP().toString().c_str(), WiFi.RSSI());
+        } else {
+            RLOG_WARN("WiFi", "Connection lost");
+        }
     }
 
     if (!is_connected && !config_manager->getWiFiSSID().isEmpty()) {
@@ -234,7 +281,12 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             startAPMode("Multiple reconnection attempts failed");
         }
         
-        WiFi.reconnect();
+        // Use WiFi.begin() instead of WiFi.reconnect() for reliability
+        // WiFi.reconnect() only works if there was a previous successful connection
+        // If the network was never found (scan failed), reconnect() will fail
+        String ssid = config_manager->getWiFiSSID();
+        String password = config_manager->getWiFiPassword();
+        WiFi.begin(ssid.c_str(), password.c_str());
         
         if (mdns_manager && mdns_manager->isInitialized()) {
             Serial.println("[MDNS] Stopping mDNS due to WiFi disconnect...");

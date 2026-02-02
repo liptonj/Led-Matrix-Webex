@@ -327,12 +327,16 @@
             <section id="webex" class="tab-content">
                 <div class="card">
                     <h2>Webex OAuth Configuration</h2>
-                    <p class="help-text">Authorization details are below. Credentials are in Advanced.</p>
+                    <p class="help-text">Connect your Webex account via display.5ls.us authorization service.</p>
                     <hr>
                     <div class="auth-section">
                         <h3>Authorization Status</h3>
                         <p>Status: <span id="webex-auth-status" class="value">Not connected</span></p>
+                        <p class="help-text" id="webex-auth-help">Click the button below to authorize via display.5ls.us</p>
                         <button id="webex-auth-btn" class="btn">Connect to Webex</button>
+                        <p class="help-text" style="margin-top: 10px; font-size: 0.85em;">
+                            Pairing Code: <strong id="webex-pairing-code">------</strong>
+                        </p>
                     </div>
                 </div>
 
@@ -481,6 +485,10 @@
                         <div class="status-item">
                             <span class="label">WiFi Signal:</span>
                             <span id="wifi-signal" class="value">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="label">Saved SSID:</span>
+                            <span id="wifi-ssid-saved" class="value">--</span>
                         </div>
                     </div>
                 </div>

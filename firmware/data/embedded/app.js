@@ -336,6 +336,10 @@ async function loadDisplayStatus() {
         const response = await fetch(CONFIG.statusEndpoint);
         const data = await response.json();
         
+        // Store status data for use by other functions
+        state.status = data;
+        state.webex_authenticated = data.webex_authenticated;
+        
         // Update status tab
         document.getElementById('display-status').textContent = data.webex_status || '--';
         document.getElementById('camera-status').textContent = data.camera_on ? 'On' : 'Off';
@@ -382,6 +386,23 @@ async function loadDisplayStatus() {
         updateConnectionItem('conn-wifi', data.wifi_connected); // from common.js
         updateConnectionItem('conn-webex', data.webex_authenticated); // from common.js
         updateConnectionItem('conn-mqtt', data.mqtt_connected); // from common.js
+        
+        // WiFi SSID status
+        const wifiSsidSavedEl = document.getElementById('wifi-ssid-saved');
+        if (wifiSsidSavedEl) {
+            if (data.wifi_ssid_saved && data.wifi_ssid) {
+                wifiSsidSavedEl.textContent = data.wifi_ssid;
+                wifiSsidSavedEl.style.color = '#6cc04a'; // green
+            } else {
+                wifiSsidSavedEl.textContent = 'Not configured';
+                wifiSsidSavedEl.style.color = '#ff5c5c'; // red
+            }
+        }
+        // Pre-fill WiFi SSID input with saved value
+        const wifiSsidInput = document.getElementById('wifi-ssid');
+        if (wifiSsidInput && data.wifi_ssid && !wifiSsidInput.value) {
+            wifiSsidInput.value = data.wifi_ssid;
+        }
         
     } catch (error) {
         console.error('Failed to load status:', error);
@@ -434,16 +455,29 @@ async function loadDisplayConfig() {
         
         // Auth status - check actual authentication state (Supabase or local)
         const authStatus = document.getElementById('webex-auth-status');
+        const authHelp = document.getElementById('webex-auth-help');
+        const authBtn = document.getElementById('webex-auth-btn');
         if (state.webex_authenticated) {
             // Connected via Supabase OAuth or local tokens
-            authStatus.textContent = 'Connected';
+            authStatus.textContent = 'Connected via display.5ls.us';
             authStatus.style.color = '#6cc04a';
+            if (authHelp) authHelp.textContent = 'Your Webex account is authorized.';
+            if (authBtn) authBtn.textContent = 'Re-authorize Webex';
         } else if (state.displayConfig.has_webex_credentials) {
             authStatus.textContent = 'Not authorized';
             authStatus.style.color = '#ffcc00';
+            if (authHelp) authHelp.textContent = 'Click below to authorize via display.5ls.us';
+            if (authBtn) authBtn.textContent = 'Connect to Webex';
         } else {
             authStatus.textContent = 'Not configured';
             authStatus.style.color = '#ff5c5c';
+            if (authHelp) authHelp.textContent = 'Click below to authorize via display.5ls.us';
+            if (authBtn) authBtn.textContent = 'Connect to Webex';
+        }
+        // Display pairing code for reference
+        const pairingCodeEl = document.getElementById('webex-pairing-code');
+        if (pairingCodeEl && state.status && state.status.pairing_code) {
+            pairingCodeEl.textContent = state.status.pairing_code;
         }
 
         const clientIdMask = document.getElementById('webex-client-id-mask');

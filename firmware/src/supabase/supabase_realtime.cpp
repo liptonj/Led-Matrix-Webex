@@ -13,6 +13,7 @@
 #include "../common/ca_certs.h"
 #include "../common/url_utils.h"
 #include "../config/config_manager.h"
+#include "../debug/remote_logger.h"
 
 extern ConfigManager config_manager;
 
@@ -589,6 +590,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
 
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         Serial.println("[REALTIME] Connected");
+        RLOG_INFO("Realtime", "WebSocket connected to Supabase");
         instance->_connected = true;
         instance->_connecting = false;
         instance->_loggedFirstMessage = false;
@@ -653,6 +655,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_CLOSED) {
         if (instance->_connected) {
             Serial.println("[REALTIME] Disconnected (was connected)");
+            RLOG_WARN("Realtime", "WebSocket disconnected");
         } else {
             Serial.println("[REALTIME] Disconnected (was not connected)");
         }

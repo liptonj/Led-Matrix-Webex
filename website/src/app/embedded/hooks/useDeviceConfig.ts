@@ -126,6 +126,7 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog }: UseDev
         if (response.data) {
           const config = asDeviceConfig(response.data);
           setDeviceConfig(config);
+          // Sync all config values back from device response
           if (config.brightness !== undefined) setBrightness(config.brightness);
           if (config.scroll_speed_ms !== undefined) setScrollSpeedMs(config.scroll_speed_ms);
           if (config.page_interval_ms !== undefined) setPageIntervalMs(config.page_interval_ms);
@@ -136,8 +137,15 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog }: UseDev
           if (config.time_color) setTimeColor(config.time_color);
           if (config.name_color) setNameColor(config.name_color);
           if (config.metric_color) setMetricColor(config.metric_color);
+          // Sync MQTT settings from device response
+          if (config.mqtt_broker !== undefined) setMqttBroker(config.mqtt_broker);
+          if (config.mqtt_port !== undefined) setMqttPort(config.mqtt_port);
+          if (config.mqtt_username !== undefined) setMqttUsername(config.mqtt_username);
           if (config.has_mqtt_password !== undefined) setHasMqttPassword(config.has_mqtt_password);
-          setMqttPassword('');
+          if (config.mqtt_topic !== undefined) setMqttTopic(config.mqtt_topic || 'meraki/v1/mt/#');
+          if (config.display_sensor_mac !== undefined) setDisplaySensorMac(config.display_sensor_mac);
+          if (config.display_metric !== undefined) setDisplayMetric(config.display_metric || 'tvoc');
+          setMqttPassword(''); // Clear password field after save
         }
       } else addLog(`Failed to save: ${response.error || 'Unknown error'}`);
     } catch (error) { addLog(`Save failed: ${error instanceof Error ? error.message : 'Unknown error'}`); }
@@ -153,7 +161,7 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog }: UseDev
     finally { setIsRebooting(false); }
   }, [isPeerConnected, sendCommand, addLog]);
 
-  // Fetch device config
+  // Fetch device config - sync all values from device to app state
   const fetchDeviceConfig = useCallback(async () => {
     if (!isPeerConnected) return;
     try {
@@ -162,25 +170,36 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog }: UseDev
       if (response.success && response.data) {
         const config = asDeviceConfig(response.data);
         setDeviceConfig(config);
+        
+        // Display settings - use !== undefined to handle 0 and false values
         if (config.brightness !== undefined) setBrightness(config.brightness);
         if (config.scroll_speed_ms !== undefined) setScrollSpeedMs(config.scroll_speed_ms);
         if (config.page_interval_ms !== undefined) setPageIntervalMs(config.page_interval_ms);
         if (config.display_pages) setDisplayPages(config.display_pages);
         else if (config.sensor_page_enabled !== undefined) setDisplayPages(config.sensor_page_enabled ? 'rotate' : 'status');
         if (config.status_layout) setStatusLayout(config.status_layout);
+        
+        // Color settings - only update if present (empty string is not valid)
         if (config.date_color) setDateColor(config.date_color);
         if (config.time_color) setTimeColor(config.time_color);
         if (config.name_color) setNameColor(config.name_color);
         if (config.metric_color) setMetricColor(config.metric_color);
-        if (config.device_name) setDeviceName(config.device_name);
-        if (config.display_name) setManualDisplayName(config.display_name);
-        if (config.mqtt_broker) setMqttBroker(config.mqtt_broker);
+        
+        // Device/display names - sync from device (can be empty)
+        if (config.device_name !== undefined) setDeviceName(config.device_name);
+        if (config.display_name !== undefined) setManualDisplayName(config.display_name || 'User');
+        
+        // MQTT settings - always sync from device (can be empty strings)
+        if (config.mqtt_broker !== undefined) setMqttBroker(config.mqtt_broker);
         if (config.mqtt_port !== undefined) setMqttPort(config.mqtt_port);
         if (config.mqtt_username !== undefined) setMqttUsername(config.mqtt_username);
         if (config.has_mqtt_password !== undefined) setHasMqttPassword(config.has_mqtt_password);
-        if (config.mqtt_topic) setMqttTopic(config.mqtt_topic);
-        if (config.display_sensor_mac) setDisplaySensorMac(config.display_sensor_mac);
-        if (config.display_metric) setDisplayMetric(config.display_metric);
+        if (config.mqtt_topic !== undefined) setMqttTopic(config.mqtt_topic || 'meraki/v1/mt/#');
+        
+        // Sensor settings - sync from device (can be empty)
+        if (config.display_sensor_mac !== undefined) setDisplaySensorMac(config.display_sensor_mac);
+        if (config.display_metric !== undefined) setDisplayMetric(config.display_metric || 'tvoc');
+        
         addLog('Device config loaded');
       }
     } catch (error) {

@@ -31,12 +31,11 @@ export const CONFIG = {
 } as const;
 
 /**
- * Application version from environment or package.json.
- * Imported dynamically in the component to avoid circular dependencies.
+ * Application version from environment.
+ * Returns undefined if not set, allowing fallback to package.json in consumer.
  */
-export const getAppVersion = (): string => {
-  // Dynamic import would be needed for package.json, so we rely on env variable
-  return process.env.NEXT_PUBLIC_APP_VERSION || 'unknown';
+export const getAppVersion = (): string | undefined => {
+  return process.env.NEXT_PUBLIC_APP_VERSION || undefined;
 };
 
 /**

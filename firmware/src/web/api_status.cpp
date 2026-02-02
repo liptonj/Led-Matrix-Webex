@@ -26,6 +26,11 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     JsonDocument doc;
 
     doc["wifi_connected"] = app_state->wifi_connected;
+    // WiFi configuration status for WebUI
+    String wifi_ssid = config_manager->getWiFiSSID();
+    doc["wifi_ssid"] = wifi_ssid.isEmpty() ? "" : wifi_ssid;
+    doc["wifi_ssid_saved"] = !wifi_ssid.isEmpty();
+    doc["has_wifi_password"] = !config_manager->getWiFiPassword().isEmpty();
     doc["webex_authenticated"] = app_state->webex_authenticated;
     doc["pairing_code"] = pairing_manager.getCode();
     doc["embedded_app_connected"] = app_state->embedded_app_connected;

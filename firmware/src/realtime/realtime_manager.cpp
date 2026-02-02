@@ -255,6 +255,20 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
             cmd.command = record["command"].as<String>();
             cmd.created_at = record["created_at"].as<String>();
 
+            // REGRESSION FIX: Validate command ID before processing
+            cmd.id.trim();
+            if (cmd.id.isEmpty() || cmd.id.length() < 8) {
+                Serial.printf("[REALTIME] Broadcast command has invalid ID: '%s'\n", cmd.id.c_str());
+                return;
+            }
+            
+            // Validate command name
+            cmd.command.trim();
+            if (cmd.command.isEmpty()) {
+                Serial.printf("[REALTIME] Broadcast command %s has empty command name\n", cmd.id.c_str());
+                return;
+            }
+
             JsonObject cmdPayload = record["payload"];
             if (!cmdPayload.isNull()) {
                 serializeJson(cmdPayload, cmd.payload);
@@ -361,6 +375,20 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         cmd.id = data["id"].as<String>();
         cmd.command = data["command"].as<String>();
         cmd.created_at = data["created_at"].as<String>();
+
+        // REGRESSION FIX: Validate command ID before processing
+        cmd.id.trim();
+        if (cmd.id.isEmpty() || cmd.id.length() < 8) {
+            Serial.printf("[REALTIME] INSERT command has invalid ID: '%s'\n", cmd.id.c_str());
+            return;
+        }
+        
+        // Validate command name
+        cmd.command.trim();
+        if (cmd.command.isEmpty()) {
+            Serial.printf("[REALTIME] INSERT command %s has empty command name\n", cmd.id.c_str());
+            return;
+        }
 
         if (commandProcessor.wasRecentlyProcessed(cmd.id)) {
             Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());

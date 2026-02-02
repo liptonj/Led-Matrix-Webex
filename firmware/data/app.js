@@ -171,6 +171,33 @@ function updateConnectionIndicators(data) {
     updateConnectionItem('conn-wifi', data.wifi_connected); // from common.js
     updateConnectionItem('conn-webex', data.webex_authenticated); // from common.js
     updateConnectionItem('conn-mqtt', data.mqtt_connected); // from common.js
+    
+    // WiFi SSID status
+    const wifiSsidSavedEl = document.getElementById('wifi-ssid-saved');
+    if (wifiSsidSavedEl) {
+        if (data.wifi_ssid_saved && data.wifi_ssid) {
+            wifiSsidSavedEl.textContent = data.wifi_ssid;
+            wifiSsidSavedEl.style.color = '#6cc04a'; // green
+        } else {
+            wifiSsidSavedEl.textContent = 'Not configured';
+            wifiSsidSavedEl.style.color = '#ff5c5c'; // red
+        }
+    }
+    const wifiPasswordStatus = document.getElementById('wifi-password-status');
+    if (wifiPasswordStatus) {
+        if (data.has_wifi_password) {
+            wifiPasswordStatus.textContent = 'Saved';
+            wifiPasswordStatus.style.color = '#6cc04a'; // green
+        } else {
+            wifiPasswordStatus.textContent = 'Not set';
+            wifiPasswordStatus.style.color = '#ff5c5c'; // red
+        }
+    }
+    // Pre-fill WiFi SSID input with saved value
+    const wifiSsidInput = document.getElementById('wifi-ssid');
+    if (wifiSsidInput && data.wifi_ssid && !wifiSsidInput.value) {
+        wifiSsidInput.value = data.wifi_ssid;
+    }
 }
 
 // Load Configuration
@@ -272,16 +299,20 @@ async function loadConfig() {
 
         // Update auth status - check actual authentication state (Supabase or local)
         const authStatus = document.getElementById('webex-auth-status');
+        const redirectNote = document.getElementById('webex-redirect-note');
         if (config.webex_authenticated) {
             // Connected via Supabase OAuth or local tokens
-            authStatus.textContent = 'Connected';
+            authStatus.textContent = 'Connected via display.5ls.us';
             authStatus.style.color = '#6cc04a';
+            if (redirectNote) redirectNote.textContent = 'Your Webex account is authorized.';
         } else if (config.has_webex_credentials) {
             authStatus.textContent = 'Credentials saved, not authorized';
             authStatus.style.color = '#ffcc00';
+            if (redirectNote) redirectNote.textContent = 'Click above to authorize via display.5ls.us';
         } else {
             authStatus.textContent = 'Not configured';
             authStatus.style.color = '#ff5c5c';
+            if (redirectNote) redirectNote.textContent = 'Click above to authorize via display.5ls.us';
         }
 
     } catch (error) {

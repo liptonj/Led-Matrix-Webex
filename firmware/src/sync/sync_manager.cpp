@@ -178,9 +178,29 @@ void SyncManager::pollCommands() {
     int count = supabaseClient.pollCommands(commands, MAX_COMMANDS);
 
     for (int i = 0; i < count; i++) {
-        if (commands[i].valid) {
-            handleSupabaseCommand(commands[i]);
+        // REGRESSION FIX: Additional validation before command processing
+        if (!commands[i].valid) {
+            Serial.printf("[SYNC] Skipping invalid command at index %d\n", i);
+            continue;
         }
+        
+        // Validate command ID (redundant check, but defensive)
+        if (commands[i].id.isEmpty() || commands[i].id.length() < 8) {
+            Serial.printf("[SYNC] Skipping command with invalid ID: '%s'\n", 
+                         commands[i].id.c_str());
+            continue;
+        }
+        
+        // Validate command name
+        if (commands[i].command.isEmpty()) {
+            Serial.printf("[SYNC] Skipping command %s with empty command name\n", 
+                         commands[i].id.c_str());
+            continue;
+        }
+        
+        Serial.printf("[SYNC] Processing command: id=%s cmd=%s\n", 
+                     commands[i].id.c_str(), commands[i].command.c_str());
+        handleSupabaseCommand(commands[i]);
     }
 }
 
@@ -205,6 +225,11 @@ bool provisionDeviceWithSupabase() {
         return true;
     }
     if (!app_state.wifi_connected) {
+        return false;
+    }
+    // Guard: Check if supabaseClient is initialized before attempting provisioning
+    if (!supabaseClient.isInitialized()) {
+        Serial.println("[SUPABASE] Client not initialized - skipping provisioning");
         return false;
     }
     if (app_state.supabase_disabled || app_state.supabase_blacklisted || app_state.supabase_deleted) {

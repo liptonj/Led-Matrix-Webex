@@ -101,6 +101,19 @@
         <!-- WiFi Tab -->
         <section id="wifi" class="tab-content">
             <div class="card">
+                <h2>WiFi Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="label">Saved SSID:</span>
+                        <span id="wifi-ssid-saved" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Password:</span>
+                        <span id="wifi-password-status" class="value">--</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
                 <h2>WiFi Configuration</h2>
                 <button id="scan-wifi" class="btn">Scan Networks</button>
                 <div id="wifi-networks" class="network-list"></div>

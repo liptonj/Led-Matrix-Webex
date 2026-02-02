@@ -55,6 +55,7 @@ extern MatrixDisplay matrix_display;
 extern WebServerManager web_server;
 extern WiFiManager wifi_manager;
 extern AppState app_state;
+extern PairingManager pairing_manager;
 
 // Firmware version from build
 #ifndef FIRMWARE_VERSION
@@ -118,21 +119,27 @@ void HeapTrendMonitor::logIfTrending(unsigned long now) {
 void logHeapStatus(const char* label) {
     uint32_t freeHeap = ESP.getFreeHeap();
     uint32_t minHeap = ESP.getMinFreeHeap();
-    uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    Serial.printf("[HEAP] %s free=%u min=%u largest=%u\n",
-                  label, freeHeap, minHeap, largestBlock);
+    // Log both internal (for TLS operations) and total (includes PSRAM) for complete diagnostics
+    uint32_t largestInternal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    uint32_t largestTotal = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    Serial.printf("[HEAP] %s free=%u min=%u largest_internal=%u largest_total=%u\n",
+                  label, freeHeap, minHeap, largestInternal, largestTotal);
 }
 
 bool hasSafeTlsHeap(uint32_t min_free, uint32_t min_block) {
+    // TLS requires contiguous internal RAM (not PSRAM) for DMA operations
+    // MALLOC_CAP_INTERNAL excludes PSRAM, ensuring we check actual internal SRAM availability
     return ESP.getFreeHeap() >= min_free &&
-           heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) >= min_block;
+           heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= min_block;
 }
 
 void handleLowHeapRecovery(LoopContext& ctx) {
     static unsigned long lowHeapSince = 0;
     static unsigned long lastRecovery = 0;
     const uint32_t freeHeap = ESP.getFreeHeap();
-    const uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    // TLS/HTTPS operations require contiguous internal RAM, not PSRAM
+    // Use MALLOC_CAP_INTERNAL to detect actual internal SRAM fragmentation
+    const uint32_t largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     const uint32_t kLowHeapFree = 50000;    // Increased from 40000
     const uint32_t kLowHeapBlock = 30000;   // Increased from 25000
     const uint32_t kCriticalFree = 40000;   // Increased from 32000
@@ -243,6 +250,16 @@ void handleWiFiConnection(LoopContext& ctx) {
         // WiFi just connected (either first time or after disconnect)
         // Defer OTA checks to keep startup responsive.
         ctx.app_state->last_ota_check = ctx.current_time;
+
+        // Deferred Supabase client initialization
+        // Handles case where WiFi wasn't available at boot
+        if (!supabaseClient.isInitialized()) {
+            String supabase_url = config_manager.getSupabaseUrl();
+            if (!supabase_url.isEmpty()) {
+                Serial.println("[SUPABASE] Deferred initialization - WiFi now connected");
+                supabaseClient.begin(supabase_url, pairing_manager.getCode());
+            }
+        }
     }
     was_wifi_connected = ctx.app_state->wifi_connected;
 }
@@ -305,6 +322,11 @@ bool handleWebServer(LoopContext& ctx) {
         ctx.app_state->webex_authenticated = auth_ok;
         ctx.web_server->clearPendingOAuth();
         Serial.printf("[WEBEX] OAuth exchange %s\n", auth_ok ? "successful" : "failed");
+        if (auth_ok) {
+            RLOG_INFO("Webex", "OAuth authentication successful");
+        } else {
+            RLOG_ERROR("Webex", "OAuth authentication failed");
+        }
     }
 
     return false;

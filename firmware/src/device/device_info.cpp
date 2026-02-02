@@ -105,14 +105,12 @@ String DeviceInfo::buildConfigJson() {
     doc["pairing_code"] = pairing_manager.getCode();
     doc["tls_verify"] = config_manager.getTlsVerify();
 
-    // MQTT settings
-    if (config_manager.hasMQTTConfig()) {
-        doc["mqtt_broker"] = config_manager.getMQTTBroker();
-        doc["mqtt_port"] = config_manager.getMQTTPort();
-        doc["mqtt_username"] = config_manager.getMQTTUsername();
-        doc["has_mqtt_password"] = !config_manager.getMQTTPassword().isEmpty();
-        doc["mqtt_topic"] = config_manager.getMQTTTopic();
-    }
+    // MQTT settings - always include so embedded app can show current state
+    doc["mqtt_broker"] = config_manager.getMQTTBroker();
+    doc["mqtt_port"] = config_manager.getMQTTPort();
+    doc["mqtt_username"] = config_manager.getMQTTUsername();
+    doc["has_mqtt_password"] = !config_manager.getMQTTPassword().isEmpty();
+    doc["mqtt_topic"] = config_manager.getMQTTTopic();
 
     // Sensor settings
     doc["display_sensor_mac"] = config_manager.getDisplaySensorMac();

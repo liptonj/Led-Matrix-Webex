@@ -11,6 +11,7 @@
 #include "../config/config_manager.h"
 #include "../common/secure_client_config.h"
 #include "../supabase/supabase_realtime.h"
+#include "../debug/remote_logger.h"
 #include "../app_state.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -162,6 +163,7 @@ bool OTAManager::checkUpdateFromManifest() {
     if (update_available) {
         Serial.printf("[OTA] Update available: %s -> %s\n",
                       current_version.c_str(), latest_version.c_str());
+        RLOG_INFO("OTA", "Update available: %s -> %s", current_version.c_str(), latest_version.c_str());
         if (has_firmware) {
             Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
         } else {
@@ -169,6 +171,7 @@ bool OTAManager::checkUpdateFromManifest() {
         }
     } else {
         Serial.println("[OTA] Already on latest version");
+        RLOG_DEBUG("OTA", "Already on latest version: %s", current_version.c_str());
     }
 
     return true;  // Successfully checked manifest
@@ -243,26 +246,32 @@ bool OTAManager::performUpdate() {
         return false;
     }
 
+    RLOG_INFO("OTA", "Starting update from %s to %s", current_version.c_str(), latest_version.c_str());
+
     // Web assets are now embedded in firmware - only need to download firmware.bin
     // No more LMWB bundles or separate LittleFS downloads needed
     if (!firmware_url.isEmpty()) {
         Serial.println("[OTA] Downloading firmware (web assets embedded)");
         if (!downloadAndInstallBinary(firmware_url, U_FLASH, "firmware")) {
+            RLOG_ERROR("OTA", "Firmware download/install failed");
             return false;
         }
     } else if (!bundle_url.isEmpty()) {
         // Legacy fallback: support old LMWB bundles for transition period
         Serial.println("[OTA] Using legacy LMWB bundle for update");
         if (!downloadAndInstallBundle(bundle_url)) {
+            RLOG_ERROR("OTA", "Bundle download/install failed");
             return false;
         }
     } else {
         Serial.println("[OTA] Missing firmware URL");
+        RLOG_ERROR("OTA", "No firmware URL available for update");
         return false;
     }
 
     Serial.println("[OTA] Firmware update successful!");
     Serial.println("[OTA] Rebooting...");
+    RLOG_INFO("OTA", "Update to %s successful, rebooting", latest_version.c_str());
 
     // Show complete status
     matrix_display.showUpdatingProgress(latest_version, 100, "Rebooting...");
