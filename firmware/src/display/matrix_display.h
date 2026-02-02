@@ -214,7 +214,9 @@ private:
     void drawMicIcon(int x, int y, bool muted);
     void drawCallIcon(int x, int y);
     void drawWifiIcon(int x, int y, bool connected);
+    /// Draw text at position (size 1 font). Equivalent to drawSmallText.
     void drawText(int x, int y, const String& text, uint16_t color);
+    /// Draw text at position (size 1 font). Primary text drawing function.
     void drawSmallText(int x, int y, const String& text, uint16_t color);
     void drawCenteredText(int y, const String& text, uint16_t color);
     void drawScrollingText(int y, const String& text, uint16_t color, int max_width, const String& key);

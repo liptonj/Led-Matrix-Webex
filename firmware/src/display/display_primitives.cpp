@@ -32,7 +32,13 @@ void MatrixDisplay::drawStatusBorder(uint16_t color, uint8_t width) {
     }
 }
 
-void MatrixDisplay::drawText(int x, int y, const String& text, uint16_t color) {
+/**
+ * @brief Draw text at the specified position
+ * 
+ * On a 64x32 LED matrix, all text is effectively "small" (size 1).
+ * This function and drawSmallText are equivalent - use either.
+ */
+void MatrixDisplay::drawSmallText(int x, int y, const String& text, uint16_t color) {
     String safe_text = sanitizeSingleLine(text);
     dma_display->setTextColor(color);
     dma_display->setTextSize(1);
@@ -40,12 +46,9 @@ void MatrixDisplay::drawText(int x, int y, const String& text, uint16_t color) {
     dma_display->print(safe_text);
 }
 
-void MatrixDisplay::drawSmallText(int x, int y, const String& text, uint16_t color) {
-    String safe_text = sanitizeSingleLine(text);
-    dma_display->setTextColor(color);
-    dma_display->setTextSize(1);
-    dma_display->setCursor(x, y);
-    dma_display->print(safe_text);
+// Alias for backward compatibility - identical to drawSmallText
+void MatrixDisplay::drawText(int x, int y, const String& text, uint16_t color) {
+    drawSmallText(x, y, text, color);
 }
 
 void MatrixDisplay::drawCenteredText(int y, const String& text, uint16_t color) {
