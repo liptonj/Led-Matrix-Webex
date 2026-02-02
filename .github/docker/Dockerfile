@@ -182,6 +182,13 @@ ACCESS_TOKEN=${ACCESS_TOKEN:-""}\n\
 LABELS=${LABELS:-"self-hosted,linux,x64,docker"}\n\
 RUNNER_WORKDIR=${RUNNER_WORKDIR:-"/tmp/github-runner"}\n\
 RUNNER_SCOPE=${RUNNER_SCOPE:-"repo"}\n\
+RUN_AS_ROOT=${RUN_AS_ROOT:-"false"}\n\
+\n\
+# Allow running as root if RUN_AS_ROOT is set\n\
+if [ "$RUN_AS_ROOT" = "true" ] || [ "$RUN_AS_ROOT" = "1" ]; then\n\
+  export RUNNER_ALLOW_RUNASROOT=1\n\
+  echo "Running as root (RUNNER_ALLOW_RUNASROOT=1)"\n\
+fi\n\
 \n\
 if [ -z "$REPO_URL" ] || [ -z "$ACCESS_TOKEN" ]; then\n\
   echo "ERROR: REPO_URL and ACCESS_TOKEN must be set"\n\

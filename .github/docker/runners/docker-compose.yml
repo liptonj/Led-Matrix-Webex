@@ -1,0 +1,90 @@
+# GitHub Actions Self-Hosted Runners
+# Runs 7 parallel runners in Docker containers for concurrent job execution
+#
+# Setup:
+#   1. cp .env.example .env && nano .env  (add your GitHub PAT)
+#   2. docker-compose up -d
+#
+# Docker Compose automatically reads .env from this directory.
+# Containers auto-restart on reboot (restart: always).
+#
+# Networking:
+#   - Bridge network (172.28.0.0/16) with outbound internet access
+#   - Runners communicate with GitHub API over HTTPS
+#   - Job containers spawned via Docker socket (sibling containers)
+
+version: "3.8"
+
+x-runner-common: &runner-common
+  image: ghcr.io/liptonj/led-matrix-builder:latest
+  entrypoint: ["/entrypoint-runner.sh"]
+  restart: always
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  networks:
+    - runners
+  environment: &runner-env
+    REPO_URL: https://github.com/liptonj/Led-Matrix-Webex
+    ACCESS_TOKEN: ${GITHUB_PAT}
+    RUNNER_WORKDIR: /tmp/github-runner
+    LABELS: self-hosted,linux,x64,docker
+    RUNNER_SCOPE: repo
+    DISABLE_AUTO_UPDATE: "true"
+    RUN_AS_ROOT: "true"
+
+networks:
+  runners:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+  runner-1:
+    <<: *runner-common
+    container_name: gh-runner-1
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-1
+
+  runner-2:
+    <<: *runner-common
+    container_name: gh-runner-2
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-2
+
+  runner-3:
+    <<: *runner-common
+    container_name: gh-runner-3
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-3
+
+  runner-4:
+    <<: *runner-common
+    container_name: gh-runner-4
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-4
+
+  runner-5:
+    <<: *runner-common
+    container_name: gh-runner-5
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-5
+
+  runner-6:
+    <<: *runner-common
+    container_name: gh-runner-6
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-6
+
+  runner-7:
+    <<: *runner-common
+    container_name: gh-runner-7
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: docker-runner-7
