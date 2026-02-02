@@ -209,6 +209,13 @@ private:
 
     // Drawing helpers
     void drawLargeStatusCircle(int center_x, int center_y, uint16_t color);
+    
+    /// Generic bitmap drawing function with bounds checking
+    void drawBitmap(int x, int y, const uint8_t* bitmap, int width, int height, uint16_t color);
+    /// Draw strikethrough X over an icon area (for "off"/"muted" states)
+    void drawIconStrikethrough(int x, int y, int width, int height, uint16_t color);
+    
+    // Icon drawing functions (use drawBitmap internally)
     void drawStatusIcon(int x, int y, const String& status);
     void drawCameraIcon(int x, int y, bool on);
     void drawMicIcon(int x, int y, bool muted);
