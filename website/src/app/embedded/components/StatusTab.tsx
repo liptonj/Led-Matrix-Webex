@@ -13,6 +13,7 @@ export interface StatusTabProps {
   normalizedStatus: WebexStatus;
   statusColor: string;
   webexReady: boolean;
+  webexNeedsAuth: boolean;
   cameraOn: boolean;
   micMuted: boolean;
   rtStatus: RealtimeStatus;
@@ -38,7 +39,7 @@ const statusColorClasses: Record<string, string> = {
   offline: 'bg-status-offline',
 };
 
-export const StatusTab = memo(function StatusTab({ displayName, statusToDisplay, normalizedStatus, statusColor, webexReady, cameraOn, micMuted, rtStatus, isPeerConnected, isPaired, lastDeviceSeenMs, deviceStatus, activityLog, onStatusChange, onToggleCamera, onToggleMic, onRefreshDisplay, formatRelativeTime }: StatusTabProps) {
+export const StatusTab = memo(function StatusTab({ displayName, statusToDisplay, normalizedStatus, statusColor, webexReady, webexNeedsAuth, cameraOn, micMuted, rtStatus, isPeerConnected, isPaired, lastDeviceSeenMs, deviceStatus, activityLog, onStatusChange, onToggleCamera, onToggleMic, onRefreshDisplay, formatRelativeTime }: StatusTabProps) {
   const avatarBgClass = statusColorClasses[statusColor] || 'bg-status-offline';
   
   return (
@@ -77,6 +78,7 @@ export const StatusTab = memo(function StatusTab({ displayName, statusToDisplay,
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div><div className="text-[var(--color-text-muted)]">Realtime</div><div>{rtStatus}</div></div>
           <div><div className="text-[var(--color-text-muted)]">Display connected</div><div>{isPeerConnected ? 'Yes' : 'No'}</div></div>
+          <div><div className="text-[var(--color-text-muted)]">Webex</div><div className={webexNeedsAuth ? 'text-yellow-600' : 'text-green-600'}>{webexNeedsAuth ? 'Not connected' : 'Connected'}</div></div>
           <div><div className="text-[var(--color-text-muted)]">Last seen</div><div>{formatRelativeTime(lastDeviceSeenMs)}</div></div>
           <div><div className="text-[var(--color-text-muted)]">IP address</div><div>{deviceStatus.ip_address || 'Unknown'}</div></div>
         </div>

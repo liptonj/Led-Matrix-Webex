@@ -4,8 +4,8 @@
  * Validates device HMAC + JWT and returns a Webex authorization URL.
  */
 
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
+import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
@@ -73,7 +73,8 @@ serve(async (req: Request) => {
     let pairingCode = payload.pairing_code;
     let serialNumber = payload.serial_number;
     let deviceId = payload.device_id ?? "";
-    let ts = "";
+    // Always set a timestamp for state validation (app tokens need this for callback validation)
+    let ts = String(Math.floor(Date.now() / 1000));
     let sig = "";
 
     if (payload.token_type === "device") {

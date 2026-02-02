@@ -31,18 +31,24 @@ export default function WebexCallbackPage() {
           const stateDecoded = atob(state.replace(/-/g, '+').replace(/_/g, '/'));
           const stateObj = JSON.parse(stateDecoded);
           
-          // Verify required state fields
-          if (!stateObj.token || !stateObj.ts) {
+          // Verify required state fields (token is always required)
+          if (!stateObj.token) {
             throw new Error('Invalid state parameter structure');
           }
 
-          // Verify timestamp is recent (within 10 minutes)
-          const stateTimestamp = parseInt(stateObj.ts, 10);
-          const now = Math.floor(Date.now() / 1000);
-          if (isNaN(stateTimestamp) || Math.abs(now - stateTimestamp) > 600) {
-            throw new Error('State parameter expired or invalid');
+          // Verify timestamp if present (app tokens may have empty ts for legacy compatibility)
+          if (stateObj.ts) {
+            const stateTimestamp = parseInt(stateObj.ts, 10);
+            const now = Math.floor(Date.now() / 1000);
+            if (!isNaN(stateTimestamp) && Math.abs(now - stateTimestamp) > 600) {
+              throw new Error('State parameter expired');
+            }
           }
-        } catch {
+        } catch (parseErr) {
+          // Re-throw specific errors, wrap generic parse errors
+          if (parseErr instanceof Error && parseErr.message.includes('State parameter')) {
+            throw parseErr;
+          }
           throw new Error('Invalid or expired authorization state. Please try again.');
         }
 
