@@ -161,7 +161,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install GitHub Actions Runner
-ARG RUNNER_VERSION="2.321.0"
+ARG RUNNER_VERSION="2.331.0"
 RUN mkdir -p /actions-runner && cd /actions-runner && \
     curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
       -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
