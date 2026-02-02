@@ -146,6 +146,78 @@ fi\n\
 ' > /usr/local/bin/restore-node-modules && chmod +x /usr/local/bin/restore-node-modules
 
 # =============================================================================
+# Deno (for Supabase Edge Functions tests)
+# =============================================================================
+RUN curl -fsSL https://deno.land/install.sh | sh && \
+    mv /root/.deno/bin/deno /usr/local/bin/
+
+# =============================================================================
+# GitHub Actions Runner Support (for self-hosted runner containers)
+# =============================================================================
+# Install dependencies required by GitHub Actions Runner
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libicu70 \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install GitHub Actions Runner
+ARG RUNNER_VERSION="2.321.0"
+RUN mkdir -p /actions-runner && cd /actions-runner && \
+    curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz \
+      -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
+    tar xzf ./actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz && \
+    rm actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz
+
+# Install runner dependencies
+RUN cd /actions-runner && ./bin/installdependencies.sh
+
+# Create entrypoint script for runner
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+# Configuration\n\
+RUNNER_NAME=${RUNNER_NAME:-"docker-runner"}\n\
+REPO_URL=${REPO_URL:-""}\n\
+ACCESS_TOKEN=${ACCESS_TOKEN:-""}\n\
+LABELS=${LABELS:-"self-hosted,linux,x64,docker"}\n\
+RUNNER_WORKDIR=${RUNNER_WORKDIR:-"/tmp/github-runner"}\n\
+RUNNER_SCOPE=${RUNNER_SCOPE:-"repo"}\n\
+\n\
+if [ -z "$REPO_URL" ] || [ -z "$ACCESS_TOKEN" ]; then\n\
+  echo "ERROR: REPO_URL and ACCESS_TOKEN must be set"\n\
+  exit 1\n\
+fi\n\
+\n\
+cd /actions-runner\n\
+\n\
+# Cleanup any previous registration\n\
+./config.sh remove --token "$ACCESS_TOKEN" 2>/dev/null || true\n\
+\n\
+# Configure runner\n\
+./config.sh \\\n\
+  --url "$REPO_URL" \\\n\
+  --token "$ACCESS_TOKEN" \\\n\
+  --name "$RUNNER_NAME" \\\n\
+  --work "$RUNNER_WORKDIR" \\\n\
+  --labels "$LABELS" \\\n\
+  --unattended \\\n\
+  --replace\n\
+\n\
+# Cleanup function\n\
+cleanup() {\n\
+  echo "Removing runner..."\n\
+  ./config.sh remove --token "$ACCESS_TOKEN"\n\
+}\n\
+\n\
+trap cleanup EXIT\n\
+\n\
+# Run the runner\n\
+./run.sh\n\
+' > /entrypoint-runner.sh && chmod +x /entrypoint-runner.sh
+
+WORKDIR /actions-runner
+
+# =============================================================================
 # Health Check
 # =============================================================================
 RUN echo "=== Build Environment ===" && \
@@ -153,10 +225,14 @@ RUN echo "=== Build Environment ===" && \
     echo "Node.js: $(node --version)" && \
     echo "npm: $(npm --version)" && \
     echo "PlatformIO: $(pio --version)" && \
+    echo "Deno: $(deno --version | head -1)" && \
     echo "g++: $(g++ --version | head -1)" && \
     echo "git: $(git --version)" && \
     echo "wrangler: $(wrangler --version 2>/dev/null || echo 'installed')" && \
     echo "Cached node_modules: $(du -sh /opt/node_modules_cache 2>/dev/null || echo 'none')" && \
+    echo "GitHub Runner: installed at /actions-runner" && \
     echo "========================="
 
+# Default: Run as build container (bash)
+# Override entrypoint for runner mode: --entrypoint /entrypoint-runner.sh
 CMD ["/bin/bash"]
