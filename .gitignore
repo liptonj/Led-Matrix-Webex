@@ -65,6 +65,9 @@ supabase/signing_key.json
 # Website environment (contains API keys)
 website/.env
 
+# GitHub Actions runners (contains PAT)
+.github/docker/runners/.env
+
 # Archived code (not actively used)
 archive/
 
@@ -72,3 +75,6 @@ archive/
 .cursor/agents/
 .cursor/skills/
 .cursor/ENVIRONMENT.md
+
+# GitHub Actions runners (contains PAT)
+.github/docker/runners/.env

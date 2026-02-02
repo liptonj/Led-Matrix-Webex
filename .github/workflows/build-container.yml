@@ -12,7 +12,7 @@ on:
 
 # Workflow-level permissions
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:

@@ -1,9 +1,27 @@
- # Self-Hosted GitHub Actions Runner
- 
- This repository is configured to run all GitHub Actions workflows on a
- self-hosted runner using the `self-hosted` label.
- 
- ## Why this matters
+# Self-Hosted GitHub Actions Runner
+
+This repository is configured to run all GitHub Actions workflows on a
+self-hosted runner using the `self-hosted` label.
+
+## Quick Start: Docker Runners (Recommended)
+
+For parallel job execution, run multiple runners using Docker Compose:
+
+```bash
+cd .github/docker/runners
+
+# Set your GitHub PAT (with 'repo' scope)
+export GITHUB_PAT="ghp_your_token_here"
+
+# Start 7 parallel runners
+docker-compose up -d
+
+# Verify at: Settings → Actions → Runners
+```
+
+See [.github/docker/runners/README.md](../.github/docker/runners/README.md) for details.
+
+## Why this matters
  
  If no self-hosted runner is registered and online, workflows will remain
  queued and appear to "fail" by never starting. This blocks CI/CD for:
