@@ -55,6 +55,11 @@ MatrixDisplay matrix_display;
 // Application state instance
 AppState app_state;
 
+// Debug mode flags (defined in main.cpp, needed by display modules)
+bool g_debug_mode = false;
+bool g_debug_display = false;
+bool g_debug_realtime = false;
+
 // Additional simulation-only state for display
 String sim_air_quality_text = "good";
 
