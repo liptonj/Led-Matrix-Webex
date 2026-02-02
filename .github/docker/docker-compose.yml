@@ -1,0 +1,93 @@
+# GitHub Actions Self-Hosted Runners for Led-Matrix-Webex
+# Runs 7 parallel runners in Docker containers
+#
+# Usage:
+#   cd .github/docker
+#   echo "GITHUB_PAT=ghp_your_token" > .env
+#   docker-compose up -d --build
+#
+# To rebuild and restart:
+#   docker-compose up -d --build
+#
+# To view logs:
+#   docker-compose logs -f
+
+version: "3.8"
+
+x-runner-common: &runner-common
+  build:
+    context: ../..
+    dockerfile: .github/docker/Dockerfile
+    network: host
+  image: ghcr.io/liptonj/led-matrix-builder:latest
+  entrypoint: ["/entrypoint-runner.sh"]
+  restart: always
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  networks:
+    - runners
+  environment: &runner-env
+    REPO_URL: https://github.com/liptonj/Led-Matrix-Webex
+    ACCESS_TOKEN: ${GITHUB_PAT}
+    RUNNER_WORKDIR: /tmp/github-runner
+    LABELS: self-hosted,linux,x64,docker
+    RUNNER_SCOPE: repo
+    DISABLE_AUTO_UPDATE: "true"
+    RUN_AS_ROOT: "true"
+
+networks:
+  runners:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+  runner-1:
+    <<: *runner-common
+    container_name: led-matrix-runner-1
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-1
+
+  runner-2:
+    <<: *runner-common
+    container_name: led-matrix-runner-2
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-2
+
+  runner-3:
+    <<: *runner-common
+    container_name: led-matrix-runner-3
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-3
+
+  runner-4:
+    <<: *runner-common
+    container_name: led-matrix-runner-4
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-4
+
+  runner-5:
+    <<: *runner-common
+    container_name: led-matrix-runner-5
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-5
+
+  runner-6:
+    <<: *runner-common
+    container_name: led-matrix-runner-6
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-6
+
+  runner-7:
+    <<: *runner-common
+    container_name: led-matrix-runner-7
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: led-matrix-runner-7
