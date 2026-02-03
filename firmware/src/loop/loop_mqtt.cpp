@@ -11,12 +11,19 @@
 
 #include "meraki/mqtt_client.h"
 #include "config/config_manager.h"
+#include "display/matrix_display.h"
+#include "../core/dependencies.h"
 
 // =============================================================================
 // MQTT HANDLER
 // =============================================================================
 
 void handleMQTT(LoopContext& ctx) {
+    auto& deps = getDependencies();
+    if (deps.display.isOTALocked()) {
+        return;
+    }
+
     if (!ctx.app_state->wifi_connected || !ctx.config_manager->hasMQTTConfig()) {
         ctx.app_state->mqtt_connected = false;
         ctx.app_state->sensor_data_valid = false;

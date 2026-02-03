@@ -44,7 +44,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
     HTTPClient http;
     WiFiClientSecure client;
     auto& deps = getDependencies();
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), 2048, 2048);
     
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
@@ -64,11 +64,13 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
     if (httpCode != HTTP_CODE_OK) {
         setError("HTTP error: " + String(httpCode));
         http.end();
+        client.stop();
         return false;
     }
     
     String payload = http.getString();
     http.end();
+    client.stop();
     
     // Parse manifest
     JsonDocument doc;
@@ -154,7 +156,7 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
     HTTPClient http;
     WiFiClientSecure client;
     auto& deps = getDependencies();
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), 2048, 2048);
     
     String manifest_url = base_url + "/ota-manifest.json";
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
@@ -170,11 +172,13 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
     if (httpCode != HTTP_CODE_OK) {
         setError("HTTP error: " + String(httpCode));
         http.end();
+        client.stop();
         return false;
     }
     
     String payload = http.getString();
     http.end();
+    client.stop();
     
     JsonDocument doc;
     if (deserializeJson(doc, payload)) {
@@ -284,7 +288,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
     HTTPClient http;
     WiFiClientSecure client;
     auto& deps = getDependencies();
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), 2048, 2048);
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
                   url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
                   deps.config.getTlsVerify() ? "on" : "off");
@@ -298,6 +302,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
     if (httpCode != HTTP_CODE_OK) {
         setError("Download failed: " + String(httpCode));
         http.end();
+        client.stop();
         return false;
     }
     
@@ -309,6 +314,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
     if (!Update.begin(contentLength)) {
         setError("Not enough space");
         http.end();
+        client.stop();
         return false;
     }
     
@@ -325,6 +331,7 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
             if (Update.write(buff, bytesRead) != bytesRead) {
                 setError("Write failed");
                 http.end();
+                client.stop();
                 Update.abort();
                 return false;
             }
@@ -339,9 +346,11 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
     }
     
     http.end();
+    client.stop();
     
     if (!Update.end(true)) {
         setError("Update finalize failed");
+        Update.abort();
         return false;
     }
     

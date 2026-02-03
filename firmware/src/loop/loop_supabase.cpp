@@ -14,6 +14,7 @@
 #include "commands/command_processor.h"
 #include "supabase/supabase_client.h"
 #include "debug/remote_logger.h"
+#include "display/matrix_display.h"
 #include "../core/dependencies.h"
 
 // Forward declaration
@@ -25,6 +26,10 @@ bool provisionDeviceWithSupabase();
 
 void handleSupabase(LoopContext& ctx) {
     auto& deps = getDependencies();
+
+    if (deps.display.isOTALocked()) {
+        return;
+    }
     
     // Phase A: State sync via Edge Functions (replaces bridge for pairing)
     if (ctx.app_state->wifi_connected && deps.supabase.isInitialized()) {

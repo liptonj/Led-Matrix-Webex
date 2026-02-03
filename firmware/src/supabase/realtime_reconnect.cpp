@@ -8,13 +8,20 @@
  */
 
 #include "supabase_realtime.h"
+#include "../core/dependencies.h"
+#include "../app_state.h"
 
 namespace {
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
 }  // namespace
 
 void SupabaseRealtime::attemptReconnect() {
-    _lastReconnectAttempt = millis();
+    auto& deps = getDependencies();
+    unsigned long now = millis();
+    if (now < deps.app_state.realtime_defer_until) {
+        return;
+    }
+    _lastReconnectAttempt = now;
     
     // Exponential backoff
     _reconnectDelay = min(_reconnectDelay * 2, (unsigned long)PHOENIX_RECONNECT_MAX_MS);

@@ -41,7 +41,9 @@ void RealtimeManager::loop(unsigned long current_time) {
 
     // Auto-reconnect if needed
     if (checkReconnection(current_time, _lastInitAttempt)) {
-        initConnection();
+        if (current_time >= deps.app_state.realtime_defer_until) {
+            initConnection();
+        }
     }
 }
 
@@ -52,6 +54,10 @@ bool RealtimeManager::isConnected() const {
 
 void RealtimeManager::reconnect() {
     auto& deps = getDependencies();
+    unsigned long now = millis();
+    if (now < deps.app_state.realtime_defer_until) {
+        return;
+    }
     deps.realtime.disconnect();
     _lastInitAttempt = 0;
 }

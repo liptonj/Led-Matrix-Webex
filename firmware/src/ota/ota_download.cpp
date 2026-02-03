@@ -29,6 +29,8 @@
 bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
     auto& deps = getDependencies();
     Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
+    const bool remote_logging_was_enabled = deps.remote_logger.isRemoteEnabled();
+    deps.remote_logger.setRemoteEnabled(false);
 
     // Safety disconnect: ensure realtime is not running during OTA
     // The WebSocket competes for heap and network bandwidth, causing stream timeouts
@@ -57,6 +59,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         Serial.printf("[OTA] %s download failed: %d\n", label, httpCode);
         RLOG_ERROR("ota", "%s download failed: HTTP %d", label, httpCode);
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
 
@@ -66,6 +70,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     if (contentLength <= 0) {
         Serial.printf("[OTA] Invalid content length for %s\n", label);
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
 
@@ -76,6 +82,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         if (!target_partition) {
             Serial.println("[OTA] No OTA partition available (missing ota_1?)");
             http.end();
+            client.stop();
+            deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
             return false;
         }
         Serial.printf("[OTA] Target partition: %s (%d bytes)\n",
@@ -84,6 +92,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
             Serial.printf("[OTA] %s too large for partition (%d > %d)\n",
                           label, contentLength, target_partition->size);
             http.end();
+            client.stop();
+            deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
             return false;
         }
     }
@@ -97,19 +107,23 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     if (!OTAManagerFlash::beginUpdate(contentLength, update_type, target_partition)) {
         Serial.printf("[OTA] Not enough space for %s\n", label);
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
 
     Serial.printf("[OTA] Flashing %s...\n", label);
 
     // Use chunked download with watchdog feeding to prevent timeout
-    // Move buffer to heap to avoid stack overflow (4KB is too large for stack)
-    uint8_t* buffer = (uint8_t*)malloc(4096);
+    // Move buffer to heap to avoid stack overflow (2KB reduces heap pressure)
+    uint8_t* buffer = (uint8_t*)malloc(2048);
     if (!buffer) {
         Serial.printf("[OTA] Failed to allocate download buffer for %s\n", label);
         RLOG_ERROR("ota", "Failed to allocate buffer for %s", label);
         Update.abort();
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
     
@@ -118,6 +132,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         Serial.printf("[OTA] Failed to get stream for %s\n", label);
         free(buffer);
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
     
@@ -139,8 +155,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
         int displayProgress = (update_type == U_FLASH) ?
             (progress * 85) / 100 : 85 + ((progress * 15) / 100);
-        String statusText = String(label) + " " + String(progress) + "%";
-        deps.display.showUpdatingProgress(latest_version, displayProgress, statusText);
+        static const String empty_status;
+        deps.display.showUpdatingProgress(latest_version, displayProgress, empty_status);
     };
 
     // Use helper to download stream with retry logic
@@ -148,7 +164,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     int retry_count = 0;
 
     while (retry_count <= OTAHelpers::MAX_RETRY_ATTEMPTS) {
-        written = OTAHelpers::downloadStream(stream, buffer, 4096, 
+        written = OTAHelpers::downloadStream(stream, buffer, 2048,
                                               contentLength, writeCallback, progressCallback);
         
         if (written == static_cast<size_t>(contentLength)) {
@@ -187,11 +203,38 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         // Log heap after abort to verify cleanup
         Serial.printf("[OTA] Heap after abort: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
         
+        http.end();
+        client.stop();
+
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
-        
-        // NOTE: Full HTTP reconnect with Range header resume is out of scope.
-        // For now, fail and let the main loop schedule a full OTA retry.
-        break;
+
+        if (!http.begin(client, url)) {
+            Serial.println("[OTA] Retry HTTP begin failed");
+            RLOG_ERROR("ota", "Retry HTTP begin failed");
+            break;
+        }
+        OTAHelpers::configureHttpClient(http);
+        int retryCode = http.GET();
+        if (retryCode != HTTP_CODE_OK) {
+            Serial.printf("[OTA] Retry HTTP failed: %d\n", retryCode);
+            RLOG_ERROR("ota", "Retry HTTP failed: %d", retryCode);
+            http.end();
+            client.stop();
+            break;
+        }
+        stream = http.getStreamPtr();
+        if (!stream) {
+            Serial.println("[OTA] Failed to get stream on retry");
+            http.end();
+            client.stop();
+            break;
+        }
+        if (!OTAManagerFlash::beginUpdate(contentLength, update_type, target_partition)) {
+            Serial.printf("[OTA] Not enough space for %s (retry)\n", label);
+            http.end();
+            client.stop();
+            break;
+        }
     }
 
     if (written != static_cast<size_t>(contentLength)) {
@@ -199,6 +242,8 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         Update.abort();
         free(buffer);
         http.end();
+        client.stop();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
     
@@ -209,10 +254,15 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     if (!OTAManagerFlash::finalizeUpdate(update_type, target_partition, latest_version)) {
         Serial.printf("[OTA] %s update failed\n", label);
         http.end();
+        client.stop();
+        Update.abort();
+        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
         return false;
     }
 
     http.end();
+    client.stop();
     Serial.printf("[OTA] %s update applied\n", label);
+    deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
     return true;
 }

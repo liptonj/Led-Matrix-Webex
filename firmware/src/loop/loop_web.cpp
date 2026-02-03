@@ -12,12 +12,25 @@
 #include "web/web_server.h"
 #include "webex/webex_client.h"
 #include "debug/remote_logger.h"
+#include "display/matrix_display.h"
+#include "../core/dependencies.h"
 
 // =============================================================================
 // WEB SERVER HANDLER
 // =============================================================================
 
 bool handleWebServer(LoopContext& ctx) {
+    auto& deps = getDependencies();
+    if (deps.display.isOTALocked() && !ctx.web_server->isOTAUploadInProgress()) {
+        if (ctx.web_server->isRunning()) {
+            ctx.web_server->stop();
+        }
+        return false;
+    }
+    if (!deps.display.isOTALocked() && !ctx.web_server->isRunning()) {
+        ctx.web_server->begin(ctx.config_manager, ctx.app_state, nullptr, ctx.mdns_manager);
+    }
+
     // Process web server requests
     ctx.web_server->loop();
 

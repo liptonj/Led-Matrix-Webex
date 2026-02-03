@@ -120,9 +120,13 @@ void update_display() {
         return;
     }
     last_update = millis();
+
+    auto& deps = getDependencies();
+    if (deps.display.isOTALocked() && !deps.web_server.isOTAUploadInProgress()) {
+        return;
+    }
     const unsigned long now = millis();
     if (!cached.initialized || now - last_config_refresh >= 1000) {
-        auto& deps = getDependencies();
         last_config_refresh = now;
         cached.initialized = true;
         cached.brightness = deps.config.getBrightness();
@@ -148,7 +152,6 @@ void update_display() {
         deps.debug_realtime = deps.config.getDebugRealtime();
     }
 
-    auto& deps = getDependencies();
     if (!brightness_initialized || last_brightness != cached.brightness) {
         last_brightness = cached.brightness;
         brightness_initialized = true;

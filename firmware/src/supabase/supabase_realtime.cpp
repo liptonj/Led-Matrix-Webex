@@ -13,6 +13,7 @@
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
 #include "../core/dependencies.h"
+#include "../app_state.h"
 
 // Global instance
 SupabaseRealtime supabaseRealtime;
@@ -199,7 +200,10 @@ void SupabaseRealtime::loop() {
     
     // Handle reconnection
     if (!_connected && now - _lastReconnectAttempt >= _reconnectDelay) {
-        attemptReconnect();
+        auto& deps = getDependencies();
+        if (now >= deps.app_state.realtime_defer_until) {
+            attemptReconnect();
+        }
     }
     
     // Monitor WebSocket task stack usage (every 60 seconds)

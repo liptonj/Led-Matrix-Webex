@@ -13,6 +13,7 @@
 #include <HTTPClient.h>
 #ifndef NATIVE_BUILD
 #include <WiFiClientSecure.h>
+#include <Update.h>
 #include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -21,6 +22,7 @@
 #include "WiFiClientSecure.h"
 #endif
 #include "../common/secure_client_config.h"
+#include "../common/heap_utils.h"
 
 namespace OTAHelpers {
 
@@ -115,7 +117,7 @@ inline void configureTlsClient(WiFiClientSecure& client, const char* ca_cert_bun
                   tls_verify ? "on" : "off");
 
     // Use existing secure client configuration helper
-    configureSecureClientWithTls(client, ca_cert_bundle, tls_verify);
+    configureSecureClientWithTls(client, ca_cert_bundle, tls_verify, 2048, 2048);
 }
 
 /**
@@ -209,9 +211,14 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
                     
                     // Heap monitoring
                     uint32_t freeHeap = ESP.getFreeHeap();
-                    Serial.printf("[OTA] %d%% complete, heap: %u bytes\n", progress, freeHeap);
-                    if (freeHeap < 50000) {
+                    uint32_t maxBlock = HeapUtils::getMaxAllocBlock();
+                    Serial.printf("[OTA] %d%% complete, heap: %u bytes (block=%u)\n",
+                                  progress, freeHeap, maxBlock);
+                    if (freeHeap < 30000 || (freeHeap < 50000 && maxBlock < 20000)) {
                         Serial.println("[OTA] CRITICAL: Heap too low, aborting");
+#ifndef NATIVE_BUILD
+                        Update.abort();
+#endif
                         return total_written;
                     }
                 }
