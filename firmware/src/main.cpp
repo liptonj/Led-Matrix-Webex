@@ -41,6 +41,11 @@
 #include "commands/command_processor.h"
 #include "loop/loop_handlers.h"
 
+// Initialization modules (extracted from main.cpp)
+#include "boot_manager.h"
+#include "improv_provisioner.h"
+#include "supabase_init.h"
+
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
@@ -75,16 +80,13 @@ void setup_time();
 
 // Setup initialization functions (preserve order)
 void initSerialAndWatchdog();
-void initBootValidator();
 void initConfigManager();
 void initDebugMode();
 void initDeviceCredentials();
 void initDisplay();
-void initWiFiAndImprov();
 void initWebServer();
 void initWebexClient();
 void initManagers();
-void initSupabase();
 void initRemoteLogger();
 void initIntegrations();
 void initOTAManager();
@@ -98,16 +100,17 @@ void finalizeBootAndDisplay();
  */
 void setup() {
     initSerialAndWatchdog();
-    initBootValidator();
+    initBootValidation();  // From boot_manager module
     initConfigManager();
     initDebugMode();
     initDeviceCredentials();
     initDisplay();
-    initWiFiAndImprov();
+    initWiFiAndImprov(config_manager, app_state, s_display_ok ? &matrix_display : nullptr,
+                       mdns_manager, wifi_manager, s_display_ok);  // From improv_provisioner module
     initWebServer();
     initWebexClient();
     initManagers();
-    initSupabase();
+    initSupabase(config_manager, app_state, pairing_manager);  // From supabase_init module
     initRemoteLogger();
     initIntegrations();
     initOTAManager();
@@ -177,13 +180,6 @@ void initSerialAndWatchdog() {
     Serial.println();
 }
 
-void initBootValidator() {
-    // Boot validation - check if we should rollback to bootstrap
-    if (!boot_validator.begin()) {
-        RLOG_ERROR("init", "Boot validation failed");
-    }
-}
-
 void initConfigManager() {
     Serial.println("[INIT] Loading configuration...");
     if (!config_manager.begin()) {
@@ -192,15 +188,7 @@ void initConfigManager() {
     }
 
     // Store version for currently running partition (for OTA version tracking)
-    #ifndef NATIVE_BUILD
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    if (running) {
-        #ifdef FIRMWARE_VERSION
-        config_manager.setPartitionVersion(String(running->label), FIRMWARE_VERSION);
-        Serial.printf("[INIT] Stored version %s for partition %s\n", FIRMWARE_VERSION, running->label);
-        #endif
-    }
-    #endif
+    storePartitionVersion(config_manager);  // From boot_manager module
 }
 
 void initDebugMode() {
@@ -244,198 +232,7 @@ void initDisplay() {
     }
 }
 
-void initWiFiAndImprov() {
-    // Initialize WiFi in STA mode (required for scanning)
-    WiFi.mode(WIFI_STA);
-    WiFi.setSleep(WIFI_PS_NONE);  // Disable power save (prevents display interference)
-    Serial.println("[INIT] WiFi initialized in STA mode");
-
-    Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
-    improv_handler.begin(&Serial, &config_manager, &app_state, s_display_ok ? &matrix_display : nullptr);
-
-    // Check if WiFi is already configured
-    bool wifi_configured = config_manager.hasWiFiCredentials();
-    
-    // Check boot count - if high, we're in a boot loop and need extended timeouts
-    // This allows recovery via website firmware installer even during boot loops
-    int boot_count = boot_validator.getBootCount();
-    bool recovery_mode = (boot_count > MAX_BOOT_FAILURES);
-    
-    // Improv detection strategy:
-    // - WiFi configured + normal boot: Skip Improv entirely (fast boot)
-    // - WiFi configured + recovery mode: Brief 30-second window for firmware installer
-    // - No WiFi configured + normal boot: 10-second detection window
-    // - No WiFi configured + recovery mode: Extended 5-minute detection window
-    
-    bool improv_activity_detected = false;
-    
-    if (wifi_configured && !recovery_mode) {
-        // Normal boot with WiFi configured - skip Improv entirely for fast boot
-        Serial.println("[IMPROV] WiFi already configured, skipping provisioning window");
-    } else if (wifi_configured && recovery_mode) {
-        // Recovery mode with WiFi configured - brief window for firmware installer
-        Serial.println("[IMPROV] Recovery mode: Brief Improv window (30 sec) for firmware installer...");
-        Serial.printf("[IMPROV] Boot count: %d (threshold: %d)\n", boot_count, MAX_BOOT_FAILURES);
-        
-        unsigned long DETECT_TIMEOUT = 30000;   // 30 seconds in recovery with WiFi
-        unsigned long PROVISION_TIMEOUT = 60000;  // 60 seconds for provisioning
-        
-        unsigned long detect_start = millis();
-        
-        // Phase 1: Detection (30 seconds)
-        while (millis() - detect_start < DETECT_TIMEOUT) {
-            if (Serial.available() > 0) {
-                improv_activity_detected = true;
-                Serial.println("[IMPROV] Serial activity detected! Extending window for provisioning...");
-                if (s_display_ok) {
-                    matrix_display.showImprovProvisioning();
-                }
-                break;
-            }
-            
-            improv_handler.loop();
-            
-            if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
-                Serial.println("[IMPROV] WiFi configured successfully!");
-                break;
-            }
-            
-            delay(10);
-        }
-        
-        // Phase 2: Extended provisioning if activity was detected
-        if (improv_activity_detected && WiFi.status() != WL_CONNECTED) {
-            Serial.printf("[IMPROV] Waiting for WiFi provisioning (%lu seconds)...\n",
-                          PROVISION_TIMEOUT / 1000);
-            
-            unsigned long provision_start = millis();
-            unsigned long last_status = 0;
-            
-            while (millis() - provision_start < PROVISION_TIMEOUT) {
-                improv_handler.loop();
-                
-                if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
-                    Serial.println("[IMPROV] WiFi configured successfully!");
-                    break;
-                }
-                
-                unsigned long elapsed = millis() - provision_start;
-                if (elapsed - last_status >= 5000) {
-                    last_status = elapsed;
-                    Serial.printf("[IMPROV] Waiting... %lu seconds remaining\n",
-                                  (PROVISION_TIMEOUT - elapsed) / 1000);
-                }
-                
-                delay(10);
-            }
-        }
-        
-        if (!improv_activity_detected) {
-            Serial.println("[IMPROV] No serial activity detected, continuing boot...");
-        }
-    } else {
-        // No WiFi configured - run full Improv detection
-        unsigned long DETECT_TIMEOUT = recovery_mode ? 300000 : 10000;   // 5 min vs 10 sec
-        unsigned long PROVISION_TIMEOUT = recovery_mode ? 300000 : 60000;  // 5 min vs 60 sec
-        
-        if (recovery_mode) {
-            Serial.println("[IMPROV] RECOVERY MODE: Boot loop detected, extending timeouts for firmware installer recovery");
-            Serial.printf("[IMPROV] Boot count: %d (threshold: %d)\n", boot_count, MAX_BOOT_FAILURES);
-            Serial.printf("[IMPROV] Extended timeouts: %lu sec detection, %lu sec provisioning\n",
-                          DETECT_TIMEOUT / 1000, PROVISION_TIMEOUT / 1000);
-        } else {
-            Serial.printf("[IMPROV] No WiFi configured - detecting serial activity (%lu seconds)...\n",
-                          DETECT_TIMEOUT / 1000);
-        }
-        
-        unsigned long detect_start = millis();
-        
-        // Phase 1: Detection
-        while (millis() - detect_start < DETECT_TIMEOUT) {
-            if (Serial.available() > 0) {
-                improv_activity_detected = true;
-                Serial.println("[IMPROV] Serial activity detected! Extending window for provisioning...");
-                if (s_display_ok) {
-                    matrix_display.showImprovProvisioning();
-                }
-                break;
-            }
-            
-            improv_handler.loop();
-            
-            if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
-                Serial.println("[IMPROV] WiFi configured successfully!");
-                break;
-            }
-            
-            delay(10);
-        }
-        
-        // Phase 2: Extended provisioning if activity was detected
-        if (improv_activity_detected && WiFi.status() != WL_CONNECTED) {
-            Serial.printf("[IMPROV] Waiting for WiFi provisioning (%lu seconds)...\n",
-                          PROVISION_TIMEOUT / 1000);
-            
-            unsigned long provision_start = millis();
-            unsigned long last_status = 0;
-            
-            while (millis() - provision_start < PROVISION_TIMEOUT) {
-                improv_handler.loop();
-                
-                if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
-                    Serial.println("[IMPROV] WiFi configured successfully!");
-                    break;
-                }
-                
-                unsigned long elapsed = millis() - provision_start;
-                if (elapsed - last_status >= 5000) {
-                    last_status = elapsed;
-                    Serial.printf("[IMPROV] Waiting... %lu seconds remaining\n",
-                                  (PROVISION_TIMEOUT - elapsed) / 1000);
-                }
-                
-                delay(10);
-            }
-        }
-        
-        if (!improv_activity_detected) {
-            Serial.println("[IMPROV] No serial activity detected, continuing boot...");
-        }
-    }
-    
-    // Handle successful Improv provisioning
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("[IMPROV] Provisioning complete, continuing boot...");
-        if (s_display_ok) {
-            matrix_display.showUnconfigured(WiFi.localIP().toString(), "");
-        }
-        
-        // If WiFi was configured via Improv (from ESP Web Tools), mark boot successful early
-        // This prevents boot loop if other initialization fails, allowing WiFi provisioning to complete
-        if (improv_handler.wasConfiguredViaImprov()) {
-            Serial.println("[IMPROV] WiFi configured via ESP Web Tools - marking boot successful early");
-            boot_validator.markBootSuccessful();
-        }
-    } else if (improv_activity_detected) {
-        Serial.println("[IMPROV] Provisioning window closed, continuing to AP mode...");
-    }
-
-    // Setup WiFi (includes AP mode fallback if connection fails)
-    Serial.println("[INIT] Setting up WiFi...");
-    wifi_manager.begin(&config_manager, &app_state, &matrix_display);
-    wifi_manager.setupWiFi();
-
-    // Initialize mDNS and sync time if WiFi is connected
-    if (app_state.wifi_connected) {
-        Serial.println("[INIT] Starting mDNS...");
-        mdns_manager.begin(config_manager.getDeviceName());
-        mdns_manager.advertiseHTTP(80);
-
-        // Sync time via NTP
-        Serial.println("[INIT] Syncing time via NTP...");
-        setup_time();
-    }
-}
+// initWiFiAndImprov() moved to improv_provisioner.cpp
 
 void initWebServer() {
     Serial.println("[INIT] Starting web server...");
@@ -468,85 +265,7 @@ void initManagers() {
     realtimeManager.begin();
 }
 
-void initSupabase() {
-    // Initialize Supabase client FIRST (required for provisioning to work)
-    String supabase_url = config_manager.getSupabaseUrl();
-    if (!supabase_url.isEmpty() && app_state.wifi_connected) {
-        Serial.println("[INIT] Initializing Supabase client...");
-        supabaseClient.begin(supabase_url, pairing_manager.getCode());
-    }
-
-    // Register device with Supabase on first boot (requires WiFi + Supabase URL)
-    if (app_state.wifi_connected) {
-        provisionDeviceWithSupabase();
-    }
-
-    // Continue with authentication logic
-    if (!supabase_url.isEmpty() && app_state.wifi_connected) {
-        
-        // Attempt initial authentication
-        if (app_state.supabase_approval_pending || app_state.supabase_disabled ||
-            app_state.supabase_blacklisted || app_state.supabase_deleted) {
-            Serial.println("[SUPABASE] Provisioning awaiting admin approval - skipping auth");
-        } else if (!app_state.time_synced) {
-            Serial.println("[SUPABASE] Waiting for NTP sync before authenticating");
-        } else if (supabaseClient.authenticate()) {
-            app_state.supabase_connected = true;
-            Serial.println("[INIT] Supabase client authenticated successfully");
-
-            String authAnonKey = supabaseClient.getAnonKey();
-            if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
-                config_manager.setSupabaseAnonKey(authAnonKey);
-                Serial.println("[SUPABASE] Anon key updated from device-auth");
-            }
-            
-            // Check for target firmware version
-            String targetVersion = supabaseClient.getTargetFirmwareVersion();
-            if (!targetVersion.isEmpty()) {
-                Serial.printf("[INIT] Target firmware version from Supabase: %s\n", 
-                              targetVersion.c_str());
-            }
-            
-            // Immediately update device_connected so embedded app knows device is online
-            if (hasSafeTlsHeap(65000, 40000)) {
-                Serial.println("[INIT] Sending initial device state to mark device as connected...");
-                int rssi = WiFi.RSSI();
-                uint32_t freeHeap = ESP.getFreeHeap();
-                uint32_t uptime = millis() / 1000;
-                float temp = app_state.temperature;
-                SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
-                if (appState.valid) {
-                    DeviceInfo::applyAppState(appState);
-                }
-            }
-            
-            Serial.println("[INIT] Deferring Supabase Realtime init until after OTA/web server settle...");
-            app_state.realtime_defer_until = millis() + 15000UL;  // allow OTA + web to stabilize
-            logHeapStatus("after supabase auth");
-        } else {
-            RLOG_WARN("init", "Supabase auth failed - will retry in loop");
-            SupabaseAuthError authError = supabaseClient.getLastAuthError();
-            if (authError == SupabaseAuthError::InvalidSignature) {
-                Serial.println("[SUPABASE] Invalid signature - triggering reprovision");
-                provisionDeviceWithSupabase();
-            } else if (authError == SupabaseAuthError::ApprovalRequired) {
-                app_state.supabase_approval_pending = true;
-            } else if (authError == SupabaseAuthError::Disabled) {
-                app_state.supabase_disabled = true;
-                Serial.println("[SUPABASE] Device disabled by admin");
-            } else if (authError == SupabaseAuthError::Blacklisted) {
-                app_state.supabase_blacklisted = true;
-                Serial.println("[SUPABASE] Device blacklisted by admin");
-            } else if (authError == SupabaseAuthError::Deleted) {
-                app_state.supabase_deleted = true;
-                Serial.println("[SUPABASE] Device deleted - clearing credentials");
-                deviceCredentials.resetCredentials();
-                delay(200);
-                ESP.restart();
-            }
-        }
-    }
-}
+// initSupabase() moved to supabase_init.cpp
 
 void initRemoteLogger() {
     remoteLogger.begin(app_state.wifi_connected ? &supabaseClient : nullptr);
@@ -614,6 +333,16 @@ void setup_time() {
 // =============================================================================
 // The following functions have been extracted to focused modules:
 // 
+// boot_manager.cpp:
+//   - initBootValidation() - Boot validation and partition version tracking
+//   - storePartitionVersion() - Store firmware version for OTA tracking
+//
+// improv_provisioner.cpp:
+//   - initWiFiAndImprov() - Improv WiFi provisioning with detection windows
+//
+// supabase_init.cpp:
+//   - initSupabase() - Supabase initialization, authentication, and error handling
+//
 // loop/loop_handlers.cpp:
 //   - update_display() - LED matrix display logic
 //   - check_for_updates() - OTA firmware update checks

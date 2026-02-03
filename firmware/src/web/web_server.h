@@ -101,6 +101,9 @@ private:
     
     // Route handlers
     void setupRoutes();
+    void setupApiRoutes();
+    void setupStaticRoutes();
+    void setupCaptivePortalRoutes();
     void handleRoot(AsyncWebServerRequest* request);
     void handleStatus(AsyncWebServerRequest* request);
     void handleConfig(AsyncWebServerRequest* request);
@@ -142,6 +145,14 @@ private:
                               size_t len,
                               bool final,
                               size_t total);
+    void handleOTAUploadComplete(AsyncWebServerRequest* request);
+    void handleOTAFilesystemUploadChunk(AsyncWebServerRequest* request,
+                                       const String& filename,
+                                       size_t index,
+                                       uint8_t* data,
+                                       size_t len,
+                                       bool final);
+    void handleOTAFilesystemUploadComplete(AsyncWebServerRequest* request);
 
 public:
     bool hasPendingOAuthCode() const { return !pending_oauth_code.isEmpty(); }

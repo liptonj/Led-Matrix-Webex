@@ -1,15 +1,20 @@
 /**
  * @file api_ota_upload.cpp
- * @brief OTA Firmware Upload Chunk Handler
+ * @brief OTA Firmware Upload Handlers
  * 
  * Handles chunked OTA uploads including bundle format (firmware + filesystem)
+ * - Chunk processing (handleOTAUploadChunk)
+ * - Upload completion (handleOTAUploadComplete)
+ * - Filesystem upload handlers
  */
 
 #include "web_server.h"
+#include "web_helpers.h"
 #include "ota_bundle.h"
 #include <Update.h>
 #include <LittleFS.h>
 #include <esp_ota_ops.h>
+#include <ArduinoJson.h>
 #include "../debug/remote_logger.h"
 
 void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,

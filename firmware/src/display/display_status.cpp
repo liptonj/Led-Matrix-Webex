@@ -10,49 +10,6 @@
 #include "matrix_display.h"
 #include "../debug.h"
 
-// Line height constant
-static const int LINE_HEIGHT = 8;
-
-// Cache key for border (to avoid redrawing every frame)
-static String last_border_key;
-static StatusLayoutMode last_status_layout = StatusLayoutMode::SENSORS;
-static int clampBorderWidth(int width) {
-    if (width < 1) return 1;
-    if (width > 3) return 3;
-    return width;
-}
-
-/**
- * @brief Build a cache key for date/time line
- */
-static String buildDateTimeKey(const DisplayData& data, uint16_t date_color, uint16_t time_color) {
-    char buffer[64];
-    if (data.time_valid) {
-        snprintf(buffer, sizeof(buffer), "time|%d/%d|%d:%d|%s|%d|%d|%d",
-                 data.month, data.day, data.hour, data.minute,
-                 data.use_24h ? "24" : "12",
-                 data.date_format, date_color, time_color);
-    } else {
-        snprintf(buffer, sizeof(buffer), "time|none|%d|%d", date_color, time_color);
-    }
-    return String(buffer);
-}
-
-/**
- * @brief Build a cache key for sensor bar
- */
-static String buildSensorKey(const DisplayData& data, const String& prefix) {
-    char buffer[128];
-    if (data.show_sensors) {
-        snprintf(buffer, sizeof(buffer), "%s|%d/%d/%d/%s|%d",
-                 prefix.c_str(), (int)data.temperature, (int)data.humidity,
-                 (int)data.tvoc, data.right_metric.c_str(), data.metric_color);
-    } else {
-        snprintf(buffer, sizeof(buffer), "%s|none|%d", prefix.c_str(), data.metric_color);
-    }
-    return String(buffer);
-}
-
 void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     // Status Page Layout (64x32) with colored border:
     // Border: Status-colored border around entire display (1-3 pixels)
@@ -67,51 +24,24 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     const uint16_t time_color = data.time_color;
     const uint16_t name_color = data.name_color;
 
-    // Calculate content area based on border width
+    // Calculate content area and layout
     const int border = clampBorderWidth(data.border_width);
-    const int content_x = border;
-    const int content_width = MATRIX_WIDTH - 2 * border;
+    int content_x, content_width;
+    calculateContentArea(border, content_x, content_width);
 
-    // Line positions offset by border with extra spacing only after status line
-    const int available_height = MATRIX_HEIGHT - (2 * border);
-    const int max_lines = available_height / LINE_HEIGHT;
+    int available_height, max_lines;
+    calculateAvailableHeight(border, available_height, max_lines);
+    const int extra_date_spacing = calculateExtraSpacing(available_height);
 
-    // Only add extra spacing if we have room for 4 lines (needed room: 4*8 + 2 = 34px)
-    // With 1px border: available = 30px, so we can't fit 4 lines + 2px spacing
-    // Solution: use 1px spacing when tight on space, 2px when there's room
-    const bool tight_fit = (available_height < 34); // Less than 34px means can't fit 4 lines + 2px spacing
-    const int extra_date_spacing = tight_fit ? 0 : 2; // No spacing if tight, 2px if room
-
-    const int line0_y = border + LINE_HEIGHT * 0;
-    const int line1_y = border + LINE_HEIGHT * 1 + extra_date_spacing;
-    const int line2_y = border + LINE_HEIGHT * 2 + extra_date_spacing; // Shift down by spacing to prevent overlap
-    const int line3_y = border + LINE_HEIGHT * 3 + extra_date_spacing; // Shift down by spacing to prevent overlap
+    int line0_y, line1_y, line2_y, line3_y;
+    calculateLinePositions(border, extra_date_spacing, line0_y, line1_y, line2_y, line3_y);
 
     // Draw border (cached - only redraw when status or width changes)
-    char border_key_buf[64];
-    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
-    const String border_key = String(border_key_buf);
-    bool border_changed = (border_key != last_border_key);
-    bool layout_changed = (data.status_layout != last_status_layout);
-    if (layout_changed) {
-        last_status_layout = data.status_layout;
-    }
-    if (border_changed || layout_changed) {
-        last_border_key = border_key;
-        // Clear entire screen and redraw border when border changes
-        dma_display->clearScreen();
-        drawStatusBorder(status_color, border);
+    bool border_changed = updateBorderCache(status_color, border, data.webex_status, data.status_layout);
+    if (border_changed) {
         // Force redraw of all content when border changes
-        for (int i = 0; i < 4; i++) {
-            last_line_keys[i].clear();
-        }
-        // Clear scroll states to force redraw of scrolling text
-        status_scroll.text.clear();
-        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
-            if (scroll_states[i].active) {
-                scroll_states[i].state.text.clear();
-            }
-        }
+        clearPageCache();
+        clearScrollStates();
     }
 
     // Line 0: Status text (centered, scrolls if too long)
@@ -122,7 +52,7 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     const String line1_key = buildDateTimeKey(data, date_color, time_color);
     if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
-        fillRect(content_x, line1_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line1_y, content_width, getLineHeight(), COLOR_BLACK);
         if (data.time_valid) {
             // Format date (tiny text, 4px per char) and time (regular text, 6px per char)
             String date_text = formatDate(data.month, data.day, data.date_format);
@@ -166,6 +96,8 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     static bool first_draw = true;
     static String last_status_logged = "";
     static String last_name_logged = "";
+    static StatusLayoutMode last_layout_logged = StatusLayoutMode::SENSORS;
+    bool layout_changed = (data.status_layout != last_layout_logged);
     bool content_changed = (status_text != last_status_logged) ||
                           (data.display_name != last_name_logged);
 
@@ -173,6 +105,7 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
         first_draw = false;
         last_status_logged = status_text;
         last_name_logged = data.display_name;
+        last_layout_logged = data.status_layout;
 
         DEBUG_DISPLAY("========== Status Page ==========");
         DEBUG_DISPLAY("Border: %dpx, Content: %dx%d, Max lines: %d",
@@ -219,12 +152,12 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
         const String line2_key = buildSensorKey(data, "sensors_inline");
         if (line2_key != last_line_keys[2] || border_changed) {
             last_line_keys[2] = line2_key;
-            fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+            fillRect(content_x, line2_y, content_width, getLineHeight(), COLOR_BLACK);
             drawSensorBar(data, line2_y, content_x, content_width);
         }
 
         // Line 3 (tiny): Display name if space allows
-        const int used_height = LINE_HEIGHT * 3 + extra_date_spacing;
+        const int used_height = getLineHeight() * 3 + extra_date_spacing;
         const int leftover = available_height - used_height;
         const int tiny_height = 6;
         if (!data.display_name.isEmpty() && leftover >= tiny_height) {
@@ -258,7 +191,7 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
             const String line2_key = "name|empty";
             if (line2_key != last_line_keys[2] || border_changed) {
                 last_line_keys[2] = line2_key;
-                fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+                fillRect(content_x, line2_y, content_width, getLineHeight(), COLOR_BLACK);
             }
         }
 
@@ -267,7 +200,7 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
             const String line3_key = buildSensorKey(data, "sensors");
             if (line3_key != last_line_keys[3] || border_changed) {
                 last_line_keys[3] = line3_key;
-                fillRect(content_x, line3_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+                fillRect(content_x, line3_y, content_width, getLineHeight(), COLOR_BLACK);
                 if (data.show_sensors) {
                     drawSensorBar(data, line3_y, content_x, content_width);
                 }
@@ -276,7 +209,7 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
             const String line3_key = "sensors|hidden";
             if (line3_key != last_line_keys[3] || border_changed) {
                 last_line_keys[3] = line3_key;
-                const int clear_y = border + (LINE_HEIGHT * max_lines);
+                const int clear_y = border + (getLineHeight() * max_lines);
                 const int clear_h = MATRIX_HEIGHT - border - clear_y;
                 if (clear_h > 0) {
                     fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
@@ -312,40 +245,23 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
     const uint16_t metric_color = data.metric_color;
     int temp_f = (int)((data.temperature * 9.0f / 5.0f) + 32.0f);
 
-    // Calculate content area based on border width
+    // Calculate content area and layout
     const int border = clampBorderWidth(data.border_width);
-    const int content_x = border;
-    const int content_width = MATRIX_WIDTH - 2 * border;
+    int content_x, content_width;
+    calculateContentArea(border, content_x, content_width);
 
-    // Line positions offset by border
-    const int available_height = MATRIX_HEIGHT - (2 * border);
-    const int max_lines = available_height / LINE_HEIGHT;
-    const int line0_y = border + LINE_HEIGHT * 0;
-    const int line1_y = border + LINE_HEIGHT * 1;
-    const int line2_y = border + LINE_HEIGHT * 2;
-    const int line3_y = border + LINE_HEIGHT * 3;
+    int available_height, max_lines;
+    calculateAvailableHeight(border, available_height, max_lines);
+
+    int line0_y, line1_y, line2_y, line3_y;
+    calculateLinePositions(border, line0_y, line1_y, line2_y, line3_y);
 
     // Draw border (cached - only redraw when status or width changes)
-    char border_key_buf[64];
-    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
-    const String border_key = String(border_key_buf);
-    bool border_changed = (border_key != last_border_key);
+    bool border_changed = updateBorderCache(status_color, border, data.webex_status, data.status_layout);
     if (border_changed) {
-        last_border_key = border_key;
-        // Clear entire screen and redraw border when border changes
-        dma_display->clearScreen();
-        drawStatusBorder(status_color, border);
         // Force redraw of all content when border changes
-        for (int i = 0; i < 4; i++) {
-            last_line_keys[i].clear();
-        }
-        // Clear scroll states to force redraw of scrolling text
-        status_scroll.text.clear();
-        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
-            if (scroll_states[i].active) {
-                scroll_states[i].state.text.clear();
-            }
-        }
+        clearPageCache();
+        clearScrollStates();
     }
 
     // Line 0: Temperature
@@ -415,7 +331,7 @@ void MatrixDisplay::drawSensorPage(const DisplayData& data) {
         const String line3_key = "sensor3|hidden";
         if (line3_key != last_line_keys[3] || border_changed) {
             last_line_keys[3] = line3_key;
-            const int clear_y = border + (LINE_HEIGHT * max_lines);
+            const int clear_y = border + (getLineHeight() * max_lines);
             const int clear_h = MATRIX_HEIGHT - border - clear_y;
             if (clear_h > 0) {
                 fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
@@ -457,41 +373,28 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     const uint16_t date_color = data.date_color;
     const uint16_t time_color = data.time_color;
 
-    // Calculate content area based on border width
+    // Calculate content area and layout
     const int border = clampBorderWidth(data.border_width);
-    const int content_x = border;
-    const int content_width = MATRIX_WIDTH - 2 * border;
+    int content_x, content_width;
+    calculateContentArea(border, content_x, content_width);
 
-    // Line positions offset by border with extra spacing only after call status
-    const int available_height = MATRIX_HEIGHT - (2 * border);
-    const int max_lines = available_height / LINE_HEIGHT;
+    int available_height, max_lines;
+    calculateAvailableHeight(border, available_height, max_lines);
     const int extra_date_spacing = 2; // Extra pixels between status and camera/mic line
-    const int line0_y = border + LINE_HEIGHT * 0;
-    const int line1_y = border + LINE_HEIGHT * 1 + extra_date_spacing;
-    const int line2_y = border + LINE_HEIGHT * 2; // No extra spacing - keep normal position
-    const int line3_y = border + LINE_HEIGHT * 3; // No extra spacing - keep normal position
+    
+    int line0_y, line1_y, line2_y, line3_y;
+    // Custom line positions for in-call page (extra spacing only after line 0)
+    line0_y = border + getLineHeight() * 0;
+    line1_y = border + getLineHeight() * 1 + extra_date_spacing;
+    line2_y = border + getLineHeight() * 2; // No extra spacing - keep normal position
+    line3_y = border + getLineHeight() * 3; // No extra spacing - keep normal position
 
     // Draw border (cached - only redraw when status or width changes)
-    char border_key_buf[64];
-    snprintf(border_key_buf, sizeof(border_key_buf), "border|%s|%d", data.webex_status.c_str(), border);
-    const String border_key = String(border_key_buf);
-    bool border_changed = (border_key != last_border_key);
+    bool border_changed = updateBorderCache(status_color, border, data.webex_status, data.status_layout);
     if (border_changed) {
-        last_border_key = border_key;
-        // Clear entire screen and redraw border when border changes
-        dma_display->clearScreen();
-        drawStatusBorder(status_color, border);
         // Force redraw of all content when border changes
-        for (int i = 0; i < 4; i++) {
-            last_line_keys[i].clear();
-        }
-        // Clear scroll states to force redraw of scrolling text
-        status_scroll.text.clear();
-        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
-            if (scroll_states[i].active) {
-                scroll_states[i].state.text.clear();
-            }
-        }
+        clearPageCache();
+        clearScrollStates();
     }
 
     // Line 0: "IN A CALL" text
@@ -511,7 +414,7 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
 
     if (line1_key != last_line_keys[1] || border_changed) {
         last_line_keys[1] = line1_key;
-        fillRect(content_x, line1_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line1_y, content_width, getLineHeight(), COLOR_BLACK);
 
         // Camera icon and status on left (offset by border)
         const int camera_x = content_x + 2;
@@ -533,7 +436,7 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
     const String line2_key = String(line2_key_buf);
     if (line2_key != last_line_keys[2] || border_changed) {
         last_line_keys[2] = line2_key;
-        fillRect(content_x, line2_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+        fillRect(content_x, line2_y, content_width, getLineHeight(), COLOR_BLACK);
         if (data.time_valid) {
             // Format date (tiny text, 4px per char) and time (regular text, 6px per char)
             String date_text = formatDate(data.month, data.day, data.date_format);
@@ -575,7 +478,7 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
         const String line3_key = buildSensorKey(data, "call3");
         if (line3_key != last_line_keys[3] || border_changed) {
             last_line_keys[3] = line3_key;
-            fillRect(content_x, line3_y, content_width, LINE_HEIGHT, COLOR_BLACK);
+            fillRect(content_x, line3_y, content_width, getLineHeight(), COLOR_BLACK);
             if (data.show_sensors) {
                 drawSensorBar(data, line3_y, content_x, content_width);
             }
@@ -584,7 +487,7 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
         const String line3_key = "call3|hidden";
         if (line3_key != last_line_keys[3] || border_changed) {
             last_line_keys[3] = line3_key;
-            const int clear_y = border + (LINE_HEIGHT * max_lines);
+            const int clear_y = border + (getLineHeight() * max_lines);
             const int clear_h = MATRIX_HEIGHT - border - clear_y;
             if (clear_h > 0) {
                 fillRect(content_x, clear_y, content_width, clear_h, COLOR_BLACK);
@@ -643,18 +546,7 @@ void MatrixDisplay::update(const DisplayData& data) {
     // Check if page changed - clear screen and reset line keys
     if (target_page != last_page) {
         dma_display->clearScreen();
-        for (int i = 0; i < 4; i++) {
-            last_line_keys[i].clear();
-        }
-        // Reset border key to force redraw on page change
-        last_border_key.clear();
-        // Reset scroll states to force redraw of scrolling text on page change
-        status_scroll.text.clear();
-        for (int i = 0; i < MAX_SCROLL_STATES; i++) {
-            if (scroll_states[i].active) {
-                scroll_states[i].state.text.clear();
-            }
-        }
+        clearAllCaches();
 
         // Log page change
         const char* page_name = (target_page == DisplayPage::STATUS) ? "STATUS" :

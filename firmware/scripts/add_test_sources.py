@@ -22,13 +22,25 @@ Import("env")  # noqa: F821
 # Get the project directory
 project_dir = env.get("PROJECT_DIR", "")  # noqa: F821
 
-# Add config manager, nvs utils, and mock globals to the build
+# Add config manager (split into domain files), nvs utils, and mock globals to the build
 env.Append(  # noqa: F821
     SRC_FILTER=[
+        # Config manager domain files (split from monolithic config_manager.cpp)
         "+<config/config_manager.cpp>",
+        "+<config/config_wifi.cpp>",
+        "+<config/config_display.cpp>",
+        "+<config/config_webex.cpp>",
+        "+<config/config_mqtt.cpp>",
+        "+<config/config_supabase.cpp>",
+        "+<config/config_time.cpp>",
+        "+<config/config_export.cpp>",
+        # Common utilities
         "+<common/nvs_utils.cpp>",
+        # Note: http_utils.cpp and heap_utils.cpp excluded from native tests
+        # as they require ESP32-specific headers (WiFiClientSecure, etc.)
+        # Mocks
         "+<../simulation/mocks/globals.cpp>",
     ]
 )
 
-print("[TEST] Added config_manager.cpp, nvs_utils.cpp and globals.cpp to test build")
+print("[TEST] Added config domain files, utilities and mocks to test build")

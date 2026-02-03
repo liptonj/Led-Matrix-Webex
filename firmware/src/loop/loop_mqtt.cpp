@@ -1,0 +1,79 @@
+/**
+ * @file loop_mqtt.cpp
+ * @brief MQTT handler
+ *
+ * Handles MQTT connection and sensor data processing.
+ */
+
+#include "loop_handlers.h"
+
+#ifndef NATIVE_BUILD
+
+#include "meraki/mqtt_client.h"
+#include "config/config_manager.h"
+
+// =============================================================================
+// MQTT HANDLER
+// =============================================================================
+
+void handleMQTT(LoopContext& ctx) {
+    if (!ctx.app_state->wifi_connected || !ctx.config_manager->hasMQTTConfig()) {
+        ctx.app_state->mqtt_connected = false;
+        ctx.app_state->sensor_data_valid = false;
+        return;
+    }
+
+    if (!ctx.mqtt_client->isInitialized()) {
+        ctx.mqtt_client->begin(ctx.config_manager);
+    }
+
+    ctx.mqtt_client->loop();
+    ctx.app_state->mqtt_connected = ctx.mqtt_client->isConnected();
+    if (!ctx.app_state->mqtt_connected) {
+        ctx.app_state->sensor_data_valid = false;
+    }
+
+    // Check for sensor updates
+    static String last_display_sensor;
+    const String configured_display_sensor = ctx.config_manager->getDisplaySensorMac();
+    const bool update_available = ctx.mqtt_client->hasUpdate();
+
+    if (update_available) {
+        MerakiSensorData latest = ctx.mqtt_client->getLatestData();
+        if (configured_display_sensor.isEmpty()) {
+            ctx.app_state->temperature = latest.temperature;
+            ctx.app_state->humidity = latest.humidity;
+            ctx.app_state->door_status = latest.door_status;
+            ctx.app_state->air_quality_index = latest.air_quality_index;
+            ctx.app_state->tvoc = latest.tvoc;
+            ctx.app_state->co2_ppm = latest.co2_ppm;
+            ctx.app_state->pm2_5 = latest.pm2_5;
+            ctx.app_state->ambient_noise = latest.ambient_noise;
+            ctx.app_state->sensor_mac = latest.sensor_mac;
+            last_display_sensor = latest.sensor_mac;
+            ctx.app_state->sensor_data_valid = latest.valid;
+            ctx.app_state->last_sensor_update = millis();
+        }
+    }
+
+    if (!configured_display_sensor.isEmpty() &&
+        (update_available || configured_display_sensor != last_display_sensor)) {
+        MerakiSensorData selected;
+        if (ctx.mqtt_client->getSensorData(configured_display_sensor, selected)) {
+            ctx.app_state->temperature = selected.temperature;
+            ctx.app_state->humidity = selected.humidity;
+            ctx.app_state->door_status = selected.door_status;
+            ctx.app_state->air_quality_index = selected.air_quality_index;
+            ctx.app_state->tvoc = selected.tvoc;
+            ctx.app_state->co2_ppm = selected.co2_ppm;
+            ctx.app_state->pm2_5 = selected.pm2_5;
+            ctx.app_state->ambient_noise = selected.ambient_noise;
+            ctx.app_state->sensor_mac = configured_display_sensor;
+            last_display_sensor = configured_display_sensor;
+            ctx.app_state->sensor_data_valid = selected.valid;
+            ctx.app_state->last_sensor_update = millis();
+        }
+    }
+}
+
+#endif // !NATIVE_BUILD

@@ -255,6 +255,27 @@ private:
     String formatDate(int month, int day, uint8_t format);
     String getMonthAbbrev(int month);
 
+    // Border management
+    int clampBorderWidth(int width);
+    bool updateBorderCache(uint16_t status_color, int border, const String& status, StatusLayoutMode layout);
+    void clearBorderCache();
+    String getBorderCacheKey() const;
+
+    // Layout calculation
+    void calculateContentArea(int border, int& content_x, int& content_width);
+    void calculateAvailableHeight(int border, int& available_height, int& max_lines);
+    int calculateExtraSpacing(int available_height);
+    void calculateLinePositions(int border, int extra_spacing, int& line0_y, int& line1_y, int& line2_y, int& line3_y);
+    void calculateLinePositions(int border, int& line0_y, int& line1_y, int& line2_y, int& line3_y);
+    int getLineHeight() const;
+
+    // Cache management
+    String buildDateTimeKey(const DisplayData& data, uint16_t date_color, uint16_t time_color);
+    String buildSensorKey(const DisplayData& data, const String& prefix);
+    void clearPageCache();
+    void clearScrollStates();
+    void clearAllCaches();
+
     struct ScrollState {
         String text;
         int offset = 0;
@@ -271,6 +292,10 @@ private:
     };
     ScrollEntry scroll_states[MAX_SCROLL_STATES];
     ScrollState* getScrollState(const String& key);
+    
+    /// Internal helper for unified scrolling text rendering (consolidates normal and tiny text scrolling)
+    void drawScrollingTextGeneric(int y, const String& text, uint16_t color, int start_x, int max_width, 
+                                   ScrollState* state, bool use_tiny);
     
     ScrollState status_scroll;  // For scrolling status text (used by drawScrollingStatusText)
     String last_static_key;

@@ -1,0 +1,330 @@
+/**
+ * @file ota_version.cpp
+ * @brief OTA Version Checking and Update Detection
+ * 
+ * This file handles version comparison, manifest parsing, GitHub API parsing,
+ * and release asset selection for OTA updates.
+ */
+
+#include "ota_manager.h"
+#include "ota_helpers.h"
+#include "../auth/device_credentials.h"
+#include "../common/ca_certs.h"
+#include "../config/config_manager.h"
+#include "../debug/remote_logger.h"
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
+
+// External references
+extern ConfigManager config_manager;
+
+namespace {
+// Add HMAC authentication headers if device is provisioned
+void addAuthHeaders(HTTPClient& http) {
+    if (deviceCredentials.isProvisioned()) {
+        uint32_t timestamp = DeviceCredentials::getTimestamp();
+        String signature = deviceCredentials.signRequest(timestamp, "");
+
+        http.addHeader("X-Device-Serial", deviceCredentials.getSerialNumber());
+        http.addHeader("X-Timestamp", String(timestamp));
+        http.addHeader("X-Signature", signature);
+
+        Serial.println("[OTA] Added HMAC authentication headers");
+    }
+}
+}  // namespace
+
+bool OTAManager::compareVersions(const String& v1, const String& v2) {
+    // Simple semantic version comparison
+    // Returns true if v1 > v2
+
+    int v1_major = 0, v1_minor = 0, v1_patch = 0;
+    int v2_major = 0, v2_minor = 0, v2_patch = 0;
+
+    sscanf(v1.c_str(), "%d.%d.%d", &v1_major, &v1_minor, &v1_patch);
+    sscanf(v2.c_str(), "%d.%d.%d", &v2_major, &v2_minor, &v2_patch);
+
+    if (v1_major > v2_major) return true;
+    if (v1_major < v2_major) return false;
+
+    if (v1_minor > v2_minor) return true;
+    if (v1_minor < v2_minor) return false;
+
+    return v1_patch > v2_patch;
+}
+
+String OTAManager::extractVersion(const String& tag) {
+    // Remove 'v' prefix if present
+    if (tag.startsWith("v") || tag.startsWith("V")) {
+        return tag.substring(1);
+    }
+    return tag;
+}
+
+bool OTAManager::checkUpdateFromManifest() {
+    if (manifest_url.isEmpty()) {
+        return false;
+    }
+
+    Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
+
+    WiFiClientSecure client;
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), manifest_url);
+
+    HTTPClient http;
+    http.begin(client, manifest_url);
+    OTAHelpers::configureHttpClient(http);
+
+    // Add HMAC authentication for authenticated manifest access
+    addAuthHeaders(http);
+
+    int httpCode = http.GET();
+
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[OTA] Manifest fetch failed: %d\n", httpCode);
+        RLOG_ERROR("ota", "Manifest fetch failed: HTTP %d", httpCode);
+        http.end();
+        return false;
+    }
+
+    String response = http.getString();
+    http.end();
+
+    // Parse manifest JSON
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
+
+    if (error) {
+        Serial.printf("[OTA] Failed to parse manifest: %s\n", error.c_str());
+        return false;
+    }
+
+    // Extract version and build info
+    latest_version = doc["version"].as<String>();
+    latest_build_id = doc["build_id"].as<String>();
+    latest_build_date = doc["build_date"].as<String>();
+
+    if (latest_version.isEmpty()) {
+        Serial.println("[OTA] No version in manifest");
+        return false;
+    }
+
+    Serial.printf("[OTA] Manifest: version=%s, build_id=%s, build_date=%s\n",
+                  latest_version.c_str(),
+                  latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
+                  latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
+
+    // Extract URLs for this board - prefer firmware-only (web assets embedded)
+    #if defined(ESP32_S3_BOARD)
+    const char* board_type = "esp32s3";
+    #else
+    const char* board_type = "esp32";
+    #endif
+
+    // Try firmware-only first (preferred - web assets now embedded in firmware)
+    firmware_url = doc["firmware"][board_type]["url"].as<String>();
+
+    // Legacy fallback: bundle (for transition period)
+    bundle_url = doc["bundle"][board_type]["url"].as<String>();
+
+    // Clear filesystem URL - no longer needed
+    littlefs_url = "";
+
+    bool has_firmware = !firmware_url.isEmpty();
+    bool has_bundle = !bundle_url.isEmpty();
+
+    if (!has_firmware && !has_bundle) {
+        Serial.printf("[OTA] Missing %s firmware in manifest\n", board_type);
+        return false;
+    }
+
+    // Compare versions
+    update_available = compareVersions(latest_version, current_version);
+
+    if (update_available) {
+        Serial.printf("[OTA] Update available: %s -> %s\n",
+                      current_version.c_str(), latest_version.c_str());
+        RLOG_INFO("OTA", "Update available: %s -> %s", current_version.c_str(), latest_version.c_str());
+        if (has_firmware) {
+            Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
+        } else {
+            Serial.printf("[OTA] Legacy bundle: %s\n", bundle_url.c_str());
+        }
+    } else {
+        Serial.println("[OTA] Already on latest version");
+        RLOG_DEBUG("OTA", "Already on latest version: %s", current_version.c_str());
+    }
+
+    return true;  // Successfully checked manifest
+}
+
+bool OTAManager::checkUpdateFromGithubAPI() {
+    if (update_url.isEmpty()) {
+        Serial.println("[OTA] No update URL configured");
+        return false;
+    }
+
+    Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
+
+    WiFiClientSecure client;
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), update_url);
+
+    HTTPClient http;
+    http.begin(client, update_url);
+    OTAHelpers::configureHttpClient(http);
+    http.addHeader("Accept", "application/vnd.github.v3+json");
+
+    int httpCode = http.GET();
+
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("[OTA] Failed to check for updates: %d\n", httpCode);
+        RLOG_ERROR("ota", "Failed to check for updates: HTTP %d", httpCode);
+        http.end();
+        return false;
+    }
+
+    String response = http.getString();
+    http.end();
+
+    // Parse GitHub releases response
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
+
+    if (error) {
+        Serial.printf("[OTA] Failed to parse response: %s\n", error.c_str());
+        return false;
+    }
+
+    // Extract version from tag_name
+    String tag = doc["tag_name"].as<String>();
+    latest_version = extractVersion(tag);
+
+    firmware_url = "";
+    littlefs_url = "";
+
+    // Find firmware + filesystem assets in release
+    JsonArray assets = doc["assets"].as<JsonArray>();
+    if (!selectReleaseAssets(assets)) {
+        Serial.println("[OTA] Missing firmware or LittleFS asset in release");
+        return false;
+    }
+
+    // Compare versions
+    update_available = compareVersions(latest_version, current_version);
+
+    if (update_available) {
+        Serial.printf("[OTA] Update available: %s -> %s\n",
+                      current_version.c_str(), latest_version.c_str());
+    } else {
+        Serial.println("[OTA] Already on latest version");
+    }
+
+    return true;  // Successfully checked (even if no update available)
+}
+
+bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
+    int bundle_priority = 0;
+    int firmware_priority = 0;
+    int littlefs_priority = 0;
+
+    for (JsonObject asset : assets) {
+        String name = asset["name"].as<String>();
+        String name_lower = name;
+        name_lower.toLowerCase();
+
+        if (!name_lower.endsWith(".bin")) {
+            continue;
+        }
+
+        if (name_lower.indexOf("bootstrap") >= 0) {
+            continue;
+        }
+
+        const String download = asset["browser_download_url"].as<String>();
+
+        // Check for LMWB bundle file (firmware-ota-*.bin) - PREFERRED
+        if (name_lower.indexOf("firmware") >= 0 && name_lower.indexOf("ota") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (priority > bundle_priority) {
+                bundle_priority = priority;
+                bundle_url = download;
+                Serial.printf("[OTA] Found bundle: %s (priority %d)\n", name.c_str(), priority);
+            }
+            continue;
+        }
+
+        // Fallback: separate littlefs file
+        if (name_lower.indexOf("littlefs") >= 0 || name_lower.indexOf("spiffs") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "littlefs.bin" || name_lower == "spiffs.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > littlefs_priority) {
+                littlefs_priority = priority;
+                littlefs_url = download;
+            }
+            continue;
+        }
+
+        // Fallback: separate firmware file
+        if (name_lower.indexOf("firmware") >= 0) {
+            int priority = 0;
+            #if defined(ESP32_S3_BOARD)
+            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                priority = 200;
+            }
+            #else
+            if (name_lower.indexOf("esp32") >= 0 &&
+                name_lower.indexOf("esp32s3") < 0 &&
+                name_lower.indexOf("esp32-s3") < 0) {
+                priority = 200;
+            }
+            #endif
+            if (name_lower == "firmware.bin") {
+                priority = max(priority, 50);
+            }
+            if (priority > firmware_priority) {
+                firmware_priority = priority;
+                firmware_url = download;
+            }
+        }
+    }
+
+    // Prefer firmware-only (web assets now embedded in firmware)
+    if (firmware_priority > 0) {
+        Serial.printf("[OTA] Using firmware: %s\n", firmware_url.c_str());
+        littlefs_url = "";  // Clear - no longer needed
+        return true;
+    }
+
+    // Legacy fallback: use bundle if firmware-only not available
+    if (bundle_priority > 0) {
+        Serial.printf("[OTA] Using legacy bundle: %s\n", bundle_url.c_str());
+        return true;
+    }
+
+    return false;
+}
