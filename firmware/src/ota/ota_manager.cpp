@@ -65,22 +65,15 @@ bool OTAManager::performUpdate() {
 
     // Web assets are now embedded in firmware - only need to download firmware.bin
     // No more LMWB bundles or separate LittleFS downloads needed
-    if (!firmware_url.isEmpty()) {
-        Serial.println("[OTA] Downloading firmware (web assets embedded)");
-        if (!downloadAndInstallBinary(firmware_url, U_FLASH, "firmware")) {
-            RLOG_ERROR("OTA", "Firmware download/install failed");
-            return false;
-        }
-    } else if (!bundle_url.isEmpty()) {
-        // Legacy fallback: support old LMWB bundles for transition period
-        Serial.println("[OTA] Using legacy LMWB bundle for update");
-        if (!downloadAndInstallBundle(bundle_url)) {
-            RLOG_ERROR("OTA", "Bundle download/install failed");
-            return false;
-        }
-    } else {
+    if (firmware_url.isEmpty()) {
         Serial.println("[OTA] Missing firmware URL");
         RLOG_ERROR("OTA", "No firmware URL available for update");
+        return false;
+    }
+
+    Serial.println("[OTA] Downloading firmware (web assets embedded)");
+    if (!downloadAndInstallBinary(firmware_url, U_FLASH, "firmware")) {
+        RLOG_ERROR("OTA", "Firmware download/install failed");
         return false;
     }
 

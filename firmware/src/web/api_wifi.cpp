@@ -68,7 +68,10 @@ void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     }
 }
 
-void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len, 
+                                       size_t index, size_t total) {
+    (void)index;  // Unused - single-chunk body
+    (void)total;  // Unused - single-chunk body
     String ssid;
     String password;
     

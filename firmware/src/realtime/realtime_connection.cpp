@@ -20,10 +20,9 @@ extern PairingManager pairing_manager;
 namespace {
 constexpr int REALTIME_SUBSCRIPTION_MODE = 0;  // 0=all tables, 1=commands only, 2=pairings only, 3=broadcast
 constexpr unsigned long INIT_RETRY_INTERVAL = 15000;  // 15 seconds
-
-// Forward declaration
-void handleRealtimeMessage(const RealtimeMessage& msg);
 }  // namespace
+
+// handleRealtimeMessage is declared in realtime_manager.h and defined in realtime_handlers.cpp
 
 bool RealtimeManager::attemptInit() {
     static unsigned long last_realtime_error_log = 0;

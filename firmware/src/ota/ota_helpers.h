@@ -22,6 +22,21 @@
 
 namespace OTAHelpers {
 
+// Retry configuration
+static constexpr int MAX_RETRY_ATTEMPTS = 3;
+static constexpr int INITIAL_RETRY_DELAY_MS = 2000;
+static constexpr int MAX_RETRY_DELAY_MS = 15000;
+
+// Check if download should be retried (partial download = retryable)
+inline bool shouldRetry(size_t written, size_t expected) {
+    return written > 0 && written < expected;
+}
+
+inline int getRetryDelay(int attempt) {
+    int delay = INITIAL_RETRY_DELAY_MS * (1 << attempt);
+    return min(delay, MAX_RETRY_DELAY_MS);
+}
+
 /**
  * @brief Disable and reconfigure watchdog for OTA operations
  * 
@@ -161,9 +176,21 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
             return total_written;
         }
 
+        unsigned long read_start = millis();
         int bytes_read = stream->readBytes(buffer, to_read);
+        unsigned long read_time = millis() - read_start;
+        if (read_time > 1000) {
+            Serial.printf("[OTA] WARNING: Slow read: %lu ms for %d bytes\n", read_time, bytes_read);
+        }
+
         if (bytes_read > 0) {
+            unsigned long write_start = millis();
             size_t bytes_written = write_callback(buffer, bytes_read);
+            unsigned long write_time = millis() - write_start;
+            if (write_time > 500) {
+                Serial.printf("[OTA] WARNING: Slow write: %lu ms for %zu bytes\n", write_time, bytes_written);
+            }
+
             if (bytes_written != static_cast<size_t>(bytes_read)) {
                 Serial.printf("[OTA] Write failed: wrote %zu of %d bytes\n", 
                               bytes_written, bytes_read);
@@ -177,6 +204,14 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
                 if (progress / 5 > last_progress / 5) {
                     last_progress = progress;
                     progress_callback(progress);
+                    
+                    // Heap monitoring
+                    uint32_t freeHeap = ESP.getFreeHeap();
+                    Serial.printf("[OTA] %d%% complete, heap: %u bytes\n", progress, freeHeap);
+                    if (freeHeap < 50000) {
+                        Serial.println("[OTA] CRITICAL: Heap too low, aborting");
+                        return total_written;
+                    }
                 }
             }
         }

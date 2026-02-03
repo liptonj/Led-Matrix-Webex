@@ -24,6 +24,9 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                                             size_t len,
                                             bool final,
                                             size_t total) {
+    // Progress logging state (static across calls)
+    static int last_web_progress = -1;
+
     if (index == 0) {
         ota_upload_in_progress = true;
         ota_upload_error = "";
@@ -36,9 +39,11 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
         ota_bundle_app_written = 0;
         ota_bundle_fs_written = 0;
         ota_bundle_fs_started = false;
+        last_web_progress = -1;  // Reset on new upload
 
         Serial.printf("[WEB] OTA upload start: %s (%u bytes)\n",
                       filename.c_str(), static_cast<unsigned>(ota_upload_size));
+        Serial.printf("[WEB] Starting heap: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
     }
 
     if (ota_upload_error.isEmpty()) {
@@ -204,6 +209,29 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                 }
             }
         }
+
+        // Progress logging every 10% with heap monitoring
+        size_t total_written = ota_bundle_mode ? 
+            (ota_bundle_app_written + ota_bundle_fs_written) : 
+            (index + len);
+        size_t total_size = ota_bundle_mode ? 
+            (ota_bundle_app_size + ota_bundle_fs_size) : 
+            ota_upload_size;
+
+        if (total_size > 0) {
+            int progress = (total_written * 100) / total_size;
+            if (progress / 10 > last_web_progress / 10) {
+                last_web_progress = progress;
+                uint32_t freeHeap = ESP.getFreeHeap();
+                Serial.printf("[WEB] Upload: %d%% (heap: %u bytes)\n", progress, freeHeap);
+                
+                // Abort if heap critically low
+                if (freeHeap < 50000 && ota_upload_error.isEmpty()) {
+                    ota_upload_error = "Heap too low during upload";
+                    RLOG_ERROR("ota-web", "Heap critically low: %u bytes at %d%%", freeHeap, progress);
+                }
+            }
+        }
     }
 
     if (final) {
@@ -274,5 +302,76 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
             pending_reboot_time = millis() + 1000;
             pending_boot_partition = nullptr;
         }
+    }
+}
+
+void WebServerManager::handleOTAUploadComplete(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    
+    if (ota_upload_error.isEmpty()) {
+        doc["success"] = true;
+        doc["message"] = "Firmware update complete, rebooting...";
+        sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+    } else {
+        doc["success"] = false;
+        doc["error"] = ota_upload_error;
+        sendJsonResponse(request, 500, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+    }
+}
+
+void WebServerManager::handleOTAFilesystemUploadChunk(AsyncWebServerRequest* request,
+                                                       const String& filename,
+                                                       size_t index,
+                                                       uint8_t* data,
+                                                       size_t len,
+                                                       bool final) {
+    // Filesystem-only upload (legacy - not typically used anymore)
+    if (index == 0) {
+        ota_upload_in_progress = true;
+        ota_upload_error = "";
+        Serial.printf("[WEB] Filesystem upload start: %s\n", filename.c_str());
+        
+        LittleFS.end();
+        if (!Update.begin(request->contentLength(), U_SPIFFS)) {
+            ota_upload_error = Update.errorString();
+            RLOG_ERROR("ota-web", "FS Update.begin failed: %s", ota_upload_error.c_str());
+        }
+    }
+
+    if (ota_upload_error.isEmpty() && len > 0) {
+        if (Update.write(data, len) != len) {
+            ota_upload_error = Update.errorString();
+        }
+    }
+
+    if (final) {
+        if (ota_upload_error.isEmpty()) {
+            if (!Update.end(true)) {
+                ota_upload_error = Update.errorString();
+            }
+        } else {
+            Update.abort();
+        }
+
+        ota_upload_in_progress = false;
+        Serial.printf("[WEB] Filesystem upload %s\n",
+                      ota_upload_error.isEmpty() ? "complete" : "failed");
+        if (!ota_upload_error.isEmpty()) {
+            RLOG_ERROR("ota-web", "FS error: %s", ota_upload_error.c_str());
+        }
+    }
+}
+
+void WebServerManager::handleOTAFilesystemUploadComplete(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    
+    if (ota_upload_error.isEmpty()) {
+        doc["success"] = true;
+        doc["message"] = "Filesystem update complete";
+        sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+    } else {
+        doc["success"] = false;
+        doc["error"] = ota_upload_error;
+        sendJsonResponse(request, 500, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
     }
 }

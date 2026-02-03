@@ -57,8 +57,8 @@ void WebServerManager::setupApiRoutes() {
     server->on("/api/wifi/save", HTTP_POST,
         [](AsyncWebServerRequest* request) {},
         nullptr,
-        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len) {
-            handleWifiSave(request, data, len);
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleWifiSave(request, data, len, index, total);
         }
     );
 

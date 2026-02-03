@@ -125,16 +125,9 @@ bool OTAManager::checkUpdateFromManifest() {
     // Try firmware-only first (preferred - web assets now embedded in firmware)
     firmware_url = doc["firmware"][board_type]["url"].as<String>();
 
-    // Legacy fallback: bundle (for transition period)
-    bundle_url = doc["bundle"][board_type]["url"].as<String>();
-
-    // Clear filesystem URL - no longer needed
-    littlefs_url = "";
-
     bool has_firmware = !firmware_url.isEmpty();
-    bool has_bundle = !bundle_url.isEmpty();
 
-    if (!has_firmware && !has_bundle) {
+    if (!has_firmware) {
         Serial.printf("[OTA] Missing %s firmware in manifest\n", board_type);
         return false;
     }
@@ -146,11 +139,7 @@ bool OTAManager::checkUpdateFromManifest() {
         Serial.printf("[OTA] Update available: %s -> %s\n",
                       current_version.c_str(), latest_version.c_str());
         RLOG_INFO("OTA", "Update available: %s -> %s", current_version.c_str(), latest_version.c_str());
-        if (has_firmware) {
-            Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
-        } else {
-            Serial.printf("[OTA] Legacy bundle: %s\n", bundle_url.c_str());
-        }
+        Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
     } else {
         Serial.println("[OTA] Already on latest version");
         RLOG_DEBUG("OTA", "Already on latest version: %s", current_version.c_str());
@@ -201,12 +190,11 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     latest_version = extractVersion(tag);
 
     firmware_url = "";
-    littlefs_url = "";
 
-    // Find firmware + filesystem assets in release
+    // Find firmware assets in release
     JsonArray assets = doc["assets"].as<JsonArray>();
     if (!selectReleaseAssets(assets)) {
-        Serial.println("[OTA] Missing firmware or LittleFS asset in release");
+        Serial.println("[OTA] Missing firmware asset in release");
         return false;
     }
 
@@ -224,9 +212,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
 }
 
 bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
-    int bundle_priority = 0;
     int firmware_priority = 0;
-    int littlefs_priority = 0;
 
     for (JsonObject asset : assets) {
         String name = asset["name"].as<String>();
@@ -243,53 +229,7 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
 
         const String download = asset["browser_download_url"].as<String>();
 
-        // Check for LMWB bundle file (firmware-ota-*.bin) - PREFERRED
-        if (name_lower.indexOf("firmware") >= 0 && name_lower.indexOf("ota") >= 0) {
-            int priority = 0;
-            #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 200;
-            }
-            #else
-            if (name_lower.indexOf("esp32") >= 0 &&
-                name_lower.indexOf("esp32s3") < 0 &&
-                name_lower.indexOf("esp32-s3") < 0) {
-                priority = 200;
-            }
-            #endif
-            if (priority > bundle_priority) {
-                bundle_priority = priority;
-                bundle_url = download;
-                Serial.printf("[OTA] Found bundle: %s (priority %d)\n", name.c_str(), priority);
-            }
-            continue;
-        }
-
-        // Fallback: separate littlefs file
-        if (name_lower.indexOf("littlefs") >= 0 || name_lower.indexOf("spiffs") >= 0) {
-            int priority = 0;
-            #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 200;
-            }
-            #else
-            if (name_lower.indexOf("esp32") >= 0 &&
-                name_lower.indexOf("esp32s3") < 0 &&
-                name_lower.indexOf("esp32-s3") < 0) {
-                priority = 200;
-            }
-            #endif
-            if (name_lower == "littlefs.bin" || name_lower == "spiffs.bin") {
-                priority = max(priority, 50);
-            }
-            if (priority > littlefs_priority) {
-                littlefs_priority = priority;
-                littlefs_url = download;
-            }
-            continue;
-        }
-
-        // Fallback: separate firmware file
+        // Check for firmware file
         if (name_lower.indexOf("firmware") >= 0) {
             int priority = 0;
             #if defined(ESP32_S3_BOARD)
@@ -316,13 +256,6 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
     // Prefer firmware-only (web assets now embedded in firmware)
     if (firmware_priority > 0) {
         Serial.printf("[OTA] Using firmware: %s\n", firmware_url.c_str());
-        littlefs_url = "";  // Clear - no longer needed
-        return true;
-    }
-
-    // Legacy fallback: use bundle if firmware-only not available
-    if (bundle_priority > 0) {
-        Serial.printf("[OTA] Using legacy bundle: %s\n", bundle_url.c_str());
         return true;
     }
 

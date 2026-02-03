@@ -21,6 +21,7 @@
 #include "../common/ca_certs.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include <WiFi.h>
 #include <Update.h>
 #include <LittleFS.h>
 
@@ -146,9 +147,56 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
     };
 
-    // Use helper to download stream
-    size_t written = OTAHelpers::downloadStream(stream, buffer, 4096, 
-                                                 contentLength, writeCallback, progressCallback);
+    // Use helper to download stream with retry logic
+    size_t written = 0;
+    int retry_count = 0;
+
+    while (retry_count <= OTAHelpers::MAX_RETRY_ATTEMPTS) {
+        written = OTAHelpers::downloadStream(stream, buffer, 4096, 
+                                              contentLength, writeCallback, progressCallback);
+        
+        if (written == static_cast<size_t>(contentLength)) {
+            break;  // Success
+        }
+        
+        if (!OTAHelpers::shouldRetry(written, contentLength)) {
+            Serial.printf("[OTA] Download failed at %zu bytes, not retryable\n", written);
+            RLOG_ERROR("ota", "Download failed at %zu/%d bytes, not retryable", written, contentLength);
+            break;
+        }
+        
+        retry_count++;
+        if (retry_count > OTAHelpers::MAX_RETRY_ATTEMPTS) {
+            Serial.printf("[OTA] Max retries (%d) exceeded\n", OTAHelpers::MAX_RETRY_ATTEMPTS);
+            RLOG_ERROR("ota", "OTA failed after %d retries at %zu/%d bytes", 
+                       OTAHelpers::MAX_RETRY_ATTEMPTS, written, contentLength);
+            break;
+        }
+        
+        // Check WiFi before retry
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[OTA] WiFi disconnected, cannot retry");
+            RLOG_ERROR("ota", "WiFi disconnected during OTA at %zu bytes", written);
+            break;
+        }
+        
+        int delay_ms = OTAHelpers::getRetryDelay(retry_count - 1);
+        Serial.printf("[OTA] Retry %d/%d in %dms (got %zu/%d bytes)\n",
+                      retry_count, OTAHelpers::MAX_RETRY_ATTEMPTS, delay_ms, written, contentLength);
+        RLOG_WARN("ota", "OTA retry %d/%d at %zu/%d bytes", 
+                  retry_count, OTAHelpers::MAX_RETRY_ATTEMPTS, written, contentLength);
+        
+        Update.abort();
+        
+        // Log heap after abort to verify cleanup
+        Serial.printf("[OTA] Heap after abort: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
+        
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        
+        // NOTE: Full HTTP reconnect with Range header resume is out of scope.
+        // For now, fail and let the main loop schedule a full OTA retry.
+        break;
+    }
 
     if (written != static_cast<size_t>(contentLength)) {
         Serial.printf("[OTA] Written only %zu of %d bytes for %s\n", written, contentLength, label);

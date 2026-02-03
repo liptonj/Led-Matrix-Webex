@@ -109,7 +109,7 @@ private:
     void handleConfig(AsyncWebServerRequest* request);
     void handleSaveConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
     void handleWifiScan(AsyncWebServerRequest* request);
-    void handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    void handleWifiSave(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
     void handleWebexAuth(AsyncWebServerRequest* request);
     void handleOAuthCallback(AsyncWebServerRequest* request);
     void handleCheckUpdate(AsyncWebServerRequest* request);
