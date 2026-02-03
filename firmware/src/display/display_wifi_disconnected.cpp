@@ -1,21 +1,20 @@
 #include "matrix_display.h"
+#include "display_helpers.h"
 
 void MatrixDisplay::showWifiDisconnected() {
     if (!initialized) return;
 
-    const String screen_key = "wifi_offline";
-    const bool screen_changed = (last_static_key != screen_key);
-    last_static_key = screen_key;
+    StaticScreenBuilder builder(this, "wifi_offline", last_static_key);
 
-    if (screen_changed) {
-        dma_display->clearScreen();
+    if (builder.hasChanged()) {
+        builder.clearScreen();
 
         // Draw WiFi icon centered, disconnected (red)
         int icon_x = (MATRIX_WIDTH - 7) / 2;
         int icon_y = 6;
         drawWifiIcon(icon_x, icon_y, false);
 
-        drawCenteredText(getTextLineY(2, 8), "WIFI OFFLINE", COLOR_YELLOW);
-        drawCenteredText(getTextLineY(3, 8), "NO CONNECTION", COLOR_WHITE);
+        drawCenteredText(builder.getLineY(2, 8), "WIFI OFFLINE", COLOR_YELLOW);
+        drawCenteredText(builder.getLineY(3, 8), "NO CONNECTION", COLOR_WHITE);
     }
 }

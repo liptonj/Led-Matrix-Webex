@@ -9,14 +9,12 @@
 #include "ota_manager.h"
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
+#include "../core/dependencies.h"
 #include <Update.h>
 #ifndef NATIVE_BUILD
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 #endif
-
-// External references
-extern ConfigManager config_manager;
 
 namespace OTAManagerFlash {
 
@@ -70,7 +68,8 @@ bool finalizeUpdate(int update_type, const esp_partition_t* target_partition, co
         Serial.printf("[OTA] Boot partition set to %s\n", target_partition->label);
 
         // Store the version for this partition in NVS for future display
-        config_manager.setPartitionVersion(String(target_partition->label), version);
+        auto& deps = getDependencies();
+        deps.config.setPartitionVersion(String(target_partition->label), version);
     }
 #endif
 

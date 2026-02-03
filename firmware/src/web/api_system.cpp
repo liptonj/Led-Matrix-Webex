@@ -12,11 +12,8 @@
 #include "web_helpers.h"
 #include "../common/pairing_manager.h"
 #include "../supabase/supabase_client.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
-
-// External pairing manager for pairing code
-extern PairingManager pairing_manager;
-extern SupabaseClient supabaseClient;
 
 void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
     sendSuccessResponse(request, "Rebooting...", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
@@ -36,8 +33,9 @@ void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* request) {
-    String newCode = pairing_manager.generateCode(true);
-    supabaseClient.setPairingCode(newCode);
+    auto& deps = getDependencies();
+    String newCode = deps.pairing.generateCode(true);
+    deps.supabase.setPairingCode(newCode);
     app_state->supabase_realtime_resubscribe = true;
     Serial.println("[WEB] New pairing code generated");
 

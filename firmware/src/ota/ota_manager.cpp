@@ -14,11 +14,7 @@
 #include "../supabase/supabase_realtime.h"
 #include "../debug/remote_logger.h"
 #include "../app_state.h"
-
-// External references
-extern MatrixDisplay matrix_display;
-extern SupabaseRealtime supabaseRealtime;
-extern AppState app_state;
+#include "../core/dependencies.h"
 
 OTAManager::OTAManager()
     : update_available(false), use_manifest_mode(false) {
@@ -82,7 +78,8 @@ bool OTAManager::performUpdate() {
     RLOG_INFO("OTA", "Update to %s successful, rebooting", latest_version.c_str());
 
     // Show complete status
-    matrix_display.showUpdatingProgress(latest_version, 100, "Rebooting...");
+    auto& deps = getDependencies();
+    deps.display.showUpdatingProgress(latest_version, 100, "Rebooting...");
 
     delay(1000);
     ESP.restart();

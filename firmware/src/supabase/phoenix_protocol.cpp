@@ -9,8 +9,7 @@
 #include "supabase_realtime.h"
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
-
-extern ConfigManager config_manager;
+#include "../core/dependencies.h"
 
 namespace {
 String buildRedactedJoinPayload(const JsonDocument& payload) {
@@ -377,7 +376,8 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
         if (status == "ok") {
             _subscribed = true;
             Serial.println("[REALTIME] Successfully joined channel");
-            if (config_manager.getPairingRealtimeDebug()) {
+            auto& deps = getDependencies();
+            if (deps.config.getPairingRealtimeDebug()) {
                 String responseStr;
                 if (payload["response"].is<JsonObject>()) {
                     serializeJson(payload["response"], responseStr);
@@ -410,7 +410,8 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     
     // Handle postgres_changes events
     if (event == "postgres_changes") {
-        if (config_manager.getPairingRealtimeDebug()) {
+        auto& deps = getDependencies();
+        if (deps.config.getPairingRealtimeDebug()) {
             String payloadStr;
             serializeJson(payload, payloadStr);
             Serial.printf("[REALTIME] postgres_changes inbound: %s\n", payloadStr.c_str());

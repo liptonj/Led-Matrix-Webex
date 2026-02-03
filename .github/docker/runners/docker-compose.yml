@@ -19,6 +19,9 @@ x-runner-common: &runner-common
   image: ghcr.io/liptonj/led-matrix-builder:latest
   entrypoint: ["/entrypoint-runner.sh"]
   restart: always
+  # Memory limits to prevent OOM when multiple runners execute npm ci concurrently
+  mem_limit: 4g
+  memswap_limit: 6g
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
   networks:

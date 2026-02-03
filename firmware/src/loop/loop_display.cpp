@@ -15,13 +15,7 @@
 #include "display/matrix_display.h"
 #include "wifi/wifi_manager.h"
 #include "web/web_server.h"
-
-// External globals from main.cpp
-extern ConfigManager config_manager;
-extern MatrixDisplay matrix_display;
-extern WiFiManager wifi_manager;
-extern WebServerManager web_server;
-extern AppState app_state;
+#include "../core/dependencies.h"
 
 // Forward declaration for extractFirstName (defined in loop_webex.cpp)
 // We'll define it here as static since it's used by both files
@@ -128,55 +122,55 @@ void update_display() {
     last_update = millis();
     const unsigned long now = millis();
     if (!cached.initialized || now - last_config_refresh >= 1000) {
+        auto& deps = getDependencies();
         last_config_refresh = now;
         cached.initialized = true;
-        cached.brightness = config_manager.getBrightness();
-        cached.scroll_speed_ms = config_manager.getScrollSpeedMs();
-        cached.page_interval_ms = config_manager.getPageIntervalMs();
-        cached.border_width = config_manager.getBorderWidth();
-        cached.display_pages = config_manager.getDisplayPages();
-        cached.status_layout = config_manager.getStatusLayout();
-        cached.display_metric = config_manager.getDisplayMetric();
-        cached.display_name = config_manager.getDisplayName();
+        cached.brightness = deps.config.getBrightness();
+        cached.scroll_speed_ms = deps.config.getScrollSpeedMs();
+        cached.page_interval_ms = deps.config.getPageIntervalMs();
+        cached.border_width = deps.config.getBorderWidth();
+        cached.display_pages = deps.config.getDisplayPages();
+        cached.status_layout = deps.config.getStatusLayout();
+        cached.display_metric = deps.config.getDisplayMetric();
+        cached.display_name = deps.config.getDisplayName();
         cached.display_name_short = extractFirstName(cached.display_name);
-        cached.device_name = config_manager.getDeviceName();
+        cached.device_name = deps.config.getDeviceName();
         cached.device_name_short = extractFirstName(cached.device_name);
-        cached.date_color = parseColor565(config_manager.getDateColor(), COLOR_CYAN);
-        cached.time_color = parseColor565(config_manager.getTimeColor(), COLOR_WHITE);
-        cached.name_color = parseColor565(config_manager.getNameColor(), COLOR_ORANGE);
-        cached.metric_color = parseColor565(config_manager.getMetricColor(), COLOR_BLUE);
-        cached.use_24h = config_manager.use24HourTime();
-        cached.date_format = config_manager.getDateFormatCode();
+        cached.date_color = parseColor565(deps.config.getDateColor(), COLOR_CYAN);
+        cached.time_color = parseColor565(deps.config.getTimeColor(), COLOR_WHITE);
+        cached.name_color = parseColor565(deps.config.getNameColor(), COLOR_ORANGE);
+        cached.metric_color = parseColor565(deps.config.getMetricColor(), COLOR_BLUE);
+        cached.use_24h = deps.config.use24HourTime();
+        cached.date_format = deps.config.getDateFormatCode();
         
         // Update runtime debug flags
-        extern bool g_debug_display;
-        extern bool g_debug_realtime;
-        g_debug_display = config_manager.getDebugDisplay();
-        g_debug_realtime = config_manager.getDebugRealtime();
+        deps.debug_display = deps.config.getDebugDisplay();
+        deps.debug_realtime = deps.config.getDebugRealtime();
     }
 
+    auto& deps = getDependencies();
     if (!brightness_initialized || last_brightness != cached.brightness) {
         last_brightness = cached.brightness;
         brightness_initialized = true;
-        matrix_display.setBrightness(cached.brightness);
+        deps.display.setBrightness(cached.brightness);
     }
-    matrix_display.setScrollSpeedMs(cached.scroll_speed_ms);
-    matrix_display.setPageIntervalMs(cached.page_interval_ms);
+    deps.display.setScrollSpeedMs(cached.scroll_speed_ms);
+    deps.display.setPageIntervalMs(cached.page_interval_ms);
 
     // Show updating screen during OTA file upload
-    if (web_server.isOTAUploadInProgress()) {
-        matrix_display.showUpdating("Uploading...");
+    if (deps.web_server.isOTAUploadInProgress()) {
+        deps.display.showUpdating("Uploading...");
         return;
     }
 
     // If WiFi is not connected, show appropriate screen
-    if (!app_state.wifi_connected) {
-        if (wifi_manager.isAPModeActive()) {
+    if (!deps.app_state.wifi_connected) {
+        if (deps.wifi.isAPModeActive()) {
             // In AP mode for setup - show AP mode screen
-            matrix_display.showAPMode(WiFi.softAPIP().toString());
+            deps.display.showAPMode(WiFi.softAPIP().toString());
         } else {
             // WiFi was configured but connection dropped
-            matrix_display.showWifiDisconnected();
+            deps.display.showWifiDisconnected();
         }
         return;
     }
@@ -184,48 +178,48 @@ void update_display() {
     // If Webex is unavailable, keep showing a generic screen with IP
     // Only show unconfigured screen if WiFi is connected but no services are connected
     // Note: Even "unknown" status should be displayed on the status page, not trigger unconfigured screen
-    const bool has_app_presence = app_state.embedded_app_connected || app_state.supabase_app_connected;
-    if (app_state.wifi_connected &&
-        !app_state.xapi_connected &&
-        !app_state.webex_authenticated &&
-        !app_state.mqtt_connected &&
+    const bool has_app_presence = deps.app_state.embedded_app_connected || deps.app_state.supabase_app_connected;
+    if (deps.app_state.wifi_connected &&
+        !deps.app_state.xapi_connected &&
+        !deps.app_state.webex_authenticated &&
+        !deps.app_state.mqtt_connected &&
         !has_app_presence &&
-        !app_state.webex_status_received) {
+        !deps.app_state.webex_status_received) {
         // Show unconfigured screen only when truly no services are connected
         // Status display will show "unknown" status if webex_status is "unknown"
         const uint16_t unconfigured_scroll = cached.scroll_speed_ms < 60 ? cached.scroll_speed_ms : 60;
-        matrix_display.setScrollSpeedMs(unconfigured_scroll);
-        matrix_display.showUnconfigured(WiFi.localIP().toString(), cached.device_name);
+        deps.display.setScrollSpeedMs(unconfigured_scroll);
+        deps.display.showUnconfigured(WiFi.localIP().toString(), cached.device_name);
         return;
     }
 
     // Build display data
     DisplayData data;
-    data.webex_status = app_state.webex_status;
+    data.webex_status = deps.app_state.webex_status;
     // Prefer embedded app display name (from Webex SDK), fallback to config, then device name
-    if (app_state.embedded_app_connected && !app_state.embedded_app_display_name.isEmpty()) {
-        data.display_name = extractFirstName(app_state.embedded_app_display_name);
+    if (deps.app_state.embedded_app_connected && !deps.app_state.embedded_app_display_name.isEmpty()) {
+        data.display_name = extractFirstName(deps.app_state.embedded_app_display_name);
     } else if (!cached.display_name_short.isEmpty()) {
         data.display_name = cached.display_name_short;
     } else {
         // Fallback to device name if no display name is configured
         data.display_name = cached.device_name_short;
     }
-    data.camera_on = app_state.camera_on;
-    data.mic_muted = app_state.mic_muted;
-    data.in_call = app_state.in_call;
+    data.camera_on = deps.app_state.camera_on;
+    data.mic_muted = deps.app_state.mic_muted;
+    data.in_call = deps.app_state.in_call;
     // Show call status when we have camera/mic info (xAPI) OR when in a call from any source
-    data.show_call_status = app_state.xapi_connected || app_state.embedded_app_connected || app_state.in_call;
-    data.temperature = app_state.temperature;
-    data.humidity = app_state.humidity;
-    data.door_status = app_state.door_status;
-    data.air_quality_index = app_state.air_quality_index;
-    data.tvoc = app_state.tvoc;
-    data.co2_ppm = app_state.co2_ppm;
-    data.pm2_5 = app_state.pm2_5;
-    data.ambient_noise = app_state.ambient_noise;
+    data.show_call_status = deps.app_state.xapi_connected || deps.app_state.embedded_app_connected || deps.app_state.in_call;
+    data.temperature = deps.app_state.temperature;
+    data.humidity = deps.app_state.humidity;
+    data.door_status = deps.app_state.door_status;
+    data.air_quality_index = deps.app_state.air_quality_index;
+    data.tvoc = deps.app_state.tvoc;
+    data.co2_ppm = deps.app_state.co2_ppm;
+    data.pm2_5 = deps.app_state.pm2_5;
+    data.ambient_noise = deps.app_state.ambient_noise;
     data.right_metric = cached.display_metric;
-    data.show_sensors = app_state.mqtt_connected && app_state.sensor_data_valid;
+    data.show_sensors = deps.app_state.mqtt_connected && deps.app_state.sensor_data_valid;
     const String& page_mode = cached.display_pages;
     if (page_mode == "status") {
         data.page_mode = DisplayPageMode::STATUS_ONLY;
@@ -243,7 +237,7 @@ void update_display() {
     data.metric_color = cached.metric_color;
 
     // Connection indicators
-    data.wifi_connected = app_state.wifi_connected;
+    data.wifi_connected = deps.app_state.wifi_connected;
 
     // Get current time (cache once per second)
     static struct tm last_timeinfo;
@@ -255,8 +249,8 @@ void update_display() {
         if (getLocalTime(&timeinfo)) {
             last_timeinfo = timeinfo;
             has_time = true;
-            app_state.time_synced = true;
-        } else if (!app_state.time_synced) {
+            deps.app_state.time_synced = true;
+        } else if (!deps.app_state.time_synced) {
             has_time = false;
         }
     }
@@ -270,7 +264,7 @@ void update_display() {
     data.use_24h = cached.use_24h;
     data.date_format = cached.date_format;
 
-    matrix_display.update(data);
+    deps.display.update(data);
 }
 
 void handleDisplayUpdate(LoopContext& ctx) {

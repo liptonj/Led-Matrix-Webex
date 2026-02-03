@@ -19,29 +19,25 @@
 #include "../app_state.h"
 #include "../display/matrix_display.h"
 #include "../common/ca_certs.h"
+#include "../core/dependencies.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
 #include <Update.h>
 #include <LittleFS.h>
 
-// External references
-extern ConfigManager config_manager;
-extern SupabaseRealtime supabaseRealtime;
-extern AppState app_state;
-extern MatrixDisplay matrix_display;
-
 bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
+    auto& deps = getDependencies();
     Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
 
     // Safety disconnect: ensure realtime is not running during OTA
     // The WebSocket competes for heap and network bandwidth, causing stream timeouts
-    if (supabaseRealtime.isConnected() || supabaseRealtime.isConnecting()) {
+    if (deps.realtime.isConnected() || deps.realtime.isConnecting()) {
         Serial.println("[OTA] Safety disconnect: stopping realtime for OTA");
-        supabaseRealtime.disconnect();
+        deps.realtime.disconnect();
     }
     // Defer realtime reconnection for 10 minutes to cover entire OTA process
-    app_state.realtime_defer_until = millis() + 600000UL;
+    deps.app_state.realtime_defer_until = millis() + 600000UL;
 
     Serial.printf("[OTA] Heap before download: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
 
@@ -49,7 +45,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     OTAHelpers::disableWatchdogForOTA();
 
     WiFiClientSecure client;
-    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), url);
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), url);
 
     HTTPClient http;
     http.begin(client, url);
@@ -136,7 +132,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     };
 
     // Define progress callback for display updates
-    auto progressCallback = [this, &label, update_type](int progress) {
+    auto progressCallback = [this, &label, update_type, &deps](int progress) {
         Serial.printf("[OTA] %s: %d%%\n", label, progress);
 
         // Update display with progress
@@ -144,7 +140,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         int displayProgress = (update_type == U_FLASH) ?
             (progress * 85) / 100 : 85 + ((progress * 15) / 100);
         String statusText = String(label) + " " + String(progress) + "%";
-        matrix_display.showUpdatingProgress(latest_version, displayProgress, statusText);
+        deps.display.showUpdatingProgress(latest_version, displayProgress, statusText);
     };
 
     // Use helper to download stream with retry logic

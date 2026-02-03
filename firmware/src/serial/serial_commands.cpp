@@ -5,10 +5,8 @@
 
 #include "serial_commands.h"
 #include "../config/config_manager.h"
+#include "../core/dependencies.h"
 #include <WiFi.h>
-
-// External references
-extern ConfigManager config_manager;
 
 // Serial command state
 static String serial_buffer = "";
@@ -156,7 +154,8 @@ static void handle_wifi_command(const String& command) {
     Serial.printf("[SERIAL] Configuring WiFi: SSID='%s' (len=%d)\n", ssid.c_str(), ssid.length());
     
     // Save credentials using config manager
-    config_manager.setWiFiCredentials(ssid, password);
+    auto& deps = getDependencies();
+    deps.config.setWiFiCredentials(ssid, password);
     
     // Set pending flag for main loop to handle connection
     wifi_pending = true;
@@ -240,7 +239,8 @@ static void handle_factory_reset_command() {
     delay(1000);
     
     // Use ConfigManager's factory reset (clears correct namespace + partitions)
-    config_manager.factoryReset();
+    auto& deps = getDependencies();
+    deps.config.factoryReset();
     
     Serial.println("[SERIAL] Rebooting...");
     delay(500);

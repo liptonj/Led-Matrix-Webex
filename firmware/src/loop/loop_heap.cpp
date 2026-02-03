@@ -11,9 +11,7 @@
 
 #include "esp_heap_caps.h"
 #include "supabase/supabase_realtime.h"
-
-// Forward declaration
-extern SupabaseRealtime supabaseRealtime;
+#include "../core/dependencies.h"
 
 // =============================================================================
 // HEAP TREND MONITOR IMPLEMENTATION
@@ -114,7 +112,8 @@ void handleLowHeapRecovery(LoopContext& ctx) {
             Serial.printf("[HEAP] Low heap recovery triggered (free=%u block=%u)\n",
                           freeHeap, largestBlock);
             // Disconnect realtime to free heap
-            supabaseRealtime.disconnect();
+            auto& deps = getDependencies();
+            deps.realtime.disconnect();
             ctx.app_state->realtime_defer_until = ctx.current_time + 60000UL;
             Serial.println("[HEAP] Freed realtime connection to recover heap");
         }

@@ -9,18 +9,18 @@
 #include "../common/pairing_manager.h"
 #include "../supabase/supabase_client.h"
 #include "../common/url_utils.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
-
-extern PairingManager pairing_manager;
 
 // Note: urlEncode() removed from anonymous namespace - now using common/url_utils.h
 
 void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
-    const String pairing_code = pairing_manager.getCode();
-    const String serial = deviceCredentials.getSerialNumber();
-    const String token = supabaseClient.getAccessToken();
+    auto& deps = getDependencies();
+    const String pairing_code = deps.pairing.getCode();
+    const String serial = deps.credentials.getSerialNumber();
+    const String token = deps.supabase.getAccessToken();
     const uint32_t ts = DeviceCredentials::getTimestamp();
-    const String sig = deviceCredentials.signRequest(ts, "");
+    const String sig = deps.credentials.signRequest(ts, "");
 
     if (pairing_code.isEmpty() || serial.isEmpty()) {
         request->send(400, "application/json", "{\"error\":\"Device not ready\"}");

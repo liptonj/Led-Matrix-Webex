@@ -8,14 +8,8 @@
 #include "../config/config_manager.h"
 #include "../commands/command_processor.h"
 #include "../supabase/supabase_client.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
-
-extern AppState app_state;
-extern ConfigManager config_manager;
-extern CommandProcessor commandProcessor;
-
-// External debug flags from main.cpp
-extern bool g_debug_mode;
 
 // Forward declarations
 void handleSupabaseCommand(const SupabaseCommand& cmd);
@@ -89,6 +83,8 @@ bool buildCommandFromJson(const JsonObject& record, SupabaseCommand& cmd) {
  * @param record JSON object containing command data
  */
 void handleBroadcastCommand(const JsonObject& record) {
+    auto& deps = getDependencies();
+    
     if (record.isNull()) {
         Serial.println("[REALTIME] Broadcast command missing record");
         return;
@@ -99,7 +95,7 @@ void handleBroadcastCommand(const JsonObject& record) {
         return;
     }
 
-    if (commandProcessor.wasRecentlyProcessed(cmd.id)) {
+    if (deps.command_processor.wasRecentlyProcessed(cmd.id)) {
         Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
         return;
     }
@@ -121,6 +117,8 @@ void handleBroadcastCommand(const JsonObject& record) {
  * @param record JSON object containing pairing data
  */
 void handleBroadcastPairing(const JsonObject& record) {
+    auto& deps = getDependencies();
+    
     if (record.isNull()) {
         Serial.println("[REALTIME] Broadcast pairing missing record");
         return;
@@ -137,47 +135,47 @@ void handleBroadcastPairing(const JsonObject& record) {
     // Check if any STATUS-RELEVANT fields actually changed
     bool statusChanged = false;
 
-    if (newAppConnected != app_state.embedded_app_connected ||
-        newWebexStatus != app_state.webex_status ||
-        (!newDisplayName.isEmpty() && newDisplayName != app_state.embedded_app_display_name)) {
+    if (newAppConnected != deps.app_state.embedded_app_connected ||
+        newWebexStatus != deps.app_state.webex_status ||
+        (!newDisplayName.isEmpty() && newDisplayName != deps.app_state.embedded_app_display_name)) {
         statusChanged = true;
     }
 
-    if (!app_state.xapi_connected) {
-        if (newCameraOn != app_state.camera_on ||
-            newMicMuted != app_state.mic_muted ||
-            newInCall != app_state.in_call) {
+    if (!deps.app_state.xapi_connected) {
+        if (newCameraOn != deps.app_state.camera_on ||
+            newMicMuted != deps.app_state.mic_muted ||
+            newInCall != deps.app_state.in_call) {
             statusChanged = true;
         }
     }
 
     // Ignore heartbeat-only updates
     if (!statusChanged) {
-        app_state.last_supabase_sync = millis();
-        if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
+        deps.app_state.last_supabase_sync = millis();
+        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
             Serial.println("[REALTIME] Broadcast pairing update ignored (no status change)");
         }
         return;
     }
 
     // Apply changes
-    app_state.supabase_app_connected = newAppConnected;
-    app_state.embedded_app_connected = newAppConnected;
+    deps.app_state.supabase_app_connected = newAppConnected;
+    deps.app_state.embedded_app_connected = newAppConnected;
     if (newAppConnected) {
-        app_state.webex_status = newWebexStatus;
-        app_state.webex_status_received = true;
-        app_state.webex_status_source = "embedded_app";
+        deps.app_state.webex_status = newWebexStatus;
+        deps.app_state.webex_status_received = true;
+        deps.app_state.webex_status_source = "embedded_app";
         if (!newDisplayName.isEmpty()) {
-            app_state.embedded_app_display_name = newDisplayName;
+            deps.app_state.embedded_app_display_name = newDisplayName;
         }
-        if (!app_state.xapi_connected) {
-            app_state.camera_on = newCameraOn;
-            app_state.mic_muted = newMicMuted;
-            app_state.in_call = newInCall;
+        if (!deps.app_state.xapi_connected) {
+            deps.app_state.camera_on = newCameraOn;
+            deps.app_state.mic_muted = newMicMuted;
+            deps.app_state.in_call = newInCall;
         }
     }
 
-    app_state.last_supabase_sync = millis();
+    deps.app_state.last_supabase_sync = millis();
     Serial.printf("[REALTIME] Pairing status changed (broadcast) - app=%s, status=%s\n",
                   newAppConnected ? "connected" : "disconnected",
                   newWebexStatus.c_str());
@@ -224,6 +222,8 @@ void handleBroadcastMessage(JsonDocument& payload) {
  * @param data JSON object containing command data
  */
 void handleCommandInsert(const JsonObject& data) {
+    auto& deps = getDependencies();
+    
     if (data.isNull()) {
         Serial.println("[REALTIME] No record in command payload");
         return;
@@ -235,7 +235,7 @@ void handleCommandInsert(const JsonObject& data) {
         return;
     }
 
-    if (commandProcessor.wasRecentlyProcessed(cmd.id)) {
+    if (deps.command_processor.wasRecentlyProcessed(cmd.id)) {
         Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
         return;
     }
@@ -260,6 +260,8 @@ void handleCommandInsert(const JsonObject& data) {
  * @param data JSON object containing pairing data
  */
 void handlePairingUpdate(const JsonObject& data) {
+    auto& deps = getDependencies();
+    
     if (data.isNull()) {
         return;
     }
@@ -277,60 +279,60 @@ void handlePairingUpdate(const JsonObject& data) {
     bool statusChanged = false;
 
     // Check connection state changes
-    if (newAppConnected != app_state.embedded_app_connected) {
+    if (newAppConnected != deps.app_state.embedded_app_connected) {
         statusChanged = true;
     }
 
     // Check webex status change
-    if (newWebexStatus != app_state.webex_status) {
+    if (newWebexStatus != deps.app_state.webex_status) {
         statusChanged = true;
     }
 
     // Check display name change (only if non-empty)
-    if (!newDisplayName.isEmpty() && newDisplayName != app_state.embedded_app_display_name) {
+    if (!newDisplayName.isEmpty() && newDisplayName != deps.app_state.embedded_app_display_name) {
         statusChanged = true;
     }
 
     // Check camera/mic/call state changes (only if not using xAPI)
-    if (!app_state.xapi_connected) {
-        if (newCameraOn != app_state.camera_on ||
-            newMicMuted != app_state.mic_muted ||
-            newInCall != app_state.in_call) {
+    if (!deps.app_state.xapi_connected) {
+        if (newCameraOn != deps.app_state.camera_on ||
+            newMicMuted != deps.app_state.mic_muted ||
+            newInCall != deps.app_state.in_call) {
             statusChanged = true;
         }
     }
 
     // Only process and log if something actually changed
     if (!statusChanged) {
-        app_state.last_supabase_sync = millis();
+        deps.app_state.last_supabase_sync = millis();
         // Heartbeat-only update - silently ignore
-        if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
+        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
             Serial.println("[REALTIME] Pairing update ignored (no status change - likely heartbeat)");
         }
         return;
     }
 
     // Apply the changes to app state
-    app_state.supabase_app_connected = newAppConnected;
-    app_state.embedded_app_connected = newAppConnected;
+    deps.app_state.supabase_app_connected = newAppConnected;
+    deps.app_state.embedded_app_connected = newAppConnected;
     if (newAppConnected) {
-        app_state.webex_status = newWebexStatus;
-        app_state.webex_status_received = true;
-        app_state.webex_status_source = "embedded_app";
+        deps.app_state.webex_status = newWebexStatus;
+        deps.app_state.webex_status_received = true;
+        deps.app_state.webex_status_source = "embedded_app";
 
         if (!newDisplayName.isEmpty()) {
-            app_state.embedded_app_display_name = newDisplayName;
+            deps.app_state.embedded_app_display_name = newDisplayName;
         }
 
         // Only update camera/mic/call if not using xAPI
-        if (!app_state.xapi_connected) {
-            app_state.camera_on = newCameraOn;
-            app_state.mic_muted = newMicMuted;
-            app_state.in_call = newInCall;
+        if (!deps.app_state.xapi_connected) {
+            deps.app_state.camera_on = newCameraOn;
+            deps.app_state.mic_muted = newMicMuted;
+            deps.app_state.in_call = newInCall;
         }
     }
 
-    app_state.last_supabase_sync = millis();
+    deps.app_state.last_supabase_sync = millis();
     Serial.printf("[REALTIME] Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s\n",
                   newAppConnected ? "connected" : "disconnected",
                   newWebexStatus.c_str(),
@@ -338,7 +340,7 @@ void handlePairingUpdate(const JsonObject& data) {
                   newMicMuted ? "muted" : "unmuted",
                   newInCall ? "yes" : "no");
 
-    if (g_debug_mode && config_manager.getPairingRealtimeDebug()) {
+    if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
         JsonDocument debugDoc;
         debugDoc["app_connected"] = newAppConnected;
         debugDoc["webex_status"] = newWebexStatus;

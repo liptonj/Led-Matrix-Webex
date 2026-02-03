@@ -8,17 +8,8 @@
 #include <unity.h>
 #include <Arduino.h>
 
-// Mock ESP.getFreeHeap() for native tests
-#ifdef NATIVE_BUILD
-namespace {
-    uint32_t mock_heap = 100000;
-}
-class MockESP {
-public:
-    static uint32_t getFreeHeap() { return mock_heap; }
-};
-#define ESP MockESP
-#endif
+// ESP mock is already provided by simulation/mocks/Arduino.h
+// No need to redefine here
 
 // Include after mocks
 #include "../src/ota/ota_helpers.h"

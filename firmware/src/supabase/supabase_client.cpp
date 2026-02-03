@@ -17,8 +17,7 @@
 #include "../config/config_manager.h"
 #include "../debug.h"
 #include "../debug/remote_logger.h"
-
-extern ConfigManager config_manager;
+#include "../core/dependencies.h"
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "1.0.0"
@@ -391,8 +390,9 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     String url = _supabaseUrl + "/functions/v1/" + endpoint;
     
     _client.stop();
+    auto& deps = getDependencies();
     configureSecureClientWithTls(_client, CA_CERT_BUNDLE_SUPABASE, 
-                                 config_manager.getTlsVerify(), 2048, 2048);
+                                 deps.config.getTlsVerify(), 2048, 2048);
     
     HTTPClient http;
     http.begin(_client, url);

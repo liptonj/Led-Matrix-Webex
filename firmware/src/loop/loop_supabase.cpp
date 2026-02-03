@@ -14,13 +14,7 @@
 #include "commands/command_processor.h"
 #include "supabase/supabase_client.h"
 #include "debug/remote_logger.h"
-
-// External global instances from main.cpp
-extern SyncManager syncManager;
-extern RealtimeManager realtimeManager;
-extern CommandProcessor commandProcessor;
-extern RemoteLogger remoteLogger;
-extern SupabaseClient supabaseClient;
+#include "../core/dependencies.h"
 
 // Forward declaration
 bool provisionDeviceWithSupabase();
@@ -30,25 +24,27 @@ bool provisionDeviceWithSupabase();
 // =============================================================================
 
 void handleSupabase(LoopContext& ctx) {
+    auto& deps = getDependencies();
+    
     // Phase A: State sync via Edge Functions (replaces bridge for pairing)
-    if (ctx.app_state->wifi_connected && supabaseClient.isInitialized()) {
-        syncManager.loop(ctx.current_time);
-        realtimeManager.loop(ctx.current_time);
-        commandProcessor.processPendingAcks();
-        commandProcessor.processPendingActions();
+    if (ctx.app_state->wifi_connected && deps.supabase.isInitialized()) {
+        deps.sync.loop(ctx.current_time);
+        deps.realtime_manager.loop(ctx.current_time);
+        deps.command_processor.processPendingAcks();
+        deps.command_processor.processPendingActions();
         // Keep remote logger in sync with server-side debug toggle
-        remoteLogger.setRemoteEnabled(supabaseClient.isRemoteDebugEnabled());
+        deps.remote_logger.setRemoteEnabled(deps.supabase.isRemoteDebugEnabled());
     }
 
     // Phase B: Realtime WebSocket for instant command delivery
     // Handle realtime resubscribe request
     if (ctx.app_state->supabase_realtime_resubscribe) {
         ctx.app_state->supabase_realtime_resubscribe = false;
-        realtimeManager.reconnect();
+        deps.realtime_manager.reconnect();
     }
 
     // Realtime connection management and event processing
-    realtimeManager.loop(ctx.current_time);
+    deps.realtime_manager.loop(ctx.current_time);
 }
 
 // =============================================================================

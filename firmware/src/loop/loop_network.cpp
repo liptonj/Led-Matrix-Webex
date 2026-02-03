@@ -19,17 +19,10 @@
 #include "common/pairing_manager.h"
 #include "display/matrix_display.h"
 #include "debug/remote_logger.h"
+#include "../core/dependencies.h"
 
 // Forward declarations for functions still in main.cpp
 extern void setup_time();
-
-// External globals from main.cpp
-extern ConfigManager config_manager;
-extern MatrixDisplay matrix_display;
-extern WiFiManager wifi_manager;
-extern AppState app_state;
-extern PairingManager pairing_manager;
-extern SupabaseClient supabaseClient;
 
 // =============================================================================
 // SERIAL AND IMPROV HANDLER
@@ -102,11 +95,12 @@ void handleWiFiConnection(LoopContext& ctx) {
 
         // Deferred Supabase client initialization
         // Handles case where WiFi wasn't available at boot
-        if (!supabaseClient.isInitialized()) {
-            String supabase_url = config_manager.getSupabaseUrl();
+        auto& deps = getDependencies();
+        if (!deps.supabase.isInitialized()) {
+            String supabase_url = deps.config.getSupabaseUrl();
             if (!supabase_url.isEmpty()) {
                 Serial.println("[SUPABASE] Deferred initialization - WiFi now connected");
-                supabaseClient.begin(supabase_url, pairing_manager.getCode());
+                deps.supabase.begin(supabase_url, deps.pairing.getCode());
             }
         }
     }

@@ -5,9 +5,7 @@
 
 #include "improv_provisioner.h"
 #include "time/time_manager.h"
-
-// External global instances from main.cpp
-extern ImprovHandler improv_handler;
+#include "core/dependencies.h"
 
 /**
  * @brief Detect Improv activity during detection window
@@ -33,9 +31,10 @@ static bool detectImprovActivity(
             return true;
         }
         
-        improv_handler.loop();
+        auto& deps = getDependencies();
+        deps.improv.loop();
         
-        if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
+        if (deps.improv.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
             Serial.println("[IMPROV] WiFi configured successfully!");
             return false;  // Already configured, no need for extended provisioning
         }
@@ -59,9 +58,10 @@ static void waitForImprovProvisioning(unsigned long provision_timeout) {
     unsigned long last_status = 0;
     
     while (millis() - provision_start < provision_timeout) {
-        improv_handler.loop();
+        auto& deps = getDependencies();
+        deps.improv.loop();
         
-        if (improv_handler.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
+        if (deps.improv.wasConfiguredViaImprov() || WiFi.status() == WL_CONNECTED) {
             Serial.println("[IMPROV] WiFi configured successfully!");
             return;
         }
@@ -91,7 +91,8 @@ void initWiFiAndImprov(
     Serial.println("[INIT] WiFi initialized in STA mode");
 
     Serial.println("[IMPROV] Initializing Improv Wi-Fi handler...");
-    improv_handler.begin(&Serial, &config_manager, &app_state, display_ok ? matrix_display : nullptr);
+    auto& deps = getDependencies();
+    deps.improv.begin(&Serial, &config_manager, &app_state, display_ok ? matrix_display : nullptr);
 
     // Check if WiFi is already configured
     bool wifi_configured = config_manager.hasWiFiCredentials();
@@ -168,7 +169,8 @@ void initWiFiAndImprov(
         
         // If WiFi was configured via Improv (from ESP Web Tools), mark boot successful early
         // This prevents boot loop if other initialization fails, allowing WiFi provisioning to complete
-        if (improv_handler.wasConfiguredViaImprov()) {
+        auto& deps = getDependencies();
+        if (deps.improv.wasConfiguredViaImprov()) {
             Serial.println("[IMPROV] WiFi configured via ESP Web Tools - marking boot successful early");
             boot_validator.markBootSuccessful();
         }

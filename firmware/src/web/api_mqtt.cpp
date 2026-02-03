@@ -10,19 +10,19 @@
 #include "web_server.h"
 #include "web_helpers.h"
 #include "../meraki/mqtt_client.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
 
-// External MQTT client for config invalidation
-extern MerakiMQTTClient mqtt_client;
-
 void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
+    auto& deps = getDependencies();
     config_manager->setMQTTConfig("", 1883, "", "", "");
-    mqtt_client.invalidateConfig();  // Clear cached config
+    deps.mqtt.invalidateConfig();  // Clear cached config
     Serial.println("[WEB] MQTT configuration cleared");
     sendSuccessResponse(request, "MQTT configuration cleared", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    auto& deps = getDependencies();
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, data, len);
 
@@ -32,13 +32,13 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
     }
 
     bool enabled = doc["enabled"] | false;
-    mqtt_client.setDebugEnabled(enabled);
+    deps.mqtt.setDebugEnabled(enabled);
 
     Serial.printf("[WEB] MQTT debug logging %s\n", enabled ? "enabled" : "disabled");
 
     JsonDocument resp;
     resp["success"] = true;
-    resp["debug_enabled"] = mqtt_client.isDebugEnabled();
+    resp["debug_enabled"] = deps.mqtt.isDebugEnabled();
 
     sendJsonResponse(request, 200, resp, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }

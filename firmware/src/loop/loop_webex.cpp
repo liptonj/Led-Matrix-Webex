@@ -15,10 +15,7 @@
 #include "supabase/supabase_client.h"
 #include "config/config_manager.h"
 #include "debug/remote_logger.h"
-
-// External globals from main.cpp
-extern ConfigManager config_manager;
-extern SupabaseClient supabaseClient;
+#include "../core/dependencies.h"
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -71,6 +68,8 @@ void handleXAPIWebSocket(LoopContext& ctx) {
 // =============================================================================
 
 bool handleWebexFallbackPolling(LoopContext& ctx) {
+    auto& deps = getDependencies();
+    
     // Poll Webex API as fallback when Supabase/app status is unavailable or stale
     // Conditions for fallback polling:
     // 1. Embedded app not connected, OR
@@ -81,7 +80,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
     bool need_api_fallback = !ctx.app_state->embedded_app_connected &&
                              (supabase_status_stale || !ctx.app_state->webex_status_received);
 
-    if (!need_api_fallback || (!supabaseClient.isAuthenticated() && !ctx.app_state->webex_authenticated)) {
+    if (!need_api_fallback || (!deps.supabase.isAuthenticated() && !ctx.app_state->webex_authenticated)) {
         return false;
     }
 
@@ -103,11 +102,11 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
     bool cloud_synced = false;
     String cloud_status;
 
-    if (supabaseClient.isAuthenticated()) {
+    if (deps.supabase.isAuthenticated()) {
         if (!hasSafeTlsHeap(65000, 40000)) {
             Serial.println("[SUPABASE] Skipping webex-status - low heap for TLS");
         } else {
-            cloud_synced = supabaseClient.syncWebexStatus(cloud_status);
+            cloud_synced = deps.supabase.syncWebexStatus(cloud_status);
             if (cloud_synced) {
                 ctx.app_state->webex_status = cloud_status;
                 ctx.app_state->webex_status_received = true;
@@ -121,7 +120,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
         if (ctx.app_state->embedded_app_connected) {
             return true;
         }
-        if (supabaseClient.isWebexTokenMissing() && ctx.app_state->wifi_connected) {
+        if (deps.supabase.isWebexTokenMissing() && ctx.app_state->wifi_connected) {
             Serial.println("[WEBEX] No Webex token; skipping local fallback");
             return true;
         }
@@ -169,7 +168,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             serializeJson(payload, body);
 
             String ignored;
-            supabaseClient.syncWebexStatus(ignored, body);
+            deps.supabase.syncWebexStatus(ignored, body);
         }
     }
 

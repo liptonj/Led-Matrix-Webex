@@ -46,6 +46,9 @@
 #include "improv_provisioner.h"
 #include "supabase_init.h"
 
+// Dependency Injection Framework
+#include "core/dependencies.h"
+
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
@@ -72,6 +75,39 @@ bool g_debug_mode = false;
 bool g_debug_display = false;
 bool g_debug_realtime = false;
 
+// External references to global instances defined in other modules
+extern BootValidator boot_validator;
+extern DeviceCredentials deviceCredentials;
+extern SyncManager syncManager;
+extern RealtimeManager realtimeManager;
+extern CommandProcessor commandProcessor;
+extern RemoteLogger remoteLogger;
+extern ImprovHandler improv_handler;
+extern SupabaseClient supabaseClient;
+extern SupabaseRealtime supabaseRealtime;
+
+// Dependency Injection: Global Dependencies instance
+// Initialized in setup() after all global instances are ready
+static Dependencies* g_dependencies = nullptr;
+
+/**
+ * @brief Get the global Dependencies instance
+ * 
+ * @return Dependencies& Reference to the global Dependencies instance
+ * @note Must be called after setup() completes initialization
+ * @note Aborts if dependencies not initialized (critical error)
+ */
+Dependencies& getDependencies() {
+    if (g_dependencies == nullptr) {
+        Serial.println("[CRITICAL] Dependencies not initialized - setup() failed or not called");
+        Serial.flush();
+        // Abort - this is a critical programming error
+        // On ESP32, this will trigger a watchdog reset
+        abort();
+    }
+    return *g_dependencies;
+}
+
 // Display initialization state (tracked across setup functions)
 static bool s_display_ok = false;
 
@@ -92,6 +128,7 @@ void initIntegrations();
 void initOTAManager();
 void initSerialCommands();
 void finalizeBootAndDisplay();
+void initDependencies();
 
 // Command queue management moved to command_processor module
 
@@ -105,6 +142,7 @@ void setup() {
     initDebugMode();
     initDeviceCredentials();
     initDisplay();
+    initDependencies();  // Initialize DI framework early - before any code that uses getDependencies()
     initWiFiAndImprov(config_manager, app_state, s_display_ok ? &matrix_display : nullptr,
                        mdns_manager, wifi_manager, s_display_ok);  // From improv_provisioner module
     initWebServer();
@@ -300,6 +338,41 @@ void initOTAManager() {
 void initSerialCommands() {
     Serial.println("[INIT] Initializing serial command handler...");
     serial_commands_begin();
+}
+
+void initDependencies() {
+    Serial.println("[INIT] Initializing dependency injection framework...");
+    
+    // Initialize the global Dependencies instance with all component references
+    // Using static allocation to ensure it persists for the lifetime of the program
+    static Dependencies deps = initializeDependencies(
+        config_manager,
+        app_state,
+        g_debug_mode,
+        g_debug_display,
+        g_debug_realtime,
+        matrix_display,
+        wifi_manager,
+        web_server,
+        mdns_manager,
+        supabaseClient,
+        supabaseRealtime,
+        deviceCredentials,
+        pairing_manager,
+        boot_validator,
+        ota_manager,
+        mqtt_client,
+        syncManager,
+        realtimeManager,
+        commandProcessor,
+        remoteLogger,
+        improv_handler,
+        webex_client,
+        xapi_websocket
+    );
+    
+    g_dependencies = &deps;
+    Serial.println("[INIT] Dependency injection framework ready");
 }
 
 void finalizeBootAndDisplay() {

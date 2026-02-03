@@ -10,9 +10,8 @@
 #include "../common/secure_client_config.h"
 #include "../common/lookup_tables.h"
 #include "../config/config_manager.h"
+#include "../core/dependencies.h"
 #include <time.h>
-
-extern ConfigManager config_manager;
 
 // Module size estimates in KB (for patch size calculation)
 const size_t MODULE_SIZES[] = {
@@ -44,7 +43,8 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
                                        OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
+    auto& deps = getDependencies();
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
     
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
@@ -52,7 +52,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
     Serial.printf("[DELTA-OTA] Checking: %s\n", manifest_url.c_str());
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
                   manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
+                  deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect to OTA server");
@@ -153,12 +153,13 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
                                      OTAManifest& manifest) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
+    auto& deps = getDependencies();
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
     
     String manifest_url = base_url + "/ota-manifest.json";
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
                   manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
+                  deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect");
@@ -282,10 +283,11 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
                                             void (*progress)(int)) {
     HTTPClient http;
     WiFiClientSecure client;
-    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify());
+    auto& deps = getDependencies();
+    configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify());
     Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
                   url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  config_manager.getTlsVerify() ? "on" : "off");
+                  deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, url)) {
         setError("Connection failed");

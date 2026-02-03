@@ -12,6 +12,7 @@
 #include "web_helpers.h"
 #include "embedded_assets.h"
 #include "../meraki/mqtt_client.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 
@@ -129,9 +130,9 @@ void WebServerManager::setupApiRoutes() {
 
     // MQTT debug toggle
     server->on("/api/mqtt/debug", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        extern MerakiMQTTClient mqtt_client;
+        auto& deps = getDependencies();
         JsonDocument doc;
-        doc["debug_enabled"] = mqtt_client.isDebugEnabled();
+        doc["debug_enabled"] = deps.mqtt.isDebugEnabled();
         String response;
         serializeJson(doc, response);
         AsyncWebServerResponse* resp = request->beginResponse(200, "application/json", response);

@@ -7,9 +7,7 @@
 #include "../app_state.h"
 #include "../supabase/supabase_realtime.h"
 #include "realtime_watchdog.h"
-
-extern AppState app_state;
-extern SupabaseRealtime supabaseRealtime;
+#include "../core/dependencies.h"
 
 // Global instance
 RealtimeManager realtimeManager;
@@ -31,9 +29,11 @@ void RealtimeManager::begin() {
 }
 
 void RealtimeManager::loop(unsigned long current_time) {
+    auto& deps = getDependencies();
+    
     // Process realtime events if socket is connected
-    if (app_state.wifi_connected && supabaseRealtime.isSocketConnected()) {
-        supabaseRealtime.loop();
+    if (deps.app_state.wifi_connected && deps.realtime.isSocketConnected()) {
+        deps.realtime.loop();
     }
 
     // Update watchdog timer
@@ -46,11 +46,13 @@ void RealtimeManager::loop(unsigned long current_time) {
 }
 
 bool RealtimeManager::isConnected() const {
-    return supabaseRealtime.isConnected();
+    auto& deps = getDependencies();
+    return deps.realtime.isConnected();
 }
 
 void RealtimeManager::reconnect() {
-    supabaseRealtime.disconnect();
+    auto& deps = getDependencies();
+    deps.realtime.disconnect();
     _lastInitAttempt = 0;
 }
 

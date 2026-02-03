@@ -11,14 +11,16 @@
 
 #include <Arduino.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
-#include "../common/secure_client_config.h"
-
 #ifndef NATIVE_BUILD
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#else
+// Mock is in simulation/mocks/ which is in include path via -I flag
+#include "WiFiClientSecure.h"
 #endif
+#include "../common/secure_client_config.h"
 
 namespace OTAHelpers {
 

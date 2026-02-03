@@ -195,6 +195,9 @@ public:
     void setPageIntervalMs(uint16_t interval_ms);
 
 private:
+    // Allow StaticScreenBuilder to access private drawing methods
+    friend class StaticScreenBuilder;
+    
     // Page rendering
     void drawStatusPage(const DisplayData& data);
     void drawSensorPage(const DisplayData& data);

@@ -12,12 +12,10 @@
 #include "../common/ca_certs.h"
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
+#include "../core/dependencies.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
-
-// External references
-extern ConfigManager config_manager;
 
 namespace {
 // Add HMAC authentication headers if device is provisioned
@@ -70,7 +68,8 @@ bool OTAManager::checkUpdateFromManifest() {
     Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
 
     WiFiClientSecure client;
-    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), manifest_url);
+    auto& deps = getDependencies();
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), manifest_url);
 
     HTTPClient http;
     http.begin(client, manifest_url);
@@ -157,7 +156,8 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
 
     WiFiClientSecure client;
-    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, config_manager.getTlsVerify(), update_url);
+    auto& deps = getDependencies();
+    OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), update_url);
 
     HTTPClient http;
     http.begin(client, update_url);

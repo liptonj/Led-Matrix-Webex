@@ -10,15 +10,14 @@
 #include "web_helpers.h"
 #include "../common/pairing_manager.h"
 #include "../auth/device_credentials.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
 #include <LittleFS.h>
 
-// External pairing manager for pairing code
-extern PairingManager pairing_manager;
-
 void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
+    auto& deps = getDependencies();
     JsonDocument doc;
 
     doc["wifi_connected"] = app_state->wifi_connected;
@@ -34,7 +33,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     doc["wifi_ssid_saved"] = !config_manager->getWiFiSSID().isEmpty();
     doc["has_wifi_password"] = !config_manager->getWiFiPassword().isEmpty();
     doc["webex_authenticated"] = app_state->webex_authenticated;
-    doc["pairing_code"] = pairing_manager.getCode();
+    doc["pairing_code"] = deps.pairing.getCode();
     doc["embedded_app_connected"] = app_state->embedded_app_connected;
     doc["xapi_connected"] = app_state->xapi_connected;
     doc["mqtt_connected"] = app_state->mqtt_connected;
@@ -56,8 +55,8 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     // System info
     doc["ip_address"] = WiFi.localIP().toString();
     doc["mac_address"] = WiFi.macAddress();
-    doc["serial_number"] = deviceCredentials.getSerialNumber();
-    doc["hmac_enabled"] = deviceCredentials.isProvisioned();
+    doc["serial_number"] = deps.credentials.getSerialNumber();
+    doc["hmac_enabled"] = deps.credentials.isProvisioned();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["uptime"] = millis() / 1000;
     doc["realtime_error"] = app_state->realtime_error;

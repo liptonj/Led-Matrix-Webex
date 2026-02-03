@@ -1,4 +1,5 @@
 #include "matrix_display.h"
+#include "display_helpers.h"
 
 void MatrixDisplay::showUpdating(const String& version) {
     ota_in_progress = true;  // Lock display for OTA
@@ -9,35 +10,43 @@ void MatrixDisplay::showUpdatingProgress(const String& version, int progress, co
     if (!initialized) return;
     ota_in_progress = true;  // Ensure lock is set
 
-    dma_display->clearScreen();
+    const String screen_key = "updating:" + version;
+    StaticScreenBuilder builder(this, screen_key, last_static_key);
 
-    // Title
-    drawCenteredText(0, "UPDATING", COLOR_ORANGE);
+    // Progress bar dimensions (constant)
+    const int barX = 4;
+    const int barY = 17;
+    const int barWidth = MATRIX_WIDTH - 8;  // 56 pixels wide
+    const int barHeight = 4;
 
-    // Version - scroll if long
-    drawScrollingText(8, "v" + version, COLOR_CYAN, MATRIX_WIDTH - 4, "ota_ver");
+    if (builder.hasChanged()) {
+        builder.clearScreen();
 
-    // Progress bar (at y=17, 4 pixels high)
-    int barX = 4;
-    int barY = 17;
-    int barWidth = MATRIX_WIDTH - 8;  // 56 pixels wide
-    int barHeight = 4;
+        // Title
+        builder.drawCentered(0, "UPDATING", COLOR_ORANGE);
 
-    // Draw progress bar outline
-    dma_display->drawRect(barX, barY, barWidth, barHeight, COLOR_GRAY);
+        // Progress bar outline (static - only drawn when screen changes)
+        drawRect(barX, barY, barWidth, barHeight, COLOR_GRAY);
+    }
 
-    // Fill progress bar
+    // Version - scroll if long (dynamic)
+    drawScrollingText(8, "v" + version, COLOR_CYAN, MATRIX_WIDTH - 4, builder.getScrollKey("ver"));
+
+    // Clear previous fill area (dynamic - redraw every frame)
+    fillRect(barX + 1, barY + 1, barWidth - 2, barHeight - 2, COLOR_BLACK);
+    
+    // Fill progress bar (dynamic - redraw every frame)
     if (progress > 0) {
         int fillWidth = ((barWidth - 2) * progress) / 100;
         if (fillWidth > 0) {
             // Color changes from yellow to green as progress increases
             uint16_t fillColor = (progress < 50) ? COLOR_YELLOW :
                                  (progress < 90) ? COLOR_CYAN : COLOR_GREEN;
-            dma_display->fillRect(barX + 1, barY + 1, fillWidth, barHeight - 2, fillColor);
+            fillRect(barX + 1, barY + 1, fillWidth, barHeight - 2, fillColor);
         }
     }
 
-    // Progress percentage
+    // Progress percentage (dynamic - redraw every frame)
     String progressText = String(progress) + "%";
     drawCenteredText(24, progressText, COLOR_WHITE);
 }

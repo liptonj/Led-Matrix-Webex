@@ -13,6 +13,7 @@
 #include "../device/device_info.h"
 #include "../common/secure_client_config.h"
 #include "../common/ca_certs.h"
+#include "../core/dependencies.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -23,13 +24,6 @@
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
 #endif
-
-extern AppState app_state;
-extern ConfigManager config_manager;
-extern SupabaseClient supabaseClient;
-extern SupabaseRealtime supabaseRealtime;
-extern DeviceCredentials deviceCredentials;
-extern PairingManager pairing_manager;
 
 // Global instance
 SyncManager syncManager;
@@ -57,19 +51,21 @@ void SyncManager::begin() {
 }
 
 void SyncManager::loop(unsigned long current_time) {
-    if (!app_state.wifi_connected || !supabaseClient.isAuthenticated()) {
+    auto& deps = getDependencies();
+    
+    if (!deps.app_state.wifi_connected || !deps.supabase.isAuthenticated()) {
         return;
     }
 
-    const bool commandsSocketActive = supabaseRealtime.isSocketConnected();
-    const bool commandsConnecting = supabaseRealtime.isConnecting();
+    const bool commandsSocketActive = deps.realtime.isSocketConnected();
+    const bool commandsConnecting = deps.realtime.isConnecting();
     const bool realtime_connecting = commandsConnecting;
 
     if (commandsSocketActive) {
         _lastRealtimeSocketSeen = current_time;
     }
 
-    const bool commandsRealtimeEnabled = !config_manager.getSupabaseAnonKey().isEmpty();
+    const bool commandsRealtimeEnabled = !deps.config.getSupabaseAnonKey().isEmpty();
     const bool realtimeWorking = commandsRealtimeEnabled && commandsSocketActive;
     const bool realtimeStale = commandsRealtimeEnabled &&
                                (_lastRealtimeSocketSeen > 0) &&
@@ -137,7 +133,9 @@ bool SyncManager::isSyncDue(unsigned long current_time) const {
 }
 
 void SyncManager::performSync(bool isHeartbeat) {
-    if (!supabaseClient.isAuthenticated()) {
+    auto& deps = getDependencies();
+    
+    if (!deps.supabase.isAuthenticated()) {
         return;
     }
 
@@ -149,33 +147,35 @@ void SyncManager::performSync(bool isHeartbeat) {
     #endif
     String firmwareVersion = FIRMWARE_VERSION;
 
-    SupabaseAppState appState = supabaseClient.postDeviceState(
+    SupabaseAppState appState = deps.supabase.postDeviceState(
         rssi, freeHeap, uptime, firmwareVersion, 0);
 
     if (appState.valid) {
-        app_state.last_supabase_sync = millis();
+        deps.app_state.last_supabase_sync = millis();
 
         if (appState.app_connected) {
-            app_state.supabase_app_connected = true;
-            app_state.webex_status = appState.webex_status;
-            app_state.webex_status_received = true;
+            deps.app_state.supabase_app_connected = true;
+            deps.app_state.webex_status = appState.webex_status;
+            deps.app_state.webex_status_received = true;
             if (!appState.display_name.isEmpty()) {
-                app_state.embedded_app_display_name = appState.display_name;
+                deps.app_state.embedded_app_display_name = appState.display_name;
             }
-            app_state.camera_on = appState.camera_on;
-            app_state.mic_muted = appState.mic_muted;
-            app_state.in_call = appState.in_call;
+            deps.app_state.camera_on = appState.camera_on;
+            deps.app_state.mic_muted = appState.mic_muted;
+            deps.app_state.in_call = appState.in_call;
         } else {
-            app_state.supabase_app_connected = false;
+            deps.app_state.supabase_app_connected = false;
         }
     }
 }
 
 void SyncManager::pollCommands() {
+    auto& deps = getDependencies();
+    
     const int MAX_COMMANDS = 10;
     SupabaseCommand commands[MAX_COMMANDS];
 
-    int count = supabaseClient.pollCommands(commands, MAX_COMMANDS);
+    int count = deps.supabase.pollCommands(commands, MAX_COMMANDS);
 
     for (int i = 0; i < count; i++) {
         // REGRESSION FIX: Additional validation before command processing
@@ -209,6 +209,8 @@ void SyncManager::pollCommands() {
 // =============================================================================
 
 bool provisionDeviceWithSupabase() {
+    auto& deps = getDependencies();
+    
     static bool provisioned = false;
     static unsigned long last_attempt = 0;
     static unsigned long last_time_warn = 0;
@@ -220,22 +222,22 @@ bool provisionDeviceWithSupabase() {
     if (provisioned) {
         return true;
     }
-    if (supabaseClient.isAuthenticated() || app_state.supabase_connected) {
+    if (deps.supabase.isAuthenticated() || deps.app_state.supabase_connected) {
         provisioned = true;
         return true;
     }
-    if (!app_state.wifi_connected) {
+    if (!deps.app_state.wifi_connected) {
         return false;
     }
     // Guard: Check if supabaseClient is initialized before attempting provisioning
-    if (!supabaseClient.isInitialized()) {
+    if (!deps.supabase.isInitialized()) {
         Serial.println("[SUPABASE] Client not initialized - skipping provisioning");
         return false;
     }
-    if (app_state.supabase_disabled || app_state.supabase_blacklisted || app_state.supabase_deleted) {
+    if (deps.app_state.supabase_disabled || deps.app_state.supabase_blacklisted || deps.app_state.supabase_deleted) {
         return false;
     }
-    if (!app_state.time_synced) {
+    if (!deps.app_state.time_synced) {
         unsigned long now = millis();
         if (now - last_time_warn > 60000) {
             last_time_warn = now;
@@ -243,18 +245,18 @@ bool provisionDeviceWithSupabase() {
         }
         return false;
     }
-    if (!deviceCredentials.isProvisioned()) {
+    if (!deps.credentials.isProvisioned()) {
         Serial.println("[SUPABASE] Credentials not ready - cannot provision");
         return false;
     }
-    String supabase_url = config_manager.getSupabaseUrl();
+    String supabase_url = deps.config.getSupabaseUrl();
     supabase_url.trim();
     if (supabase_url.isEmpty()) {
         Serial.println("[SUPABASE] No Supabase URL configured");
         return false;
     }
     const unsigned long retry_interval =
-        app_state.supabase_approval_pending ? pending_retry_interval_ms : retry_interval_ms;
+        deps.app_state.supabase_approval_pending ? pending_retry_interval_ms : retry_interval_ms;
     if (millis() - last_attempt < retry_interval) {
         return false;
     }
@@ -278,7 +280,7 @@ bool provisionDeviceWithSupabase() {
 
     WiFiClientSecure client;
     configureSecureClientWithTls(client, CA_CERT_BUNDLE_SUPABASE, 
-                                 config_manager.getTlsVerify(), 2048, 2048);
+                                 deps.config.getTlsVerify(), 2048, 2048);
 
     HTTPClient http;
     http.begin(client, endpoint);
@@ -286,14 +288,14 @@ bool provisionDeviceWithSupabase() {
     http.addHeader("Content-Type", "application/json");
 
     JsonDocument payload;
-    payload["serial_number"] = deviceCredentials.getSerialNumber();
-    payload["key_hash"] = deviceCredentials.getKeyHash();
+    payload["serial_number"] = deps.credentials.getSerialNumber();
+    payload["key_hash"] = deps.credentials.getKeyHash();
     payload["firmware_version"] = FIRMWARE_VERSION;
     if (WiFi.isConnected()) {
         payload["ip_address"] = WiFi.localIP().toString();
     }
     // Send existing pairing code for migration (preserves user's pairing during HMAC migration)
-    String existing_code = pairing_manager.getCode();
+    String existing_code = deps.pairing.getCode();
     if (!existing_code.isEmpty()) {
         payload["existing_pairing_code"] = existing_code;
     }
@@ -310,22 +312,22 @@ bool provisionDeviceWithSupabase() {
         Serial.printf("[SUPABASE] Provision failed: HTTP %d\n", http_code);
         Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
         if (http_code == 409 && response.indexOf("approval_required") >= 0) {
-            app_state.supabase_approval_pending = true;
+            deps.app_state.supabase_approval_pending = true;
             unsigned long now = millis();
             if (now - last_pending_log > 60000) {
                 last_pending_log = now;
                 Serial.println("[SUPABASE] Provisioning pending admin approval");
             }
         } else if (http_code == 403 && response.indexOf("device_disabled") >= 0) {
-            app_state.supabase_disabled = true;
+            deps.app_state.supabase_disabled = true;
             Serial.println("[SUPABASE] Device disabled by admin");
         } else if (http_code == 403 && response.indexOf("device_blacklisted") >= 0) {
-            app_state.supabase_blacklisted = true;
+            deps.app_state.supabase_blacklisted = true;
             Serial.println("[SUPABASE] Device blacklisted by admin");
         } else if (http_code == 410 && response.indexOf("device_deleted") >= 0) {
-            app_state.supabase_deleted = true;
+            deps.app_state.supabase_deleted = true;
             Serial.println("[SUPABASE] Device deleted - clearing credentials");
-            deviceCredentials.resetCredentials();
+            deps.credentials.resetCredentials();
             delay(200);
             ESP.restart();
         }
@@ -347,25 +349,25 @@ bool provisionDeviceWithSupabase() {
 
     String pairing_code = result["pairing_code"] | "";
     if (!pairing_code.isEmpty()) {
-        pairing_manager.setCode(pairing_code, true);
-        supabaseClient.setPairingCode(pairing_code);
-        app_state.supabase_realtime_resubscribe = true;
+        deps.pairing.setCode(pairing_code, true);
+        deps.supabase.setPairingCode(pairing_code);
+        deps.app_state.supabase_realtime_resubscribe = true;
         Serial.println("[SUPABASE] Pairing code received and set");
     }
 
     provisioned = true;
-    app_state.supabase_approval_pending = false;
-    app_state.supabase_disabled = false;
-    app_state.supabase_blacklisted = false;
-    app_state.supabase_deleted = false;
+    deps.app_state.supabase_approval_pending = false;
+    deps.app_state.supabase_disabled = false;
+    deps.app_state.supabase_blacklisted = false;
+    deps.app_state.supabase_deleted = false;
     Serial.println("[SUPABASE] Device provisioned successfully");
 
     // Immediately authenticate after provisioning so realtime can initialize
-    if (supabaseClient.authenticate()) {
-        app_state.supabase_connected = true;
-        String authAnonKey = supabaseClient.getAnonKey();
-        if (!authAnonKey.isEmpty() && authAnonKey != config_manager.getSupabaseAnonKey()) {
-            config_manager.setSupabaseAnonKey(authAnonKey);
+    if (deps.supabase.authenticate()) {
+        deps.app_state.supabase_connected = true;
+        String authAnonKey = deps.supabase.getAnonKey();
+        if (!authAnonKey.isEmpty() && authAnonKey != deps.config.getSupabaseAnonKey()) {
+            deps.config.setSupabaseAnonKey(authAnonKey);
             Serial.println("[SUPABASE] Anon key updated from device-auth");
         }
         
@@ -375,17 +377,17 @@ bool provisionDeviceWithSupabase() {
             int rssi = WiFi.RSSI();
             uint32_t freeHeap = ESP.getFreeHeap();
             uint32_t uptime = millis() / 1000;
-            float temp = app_state.temperature;
-            SupabaseAppState appState = supabaseClient.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
+            float temp = deps.app_state.temperature;
+            SupabaseAppState appState = deps.supabase.postDeviceState(rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
             if (appState.valid) {
                 DeviceInfo::applyAppState(appState);
             }
         }
         
-        app_state.realtime_defer_until = millis() + 8000UL;
+        deps.app_state.realtime_defer_until = millis() + 8000UL;
         Serial.println("[SUPABASE] Authenticated after provisioning");
     } else {
-        app_state.supabase_connected = false;
+        deps.app_state.supabase_connected = false;
         Serial.println("[SUPABASE] Authentication failed after provisioning");
     }
     return true;

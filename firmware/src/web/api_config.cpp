@@ -11,12 +11,11 @@
 #include "web_helpers.h"
 #include "../time/time_manager.h"
 #include "../meraki/mqtt_client.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
 
-// External MQTT client for config invalidation
-extern MerakiMQTTClient mqtt_client;
-
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
+    auto& deps = getDependencies();
     JsonDocument doc;
 
     // Device configuration - always include all fields
@@ -320,7 +319,8 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             }
 
             config_manager->setMQTTConfig(broker, port, username, password, topic);
-            mqtt_client.invalidateConfig();  // Force reconnect with new settings
+            auto& deps = getDependencies();
+            deps.mqtt.invalidateConfig();  // Force reconnect with new settings
             Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n",
                          broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
         } else {
@@ -403,8 +403,8 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         bool debug_mode = doc["debug_mode"].as<bool>();
         config_manager->setDebugMode(debug_mode);
         // Update global flag immediately so logging takes effect
-        extern bool g_debug_mode;
-        g_debug_mode = debug_mode;
+        auto& deps = getDependencies();
+        deps.debug_mode = debug_mode;
         Serial.printf("[WEB] Debug mode %s\n", debug_mode ? "enabled" : "disabled");
     }
     if (doc["pairing_realtime_debug"].is<bool>()) {

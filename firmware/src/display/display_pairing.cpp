@@ -4,6 +4,7 @@
  */
 
 #include "matrix_display.h"
+#include "display_helpers.h"
 
 /**
  * @brief Show pairing code for app connection
@@ -14,20 +15,19 @@
  * Row 24-31: "Pairing ready" or hub URL (scrolls if long)
  */
 void MatrixDisplay::showPairingCode(const String& code, const String& hub_url) {
-    if (!dma_display) return;
+    if (!initialized) return;
     
-    const String screen_key = "pairing:" + code;
-    const bool screen_changed = (last_static_key != screen_key);
+    const String screen_key = "pairing:" + code + "|" + hub_url;
+    StaticScreenBuilder builder(this, screen_key, last_static_key);
     
-    if (screen_changed) {
-        last_static_key = screen_key;
-        dma_display->fillScreen(COLOR_BLACK);
+    if (builder.hasChanged()) {
+        builder.clearScreen();
         
         // Title: "PAIR CODE" at top (centered)
-        drawCenteredText(0, "PAIR CODE", COLOR_CYAN);
+        builder.drawCentered(0, "PAIR CODE", COLOR_CYAN);
         
         // Draw separator line
-        dma_display->drawFastHLine(4, 8, MATRIX_WIDTH - 8, COLOR_GRAY);
+        builder.drawSeparator(8, COLOR_GRAY);
         
         // Pairing code in center
         String displayCode = code;
@@ -54,7 +54,7 @@ void MatrixDisplay::showPairingCode(const String& code, const String& hub_url) {
     
     // Bottom text - scrolls if URL is long
     if (hub_url.isEmpty()) {
-        drawScrollingText(24, "Pairing ready", COLOR_GREEN, MATRIX_WIDTH - 4, "pair_status");
+        drawScrollingText(24, "Pairing ready", COLOR_GREEN, MATRIX_WIDTH - 4, builder.getScrollKey("status"));
     } else {
         // Show hub URL (remove ws:// prefix for display)
         String shortUrl = hub_url;
@@ -63,6 +63,6 @@ void MatrixDisplay::showPairingCode(const String& code, const String& hub_url) {
         } else if (shortUrl.startsWith("wss://")) {
             shortUrl = shortUrl.substring(6);
         }
-        drawScrollingText(24, shortUrl, COLOR_CYAN, MATRIX_WIDTH - 4, "pair_url");
+        drawScrollingText(24, shortUrl, COLOR_CYAN, MATRIX_WIDTH - 4, builder.getScrollKey("url"));
     }
 }

@@ -7,10 +7,7 @@
 #include "../app_state.h"
 #include "../supabase/supabase_realtime.h"
 #include "../supabase/supabase_client.h"
-
-extern AppState app_state;
-extern SupabaseRealtime supabaseRealtime;
-extern SupabaseClient supabaseClient;
+#include "../core/dependencies.h"
 
 namespace {
 constexpr unsigned long WATCHDOG_INTERVAL = 30000;    // 30 seconds
@@ -25,21 +22,23 @@ constexpr unsigned long INIT_RETRY_INTERVAL = 15000;   // 15 seconds (before fir
  * @return true if reconnection was attempted
  */
 bool checkReconnection(unsigned long current_time, unsigned long& lastInitAttempt) {
-    if (!app_state.wifi_connected || !app_state.supabase_connected) {
+    auto& deps = getDependencies();
+    
+    if (!deps.app_state.wifi_connected || !deps.app_state.supabase_connected) {
         return false;
     }
 
-    if (supabaseRealtime.isSocketConnected() || supabaseRealtime.isConnecting()) {
+    if (deps.realtime.isSocketConnected() || deps.realtime.isConnecting()) {
         return false;
     }
 
-    if (current_time < app_state.realtime_defer_until) {
+    if (current_time < deps.app_state.realtime_defer_until) {
         return false;  // Deferred
     }
 
-    unsigned long interval = supabaseRealtime.hasEverConnected() ? RECONNECT_INTERVAL : INIT_RETRY_INTERVAL;
+    unsigned long interval = deps.realtime.hasEverConnected() ? RECONNECT_INTERVAL : INIT_RETRY_INTERVAL;
     if (current_time - lastInitAttempt > interval) {
-        if (!supabaseClient.isRequestInFlight()) {
+        if (!deps.supabase.isRequestInFlight()) {
             lastInitAttempt = current_time;
             Serial.println("[REALTIME] Attempting to reconnect...");
             return true;  // Signal that reconnection should be attempted
@@ -60,6 +59,8 @@ void updateWatchdogTimer(unsigned long current_time,
                         unsigned long& lastSubscribedTime,
                         unsigned long& lastWatchdogLog,
                         bool& watchdogInit) {
+    auto& deps = getDependencies();
+    
     // Initialize watchdog timer on first call
     if (!watchdogInit) {
         watchdogInit = true;
@@ -68,9 +69,9 @@ void updateWatchdogTimer(unsigned long current_time,
 
     // Update watchdog timer if socket is connected (not just subscribed)
     // This prevents false positives when messages are flowing but subscription flag is unclear
-    if (supabaseRealtime.isSocketConnected()) {
+    if (deps.realtime.isSocketConnected()) {
         lastSubscribedTime = current_time;
-    } else if (app_state.wifi_connected && app_state.supabase_connected) {
+    } else if (deps.app_state.wifi_connected && deps.app_state.supabase_connected) {
         if (current_time - lastSubscribedTime > 60000UL &&
             current_time - lastWatchdogLog > WATCHDOG_INTERVAL) {
             lastWatchdogLog = current_time;

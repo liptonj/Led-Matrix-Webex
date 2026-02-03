@@ -12,8 +12,7 @@
 #include "../common/url_utils.h"
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
-
-extern ConfigManager config_manager;
+#include "../core/dependencies.h"
 
 // Global instance
 SupabaseRealtime supabaseRealtime;
@@ -136,7 +135,8 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     _wsHeaders = "";
     config.headers = nullptr;
     config.subprotocol = nullptr;
-    if (config_manager.getTlsVerify()) {
+    auto& deps = getDependencies();
+    if (deps.config.getTlsVerify()) {
         config.cert_pem = CA_CERT_BUNDLE_SUPABASE;
     } else {
         config.cert_pem = nullptr;
@@ -394,7 +394,8 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                               instance->_pendingMessage.length(), snippet.c_str());
                 instance->_loggedFirstMessage = true;
             }
-            if (config_manager.getPairingRealtimeDebug()) {
+            auto& deps = getDependencies();
+            if (deps.config.getPairingRealtimeDebug()) {
                 const int maxLen = 1024;
                 String raw = instance->_pendingMessage;
                 if (raw.length() > maxLen) {

@@ -14,6 +14,7 @@
 #include "../time/time_manager.h"
 #include "../meraki/mqtt_client.h"
 #include "../debug/remote_logger.h"
+#include "../core/dependencies.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
@@ -22,15 +23,6 @@
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
 #endif
-
-extern AppState app_state;
-extern SupabaseClient supabaseClient;
-extern SupabaseRealtime supabaseRealtime;
-extern ConfigManager config_manager;
-extern PairingManager pairing_manager;
-extern MatrixDisplay matrix_display;
-extern MerakiMQTTClient mqtt_client;
-extern RemoteLogger remoteLogger;
 
 // Include for hasSafeTlsHeap
 #include "../loop/loop_handlers.h"
@@ -82,6 +74,7 @@ void CommandProcessor::markProcessed(const String& id) {
 }
 
 void CommandProcessor::queuePendingAction(PendingCommandAction action, const String& id) {
+    auto& deps = getDependencies();
     if (id.isEmpty()) {
         return;
     }
@@ -100,20 +93,21 @@ void CommandProcessor::queuePendingAction(PendingCommandAction action, const Str
     markProcessed(id);
 
     // Free heap by disconnecting realtime before ack + reboot
-    supabaseRealtime.disconnect();
-    app_state.realtime_defer_until = millis() + 60000UL;
+    deps.realtime.disconnect();
+    deps.app_state.realtime_defer_until = millis() + 60000UL;
 
     Serial.printf("[SUPABASE] %s queued - waiting for safe heap to ack\n",
                   action == PendingCommandAction::FactoryReset ? "Factory reset" : "Reboot");
 }
 
 void CommandProcessor::processPendingActions() {
+    auto& deps = getDependencies();
     if (_pendingAction == PendingCommandAction::None) {
         return;
     }
 
     const unsigned long now = millis();
-    app_state.realtime_defer_until = now + 60000UL;
+    deps.app_state.realtime_defer_until = now + 60000UL;
 
     if (!hasSafeTlsHeap(65000, 40000)) {
         if (now - _pendingActionLastLog > 10000) {
@@ -124,11 +118,11 @@ void CommandProcessor::processPendingActions() {
         return;
     }
 
-    if (supabaseClient.isRequestInFlight()) {
+    if (deps.supabase.isRequestInFlight()) {
         return;
     }
 
-    if (!supabaseClient.ackCommand(_pendingActionId, true, "", "")) {
+    if (!deps.supabase.ackCommand(_pendingActionId, true, "", "")) {
         if (now - _pendingActionLastLog > 10000) {
             _pendingActionLastLog = now;
             Serial.println("[SUPABASE] Pending command ack failed; will retry");
@@ -139,7 +133,7 @@ void CommandProcessor::processPendingActions() {
     markProcessed(_pendingActionId);
 
     if (_pendingAction == PendingCommandAction::FactoryReset) {
-        config_manager.factoryReset();
+        deps.config.factoryReset();
     }
 
     _pendingAction = PendingCommandAction::None;
@@ -163,15 +157,16 @@ bool CommandProcessor::enqueuePendingAck(const String& id, bool success,
 }
 
 void CommandProcessor::processPendingAcks() {
+    auto& deps = getDependencies();
     if (_pendingAckCount == 0) {
         return;
     }
 
-    if (!supabaseClient.isAuthenticated()) {
+    if (!deps.supabase.isAuthenticated()) {
         return;
     }
 
-    const bool realtime_connecting = supabaseRealtime.isConnecting();
+    const bool realtime_connecting = deps.realtime.isConnecting();
     if (realtime_connecting) {
         return;
     }
@@ -182,7 +177,7 @@ void CommandProcessor::processPendingAcks() {
 
     while (_pendingAckCount > 0) {
         PendingAck& ack = _pendingAcks[_pendingAckHead];
-        if (!supabaseClient.ackCommand(ack.id, ack.success, ack.response, ack.error)) {
+        if (!deps.supabase.ackCommand(ack.id, ack.success, ack.response, ack.error)) {
             break;
         }
         _pendingAckHead = (_pendingAckHead + 1) % MAX_PENDING_ACKS;
@@ -192,12 +187,13 @@ void CommandProcessor::processPendingAcks() {
 
 bool CommandProcessor::sendOrQueueAck(const String& id, bool success,
                                        const String& response, const String& error) {
-    const bool realtime_connecting = supabaseRealtime.isConnecting();
+    auto& deps = getDependencies();
+    const bool realtime_connecting = deps.realtime.isConnecting();
     if (realtime_connecting || !hasSafeTlsHeap(65000, 40000)) {
         return enqueuePendingAck(id, success, response, error);
     }
 
-    if (!supabaseClient.ackCommand(id, success, response, error)) {
+    if (!deps.supabase.ackCommand(id, success, response, error)) {
         return enqueuePendingAck(id, success, response, error);
     }
     return true;
@@ -208,6 +204,7 @@ bool CommandProcessor::sendOrQueueAck(const String& id, bool success,
 // =============================================================================
 
 void handleSupabaseCommand(const SupabaseCommand& cmd) {
+    auto& deps = getDependencies();
     Serial.printf("[CMD-SB] Processing command: %s\n", cmd.command.c_str());
     
     bool success = true;
@@ -221,12 +218,12 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         int rssi = WiFi.RSSI();
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t uptime = millis() / 1000;
-        float temp = app_state.temperature;
+        float temp = deps.app_state.temperature;
         if (!hasSafeTlsHeap(65000, 40000)) {
             success = false;
             error = "low_heap";
         } else {
-            SupabaseAppState appState = supabaseClient.postDeviceState(
+            SupabaseAppState appState = deps.supabase.postDeviceState(
                 rssi, freeHeap, uptime, FIRMWARE_VERSION, temp);
             if (!appState.valid) {
                 success = false;
@@ -253,67 +250,67 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         } else {
             // Apply settings
             if (doc["display_name"].is<const char*>()) {
-                config_manager.setDisplayName(doc["display_name"].as<String>());
+                deps.config.setDisplayName(doc["display_name"].as<String>());
             }
             if (doc["brightness"].is<int>()) {
                 uint8_t brightness = doc["brightness"].as<uint8_t>();
-                config_manager.setBrightness(brightness);
-                matrix_display.setBrightness(brightness);
+                deps.config.setBrightness(brightness);
+                deps.display.setBrightness(brightness);
             }
             if (doc["scroll_speed_ms"].is<int>()) {
                 uint16_t speed = doc["scroll_speed_ms"].as<uint16_t>();
-                config_manager.setScrollSpeedMs(speed);
-                matrix_display.setScrollSpeedMs(speed);
+                deps.config.setScrollSpeedMs(speed);
+                deps.display.setScrollSpeedMs(speed);
             }
             if (doc["page_interval_ms"].is<int>()) {
                 uint16_t interval = doc["page_interval_ms"].as<uint16_t>();
-                config_manager.setPageIntervalMs(interval);
-                matrix_display.setPageIntervalMs(config_manager.getPageIntervalMs());
+                deps.config.setPageIntervalMs(interval);
+                deps.display.setPageIntervalMs(deps.config.getPageIntervalMs());
             }
             if (doc["sensor_page_enabled"].is<bool>()) {
-                config_manager.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
+                deps.config.setSensorPageEnabled(doc["sensor_page_enabled"].as<bool>());
             }
             if (doc["display_pages"].is<const char*>()) {
-                config_manager.setDisplayPages(doc["display_pages"].as<const char*>());
+                deps.config.setDisplayPages(doc["display_pages"].as<const char*>());
             }
             if (doc["status_layout"].is<const char*>()) {
-                config_manager.setStatusLayout(doc["status_layout"].as<const char*>());
+                deps.config.setStatusLayout(doc["status_layout"].as<const char*>());
             }
             if (doc["date_color"].is<const char*>()) {
-                config_manager.setDateColor(doc["date_color"].as<String>());
+                deps.config.setDateColor(doc["date_color"].as<String>());
             }
             if (doc["time_color"].is<const char*>()) {
-                config_manager.setTimeColor(doc["time_color"].as<String>());
+                deps.config.setTimeColor(doc["time_color"].as<String>());
             }
             if (doc["name_color"].is<const char*>()) {
-                config_manager.setNameColor(doc["name_color"].as<String>());
+                deps.config.setNameColor(doc["name_color"].as<String>());
             }
             if (doc["metric_color"].is<const char*>()) {
-                config_manager.setMetricColor(doc["metric_color"].as<String>());
+                deps.config.setMetricColor(doc["metric_color"].as<String>());
             }
             if (doc["time_zone"].is<const char*>()) {
-                config_manager.setTimeZone(doc["time_zone"].as<String>());
-                if (!applyTimeConfig(config_manager, &app_state)) {
+                deps.config.setTimeZone(doc["time_zone"].as<String>());
+                if (!applyTimeConfig(deps.config, &deps.app_state)) {
                     Serial.println("[SUPABASE] Failed to apply new time zone configuration");
                 }
             }
             if (doc["time_format"].is<const char*>()) {
-                config_manager.setTimeFormat(doc["time_format"].as<String>());
+                deps.config.setTimeFormat(doc["time_format"].as<String>());
             }
             if (doc["date_format"].is<const char*>()) {
-                config_manager.setDateFormat(doc["date_format"].as<String>());
+                deps.config.setDateFormat(doc["date_format"].as<String>());
             }
             if (doc["tls_verify"].is<bool>()) {
-                config_manager.setTlsVerify(doc["tls_verify"].as<bool>());
+                deps.config.setTlsVerify(doc["tls_verify"].as<bool>());
             }
             // Update MQTT config if broker is provided (indicates MQTT update intent)
             if (doc["mqtt_broker"].is<const char*>()) {
                 // Get current values as defaults (for fields not provided)
-                String currentBroker = config_manager.getMQTTBroker();
-                uint16_t currentPort = config_manager.getMQTTPort();
-                String currentUsername = config_manager.getMQTTUsername();
-                String currentPassword = config_manager.getMQTTPassword();
-                String currentTopic = config_manager.getMQTTTopic();
+                String currentBroker = deps.config.getMQTTBroker();
+                uint16_t currentPort = deps.config.getMQTTPort();
+                String currentUsername = deps.config.getMQTTUsername();
+                String currentPassword = deps.config.getMQTTPassword();
+                String currentTopic = deps.config.getMQTTTopic();
                 
                 // Update only provided fields, keep current values for others
                 String broker = doc["mqtt_broker"].as<String>();
@@ -327,23 +324,23 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
                 // Topic: use provided value if present, otherwise keep current
                 String topic = doc["mqtt_topic"].is<const char*>() ? doc["mqtt_topic"].as<String>() : currentTopic;
                 
-                config_manager.updateMQTTConfig(broker, port, username, password, updatePassword, topic);
+                deps.config.updateMQTTConfig(broker, port, username, password, updatePassword, topic);
                 Serial.println("[CMD-SB] MQTT config updated");
-                mqtt_client.invalidateConfig();  // Reconnect with new MQTT settings
+                deps.mqtt.invalidateConfig();  // Reconnect with new MQTT settings
             }
             if (doc["display_sensor_mac"].is<const char*>()) {
-                config_manager.setDisplaySensorMac(doc["display_sensor_mac"].as<String>());
+                deps.config.setDisplaySensorMac(doc["display_sensor_mac"].as<String>());
             }
             if (doc["display_metric"].is<const char*>()) {
-                config_manager.setDisplayMetric(doc["display_metric"].as<String>());
+                deps.config.setDisplayMetric(doc["display_metric"].as<String>());
             }
             if (doc["sensor_macs"].is<const char*>()) {
-                config_manager.setSensorMacs(doc["sensor_macs"].as<String>());
+                deps.config.setSensorMacs(doc["sensor_macs"].as<String>());
             } else if (doc["sensor_serial"].is<const char*>()) {
-                config_manager.setSensorSerial(doc["sensor_serial"].as<String>());
+                deps.config.setSensorSerial(doc["sensor_serial"].as<String>());
             }
             if (doc["poll_interval"].is<int>()) {
-                config_manager.setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
+                deps.config.setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
             }
             
             response = DeviceInfo::buildConfigJson();
@@ -354,13 +351,13 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         JsonDocument doc;
         deserializeJson(doc, cmd.payload);
         uint8_t brightness = doc["value"] | 128;
-        config_manager.setBrightness(brightness);
-        matrix_display.setBrightness(brightness);
+        deps.config.setBrightness(brightness);
+        deps.display.setBrightness(brightness);
         
     } else if (cmd.command == "regenerate_pairing") {
-        String newCode = pairing_manager.generateCode(true);
-        supabaseClient.setPairingCode(newCode);  // Update Supabase client
-        app_state.supabase_realtime_resubscribe = true;
+        String newCode = deps.pairing.generateCode(true);
+        deps.supabase.setPairingCode(newCode);  // Update Supabase client
+        deps.app_state.supabase_realtime_resubscribe = true;
         JsonDocument resp;
         resp["code"] = newCode;
         serializeJson(resp, response);
@@ -369,8 +366,8 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         JsonDocument doc;
         deserializeJson(doc, cmd.payload);
         bool enabled = doc["enabled"] | false;
-        supabaseClient.setRemoteDebugEnabled(enabled);
-        remoteLogger.setRemoteEnabled(enabled);
+        deps.supabase.setRemoteDebugEnabled(enabled);
+        deps.remote_logger.setRemoteEnabled(enabled);
         JsonDocument resp;
         resp["enabled"] = enabled;
         serializeJson(resp, response);

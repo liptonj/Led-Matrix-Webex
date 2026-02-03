@@ -9,26 +9,22 @@
 #include "../supabase/supabase_realtime.h"
 #include "../app_state.h"
 #include "../debug/remote_logger.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 
-// External references for update functionality
-extern OTAManager ota_manager;
-extern MatrixDisplay matrix_display;
-extern SupabaseRealtime supabaseRealtime;
-extern AppState app_state;
-
 void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
+    auto& deps = getDependencies();
     JsonDocument doc;
     doc["current_version"] = FIRMWARE_VERSION;
     
     // Check for updates using OTA manager
     Serial.println("[WEB] Checking for OTA updates...");
-    bool update_checked = ota_manager.checkForUpdate();
+    bool update_checked = deps.ota.checkForUpdate();
     
     if (update_checked) {
-        String latest = ota_manager.getLatestVersion();
-        bool available = ota_manager.isUpdateAvailable();
+        String latest = deps.ota.getLatestVersion();
+        bool available = deps.ota.isUpdateAvailable();
         
         // If check succeeded but no version found (edge case), we're on latest
         // This can happen if manifest is valid but version parsing has issues
@@ -44,7 +40,7 @@ void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
         doc["update_available"] = available;
         
         if (available) {
-            String download_url = ota_manager.getDownloadUrl();
+            String download_url = deps.ota.getDownloadUrl();
             if (!download_url.isEmpty()) {
                 doc["download_url"] = download_url;
             }
@@ -67,14 +63,15 @@ void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
 }
 
 void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
+    auto& deps = getDependencies();
     // Check if an update is available first
-    if (!ota_manager.isUpdateAvailable()) {
+    if (!deps.ota.isUpdateAvailable()) {
         request->send(400, "application/json", 
                      "{\"success\":false,\"message\":\"No update available. Check for updates first.\"}");
         return;
     }
     
-    String new_version = ota_manager.getLatestVersion();
+    String new_version = deps.ota.getLatestVersion();
     Serial.println("[WEB] Starting OTA update...");
     
     // Clear any previous failed version marker since user is manually retrying
@@ -82,7 +79,7 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     
     // Show updating screen on display BEFORE sending response
     // This ensures the display updates before the blocking OTA starts
-    matrix_display.showUpdating(new_version);
+    deps.display.showUpdating(new_version);
     
     // Give display time to render
     delay(50);
@@ -95,9 +92,9 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     
     // Disconnect realtime to free memory and prevent network contention during OTA
     // The realtime WebSocket competes for heap and network bandwidth
-    if (supabaseRealtime.isConnected() || supabaseRealtime.isConnecting()) {
+    if (deps.realtime.isConnected() || deps.realtime.isConnecting()) {
         Serial.println("[WEB] Disconnecting realtime for OTA...");
-        supabaseRealtime.disconnect();
+        deps.realtime.disconnect();
     }
     app_state->realtime_defer_until = millis() + 600000UL;  // 10 minutes
     
@@ -109,9 +106,9 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     delay(100);  // Allow async tasks to finish
     
     // Trigger OTA update (this will reboot on success)
-    if (!ota_manager.performUpdate()) {
+    if (!deps.ota.performUpdate()) {
         RLOG_ERROR("ota-web", "OTA update failed");
-        matrix_display.unlockFromOTA();  // Unlock display on failure
+        deps.display.unlockFromOTA();  // Unlock display on failure
         // Mark version as failed to prevent auto-retry loops
         config_manager->setFailedOTAVersion(new_version);
         RLOG_WARN("ota-web", "Marked version %s as failed", new_version.c_str());

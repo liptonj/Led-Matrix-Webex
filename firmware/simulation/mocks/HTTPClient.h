@@ -8,7 +8,9 @@
 
 #include "Arduino.h"
 #include "WiFi.h"
+#include "WiFiClientSecure.h"
 #include <map>
+#include <algorithm>
 
 // HTTP codes
 #define HTTP_CODE_OK 200
@@ -34,57 +36,18 @@
 #define HTTPC_ERROR_STREAM_WRITE -10
 #define HTTPC_ERROR_READ_TIMEOUT -11
 
-class WiFiClient {
-public:
-    bool connect(const char* host, uint16_t port) { return _connected; }
-    bool connected() { return _connected; }
-    void stop() { _connected = false; }
-    int available() { return _available; }
-    int read() { return -1; }
-    size_t write(uint8_t) { return 1; }
-    size_t write(const uint8_t* buf, size_t size) { return size; }
-    void setTimeout(uint16_t timeout) { _timeout = timeout; }
-    
-    // For testing
-    void setConnected(bool connected) { _connected = connected; }
-    void setAvailable(int available) { _available = available; }
-    
-private:
-    bool _connected = true;
-    int _available = 0;
-    uint16_t _timeout = 5000;
-};
+// Redirect settings
+#define HTTPC_DISABLE_FOLLOW_REDIRECTS 0
+#define HTTPC_STRICT_FOLLOW_REDIRECTS 1
+#define HTTPC_FORCE_FOLLOW_REDIRECTS 2
 
-class WiFiClientSecure : public WiFiClient {
-public:
-    void setInsecure() {
-        _insecure = true;
-        printf("[HTTPClient] SSL certificate verification disabled\n");
-    }
-    
-    void setCACert(const char* rootCA) {
-        _insecure = false;
-        _caCert = rootCA ? rootCA : "";
-        printf("[HTTPClient] CA certificate set\n");
-    }
-    
-    void setCertificate(const char* clientCert) {
-        _clientCert = clientCert ? clientCert : "";
-    }
-    
-    void setPrivateKey(const char* privateKey) {
-        _privateKey = privateKey ? privateKey : "";
-    }
-    
-    bool isInsecure() const { return _insecure; }
-    const String& getCACert() const { return _caCert; }
-    
-private:
-    bool _insecure = false;
-    String _caCert;
-    String _clientCert;
-    String _privateKey;
-};
+// min/max macros for OTA helpers compatibility
+#ifndef min
+#define min(a,b) ((a)<(b)?(a):(b))
+#endif
+#ifndef max
+#define max(a,b) ((a)>(b)?(a):(b))
+#endif
 
 /**
  * @brief Enhanced HTTP Client mock with test response control

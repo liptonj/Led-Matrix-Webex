@@ -9,13 +9,8 @@
 #include "../supabase/supabase_realtime.h"
 #include "../config/config_manager.h"
 #include "../common/pairing_manager.h"
+#include "../core/dependencies.h"
 #include <ArduinoJson.h>
-
-extern AppState app_state;
-extern ConfigManager config_manager;
-extern SupabaseClient supabaseClient;
-extern SupabaseRealtime supabaseRealtime;
-extern PairingManager pairing_manager;
 
 namespace {
 constexpr int REALTIME_SUBSCRIPTION_MODE = 0;  // 0=all tables, 1=commands only, 2=pairings only, 3=broadcast
@@ -25,37 +20,38 @@ constexpr unsigned long INIT_RETRY_INTERVAL = 15000;  // 15 seconds
 // handleRealtimeMessage is declared in realtime_manager.h and defined in realtime_handlers.cpp
 
 bool RealtimeManager::attemptInit() {
+    auto& deps = getDependencies();
     static unsigned long last_realtime_error_log = 0;
 
     // Validate preconditions
-    String anonKey = config_manager.getSupabaseAnonKey();
+    String anonKey = deps.config.getSupabaseAnonKey();
 
     // Skip if anon key not configured
     if (anonKey.isEmpty()) {
-        app_state.realtime_error = "anon_key_missing";
-        app_state.last_realtime_error = millis();
+        deps.app_state.realtime_error = "anon_key_missing";
+        deps.app_state.last_realtime_error = millis();
         return false;
     }
 
-    if (!app_state.time_synced) {
-        app_state.realtime_error = "time_not_synced";
-        app_state.last_realtime_error = millis();
+    if (!deps.app_state.time_synced) {
+        deps.app_state.realtime_error = "time_not_synced";
+        deps.app_state.last_realtime_error = millis();
         return false;
     }
 
-    const uint32_t min_heap = supabaseRealtime.minHeapRequired();
+    const uint32_t min_heap = deps.realtime.minHeapRequired();
     if (ESP.getFreeHeap() < min_heap) {
-        app_state.realtime_error = "low_heap";
-        app_state.last_realtime_error = millis();
+        deps.app_state.realtime_error = "low_heap";
+        deps.app_state.last_realtime_error = millis();
         return false;
     }
 
-    String supabaseUrl = config_manager.getSupabaseUrl();
-    String accessToken = supabaseClient.getAccessToken();
+    String supabaseUrl = deps.config.getSupabaseUrl();
+    String accessToken = deps.supabase.getAccessToken();
 
     if (supabaseUrl.isEmpty() || accessToken.isEmpty()) {
-        app_state.realtime_error = "missing_url_or_token";
-        app_state.last_realtime_error = millis();
+        deps.app_state.realtime_error = "missing_url_or_token";
+        deps.app_state.last_realtime_error = millis();
         return false;
     }
 
@@ -63,13 +59,13 @@ bool RealtimeManager::attemptInit() {
     Serial.println("[REALTIME] Initializing Phase B realtime connection...");
 
     // Set message handler
-    supabaseRealtime.setMessageHandler(handleRealtimeMessage);
+    deps.realtime.setMessageHandler(handleRealtimeMessage);
 
     // Initialize WebSocket connection
-    supabaseRealtime.begin(supabaseUrl, anonKey, accessToken);
+    deps.realtime.begin(supabaseUrl, anonKey, accessToken);
 
     // Subscribe to channels
-    String pairingCode = pairing_manager.getCode();
+    String pairingCode = deps.pairing.getCode();
     if (pairingCode.isEmpty()) {
         Serial.println("[REALTIME] No pairing code - cannot subscribe");
         return false;
@@ -83,34 +79,34 @@ bool RealtimeManager::attemptInit() {
     if (REALTIME_SUBSCRIPTION_MODE == 3) {
         // Broadcast mode
         String channelTopic = "realtime:pairing:" + pairingCode + ":events";
-        supabaseRealtime.setChannelTopic(channelTopic);
-        queued = supabaseRealtime.subscribeBroadcast();
+        deps.realtime.setChannelTopic(channelTopic);
+        queued = deps.realtime.subscribeBroadcast();
     } else if (REALTIME_SUBSCRIPTION_MODE == 1) {
         // Commands only
-        supabaseRealtime.setChannelTopic("realtime:display");
+        deps.realtime.setChannelTopic("realtime:display");
         const String tables[] = { "commands" };
-        queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
+        queued = deps.realtime.subscribeMultiple("display", tables, 1, filter);
     } else if (REALTIME_SUBSCRIPTION_MODE == 2) {
         // Pairings only
-        supabaseRealtime.setChannelTopic("realtime:display");
+        deps.realtime.setChannelTopic("realtime:display");
         const String tables[] = { "pairings" };
-        queued = supabaseRealtime.subscribeMultiple("display", tables, 1, filter);
+        queued = deps.realtime.subscribeMultiple("display", tables, 1, filter);
     } else {
         // All tables (default)
-        supabaseRealtime.setChannelTopic("realtime:display");
+        deps.realtime.setChannelTopic("realtime:display");
         const String tables[] = { "commands", "pairings", "devices" };
-        queued = supabaseRealtime.subscribeMultiple("display", tables, 3, filter);
+        queued = deps.realtime.subscribeMultiple("display", tables, 3, filter);
     }
 
     if (queued) {
         Serial.println("[REALTIME] Subscription requested");
-        app_state.realtime_error = "";
+        deps.app_state.realtime_error = "";
         return true;
     }
 
     Serial.println("[REALTIME] Connection timeout - will retry");
-    app_state.realtime_error = "connection_timeout";
-    app_state.last_realtime_error = millis();
+    deps.app_state.realtime_error = "connection_timeout";
+    deps.app_state.last_realtime_error = millis();
 
     unsigned long now = millis();
     if (now - last_realtime_error_log > 600000) {  // 10 minutes
@@ -121,8 +117,8 @@ bool RealtimeManager::attemptInit() {
         meta["time"] = (unsigned long)time(nullptr);
         String metaStr;
         serializeJson(meta, metaStr);
-        supabaseClient.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
+        deps.supabase.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
     }
 
-    return supabaseRealtime.isSocketConnected();
+    return deps.realtime.isSocketConnected();
 }

@@ -21,6 +21,7 @@
 
 #include "web_server.h"
 #include "../display/matrix_display.h"
+#include "../core/dependencies.h"
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <esp_ota_ops.h>
@@ -156,8 +157,8 @@ bool WebServerManager::checkPendingReboot() {
     
     // Clear display before reboot to prevent DMA corruption
     // The display uses I2S DMA which can leave garbage on screen if not properly cleared
-    extern MatrixDisplay matrix_display;
-    matrix_display.clear();
+    auto& deps = getDependencies();
+    deps.display.clear();
     delay(50);  // Allow display DMA to complete the clear operation
     
     // Set boot partition if specified
