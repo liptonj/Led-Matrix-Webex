@@ -33,8 +33,17 @@ void initSupabase(
     }
 
     // Register device with Supabase on first boot (requires WiFi + Supabase URL)
+    // Skip if device already has credentials (HMAC secret + pairing code = already registered)
+    bool skipped_provisioning = false;
     if (app_state.wifi_connected) {
-        provisionDeviceWithSupabase();
+        if (pairing_manager.hasCode()) {
+            Serial.println("[SUPABASE] Existing credentials found - skipping provisioning");
+            skipped_provisioning = true;
+            // Small delay to allow heap to stabilize (provisioning HTTP would take 1-2s)
+            delay(100);
+        } else {
+            provisionDeviceWithSupabase();
+        }
     }
 
     // Continue with authentication logic
@@ -77,7 +86,8 @@ void initSupabase(
             }
             
             Serial.println("[INIT] Deferring Supabase Realtime init until after OTA/web server settle...");
-            app_state.realtime_defer_until = millis() + 15000UL;  // allow OTA + web to stabilize
+            // Use longer defer when we skipped provisioning (no TLS warmup from HTTP call)
+            app_state.realtime_defer_until = millis() + (skipped_provisioning ? 20000UL : 15000UL);
             logHeapStatus("after supabase auth");
         } else {
             RLOG_WARN("init", "Supabase auth failed - will retry in loop");

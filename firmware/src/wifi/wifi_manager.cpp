@@ -179,12 +179,14 @@ void WiFiManager::setupWiFi() {
     }
 
     if (!network_found) {
-        Serial.printf("[WIFI] Configured network '%s' NOT found!\n", ssid.c_str());
-        startAPMode("Configured network not found");
-        return;
+        // Network not found in scan, but try direct connect anyway
+        // Many networks can be connected to even when scanning fails
+        Serial.printf("[WIFI] Configured network '%s' NOT found in scan!\n", ssid.c_str());
+        Serial.println("[WIFI] Attempting direct connect anyway...");
+        RLOG_WARN("wifi", "Network '%s' not in scan, trying direct connect", ssid.c_str());
     }
 
-    // Connect to WiFi
+    // Connect to WiFi (attempt even if scan didn't find the network)
     Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());

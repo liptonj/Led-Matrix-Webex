@@ -19,7 +19,7 @@ extern ConfigManager config_manager;
 SupabaseRealtime supabaseRealtime;
 
 namespace {
-constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 80000;   // Increased from 60000
+constexpr uint32_t REALTIME_MIN_HEAP_FIRST = 100000;  // Raised from 80000 for TLS+WebSocket headroom
 constexpr uint32_t REALTIME_MIN_HEAP_STEADY = 60000;  // Increased from 45000
 constexpr uint32_t REALTIME_MIN_HEAP_FLOOR = 50000;   // Increased from 35000
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
@@ -130,7 +130,7 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     config.uri = uri.c_str();
     config.disable_auto_reconnect = true;
     config.buffer_size = 2048;  // Reduced from 4096 to save heap
-    config.task_stack = 6144;   // Reduced from 8192 (TLS needs ~5KB minimum)
+    config.task_stack = 10240;  // 10KB: TLS(5KB) + JSON + Phoenix + safety margin
     config.user_context = this;
     config.ping_interval_sec = 0;
     _wsHeaders = "";
@@ -200,6 +200,21 @@ void SupabaseRealtime::loop() {
     // Handle reconnection
     if (!_connected && now - _lastReconnectAttempt >= _reconnectDelay) {
         attemptReconnect();
+    }
+    
+    // Monitor WebSocket task stack usage (every 60 seconds)
+    static unsigned long lastStackLog = 0;
+    if (millis() - lastStackLog > 60000) {
+        lastStackLog = millis();
+        // Note: esp_websocket_client runs its own task internally
+        // We log heap as a proxy for memory health since we can't directly access the WS task handle
+        if (_connected) {
+            uint32_t freeHeap = ESP.getFreeHeap();
+            uint32_t minFreeHeap = ESP.getMinFreeHeap();
+            if (minFreeHeap < 50000) {
+                RLOG_WARN("realtime", "Low heap during WebSocket: free=%lu min=%lu", freeHeap, minFreeHeap);
+            }
+        }
     }
 }
 
