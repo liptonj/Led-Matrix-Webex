@@ -10,6 +10,7 @@
 #include <Update.h>
 #include <LittleFS.h>
 #include <esp_ota_ops.h>
+#include "../debug/remote_logger.h"
 
 void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                                             const String& filename,
@@ -74,10 +75,10 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                     // Start app update - MUST specify partition label to write to correct partition
                     if (ota_upload_error.isEmpty() && ota_upload_target) {
                         const char* ota_label = ota_upload_target->label;
-                        if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
-                            ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin app failed: %s\n", ota_upload_error.c_str());
-                        }
+                    if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
+                        ota_upload_error = Update.errorString();
+                        RLOG_ERROR("ota-web", "Update.begin app failed: %s", ota_upload_error.c_str());
+                    }
                     }
                 } else {
                     // Not a bundle - regular firmware
@@ -104,10 +105,10 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                     // Start firmware update - MUST specify partition label to write to correct partition
                     if (ota_upload_error.isEmpty() && ota_upload_target) {
                         const char* ota_label = ota_upload_target->label;
-                        if (!Update.begin(firmware_total, U_FLASH, -1, LOW, ota_label)) {
-                            ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin firmware failed: %s\n", ota_upload_error.c_str());
-                        }
+                    if (!Update.begin(firmware_total, U_FLASH, -1, LOW, ota_label)) {
+                        ota_upload_error = Update.errorString();
+                        RLOG_ERROR("ota-web", "Update.begin firmware failed: %s", ota_upload_error.c_str());
+                    }
                     }
                 }
             } else {
@@ -144,12 +145,12 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                             break;
                         }
                         if (ota_upload_target) {
-                            Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
-                            esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
-                            if (err != ESP_OK) {
-                                Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
-                                ota_upload_error = "Failed to set boot partition";
-                                break;
+                        Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
+                        esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
+                        if (err != ESP_OK) {
+                            RLOG_ERROR("ota-web", "Failed to set boot partition: %s", esp_err_to_name(err));
+                            ota_upload_error = "Failed to set boot partition";
+                            break;
                             } else {
                                 // Verify boot partition was set correctly
                                 const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
@@ -165,7 +166,7 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                         LittleFS.end();
                         if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
                             ota_upload_error = Update.errorString();
-                            Serial.printf("[WEB] Update.begin FS failed: %s\n", ota_upload_error.c_str());
+                            RLOG_ERROR("ota-web", "Update.begin FS failed: %s", ota_upload_error.c_str());
                             break;
                         }
                         ota_bundle_fs_started = true;
@@ -238,7 +239,7 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                     Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
                     esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
                     if (err != ESP_OK) {
-                        Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
+                        RLOG_ERROR("ota-web", "Failed to set boot partition: %s", esp_err_to_name(err));
                         ota_upload_error = "Failed to set boot partition";
                     } else {
                         // Verify boot partition was set correctly
@@ -260,7 +261,7 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                       ota_upload_error.isEmpty() ? "complete" : "failed",
                       static_cast<unsigned>(ota_upload_size));
         if (!ota_upload_error.isEmpty()) {
-            Serial.printf("[WEB] OTA error: %s\n", ota_upload_error.c_str());
+            RLOG_ERROR("ota-web", "OTA error: %s", ota_upload_error.c_str());
         } else {
             // OTA successful - schedule reboot
             Serial.println("[WEB] OTA successful! Scheduling reboot...");

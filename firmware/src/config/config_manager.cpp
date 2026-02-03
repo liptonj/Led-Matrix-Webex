@@ -18,6 +18,8 @@
 #include <esp_ota_ops.h>
 #endif
 
+#include "../debug/remote_logger.h"
+
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
       cached_brightness(DEFAULT_BRIGHTNESS), cached_scroll_speed_ms(DEFAULT_SCROLL_SPEED_MS),
@@ -33,7 +35,7 @@ ConfigManager::~ConfigManager() {
 
 bool ConfigManager::begin() {
     if (!preferences.begin(CONFIG_NAMESPACE, false)) {
-        Serial.println("[CONFIG] Failed to initialize NVS!");
+        RLOG_ERROR("config", "Failed to initialize NVS");
         return false;
     }
 
@@ -859,7 +861,7 @@ bool ConfigManager::importConfig(const String& json) {
     DeserializationError error = deserializeJson(doc, json.c_str());
 
     if (error) {
-        Serial.printf("[CONFIG] Failed to parse config JSON: %s\n", error.c_str());
+        RLOG_ERROR("config", "Failed to parse config JSON: %s", error.c_str());
         return false;
     }
 

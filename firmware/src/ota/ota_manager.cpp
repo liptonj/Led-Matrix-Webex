@@ -102,6 +102,7 @@ bool OTAManager::checkUpdateFromManifest() {
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] Manifest fetch failed: %d\n", httpCode);
+        RLOG_ERROR("ota", "Manifest fetch failed: HTTP %d", httpCode);
         http.end();
         return false;
     }
@@ -197,6 +198,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] Failed to check for updates: %d\n", httpCode);
+        RLOG_ERROR("ota", "Failed to check for updates: HTTP %d", httpCode);
         http.end();
         return false;
     }
@@ -443,6 +445,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] %s download failed: %d\n", label, httpCode);
+        RLOG_ERROR("ota", "%s download failed: HTTP %d", label, httpCode);
         http.end();
         return false;
     }
@@ -513,6 +516,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     uint8_t* buffer = (uint8_t*)malloc(4096);
     if (!buffer) {
         Serial.printf("[OTA] Failed to allocate download buffer for %s\n", label);
+        RLOG_ERROR("ota", "Failed to allocate buffer for %s", label);
         Update.abort();
         http.end();
         return false;
@@ -565,6 +569,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     if (!Update.end()) {
         Serial.printf("[OTA] %s update failed: %s\n", label, Update.errorString());
+        RLOG_ERROR("ota", "%s update failed: %s", label, Update.errorString());
         http.end();
         return false;
     }
@@ -574,6 +579,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         esp_err_t err = esp_ota_set_boot_partition(target_partition);
         if (err != ESP_OK) {
             Serial.printf("[OTA] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            RLOG_ERROR("ota", "Failed to set boot partition: %s", esp_err_to_name(err));
             http.end();
             return false;
         }
@@ -607,6 +613,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
 
     if (httpCode != HTTP_CODE_OK) {
         Serial.printf("[OTA] Bundle download failed: %d\n", httpCode);
+        RLOG_ERROR("ota", "Bundle download failed: HTTP %d", httpCode);
         http.end();
         return false;
     }
@@ -858,6 +865,7 @@ bool OTAManager::downloadAndInstallBundle(const String& url) {
     esp_err_t err = esp_ota_set_boot_partition(target_partition);
     if (err != ESP_OK) {
         Serial.printf("[OTA] Failed to set boot partition: %s\n", esp_err_to_name(err));
+        RLOG_ERROR("ota", "Failed to set boot partition: %s", esp_err_to_name(err));
         http.end();
         return false;
     }

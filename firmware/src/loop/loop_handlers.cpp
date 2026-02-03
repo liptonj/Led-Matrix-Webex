@@ -231,6 +231,7 @@ void handleSerialAndImprov(LoopContext& ctx) {
             ctx.matrix_display->showUnconfigured(WiFi.localIP().toString(), ctx.mdns_manager->getHostname());
         } else {
             Serial.println("[WIFI] Connection failed!");
+            RLOG_ERROR("loop", "WiFi connection failed");
             ctx.app_state->wifi_connected = false;
         }
     }
@@ -469,6 +470,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             return true;
         }
         Serial.println("[WEBEX] Cloud status failed, polling local API");
+        RLOG_WARN("loop", "Cloud status failed, falling back to local API");
         WebexPresence presence;
         if (ctx.webex_client->getPresence(presence)) {
             ctx.app_state->webex_status = presence.status;
@@ -634,6 +636,7 @@ void check_for_updates() {
                 ESP.restart();
             } else {
                 Serial.println("[OTA] Update failed!");
+                RLOG_ERROR("loop", "OTA update failed");
                 matrix_display.unlockFromOTA();  // Unlock display on failure
                 // Record this version as failed to prevent retry loop
                 config_manager.setFailedOTAVersion(new_version);

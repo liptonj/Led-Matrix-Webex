@@ -5,6 +5,7 @@
 
 #include "device_credentials.h"
 #include "common/nvs_utils.h"
+#include "../debug/remote_logger.h"
 #include <time.h>
 
 #ifndef NATIVE_BUILD
@@ -56,7 +57,7 @@ bool DeviceCredentials::begin() {
 
     // Save to NVS
     if (!saveSecretToNVS()) {
-        Serial.println("[CREDS] ERROR: Failed to save secret to NVS");
+        RLOG_ERROR("creds", "Failed to save secret to NVS");
         clearSecret();
         return false;
     }
@@ -171,7 +172,7 @@ String DeviceCredentials::sha256Hex(const String& data) {
 
 String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
     if (!_provisioned) {
-        Serial.println("[CREDS] ERROR: Cannot sign - not provisioned");
+        RLOG_ERROR("creds", "Cannot sign - not provisioned");
         return "";
     }
 
@@ -191,20 +192,20 @@ String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
 
     const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (mdInfo == nullptr) {
-        Serial.println("[CREDS] ERROR: SHA256 not available");
+        RLOG_ERROR("creds", "SHA256 not available");
         return "";
     }
 
     ret = mbedtls_md_setup(&ctx, mdInfo, 1);  // 1 = use HMAC
     if (ret != 0) {
-        Serial.printf("[CREDS] HMAC setup failed: %d\n", ret);
+        RLOG_ERROR("creds", "HMAC setup failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
 
     ret = mbedtls_md_hmac_starts(&ctx, (const uint8_t*)_keyHash.c_str(), _keyHash.length());
     if (ret != 0) {
-        Serial.printf("[CREDS] HMAC starts failed: %d\n", ret);
+        RLOG_ERROR("creds", "HMAC starts failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
@@ -218,7 +219,7 @@ String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
 
     ret = mbedtls_md_hmac_finish(&ctx, hmacResult);
     if (ret != 0) {
-        Serial.printf("[CREDS] HMAC finish failed: %d\n", ret);
+        RLOG_ERROR("creds", "HMAC finish failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }

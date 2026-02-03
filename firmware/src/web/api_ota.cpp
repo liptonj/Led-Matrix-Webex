@@ -8,6 +8,7 @@
 #include "../display/matrix_display.h"
 #include "../supabase/supabase_realtime.h"
 #include "../app_state.h"
+#include "../debug/remote_logger.h"
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
 
@@ -57,7 +58,7 @@ void WebServerManager::handleCheckUpdate(AsyncWebServerRequest* request) {
         doc["latest_version"] = "Check failed";
         doc["update_available"] = false;
         doc["error"] = "Failed to check for updates. Check OTA URL configuration and network connection.";
-        Serial.println("[WEB] OTA check failed");
+        RLOG_ERROR("ota-web", "OTA check failed");
     }
 
     String response;
@@ -109,11 +110,11 @@ void WebServerManager::handlePerformUpdate(AsyncWebServerRequest* request) {
     
     // Trigger OTA update (this will reboot on success)
     if (!ota_manager.performUpdate()) {
-        Serial.println("[WEB] OTA update failed");
+        RLOG_ERROR("ota-web", "OTA update failed");
         matrix_display.unlockFromOTA();  // Unlock display on failure
         // Mark version as failed to prevent auto-retry loops
         config_manager->setFailedOTAVersion(new_version);
-        Serial.printf("[WEB] Marked version %s as failed\n", new_version.c_str());
+        RLOG_WARN("ota-web", "Marked version %s as failed", new_version.c_str());
         Serial.println("[WEB] Restarting web server after OTA failure...");
         begin(config_manager, app_state, module_manager);
     }
@@ -126,7 +127,7 @@ void WebServerManager::handleBootToFactory(AsyncWebServerRequest* request) {
         ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_FACTORY, nullptr);
 
     if (!factory) {
-        Serial.println("[WEB] ERROR: Factory partition not found in partition table");
+        RLOG_ERROR("ota-web", "Factory partition not found in partition table");
         request->send(500, "application/json",
                       "{\"success\":false,\"message\":\"Factory partition not found\"}");
         return;
@@ -146,7 +147,7 @@ void WebServerManager::handleBootToFactory(AsyncWebServerRequest* request) {
     // Try to set boot partition immediately to verify it works
     esp_err_t err = esp_ota_set_boot_partition(factory);
     if (err != ESP_OK) {
-        Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
+        RLOG_ERROR("ota-web", "Failed to set boot partition: %s", esp_err_to_name(err));
         String errorMsg = "{\"success\":false,\"message\":\"Failed to set boot partition: ";
         errorMsg += esp_err_to_name(err);
         errorMsg += "\"}";

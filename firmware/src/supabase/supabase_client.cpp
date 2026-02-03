@@ -14,6 +14,7 @@
 #include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
 #include "../debug.h"
+#include "../debug/remote_logger.h"
 
 extern ConfigManager config_manager;
 
@@ -101,7 +102,7 @@ bool SupabaseClient::authenticate() {
     }
     
     if (httpCode != 200) {
-        Serial.printf("[SUPABASE] Auth failed: HTTP %d\n", httpCode);
+        RLOG_ERROR("supabase", "Auth failed: HTTP %d", httpCode);
         if (!response.isEmpty()) {
             Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
             if (response.indexOf("Invalid signature") >= 0) {
@@ -127,7 +128,7 @@ bool SupabaseClient::authenticate() {
     SupabaseAuthResult result = parseAuthResponse(response);
     
     if (!result.success) {
-        Serial.println("[SUPABASE] Auth response parsing failed");
+        RLOG_ERROR("supabase", "Auth response parsing failed");
         _lastAuthError = SupabaseAuthError::Other;
         return false;
     }
@@ -194,13 +195,13 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     DeserializationError error = deserializeJson(doc, json);
     
     if (error) {
-        Serial.printf("[SUPABASE] JSON parse error: %s\n", error.c_str());
+        RLOG_ERROR("supabase", "JSON parse error: %s", error.c_str());
         return result;
     }
     
     if (!doc["success"].as<bool>()) {
         String errMsg = doc["error"] | "Unknown error";
-        Serial.printf("[SUPABASE] Auth error: %s\n", errMsg.c_str());
+        RLOG_ERROR("supabase", "Auth error: %s", errMsg.c_str());
         return result;
     }
     
@@ -287,7 +288,7 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     int httpCode = makeRequestWithRetry("post-device-state", "POST", body, response);
     
     if (httpCode != 200) {
-        Serial.printf("[SUPABASE] Post state failed: HTTP %d\n", httpCode);
+        RLOG_WARN("supabase", "Post state failed: HTTP %d", httpCode);
         return state;
     }
     
@@ -296,13 +297,13 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     DeserializationError error = deserializeJson(respDoc, response);
     
     if (error) {
-        Serial.printf("[SUPABASE] Response parse error: %s\n", error.c_str());
+        RLOG_ERROR("supabase", "Response parse error: %s", error.c_str());
         return state;
     }
     
     if (!respDoc["success"].as<bool>()) {
         String errMsg = respDoc["error"] | "Unknown error";
-        Serial.printf("[SUPABASE] Post state error: %s\n", errMsg.c_str());
+        RLOG_ERROR("supabase", "Post state error: %s", errMsg.c_str());
         return state;
     }
 
@@ -458,7 +459,7 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     int httpCode = makeRequestWithRetry("ack-command", "POST", body, response);
     
     if (httpCode != 200) {
-        Serial.printf("[SUPABASE] Ack command failed: HTTP %d\n", httpCode);
+        RLOG_WARN("supabase", "Ack command failed: HTTP %d", httpCode);
         return false;
     }
     
@@ -538,7 +539,7 @@ bool SupabaseClient::syncWebexStatus(String& webexStatus, const String& payload)
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, response);
     if (err) {
-        Serial.printf("[SUPABASE] webex-status parse error: %s\n", err.c_str());
+        RLOG_ERROR("supabase", "webex-status parse error: %s", err.c_str());
         return false;
     }
 
@@ -643,7 +644,7 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     if (httpCode > 0) {
         response = http.getString();
     } else {
-        Serial.printf("[SUPABASE] Request failed: %s\n", http.errorToString(httpCode).c_str());
+        RLOG_ERROR("supabase", "Request failed: %s", http.errorToString(httpCode).c_str());
         Serial.printf("[SUPABASE] TLS context: url=%s time=%lu heap=%lu\n",
                       url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap());
         response = "";

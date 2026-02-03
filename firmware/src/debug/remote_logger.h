@@ -103,9 +103,17 @@ private:
 extern RemoteLogger remoteLogger;
 
 // Convenience macros
+#ifdef NATIVE_BUILD
+// Native builds: stub out remote logging (just prints to Serial)
+#define RLOG_DEBUG(tag, ...) do { (void)(tag); } while(0)
+#define RLOG_INFO(tag, ...) do { (void)(tag); } while(0)
+#define RLOG_WARN(tag, ...) do { (void)(tag); } while(0)
+#define RLOG_ERROR(tag, ...) do { (void)(tag); } while(0)
+#else
 #define RLOG_DEBUG(tag, ...) remoteLogger.debug(tag, __VA_ARGS__)
 #define RLOG_INFO(tag, ...) remoteLogger.info(tag, __VA_ARGS__)
 #define RLOG_WARN(tag, ...) remoteLogger.warn(tag, __VA_ARGS__)
 #define RLOG_ERROR(tag, ...) remoteLogger.error(tag, __VA_ARGS__)
+#endif
 
 #endif // REMOTE_LOGGER_H

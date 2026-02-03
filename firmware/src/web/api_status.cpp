@@ -27,9 +27,15 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
 
     doc["wifi_connected"] = app_state->wifi_connected;
     // WiFi configuration status for WebUI
-    String wifi_ssid = config_manager->getWiFiSSID();
+    // Get connected SSID when actually connected, otherwise show saved config
+    String wifi_ssid;
+    if (WiFi.status() == WL_CONNECTED && !WiFi.SSID().isEmpty()) {
+        wifi_ssid = WiFi.SSID();  // Actually connected SSID
+    } else {
+        wifi_ssid = config_manager->getWiFiSSID();  // Saved SSID as fallback
+    }
     doc["wifi_ssid"] = wifi_ssid.isEmpty() ? "" : wifi_ssid;
-    doc["wifi_ssid_saved"] = !wifi_ssid.isEmpty();
+    doc["wifi_ssid_saved"] = !config_manager->getWiFiSSID().isEmpty();
     doc["has_wifi_password"] = !config_manager->getWiFiPassword().isEmpty();
     doc["webex_authenticated"] = app_state->webex_authenticated;
     doc["pairing_code"] = pairing_manager.getCode();

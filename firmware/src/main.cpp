@@ -180,14 +180,14 @@ void initSerialAndWatchdog() {
 void initBootValidator() {
     // Boot validation - check if we should rollback to bootstrap
     if (!boot_validator.begin()) {
-        Serial.println("[ERROR] Boot validation failed!");
+        RLOG_ERROR("init", "Boot validation failed");
     }
 }
 
 void initConfigManager() {
     Serial.println("[INIT] Loading configuration...");
     if (!config_manager.begin()) {
-        Serial.println("[ERROR] Failed to initialize configuration!");
+        RLOG_ERROR("init", "Failed to initialize configuration");
         boot_validator.onCriticalFailure("Config", "Failed to load configuration");
     }
 
@@ -221,7 +221,7 @@ void initDebugMode() {
 void initDeviceCredentials() {
     Serial.println("[INIT] Initializing device credentials...");
     if (!deviceCredentials.begin()) {
-        Serial.println("[WARN] Failed to initialize device credentials - authentication disabled");
+        RLOG_WARN("init", "Failed to initialize device credentials - auth disabled");
     } else {
         Serial.printf("[INIT] Device serial: %s\n", deviceCredentials.getSerialNumber().c_str());
         Serial.printf("[INIT] Device ID: %s\n", deviceCredentials.getDeviceId().c_str());
@@ -524,7 +524,7 @@ void initSupabase() {
             app_state.realtime_defer_until = millis() + 15000UL;  // allow OTA + web to stabilize
             logHeapStatus("after supabase auth");
         } else {
-            Serial.println("[INIT] Supabase authentication failed - will retry in loop");
+            RLOG_WARN("init", "Supabase auth failed - will retry in loop");
             SupabaseAuthError authError = supabaseClient.getLastAuthError();
             if (authError == SupabaseAuthError::InvalidSignature) {
                 Serial.println("[SUPABASE] Invalid signature - triggering reprovision");

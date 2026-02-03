@@ -5,6 +5,7 @@
 
 #include "boot_validator.h"
 #include "common/nvs_utils.h"
+#include "debug/remote_logger.h"
 #include <esp_ota_ops.h>
 
 // Global instance
@@ -38,7 +39,7 @@ bool BootValidator::begin() {
     
     // Check if we've exceeded boot failure threshold
     if (boot_count > MAX_BOOT_FAILURES) {
-        Serial.println("[BOOT] Too many boot failures, rolling back to last known good partition...");
+        RLOG_ERROR("boot", "Too many boot failures, rolling back");
         rollbackToLastKnownGood();
         // Won't return - device reboots
         return false;
@@ -76,7 +77,7 @@ void BootValidator::markBootSuccessful() {
     } else if (err == ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
         Serial.println("[BOOT] No pending OTA rollback (normal boot)");
     } else {
-        Serial.printf("[BOOT] Failed to cancel rollback: %s\n", esp_err_to_name(err));
+        RLOG_ERROR("boot", "Failed to cancel rollback: %s", esp_err_to_name(err));
     }
 }
 
@@ -167,7 +168,7 @@ void BootValidator::rollbackToLastKnownGood() {
                 ESP.restart();
             }
         } else {
-            Serial.printf("[BOOT] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            RLOG_ERROR("boot", "Failed to set boot partition: %s", esp_err_to_name(err));
             // Try factory partition as fallback
             rollbackToFactoryFallback();
         }
@@ -195,7 +196,7 @@ void BootValidator::rollbackToFactoryFallback() {
             delay(1000);
             ESP.restart();
         } else {
-            Serial.printf("[BOOT] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            RLOG_ERROR("boot", "Failed to set boot partition: %s", esp_err_to_name(err));
         }
     } else {
         Serial.println("[BOOT] Factory partition not found!");
@@ -205,7 +206,7 @@ void BootValidator::rollbackToFactoryFallback() {
     Serial.println("[BOOT] Trying ESP-IDF rollback mechanism...");
     esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
     if (err != ESP_OK) {
-        Serial.printf("[BOOT] OTA rollback failed: %s\n", esp_err_to_name(err));
+        RLOG_ERROR("boot", "OTA rollback failed: %s", esp_err_to_name(err));
         
         // Final fallback: if boot count exceeds MAX_BOOT_LOOP_COUNT, reset and continue
         if (boot_count > MAX_BOOT_LOOP_COUNT) {

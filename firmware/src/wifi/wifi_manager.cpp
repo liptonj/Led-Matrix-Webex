@@ -102,6 +102,7 @@ void WiFiManager::setupWiFi() {
         scan_start_time = millis();
     } else if (result < 0) {
         Serial.printf("[WIFI] Scan failed to start: %d\n", result);
+        RLOG_ERROR("wifi", "Scan failed to start: %d", result);
         scan_in_progress = false;
         scan_completed = false;
     }
@@ -139,6 +140,7 @@ void WiFiManager::setupWiFi() {
     // If async scan failed, try blocking scan as fallback
     if (!scan_completed) {
         Serial.println("[WIFI] Async scan failed, trying blocking scan...");
+        RLOG_WARN("wifi", "Async scan failed, trying blocking scan");
         WiFi.scanDelete();  // Clear any partial results
         int blocking_result = WiFi.scanNetworks(false, false);  // Blocking scan
         if (blocking_result > 0) {
@@ -234,7 +236,7 @@ void WiFiManager::setupWiFi() {
         }
     } else {
         Serial.println("[WIFI] Connection failed");
-        RLOG_WARN("WiFi", "Connection failed after %d attempts", attempts);
+        RLOG_ERROR("wifi", "Connection failed");
         startAPMode("Connection failed");
     }
 }

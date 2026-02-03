@@ -171,7 +171,7 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
         esp_websocket_client_start(_client);
     } else {
         _connecting = false;
-        Serial.println("[REALTIME] Failed to initialize websocket client");
+        RLOG_ERROR("realtime", "Failed to initialize websocket client");
     }
 }
 
@@ -307,7 +307,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     
     JsonObject config = payload["config"].to<JsonObject>();
     if (config.isNull()) {
-        Serial.println("[REALTIME] Failed to create config object");
+        RLOG_ERROR("realtime", "Failed to create config object");
         return false;
     }
     
@@ -379,7 +379,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     
     // Validate message was built successfully
     if (message.isEmpty()) {
-        Serial.println("[REALTIME] Failed to build Phoenix message");
+        RLOG_ERROR("realtime", "Failed to build Phoenix message");
         return false;
     }
     
@@ -409,7 +409,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
 
     int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     if (sent < 0) {
-        Serial.printf("[REALTIME] Failed to send subscription message (ret=%d)\n", sent);
+        RLOG_ERROR("realtime", "Failed to send subscription message: %d", sent);
         _pendingJoinMessage = message;
         _pendingJoin = true;
         return false;
@@ -487,7 +487,7 @@ bool SupabaseRealtime::parsePhoenixMessage(const String& message, String& topic,
     DeserializationError error = deserializeJson(doc, message);
     
     if (error) {
-        Serial.printf("[REALTIME] Parse error: %s\n", error.c_str());
+        RLOG_ERROR("realtime", "Parse error: %s", error.c_str());
         return false;
     }
 
@@ -608,7 +608,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                 instance->_pendingJoinMessage.length(),
                 portMAX_DELAY);
             if (sent < 0) {
-                Serial.printf("[REALTIME] Failed to send queued subscription (ret=%d)\n", sent);
+                RLOG_WARN("realtime", "Failed to send queued subscription: %d", sent);
             } else {
                 Serial.printf("[REALTIME] Sent queued subscription (%d bytes)\n", sent);
                 instance->_pendingJoin = false;
@@ -667,7 +667,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
 
     if (event_id == WEBSOCKET_EVENT_ERROR) {
         auto* error_data = static_cast<esp_websocket_event_id_t*>(event_data);
-        Serial.printf("[REALTIME] WebSocket error event (event_id=%ld)\n", (long)event_id);
+        RLOG_ERROR("realtime", "WebSocket error event: %ld", (long)event_id);
         // Log additional error details if available
         if (error_data) {
             Serial.printf("[REALTIME] Error data pointer: %p\n", error_data);
@@ -770,7 +770,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
                 Serial.printf("[REALTIME] Join ok response: %s\n", responseStr.c_str());
             }
         } else {
-            Serial.printf("[REALTIME] Join failed: status=%s\n", status.c_str());
+            RLOG_ERROR("realtime", "Join failed: status=%s", status.c_str());
             
             // Try to extract error details
             if (payload["response"].is<JsonObject>()) {

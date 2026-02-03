@@ -9,6 +9,7 @@
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
+#include "../debug/remote_logger.h"
 
 WebexClient::WebexClient()
     : config_manager(nullptr), last_request_time(0), rate_limit_backoff(0) {
@@ -55,7 +56,7 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     // Ensure we have a valid token
     if (oauth_handler.needsRefresh()) {
         if (!oauth_handler.refreshAccessToken()) {
-            Serial.println("[WEBEX] Failed to refresh token");
+            RLOG_ERROR("webex", "Failed to refresh token");
             return false;
         }
     }
@@ -139,12 +140,12 @@ String WebexClient::makeApiRequest(const String& endpoint, bool is_retry) {
             // Retry request with new token (pass is_retry=true)
             return makeApiRequest(endpoint, true);
         } else {
-            Serial.println("[WEBEX] Token refresh failed - re-authorization required");
+            RLOG_ERROR("webex", "Token refresh failed - re-auth required");
             return "";
         }
     }
     
-    Serial.printf("[WEBEX] API request failed with code: %d\n", httpCode);
+    RLOG_WARN("webex", "API request failed: HTTP %d", httpCode);
     String errorBody = http.getString();
     if (!errorBody.isEmpty()) {
         Serial.printf("[WEBEX] Error response: %s\n", errorBody.c_str());
