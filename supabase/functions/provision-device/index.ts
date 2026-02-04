@@ -117,11 +117,26 @@ serve(async (req: Request) => {
     const { data: existingDevice, error: _lookupError } = await supabase
       .schema("display")
       .from("devices")
-      .select("device_id, pairing_code, is_provisioned")
+      .select("device_id, pairing_code, is_provisioned, user_approved_by")
       .eq("serial_number", serial_number.toUpperCase())
       .single();
 
     if (existingDevice) {
+      // CHECK: Device must be approved
+      if (!existingDevice.user_approved_by) {
+        return new Response(
+          JSON.stringify({
+            error: "Device not approved yet. Ask device owner to approve it on the website.",
+            serial_number: serial_number.toUpperCase(),
+            awaiting_approval: true,
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
       // Device already registered - return existing pairing code
       // Update firmware version if provided
       if (firmware_version) {
@@ -159,6 +174,8 @@ serve(async (req: Request) => {
         ? existing_pairing_code.toUpperCase()
         : generatePairingCode();
 
+    // Check if device is pre-approved (shouldn't happen for new devices, but check anyway)
+    // For new devices, create with user_approved_by: null
     const { error: insertError } = await supabase
       .schema("display")
       .from("devices")
@@ -170,6 +187,7 @@ serve(async (req: Request) => {
         firmware_version: firmware_version || null,
         ip_address: ip_address || null,
         is_provisioned: false,
+        user_approved_by: null, // Not approved yet
       });
 
     if (insertError) {
@@ -183,15 +201,17 @@ serve(async (req: Request) => {
       );
     }
 
+    // New device created but not approved - return 403
     return new Response(
       JSON.stringify({
-        success: true,
+        error: "Device registered but not approved yet. Ask device owner to approve it on the website.",
+        serial_number: serial_number.toUpperCase(),
         device_id: deviceId,
         pairing_code: pairingCode,
-        already_provisioned: false,
+        awaiting_approval: true,
       }),
       {
-        status: 201,
+        status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       },
     );

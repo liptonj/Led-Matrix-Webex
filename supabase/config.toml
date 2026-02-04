@@ -43,11 +43,22 @@ double_confirm_changes = true
 enable_confirmations = false
 
 # Auth hook to set JWT claims (is_admin, disabled)
-# Uses Postgres function public.custom_access_token_hook for better performance
-# Note: Postgres functions for auth hooks may only work in production/cloud
-# For local dev, revert to HTTP Edge Function if this doesn't work
+# This hook runs on login and token refresh to inject custom claims into JWTs:
+# - app_metadata.is_admin: Whether user is an admin (from admin_users table)
+# - app_metadata.disabled: Whether user account is disabled (from user_profiles table)
+#
+# Configuration:
+# - For production: Use scripts/configure-auth-hook.ts or configure via Dashboard
+# - For local dev: Set enabled = true and ensure Edge Function is running
+#
+# Hook endpoint: https://PROJECT_ID.supabase.co/functions/v1/auth-hook-set-claims
+# Secret: DEVICE_JWT_SECRET (must match project secrets)
+#
+# See docs/AUTH_HOOK_CONFIGURATION.md for detailed setup instructions
 [auth.hook.custom_access_token]
 enabled = false
+# uri = "http://localhost:54321/functions/v1/auth-hook-set-claims"  # Uncomment for local dev
+# secrets = ["DEVICE_JWT_SECRET"]  # Uncomment for local dev
 
 # Edge Function auth settings
 [functions.ack-command]

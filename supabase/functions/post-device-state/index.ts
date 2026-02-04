@@ -2,8 +2,7 @@
  * Post Device State Edge Function
  *
  * Devices post their current state (telemetry) and receive an echo
- * of the telemetry in response. App status is handled via realtime
- * or explicit troubleshooting commands.
+ * of the telemetry plus app status in response.
  *
  * Authentication: Bearer token (from device-auth) OR HMAC headers
  *
@@ -27,7 +26,14 @@
  *     temperature?: number,
  *     firmware_version?: string,
  *     ssid?: string,
- *     ota_partition?: string
+ *     ota_partition?: string,
+ *     debug_enabled?: boolean,
+ *     app_connected?: boolean,
+ *     webex_status?: string,
+ *     camera_on?: boolean,
+ *     mic_muted?: boolean,
+ *     in_call?: boolean,
+ *     display_name?: string | null
  *   }
  *
  * Rate limited: 12 requests per minute per device
@@ -62,6 +68,12 @@ interface DeviceStateResponse {
   ssid?: string;
   ota_partition?: string;
   debug_enabled?: boolean;
+  app_connected?: boolean;
+  webex_status?: string;
+  camera_on?: boolean;
+  mic_muted?: boolean;
+  in_call?: boolean;
+  display_name?: string | null;
 }
 
 interface TokenPayload {
@@ -237,6 +249,14 @@ Deno.serve(async (req) => {
       .eq("serial_number", deviceInfo.serial_number)
       .single();
 
+    // Fetch app status from pairings table
+    const { data: pairingData } = await supabase
+      .schema("display")
+      .from("pairings")
+      .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected")
+      .eq("pairing_code", deviceInfo.pairing_code)
+      .single();
+
     // ALWAYS update heartbeat table (does NOT trigger realtime to device)
     await supabase
       .schema("display")
@@ -322,7 +342,7 @@ Deno.serve(async (req) => {
             device_connected: true,
           }, { onConflict: "pairing_code" });
 
-        // Return telemetry echo (no app state)
+        // Return telemetry echo with app state
         const response: DeviceStateResponse = {
           success: true,
           rssi: stateData.rssi,
@@ -333,6 +353,12 @@ Deno.serve(async (req) => {
           ssid: stateData.ssid,
           ota_partition: stateData.ota_partition,
           debug_enabled: dev?.debug_enabled === true,
+          app_connected: pairingData?.app_connected || false,
+          webex_status: pairingData?.webex_status || "offline",
+          camera_on: pairingData?.camera_on || false,
+          mic_muted: pairingData?.mic_muted || false,
+          in_call: pairingData?.in_call || false,
+          display_name: pairingData?.display_name || null,
         };
 
         return new Response(JSON.stringify(response), {
@@ -351,7 +377,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Return telemetry echo (no app state)
+    // Return telemetry echo with app state
     const response: DeviceStateResponse = {
       success: true,
       rssi: stateData.rssi,
@@ -362,6 +388,12 @@ Deno.serve(async (req) => {
       ssid: stateData.ssid,
       ota_partition: stateData.ota_partition,
       debug_enabled: dev?.debug_enabled === true,
+      app_connected: pairingData?.app_connected || false,
+      webex_status: pairingData?.webex_status || "offline",
+      camera_on: pairingData?.camera_on || false,
+      mic_muted: pairingData?.mic_muted || false,
+      in_call: pairingData?.in_call || false,
+      display_name: pairingData?.display_name || null,
     };
 
     return new Response(JSON.stringify(response), {

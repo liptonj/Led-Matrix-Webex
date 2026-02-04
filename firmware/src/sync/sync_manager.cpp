@@ -31,6 +31,7 @@ SyncManager syncManager;
 // Include for handleSupabaseCommand and hasSafeTlsHeap
 #include "../commands/command_processor.h"
 #include "../loop/loop_handlers.h"
+#include "../display/matrix_display.h"
 
 namespace {
 constexpr unsigned long HEARTBEAT_INTERVAL = 30000;  // 30 seconds
@@ -318,6 +319,19 @@ bool provisionDeviceWithSupabase() {
                 last_pending_log = now;
                 Serial.println("[SUPABASE] Provisioning pending admin approval");
             }
+        } else if (http_code == 403 && response.indexOf("awaiting_approval") >= 0) {
+            // Device needs user approval
+            static unsigned long last_approval_log = 0;
+            if (millis() - last_approval_log > 60000) {
+                last_approval_log = millis();
+                Serial.println("[SUPABASE] Device awaiting user approval");
+                Serial.printf("[SUPABASE] Serial: %s\n", deps.credentials.getSerialNumber().c_str());
+                
+                // Update display to show awaiting approval
+                deps.display.displayProvisioningStatus(deps.credentials.getSerialNumber());
+            }
+            deps.app_state.supabase_approval_pending = true;
+            return false;
         } else if (http_code == 403 && response.indexOf("device_disabled") >= 0) {
             deps.app_state.supabase_disabled = true;
             Serial.println("[SUPABASE] Device disabled by admin");

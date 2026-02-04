@@ -66,3 +66,55 @@ void MatrixDisplay::showPairingCode(const String& code, const String& hub_url) {
         drawScrollingText(24, shortUrl, COLOR_CYAN, MATRIX_WIDTH - 4, builder.getScrollKey("url"));
     }
 }
+
+/**
+ * @brief Display provisioning status with serial number
+ * 
+ * Display layout (64x32):
+ * Row 0-7:   "SETUP" (orange)
+ * Row 9-15:  "Visit website" / "Approve device:" (small text)
+ * Row 16-24: Serial number in large green text
+ * 
+ * Also prints serial number to Serial monitor.
+ * 
+ * @param serial_number Device serial number to display
+ */
+void MatrixDisplay::displayProvisioningStatus(const String& serial_number) {
+    if (!initialized) return;
+    
+    const String screen_key = "provisioning:" + serial_number;
+    StaticScreenBuilder builder(this, screen_key, last_static_key);
+    
+    if (builder.hasChanged()) {
+        builder.clearScreen();
+        
+        // Title: "SETUP" at top (centered, orange)
+        builder.drawCentered(0, "SETUP", COLOR_ORANGE);
+        
+        // Draw separator line
+        builder.drawSeparator(8, COLOR_GRAY);
+        
+        // Instructions text
+        drawSmallText(2, 10, "Visit website", COLOR_WHITE);
+        drawSmallText(2, 18, "Approve device:", COLOR_WHITE);
+        
+        // Serial number in large green text (similar to pairing code style)
+        String displaySerial = serial_number;
+        displaySerial.toUpperCase();
+        
+        // Calculate serial display width (6 pixels per char for size 1)
+        int charWidth = 6;  // Width per character
+        int serialWidth = displaySerial.length() * charWidth;
+        int serialStartX = (MATRIX_WIDTH - serialWidth) / 2;
+        
+        // Draw serial number in green
+        dma_display->setTextColor(COLOR_GREEN);
+        dma_display->setTextSize(1);
+        dma_display->setCursor(serialStartX, 26);
+        dma_display->print(displaySerial);
+        
+        // Print to Serial monitor (only when screen changes)
+        Serial.println("[DISPLAY] Device awaiting approval");
+        Serial.printf("[DISPLAY] Serial: %s\n", serial_number.c_str());
+    }
+}

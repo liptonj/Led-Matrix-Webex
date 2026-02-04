@@ -10,6 +10,7 @@
 #include "sync/sync_manager.h"
 #include "loop/loop_handlers.h"
 #include "core/dependencies.h"
+#include "display/matrix_display.h"
 #include <WiFi.h>
 #include <Arduino.h>  // Provides ESP object (getFreeHeap, restart, etc.)
 
@@ -40,6 +41,10 @@ void initSupabase(
             // Small delay to allow heap to stabilize (provisioning HTTP would take 1-2s)
             delay(100);
         } else {
+            // Display serial number before attempting provision
+            auto& deps = getDependencies();
+            deps.display.displayProvisioningStatus(deps.credentials.getSerialNumber());
+            
             provisionDeviceWithSupabase();
         }
     }

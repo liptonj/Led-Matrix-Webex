@@ -182,6 +182,12 @@ public:
     void showPairingCode(const String& code, const String& hub_url = "");
 
     /**
+     * @brief Display provisioning status with serial number
+     * @param serial_number Device serial number to display
+     */
+    void displayProvisioningStatus(const String& serial_number);
+
+    /**
      * @brief Clear the display
      */
     void clear();
