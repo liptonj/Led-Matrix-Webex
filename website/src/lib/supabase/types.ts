@@ -16,6 +16,7 @@ export interface Device {
   registered_at: string;
   provisioned_at: string | null;
   metadata: Record<string, unknown>;
+  release_channel: 'beta' | 'production';
 }
 
 export interface ConnectionHeartbeat {
@@ -50,6 +51,7 @@ export interface Release {
   is_latest: boolean;
   is_prerelease: boolean;
   rollout_percentage: number;
+  release_channel: 'beta' | 'production';
   created_at: string;
   created_by: string | null;
 }

@@ -14,6 +14,8 @@
 
 #include "matrix_display.h"
 #include "icons.h"
+#include "../config/pin_config.h"
+#include "../common/board_utils.h"
 
 MatrixDisplay::MatrixDisplay()
     : dma_display(nullptr), initialized(false), brightness(128) {
@@ -26,6 +28,13 @@ MatrixDisplay::~MatrixDisplay() {
 }
 
 bool MatrixDisplay::begin() {
+    // Use default pins for the detected board type
+    PinConfig pins = getDefaultPinsForBoard();
+    Serial.printf("[DISPLAY] Using default pins for %s\n", getChipDescription().c_str());
+    return begin(pins);
+}
+
+bool MatrixDisplay::begin(const PinConfig& pins) {
     // Don't call Serial.begin() here - main.cpp already did it
     delay(10);
 
@@ -37,8 +46,15 @@ bool MatrixDisplay::begin() {
 
     Serial.println("===============================================");
     Serial.println("[DISPLAY] Initialization starting...");
+    Serial.printf("[DISPLAY] Board type: %s\n", getChipDescription().c_str());
     Serial.flush();
     yield(); // Feed watchdog
+
+    // Validate pin configuration
+    if (!pins.isValid()) {
+        Serial.println("[DISPLAY] ERROR: Invalid pin configuration");
+        return false;
+    }
 
     // Matrix configuration
     HUB75_I2S_CFG mxconfig(
@@ -47,44 +63,27 @@ bool MatrixDisplay::begin() {
         PANEL_CHAIN    // 1 panel
     );
 
-    // Configure HUB75 pins based on board type
-#if defined(ESP32_S3_BOARD)
-    Serial.println("[DISPLAY] Configuring for ESP32-S3 board");
-    // Seengreat adapter pin configuration for ESP32-S3 (working pins)
-    mxconfig.gpio.r1 = 37;
-    mxconfig.gpio.g1 = 6;
-    mxconfig.gpio.b1 = 36;
-    mxconfig.gpio.r2 = 35;
-    mxconfig.gpio.g2 = 5;
-    mxconfig.gpio.b2 = 0;
-    mxconfig.gpio.a = 45;
-    mxconfig.gpio.b = 1;
-    mxconfig.gpio.c = 48;
-    mxconfig.gpio.d = 2;
-    mxconfig.gpio.e = 4;
-    mxconfig.gpio.lat = 38;
-    mxconfig.gpio.oe = 21;
-    mxconfig.gpio.clk = 47;
-#else
-    Serial.println("[DISPLAY] Configuring for ESP32 standard board");
-    // Default ESP32 pins
-    mxconfig.gpio.r1 = 25;
-    mxconfig.gpio.g1 = 26;
-    mxconfig.gpio.b1 = 27;
-    mxconfig.gpio.r2 = 14;
-    mxconfig.gpio.g2 = 12;
-    mxconfig.gpio.b2 = 13;
-    mxconfig.gpio.a = 23;
-    mxconfig.gpio.b = 19;
-    mxconfig.gpio.c = 5;
-    mxconfig.gpio.d = 17;
-    mxconfig.gpio.e = 32;
-    mxconfig.gpio.lat = 4;
-    mxconfig.gpio.oe = 15;
-    mxconfig.gpio.clk = 16;
-#endif
+    // Apply pin configuration from runtime settings
+    Serial.println("[DISPLAY] Applying runtime pin configuration");
+    mxconfig.gpio.r1 = pins.r1;
+    mxconfig.gpio.g1 = pins.g1;
+    mxconfig.gpio.b1 = pins.b1;
+    mxconfig.gpio.r2 = pins.r2;
+    mxconfig.gpio.g2 = pins.g2;
+    mxconfig.gpio.b2 = pins.b2;
+    mxconfig.gpio.a = pins.a;
+    mxconfig.gpio.b = pins.b;
+    mxconfig.gpio.c = pins.c;
+    mxconfig.gpio.d = pins.d;
+    mxconfig.gpio.e = pins.e;  // Can be -1 for 1/16 scan panels
+    mxconfig.gpio.lat = pins.lat;
+    mxconfig.gpio.oe = pins.oe;
+    mxconfig.gpio.clk = pins.clk;
 
-    Serial.println("[DISPLAY] Pin configuration set");
+    Serial.printf("[DISPLAY] Pins: R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d\n",
+                  pins.r1, pins.g1, pins.b1, pins.r2, pins.g2, pins.b2);
+    Serial.printf("[DISPLAY] Pins: A=%d B=%d C=%d D=%d E=%d CLK=%d LAT=%d OE=%d\n",
+                  pins.a, pins.b, pins.c, pins.d, pins.e, pins.clk, pins.lat, pins.oe);
 
     mxconfig.clkphase = false;
     mxconfig.driver = HUB75_I2S_CFG::FM6126A;

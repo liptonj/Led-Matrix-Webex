@@ -7,6 +7,7 @@
 #include "../display/matrix_display.h"
 #include "../discovery/mdns_manager.h"
 #include "../debug/remote_logger.h"
+#include "../common/board_utils.h"
 #include <esp_heap_caps.h>
 
 namespace {
@@ -69,6 +70,20 @@ void WiFiManager::setupWiFi() {
     // WiFi power save causes timing issues with I2S DMA used for LED matrix
     WiFi.setSleep(WIFI_PS_NONE);
     Serial.println("[WIFI] WiFi power save disabled (prevents display interference)");
+    
+    // Apply chip-specific WiFi configuration
+    String board = getBoardType();
+    if (board == "esp32s2") {
+        // ESP32-S2 may need explicit TX power for stability
+        // The S2 has known WiFi issues that benefit from maximum TX power
+        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+        Serial.println("[WIFI] ESP32-S2: Set maximum TX power for stability");
+        
+        // Allow radio to stabilize before connection attempts
+        delay(100);
+        Serial.println("[WIFI] ESP32-S2: Radio stabilization delay complete");
+    }
+    Serial.printf("[WIFI] Board type: %s\n", board.c_str());
     
     String ssid = config_manager->getWiFiSSID();
     String password = config_manager->getWiFiPassword();

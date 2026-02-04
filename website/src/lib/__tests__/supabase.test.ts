@@ -493,11 +493,21 @@ describe("setLatestRelease", () => {
     jest.clearAllMocks();
   });
 
-  it("should call set_latest_release RPC with target version", async () => {
+  it("should call set_latest_release RPC with target version and channel", async () => {
     const { setLatestRelease } = await import("../supabase");
     await setLatestRelease("1.0.0");
     expect(mockRpc).toHaveBeenCalledWith("set_latest_release", {
       target_version: "1.0.0",
+      target_channel: "production",
+    });
+  });
+
+  it("should call set_latest_release RPC with custom channel", async () => {
+    const { setLatestRelease } = await import("../supabase");
+    await setLatestRelease("2.0.0-beta", "beta");
+    expect(mockRpc).toHaveBeenCalledWith("set_latest_release", {
+      target_version: "2.0.0-beta",
+      target_channel: "beta",
     });
   });
 });

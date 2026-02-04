@@ -20,8 +20,8 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { isCodeExpired, validatePairingCode } from "../_shared/pairing_code.ts";
 import { getUserFromRequest } from "../_shared/user_auth.ts";
-import { validatePairingCode, isCodeExpired } from "../_shared/pairing_code.ts";
 
 interface ApproveRequest {
   pairing_code: string;

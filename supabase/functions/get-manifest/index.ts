@@ -64,6 +64,7 @@ interface ReleaseRow {
   is_latest: boolean;
   is_prerelease: boolean;
   rollout_percentage: number;
+  release_channel: string;
 }
 
 function buildLegacyManifest(
@@ -126,12 +127,27 @@ serve(async (req: Request) => {
       }
     }
 
+    // Get device's release channel (defaults to 'production')
+    let deviceChannel = 'production';
+    if (authenticated && deviceSerialNumber) {
+      const { data: deviceRecord } = await supabase
+        .schema("display")
+        .from("devices")
+        .select("release_channel")
+        .eq("serial_number", deviceSerialNumber)
+        .single();
+      
+      if (deviceRecord?.release_channel) {
+        deviceChannel = deviceRecord.release_channel;
+      }
+    }
+
     // Get releases
     const { data: releases, error } = await supabase
       .schema("display")
       .from("releases")
       .select(
-        "version, firmware_url, firmware_merged_url, build_id, build_date, is_latest, is_prerelease, rollout_percentage",
+        "version, firmware_url, firmware_merged_url, build_id, build_date, is_latest, is_prerelease, rollout_percentage, release_channel",
       )
       .order("created_at", { ascending: false });
 
@@ -193,20 +209,27 @@ serve(async (req: Request) => {
     }
 
     // OTA legacy manifest format (firmware expects this shape)
-    // If authenticated device has a target firmware version, use that instead of latest
+    // Filter releases to device's channel
+    const channelReleases = (releases as ReleaseRow[] | undefined)?.filter(
+      (r) => r.release_channel === deviceChannel
+    ) || [];
+
+    // If authenticated device has a target firmware version, use that
     let selectedRelease: ReleaseRow | undefined;
     if (authenticated && targetVersion) {
-      selectedRelease = releases?.find((r) => r.version === targetVersion);
+      selectedRelease = channelReleases.find((r) => r.version === targetVersion);
       if (selectedRelease) {
         console.log(
-          `Using target firmware ${targetVersion} for device ${deviceSerialNumber}`,
+          `Using target firmware ${targetVersion} for device ${deviceSerialNumber} (channel: ${deviceChannel})`,
         );
       }
     }
-    // Fall back to latest release
+    // Fall back to latest release for this channel
     if (!selectedRelease) {
-      selectedRelease = releases?.find((r) => r.is_latest) || releases?.[0];
+      selectedRelease = channelReleases.find((r) => r.is_latest) || channelReleases[0];
     }
+
+    console.log(`Device ${deviceSerialNumber || 'anonymous'} channel: ${deviceChannel}, selected release: ${selectedRelease?.version || 'none'}`);
 
     if (!selectedRelease) {
       return new Response(JSON.stringify({ error: "No releases found" }), {

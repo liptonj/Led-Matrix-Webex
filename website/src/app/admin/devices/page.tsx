@@ -13,6 +13,7 @@ import {
     setDeviceBlacklisted,
     setDeviceDebugMode,
     setDeviceDisabled,
+    setDeviceReleaseChannel,
     subscribeToDevices,
 } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -121,6 +122,19 @@ export default function DevicesPage() {
         }
     }
 
+    async function handleToggleReleaseChannel(device: Device) {
+        try {
+            setActionSerial(device.serial_number);
+            const newChannel = device.release_channel === 'production' ? 'beta' : 'production';
+            await setDeviceReleaseChannel(device.serial_number, newChannel);
+            await loadDevices();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to update device channel');
+        } finally {
+            setActionSerial(null);
+        }
+    }
+
     async function handleDelete(device: Device) {
         const confirmed = window.confirm(
             `Delete device ${device.serial_number}? This cannot be undone.`,
@@ -153,6 +167,10 @@ export default function DevicesPage() {
         }
         if (action === 'toggle-blacklist') {
             await handleToggleBlacklisted(device);
+            return;
+        }
+        if (action === 'toggle-channel') {
+            await handleToggleReleaseChannel(device);
             return;
         }
         if (action === 'delete') {
@@ -349,6 +367,13 @@ export default function DevicesPage() {
                                                         ? 'Pending'
                                                         : 'Active'}
                                         </span>
+                                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                            device.release_channel === 'production'
+                                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                                        }`}>
+                                            {device.release_channel || 'production'}
+                                        </span>
                                         <button
                                             onClick={() => toggleDebug(device)}
                                             className={`px-2 py-0.5 text-xs rounded ${
@@ -380,6 +405,9 @@ export default function DevicesPage() {
                                         </option>
                                         <option value="toggle-blacklist">
                                             {device.blacklisted ? 'Unblacklist' : 'Blacklist'}
+                                        </option>
+                                        <option value="toggle-channel">
+                                            {device.release_channel === 'production' ? 'Switch to Beta' : 'Switch to Production'}
                                         </option>
                                         <option value="delete">Delete</option>
                                     </select>
@@ -508,25 +536,34 @@ export default function DevicesPage() {
                                                 </button>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                <span
-                                                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                                        device.blacklisted
-                                                            ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                                                <div className="flex flex-col gap-1">
+                                                    <span
+                                                        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                            device.blacklisted
+                                                                ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                                                                : device.disabled
+                                                                    ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+                                                                    : device.approval_required
+                                                                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                                        : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                                                        }`}
+                                                    >
+                                                        {device.blacklisted
+                                                            ? 'Blacklisted'
                                                             : device.disabled
-                                                                ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+                                                                ? 'Disabled'
                                                                 : device.approval_required
-                                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
-                                                                    : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                                                    }`}
-                                                >
-                                                    {device.blacklisted
-                                                        ? 'Blacklisted'
-                                                        : device.disabled
-                                                            ? 'Disabled'
-                                                            : device.approval_required
-                                                                ? 'Pending approval'
-                                                                : 'Active'}
-                                                </span>
+                                                                    ? 'Pending approval'
+                                                                    : 'Active'}
+                                                    </span>
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                        device.release_channel === 'production'
+                                                            ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                            : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                                                    }`}>
+                                                        {device.release_channel || 'production'}
+                                                    </span>
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center gap-2">
@@ -550,6 +587,9 @@ export default function DevicesPage() {
                                                         </option>
                                                         <option value="toggle-blacklist">
                                                             {device.blacklisted ? 'Unblacklist' : 'Blacklist'}
+                                                        </option>
+                                                        <option value="toggle-channel">
+                                                            {device.release_channel === 'production' ? 'Switch to Beta' : 'Switch to Production'}
                                                         </option>
                                                         <option value="delete">Delete</option>
                                                     </select>

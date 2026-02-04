@@ -10,6 +10,8 @@
 #include "display_config.h"
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include "../config/config_manager.h"
+#include "../config/pin_config.h"
+#include "../common/board_utils.h"
 
 // Colors (RGB565 format)
 #define COLOR_BLACK     0x0000
@@ -102,10 +104,17 @@ public:
     ~MatrixDisplay();
 
     /**
-     * @brief Initialize the display
+     * @brief Initialize the display with default pins for detected board
      * @return true on success
      */
     bool begin();
+    
+    /**
+     * @brief Initialize the display with specific pin configuration
+     * @param pins Pin configuration to use
+     * @return true on success
+     */
+    bool begin(const PinConfig& pins);
 
     /**
      * @brief Update display with current data

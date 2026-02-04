@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include "pin_config.h"
 
 // Configuration namespace
 #define CONFIG_NAMESPACE "webex-display"
@@ -160,6 +161,14 @@ public:
     bool getTlsVerify() const;
     void setTlsVerify(bool enabled);
 
+    // Pin Configuration (for HUB75 display adapter)
+    PinPreset getPinPreset() const;
+    void setPinPreset(PinPreset preset);
+    PinConfig getCustomPins() const;
+    void setCustomPins(const PinConfig& pins);
+    PinConfig getPinConfig() const;  // Returns effective pins (preset or custom)
+    bool hasCustomPins() const;
+
     // Time Configuration
     String getTimeZone() const;
     void setTimeZone(const String& time_zone);
@@ -223,6 +232,9 @@ private:
     mutable bool cached_tls_verify;
     mutable bool cached_debug_display;
     mutable bool cached_debug_realtime;
+    mutable PinPreset cached_pin_preset;
+    mutable PinConfig cached_custom_pins;
+    mutable bool cached_has_custom_pins;
     mutable bool cache_loaded;
 
     void loadCache() const;

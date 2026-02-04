@@ -1,0 +1,138 @@
+name: Promote Release to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote (e.g., 1.5.0)'
+        required: true
+        type: string
+      rollout_percentage:
+        description: 'Initial rollout percentage (0-100)'
+        required: false
+        default: '100'
+        type: string
+
+jobs:
+  promote:
+    runs-on: self-hosted
+    # environment: production  # Uncomment after creating 'production' environment in GitHub repo settings
+    steps:
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - name: Check beta release exists
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/releases?version=eq.${{ inputs.version }}&release_channel=eq.beta&select=version,firmware_url,firmware_merged_url,firmware_size,build_id,build_date,name,notes" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Profile: display")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Failed to fetch beta release - HTTP $HTTP_CODE"
+            echo "$BODY"
+            exit 1
+          fi
+          
+          if [ "$BODY" = "[]" ]; then
+            echo "::error::Beta release ${{ inputs.version }} not found. Release must exist in beta channel first."
+            exit 1
+          fi
+          
+          echo "Found beta release:"
+          echo "$BODY" | jq '.[0]'
+          
+          # Save for next step
+          echo "$BODY" | jq -r '.[0]' > /tmp/beta_release.json
+
+      - name: Create production release record
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          # Read beta release data
+          VERSION="${{ inputs.version }}"
+          FIRMWARE_URL=$(jq -r '.firmware_url // empty' /tmp/beta_release.json)
+          FIRMWARE_MERGED_URL=$(jq -r '.firmware_merged_url // empty' /tmp/beta_release.json)
+          FIRMWARE_SIZE=$(jq -r '.firmware_size // 0' /tmp/beta_release.json)
+          BUILD_ID=$(jq -r '.build_id // empty' /tmp/beta_release.json)
+          BUILD_DATE=$(jq -r '.build_date // empty' /tmp/beta_release.json)
+          NAME=$(jq -r '.name // empty' /tmp/beta_release.json)
+          NOTES=$(jq -r '.notes // empty' /tmp/beta_release.json)
+          ROLLOUT=${{ inputs.rollout_percentage }}
+          
+          echo "Creating production release for version ${VERSION}..."
+          echo "  Rollout: ${ROLLOUT}%"
+          echo "  Firmware URL: ${FIRMWARE_URL}"
+          
+          # Build JSON payload (handle null values properly)
+          JSON_PAYLOAD=$(jq -n \
+            --arg version "$VERSION" \
+            --arg tag "v$VERSION" \
+            --arg release_channel "production" \
+            --arg firmware_url "$FIRMWARE_URL" \
+            --arg firmware_merged_url "$FIRMWARE_MERGED_URL" \
+            --argjson firmware_size "${FIRMWARE_SIZE:-0}" \
+            --arg build_id "$BUILD_ID" \
+            --arg build_date "$BUILD_DATE" \
+            --arg name "$NAME" \
+            --arg notes "$NOTES" \
+            --argjson rollout "${ROLLOUT}" \
+            '{
+              version: $version,
+              tag: $tag,
+              release_channel: $release_channel,
+              firmware_url: $firmware_url,
+              firmware_merged_url: (if $firmware_merged_url == "" then null else $firmware_merged_url end),
+              firmware_size: $firmware_size,
+              build_id: (if $build_id == "" then null else $build_id end),
+              build_date: (if $build_date == "" then null else $build_date end),
+              name: (if $name == "" then ("Release v" + $version) else $name end),
+              notes: (if $notes == "" then null else $notes end),
+              is_latest: true,
+              is_prerelease: false,
+              rollout_percentage: $rollout
+            }')
+          
+          echo "Payload:"
+          echo "$JSON_PAYLOAD" | jq '.'
+          
+          # Create production release (upsert)
+          HTTP_CODE=$(curl -s -o /tmp/prod_response.txt -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/releases" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: display" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "$JSON_PAYLOAD")
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✓ Created production release ${VERSION} with ${ROLLOUT}% rollout"
+          else
+            echo "::error::Failed to create production release - HTTP $HTTP_CODE"
+            cat /tmp/prod_response.txt
+            exit 1
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Production Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Rollout** | ${{ inputs.rollout_percentage }}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Triggered by** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Workflow run** | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |" >> $GITHUB_STEP_SUMMARY

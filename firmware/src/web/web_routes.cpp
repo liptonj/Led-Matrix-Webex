@@ -89,6 +89,19 @@ void WebServerManager::setupApiRoutes() {
         handleMdnsRestart(request);
     });
 
+    // Pin configuration endpoints
+    server->on("/api/config/pins", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetPinConfig(request);
+    });
+    
+    server->on("/api/config/pins", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleSavePinConfig(request, data, len);
+        }
+    );
+
     // OTA upload endpoints - use completion handlers from api_ota_upload.cpp
     server->on("/api/ota/upload", HTTP_POST,
         [this](AsyncWebServerRequest* request) {

@@ -135,7 +135,7 @@ export default function LoginPage() {
                       : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border)]'
                   }`}
                 >
-                  Webex OAuth
+                  Sign in with Webex
                 </button>
                 <button
                   type="button"
@@ -238,8 +238,8 @@ export default function LoginPage() {
             )}
 
             <div className="mt-6 text-center text-sm text-[var(--color-text-muted)]">
-              <p>Sign in with either method.</p>
-              <p className="mt-1">You'll be redirected based on your role.</p>
+              <p>Sign in.</p>
+              <p className="mt-1">You will be redirected to your dashboard.</p>
             </div>
 
             <div className="mt-4 text-center">

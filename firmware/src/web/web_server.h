@@ -122,6 +122,10 @@ private:
     void handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* data, size_t len);
     void handleRegeneratePairingCode(AsyncWebServerRequest* request);
     
+    // Pin configuration API handlers
+    void handleGetPinConfig(AsyncWebServerRequest* request);
+    void handleSavePinConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len);
+    
     // Embedded app API handlers
     void handleEmbeddedStatus(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
     void handleEmbeddedStatusGet(AsyncWebServerRequest* request);

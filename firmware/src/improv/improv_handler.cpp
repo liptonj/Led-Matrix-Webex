@@ -5,6 +5,7 @@
 
 #include "improv_handler.h"
 #include "../display/matrix_display.h"
+#include "../common/board_utils.h"
 #include <WiFi.h>
 
 // Static instance for callbacks
@@ -54,8 +55,19 @@ void ImprovHandler::begin(Stream* serial, ConfigManager* config, AppState* state
         device_name = config_manager->getDeviceName();
     }
     
+    // Detect chip family at runtime
+    ImprovTypes::ChipFamily chipFamily;
+    uint8_t chipFamilyId = getChipFamilyId();
+    switch (chipFamilyId) {
+        case 4: chipFamily = ImprovTypes::ChipFamily::CF_ESP32_S3; break;
+        case 2: chipFamily = ImprovTypes::ChipFamily::CF_ESP32_S2; break;
+        case 5: chipFamily = ImprovTypes::ChipFamily::CF_ESP32_C3; break;
+        default: chipFamily = ImprovTypes::ChipFamily::CF_ESP32; break;
+    }
+    Serial.printf("[IMPROV] Detected chip family: %s\n", getBoardType().c_str());
+    
     improv->setDeviceInfo(
-        ImprovTypes::ChipFamily::CF_ESP32_S3,
+        chipFamily,
         "LED Matrix Webex Display",
         FIRMWARE_VERSION,
         device_name.c_str()

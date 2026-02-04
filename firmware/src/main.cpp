@@ -259,7 +259,12 @@ void initDisplay() {
     Serial.flush();
     delay(10);  // Feed watchdog before long operation
 
-    s_display_ok = matrix_display.begin();
+    // Get pin configuration from ConfigManager (supports runtime presets and custom pins)
+    PinConfig pins = config_manager.getPinConfig();
+    PinPreset preset = config_manager.getPinPreset();
+    Serial.printf("[INIT] Using pin preset: %s\n", getPresetName(preset));
+    
+    s_display_ok = matrix_display.begin(pins);
     if (!s_display_ok) {
         Serial.println("[WARN] Display initialization failed - continuing without display");
     } else {

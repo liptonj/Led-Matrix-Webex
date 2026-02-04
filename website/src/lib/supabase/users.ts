@@ -72,6 +72,26 @@ export async function removeUserDeviceAssignment(assignmentId: string) {
   if (error) throw error;
 }
 
+// Remove current user's device assignment by serial number
+// This is for users removing their own devices (not admins)
+export async function removeMyDeviceAssignment(serialNumber: string): Promise<void> {
+  const supabase = await getSupabase();
+  const user = await getUser();
+  
+  if (!user) {
+    throw new Error("Not authenticated");
+  }
+  
+  const { error } = await supabase
+    .schema("display")
+    .from("user_devices")
+    .delete()
+    .eq("serial_number", serialNumber)
+    .eq("user_id", user.id);
+  
+  if (error) throw error;
+}
+
 export async function createUserWithRole(
   email: string,
   password: string,

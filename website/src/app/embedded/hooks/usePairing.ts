@@ -46,6 +46,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const pairingChannelRef = useRef<ReturnType<SupabaseClient['channel']> | null>(null);
   const tokenRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionWatchdogRef = useRef<NodeJS.Timeout | null>(null);
   const connectInFlightRef = useRef(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -115,7 +116,29 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase not configured');
     if (supabaseRef.current && supabaseAuthRef.current === token) return supabaseRef.current;
     if (supabaseRef.current) supabaseRef.current.removeAllChannels();
-    const client = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'sb-embedded-app' }, global: { headers: { Authorization: `Bearer ${token}` } } });
+    const client = createClient(supabaseUrl, supabaseAnonKey, { 
+      auth: { 
+        persistSession: false, 
+        autoRefreshToken: false, 
+        detectSessionInUrl: false, 
+        storageKey: 'sb-embedded-app' 
+      }, 
+      global: { 
+        headers: { Authorization: `Bearer ${token}` } 
+      },
+      realtime: {
+        // Configure realtime options for better connection stability
+        params: {
+          eventsPerSecond: 10
+        },
+        timeout: 30000, // 30 second timeout for operations
+        heartbeatIntervalMs: 15000, // Send heartbeat every 15 seconds
+        reconnectAfterMs: (tries: number) => {
+          // Exponential backoff: 1s, 2s, 4s, 8s, max 10s
+          return Math.min(1000 * Math.pow(2, tries), 10000);
+        }
+      }
+    });
     client.realtime.setAuth(token);
     supabaseRef.current = client;
     supabaseAuthRef.current = token;
@@ -138,9 +161,56 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     if (pairingChannelRef.current) { supabase.removeChannel(pairingChannelRef.current); pairingChannelRef.current = null; }
     const { data: heartbeat } = await supabase.schema('display').from('connection_heartbeats').select('device_last_seen, device_connected').eq('pairing_code', code).single();
     if (heartbeat) { const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0; setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000); setLastDeviceSeenAt(heartbeat.device_last_seen ?? null); setLastDeviceSeenMs(lastSeen || null); lastPairingSnapshotRef.current = Date.now(); }
-    const channel = supabase.channel(`pairing:${code}`).on('postgres_changes', { event: 'UPDATE', schema: 'display', table: 'pairings', filter: `pairing_code=eq.${code}` }, () => { }).subscribe((status) => {
-      if (status === 'SUBSCRIBED') { setRtStatus('connected'); reconnectAttemptsRef.current = 0; isReconnectingRef.current = false; if (reconnectTimeoutRef.current) { clearTimeout(reconnectTimeoutRef.current); reconnectTimeoutRef.current = null; } }
-      else if (status === 'CHANNEL_ERROR' || status === 'CLOSED' || status === 'TIMED_OUT') { if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { setRtStatus('disconnected'); addLog(`Realtime connection ${status.toLowerCase()}, attempting to reconnect...`); attemptReconnectRef.current(code, token); } else if (!isPaired) { setRtStatus('error'); setConnectionError(`Realtime subscription ${status.toLowerCase()}`); } }
+    const channel = supabase.channel(`pairing:${code}`, {
+      config: {
+        broadcast: { self: true },
+        presence: { key: 'app' }
+      }
+    }).on('postgres_changes', { event: 'UPDATE', schema: 'display', table: 'pairings', filter: `pairing_code=eq.${code}` }, () => { 
+      // Pairing update received - connection is alive
+      lastPairingSnapshotRef.current = Date.now();
+    }).subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') { 
+        setRtStatus('connected'); 
+        reconnectAttemptsRef.current = 0; 
+        isReconnectingRef.current = false; 
+        if (reconnectTimeoutRef.current) { 
+          clearTimeout(reconnectTimeoutRef.current); 
+          reconnectTimeoutRef.current = null; 
+        }
+        addLog('Realtime connection established');
+      }
+      else if (status === 'CHANNEL_ERROR') {
+        const errorMsg = err ? `: ${err.message}` : '';
+        addLog(`Realtime channel error${errorMsg}`);
+        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+          setRtStatus('disconnected'); 
+          attemptReconnectRef.current(code, token); 
+        } else if (!isPaired) { 
+          setRtStatus('error'); 
+          setConnectionError(`Realtime channel error${errorMsg}`); 
+        }
+      }
+      else if (status === 'CLOSED') {
+        addLog('Realtime connection closed');
+        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+          setRtStatus('disconnected'); 
+          attemptReconnectRef.current(code, token); 
+        } else if (!isPaired) { 
+          setRtStatus('error'); 
+          setConnectionError('Realtime connection closed'); 
+        }
+      }
+      else if (status === 'TIMED_OUT') {
+        addLog('Realtime connection timed out');
+        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+          setRtStatus('disconnected'); 
+          attemptReconnectRef.current(code, token); 
+        } else if (!isPaired) { 
+          setRtStatus('error'); 
+          setConnectionError('Realtime connection timed out'); 
+        }
+      }
     });
     pairingChannelRef.current = channel;
   }, [getSupabaseClient, isPaired, addLog]);
@@ -166,11 +236,25 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       await subscribeToPairing(code, token.token); setIsPaired(true); setRtStatus('connected'); addLog(`Connected (pairing ${code})`);
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = setInterval(() => { if (CONFIG.useEdgeFunctions) updateAppStateViaEdge({}).catch(() => {}); else supabaseRef.current?.schema('display').from('pairings').update({ app_connected: true, app_last_seen: new Date().toISOString() }).eq('pairing_code', code).then(({ error }) => { if (error) addLog(`pairings heartbeat failed: ${error.message}`); }); }, CONFIG.heartbeatIntervalMs);
+      
+      // Start connection watchdog - force reconnect if no activity for 2 minutes
+      if (connectionWatchdogRef.current) clearInterval(connectionWatchdogRef.current);
+      connectionWatchdogRef.current = setInterval(() => {
+        const timeSinceLastUpdate = Date.now() - lastPairingSnapshotRef.current;
+        const staleThreshold = 120000; // 2 minutes
+        if (timeSinceLastUpdate > staleThreshold && rtStatus === 'connected' && !isReconnectingRef.current) {
+          addLog(`Connection appears stale (${Math.floor(timeSinceLastUpdate / 1000)}s since last update), forcing reconnect...`);
+          if (attemptReconnectRef.current && token) {
+            attemptReconnectRef.current(code, token.token);
+          }
+        }
+      }, 30000); // Check every 30 seconds
     } catch (err) { setRtStatus('error'); setConnectionError(err instanceof Error ? err.message : 'Failed to connect'); } finally { connectInFlightRef.current = false; }
-  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge]);
+  }, [addLog, appToken, exchangePairingCode, pairingCode, shouldRefreshToken, subscribeToPairing, updateAppStateViaEdge, rtStatus]);
 
   const handleDisconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) { clearTimeout(reconnectTimeoutRef.current); reconnectTimeoutRef.current = null; }
+    if (connectionWatchdogRef.current) { clearInterval(connectionWatchdogRef.current); connectionWatchdogRef.current = null; }
     isReconnectingRef.current = false; reconnectAttemptsRef.current = 0;
     if (heartbeatIntervalRef.current) { clearInterval(heartbeatIntervalRef.current); heartbeatIntervalRef.current = null; }
     if (pairingChannelRef.current && supabaseRef.current) { supabaseRef.current.removeChannel(pairingChannelRef.current); pairingChannelRef.current = null; }
@@ -180,7 +264,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   useEffect(() => { if (appToken && isPaired) { tokenRefreshIntervalRef.current = setInterval(refreshTokenIfNeeded, 60 * 1000); return () => { if (tokenRefreshIntervalRef.current) { clearInterval(tokenRefreshIntervalRef.current); tokenRefreshIntervalRef.current = null; } }; } }, [appToken, isPaired, refreshTokenIfNeeded]);
   useEffect(() => { if (isPaired && rtStatus === 'disconnected' && !isReconnectingRef.current && pairingCode && appToken && attemptReconnectRef.current) { addLog('Connection lost, attempting to reconnect...'); attemptReconnectRef.current(pairingCode, appToken.token); } }, [isPaired, rtStatus, pairingCode, appToken, addLog]);
   useEffect(() => { if (!isPaired || !pairingCode || !appToken || rtStatus !== 'connected') return; const pollInterval = setInterval(() => { refreshPairingSnapshot(pairingCode, appToken.token, 'heartbeat poll').catch(() => {}); }, 10000); return () => clearInterval(pollInterval); }, [isPaired, pairingCode, appToken, rtStatus, refreshPairingSnapshot]);
-  useEffect(() => { return () => { if (tokenRefreshIntervalRef.current) clearInterval(tokenRefreshIntervalRef.current); if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); }; }, []);
+  useEffect(() => { return () => { if (tokenRefreshIntervalRef.current) clearInterval(tokenRefreshIntervalRef.current); if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); if (connectionWatchdogRef.current) clearInterval(connectionWatchdogRef.current); }; }, []);
 
   return { isPaired, isPeerConnected, lastDeviceSeenAt, lastDeviceSeenMs, rtStatus, appToken, pairingCode, connectionError, setPairingCode, supabaseRef, handleConnect, handleDisconnect, refreshPairingSnapshot, exchangePairingCode, updateAppStateViaEdge, shouldRefreshToken };
 }

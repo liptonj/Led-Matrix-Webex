@@ -2,33 +2,38 @@
 
 import { Alert } from '@/components/ui/Alert';
 import { Spinner } from '@/components/ui/Spinner';
-import { getReleases, Release, setLatestRelease, setReleaseRollout } from '@/lib/supabase';
-import { useEffect, useState } from 'react';
+import { ConfirmDialog, useConfirmDialog } from '@/components/ui';
+import { deleteRelease, getReleasesByChannel, Release, setLatestRelease, setReleaseRollout } from '@/lib/supabase';
+import { useCallback, useEffect, useState } from 'react';
 
 export default function ReleasesPage() {
     const [releases, setReleases] = useState<Release[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [updating, setUpdating] = useState<string | null>(null);
+    const [channelFilter, setChannelFilter] = useState<'all' | 'beta' | 'production'>('all');
+    const [pendingDeleteVersion, setPendingDeleteVersion] = useState<string | null>(null);
+    const [pendingDeleteChannel, setPendingDeleteChannel] = useState<'beta' | 'production' | null>(null);
+    const confirmDelete = useConfirmDialog();
 
-    useEffect(() => {
-        loadReleases();
-    }, []);
-
-    async function loadReleases() {
+    const loadReleases = useCallback(async () => {
         try {
-            const data = await getReleases();
+            const data = await getReleasesByChannel(channelFilter);
             setReleases(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load releases');
         }
         setLoading(false);
-    }
+    }, [channelFilter]);
 
-    async function handleRolloutChange(version: string, percentage: number) {
+    useEffect(() => {
+        loadReleases();
+    }, [loadReleases]);
+
+    async function handleRolloutChange(version: string, percentage: number, channel: 'beta' | 'production') {
         setUpdating(version);
         try {
-            await setReleaseRollout(version, percentage);
+            await setReleaseRollout(version, percentage, channel);
             await loadReleases();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to update rollout');
@@ -36,15 +41,31 @@ export default function ReleasesPage() {
         setUpdating(null);
     }
 
-    async function handleSetLatest(version: string) {
+    async function handleSetLatest(version: string, channel: 'beta' | 'production') {
         setUpdating(version);
         try {
-            await setLatestRelease(version);
+            await setLatestRelease(version, channel);
             await loadReleases();
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to set latest release');
         }
         setUpdating(null);
+    }
+
+    async function handleDeleteRelease() {
+        if (!pendingDeleteVersion || !pendingDeleteChannel) return;
+        setUpdating(pendingDeleteVersion);
+        try {
+            await deleteRelease(pendingDeleteVersion, pendingDeleteChannel);
+            await loadReleases();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Failed to delete release');
+        } finally {
+            setUpdating(null);
+            setPendingDeleteVersion(null);
+            setPendingDeleteChannel(null);
+            confirmDelete.close();
+        }
     }
 
     if (loading) {
@@ -61,12 +82,23 @@ export default function ReleasesPage() {
                 <h1 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white">
                     Releases
                 </h1>
-                <button
-                    onClick={loadReleases}
-                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md"
-                >
-                    Refresh
-                </button>
+                <div className="flex gap-2">
+                    <select
+                        value={channelFilter}
+                        onChange={(e) => setChannelFilter(e.target.value as 'all' | 'beta' | 'production')}
+                        className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 rounded-md"
+                    >
+                        <option value="all">All Channels</option>
+                        <option value="beta">Beta</option>
+                        <option value="production">Production</option>
+                    </select>
+                    <button
+                        onClick={loadReleases}
+                        className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md"
+                    >
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             {error && (
@@ -109,6 +141,13 @@ export default function ReleasesPage() {
                                             Pre-release
                                         </span>
                                     )}
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                        release.release_channel === 'production' 
+                                            ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                            : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                                    }`}>
+                                        {release.release_channel}
+                                    </span>
                                 </div>
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">
@@ -164,6 +203,9 @@ export default function ReleasesPage() {
                                     Status
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                    Channel
+                                </th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                                     Rollout
                                 </th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -178,7 +220,7 @@ export default function ReleasesPage() {
                             {releases.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={6}
+                                        colSpan={7}
                                         className="px-6 py-8 text-center text-gray-500 dark:text-gray-400"
                                     >
                                         No releases found. Upload firmware via CI/CD.
@@ -214,7 +256,23 @@ export default function ReleasesPage() {
                                                         Pre-release
                                                     </span>
                                                 )}
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                    release.release_channel === 'production' 
+                                                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                        : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                                                }`}>
+                                                    {release.release_channel}
+                                                </span>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                release.release_channel === 'production' 
+                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                    : 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200'
+                                            }`}>
+                                                {release.release_channel}
+                                            </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex items-center space-x-2">
@@ -224,7 +282,7 @@ export default function ReleasesPage() {
                                                     max="100"
                                                     value={release.rollout_percentage}
                                                     onChange={(e) =>
-                                                        handleRolloutChange(release.version, parseInt(e.target.value))
+                                                        handleRolloutChange(release.version, parseInt(e.target.value), release.release_channel)
                                                     }
                                                     disabled={updating === release.version}
                                                     className="w-24"
@@ -240,15 +298,28 @@ export default function ReleasesPage() {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
-                                            {!release.is_latest && (
+                                            <div className="flex gap-2">
+                                                {!release.is_latest && (
+                                                    <button
+                                                        onClick={() => handleSetLatest(release.version, release.release_channel)}
+                                                        disabled={updating === release.version}
+                                                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                                                    >
+                                                        {updating === release.version ? 'Updating...' : 'Set Latest'}
+                                                    </button>
+                                                )}
                                                 <button
-                                                    onClick={() => handleSetLatest(release.version)}
-                                                    disabled={updating === release.version}
-                                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
+                                                    onClick={() => {
+                                                        setPendingDeleteVersion(release.version);
+                                                        setPendingDeleteChannel(release.release_channel);
+                                                        confirmDelete.open();
+                                                    }}
+                                                    disabled={updating === release.version || release.is_latest}
+                                                    className="text-sm text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
                                                 >
-                                                    {updating === release.version ? 'Updating...' : 'Set Latest'}
+                                                    Delete
                                                 </button>
-                                            )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
@@ -264,12 +335,28 @@ export default function ReleasesPage() {
                     How Releases Work
                 </h3>
                 <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1 list-disc list-inside">
-                    <li>Releases are uploaded automatically via GitHub Actions when you create a new release</li>
-                    <li>The &ldquo;Latest&rdquo; release is what devices will update to by default</li>
+                    <li>CI/CD creates releases in the <strong>Beta</strong> channel automatically</li>
+                    <li>Use the Promote workflow to move a release to <strong>Production</strong></li>
+                    <li>Devices only see releases in their assigned channel</li>
+                    <li>The &ldquo;Latest&rdquo; release is per-channel - devices update to their channel&apos;s latest</li>
                     <li>Rollout percentage controls what fraction of devices will see the update</li>
-                    <li>Set a device&apos;s target version to force it to a specific release</li>
                 </ul>
             </div>
+
+            <ConfirmDialog
+                open={confirmDelete.isOpen}
+                onClose={() => {
+                    confirmDelete.close();
+                    setPendingDeleteVersion(null);
+                    setPendingDeleteChannel(null);
+                }}
+                onConfirm={handleDeleteRelease}
+                title="Delete Release"
+                message={`Delete ${pendingDeleteChannel} release ${pendingDeleteVersion}? This will remove firmware files and cannot be undone.`}
+                variant="danger"
+                confirmLabel="Delete"
+                loading={updating === pendingDeleteVersion}
+            />
         </div>
     );
 }

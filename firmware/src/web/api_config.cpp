@@ -12,6 +12,8 @@
 #include "../time/time_manager.h"
 #include "../meraki/mqtt_client.h"
 #include "../core/dependencies.h"
+#include "../config/pin_config.h"
+#include "../common/board_utils.h"
 #include <ArduinoJson.h>
 
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
@@ -424,4 +426,112 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     Serial.println("[WEB] Configuration save complete");
 
     sendSuccessResponse(request, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+}
+
+void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
+    JsonDocument doc;
+    
+    // Board info
+    doc["board_type"] = getBoardType();
+    doc["chip_description"] = getChipDescription();
+    
+    // Current preset
+    PinPreset preset = config_manager->getPinPreset();
+    doc["preset"] = static_cast<uint8_t>(preset);
+    doc["preset_name"] = getPresetName(preset);
+    doc["default_preset"] = static_cast<uint8_t>(getDefaultPresetForBoard());
+    doc["default_preset_name"] = getPresetName(getDefaultPresetForBoard());
+    
+    // Current effective pins
+    PinConfig pins = config_manager->getPinConfig();
+    JsonObject pinsObj = doc["pins"].to<JsonObject>();
+    pinsObj["r1"] = pins.r1;
+    pinsObj["g1"] = pins.g1;
+    pinsObj["b1"] = pins.b1;
+    pinsObj["r2"] = pins.r2;
+    pinsObj["g2"] = pins.g2;
+    pinsObj["b2"] = pins.b2;
+    pinsObj["a"] = pins.a;
+    pinsObj["b"] = pins.b;
+    pinsObj["c"] = pins.c;
+    pinsObj["d"] = pins.d;
+    pinsObj["e"] = pins.e;
+    pinsObj["clk"] = pins.clk;
+    pinsObj["lat"] = pins.lat;
+    pinsObj["oe"] = pins.oe;
+    
+    // Available presets
+    JsonArray presets = doc["available_presets"].to<JsonArray>();
+    for (uint8_t i = 0; i < static_cast<uint8_t>(PinPreset::PRESET_COUNT); i++) {
+        JsonObject p = presets.add<JsonObject>();
+        p["id"] = i;
+        p["name"] = getPresetName(static_cast<PinPreset>(i));
+    }
+    
+    sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+}
+
+void WebServerManager::handleSavePinConfig(AsyncWebServerRequest* request, uint8_t* data, size_t len) {
+    String body(reinterpret_cast<char*>(data), len);
+    
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (error) {
+        Serial.printf("[WEB] Failed to parse pin config JSON: %s\n", error.c_str());
+        sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+        return;
+    }
+    
+    // Check if setting a preset or custom pins
+    if (doc["preset"].is<int>()) {
+        int preset_id = doc["preset"].as<int>();
+        if (preset_id >= 0 && preset_id < static_cast<int>(PinPreset::PRESET_COUNT)) {
+            PinPreset preset = static_cast<PinPreset>(preset_id);
+            config_manager->setPinPreset(preset);
+            Serial.printf("[WEB] Pin preset set to: %s\n", getPresetName(preset));
+            
+            // If custom preset, also save custom pins
+            if (preset == PinPreset::CUSTOM && doc["pins"].is<JsonObject>()) {
+                JsonObject pinsObj = doc["pins"].as<JsonObject>();
+                PinConfig pins;
+                pins.r1 = pinsObj["r1"] | -1;
+                pins.g1 = pinsObj["g1"] | -1;
+                pins.b1 = pinsObj["b1"] | -1;
+                pins.r2 = pinsObj["r2"] | -1;
+                pins.g2 = pinsObj["g2"] | -1;
+                pins.b2 = pinsObj["b2"] | -1;
+                pins.a = pinsObj["a"] | -1;
+                pins.b = pinsObj["b"] | -1;
+                pins.c = pinsObj["c"] | -1;
+                pins.d = pinsObj["d"] | -1;
+                pins.e = pinsObj["e"] | -1;  // Can be -1 for 1/16 scan
+                pins.clk = pinsObj["clk"] | -1;
+                pins.lat = pinsObj["lat"] | -1;
+                pins.oe = pinsObj["oe"] | -1;
+                
+                if (pins.isValid()) {
+                    config_manager->setCustomPins(pins);
+                    Serial.println("[WEB] Custom pins saved");
+                } else {
+                    Serial.println("[WEB] Invalid custom pins - some required pins are missing");
+                    sendErrorResponse(request, 400, "Invalid pin configuration - required pins missing", 
+                                      [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+                    return;
+                }
+            }
+        } else {
+            Serial.printf("[WEB] Invalid preset ID: %d\n", preset_id);
+            sendErrorResponse(request, 400, "Invalid preset ID", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+            return;
+        }
+    }
+    
+    // Respond with success and indicate reboot is required
+    JsonDocument response;
+    response["success"] = true;
+    response["message"] = "Pin configuration saved. Reboot required to apply changes.";
+    response["reboot_required"] = true;
+    
+    sendJsonResponse(request, 200, response, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }

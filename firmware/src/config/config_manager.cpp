@@ -361,3 +361,86 @@ void ConfigManager::setTlsVerify(bool enabled) {
     cached_tls_verify = enabled;
     Serial.printf("[CONFIG] TLS verify %s\n", enabled ? "enabled" : "disabled");
 }
+
+// Pin Configuration
+
+PinPreset ConfigManager::getPinPreset() const {
+    if (!initialized) return getDefaultPresetForBoard();
+    uint8_t preset = loadUInt("pin_preset", static_cast<uint8_t>(getDefaultPresetForBoard()));
+    if (preset >= static_cast<uint8_t>(PinPreset::PRESET_COUNT)) {
+        return getDefaultPresetForBoard();
+    }
+    return static_cast<PinPreset>(preset);
+}
+
+void ConfigManager::setPinPreset(PinPreset preset) {
+    saveUInt("pin_preset", static_cast<uint8_t>(preset));
+    cached_pin_preset = preset;
+    Serial.printf("[CONFIG] Pin preset set to: %s\n", getPresetName(preset));
+}
+
+PinConfig ConfigManager::getCustomPins() const {
+    if (!initialized || !hasCustomPins()) {
+        return getDefaultPinsForBoard();
+    }
+    
+    // Load custom pins from NVS (stored as comma-separated values)
+    String pins_str = loadString("custom_pins", "");
+    if (pins_str.isEmpty()) {
+        return getDefaultPinsForBoard();
+    }
+    
+    // Parse: "r1,g1,b1,r2,g2,b2,a,b,c,d,e,clk,lat,oe"
+    PinConfig pins;
+    int values[14];
+    int idx = 0;
+    int start = 0;
+    
+    for (int i = 0; i <= pins_str.length() && idx < 14; i++) {
+        if (i == pins_str.length() || pins_str[i] == ',') {
+            String val = pins_str.substring(start, i);
+            values[idx++] = val.toInt();
+            start = i + 1;
+        }
+    }
+    
+    if (idx == 14) {
+        pins.r1 = values[0];  pins.g1 = values[1];  pins.b1 = values[2];
+        pins.r2 = values[3];  pins.g2 = values[4];  pins.b2 = values[5];
+        pins.a  = values[6];  pins.b  = values[7];  pins.c  = values[8];
+        pins.d  = values[9];  pins.e  = values[10];
+        pins.clk = values[11]; pins.lat = values[12]; pins.oe = values[13];
+        return pins;
+    }
+    
+    return getDefaultPinsForBoard();
+}
+
+void ConfigManager::setCustomPins(const PinConfig& pins) {
+    // Store as comma-separated values
+    String pins_str = String(pins.r1) + "," + String(pins.g1) + "," + String(pins.b1) + "," +
+                      String(pins.r2) + "," + String(pins.g2) + "," + String(pins.b2) + "," +
+                      String(pins.a)  + "," + String(pins.b)  + "," + String(pins.c)  + "," +
+                      String(pins.d)  + "," + String(pins.e)  + "," +
+                      String(pins.clk) + "," + String(pins.lat) + "," + String(pins.oe);
+    
+    saveString("custom_pins", pins_str);
+    saveBool("has_custom_pins", true);
+    cached_custom_pins = pins;
+    cached_has_custom_pins = true;
+    
+    Serial.println("[CONFIG] Custom pins saved");
+}
+
+PinConfig ConfigManager::getPinConfig() const {
+    PinPreset preset = getPinPreset();
+    if (preset == PinPreset::CUSTOM && hasCustomPins()) {
+        return getCustomPins();
+    }
+    return getPinsForPreset(preset);
+}
+
+bool ConfigManager::hasCustomPins() const {
+    if (!initialized) return false;
+    return loadBool("has_custom_pins", false);
+}

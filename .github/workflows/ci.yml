@@ -473,10 +473,11 @@ jobs:
             echo "Uploading firmware.bin ($FIRMWARE_SIZE bytes)..."
 
             HTTP_CODE=$(curl -s -o /tmp/firmware_upload_response.txt -w "%{http_code}" \
-              -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware.bin" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/octet-stream" \
               -H "Content-Profile: display" \
+              -H "x-upsert: true" \
               --data-binary @firmware/firmware-esp32s3.bin)
 
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
@@ -496,10 +497,11 @@ jobs:
             echo "Uploading firmware-merged.bin..."
 
             HTTP_CODE=$(curl -s -o /tmp/merged_upload_response.txt -w "%{http_code}" \
-              -X POST "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/octet-stream" \
               -H "Content-Profile: display" \
+              -H "x-upsert: true" \
               --data-binary @firmware/firmware-merged-esp32s3.bin)
 
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
@@ -532,18 +534,13 @@ jobs:
           MERGED_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged.bin"
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-          # Only auto-set is_latest for stable releases (not pre-releases)
-          # Pre-releases require manual promotion via admin dashboard
-          if [ "${IS_PRERELEASE}" = "true" ]; then
-            IS_LATEST="false"
-            echo "Pre-release detected - is_latest will remain unchanged"
-          else
-            IS_LATEST="true"
-            echo "Stable release detected - will be set as latest"
-          fi
+          # All CI releases go to beta channel and are marked as latest for beta
+          IS_LATEST="true"
+          echo "CI release detected - will be set as latest for beta channel"
 
           echo "Creating/updating release record for version ${VERSION}..."
           echo "  Tag: ${TAG}"
+          echo "  Release Channel: beta"
           echo "  Firmware URL: ${FIRMWARE_URL}"
           echo "  Merged URL: ${MERGED_URL}"
           echo "  Size: ${FIRMWARE_SIZE} bytes"
@@ -568,7 +565,8 @@ jobs:
               \"firmware_size\": ${FIRMWARE_SIZE},
               \"build_id\": \"${GITHUB_SHA}\",
               \"build_date\": \"${BUILD_DATE}\",
-              \"is_latest\": ${IS_LATEST},
+              \"release_channel\": \"beta\",
+              \"is_latest\": true,
               \"is_prerelease\": ${IS_PRERELEASE},
               \"rollout_percentage\": 100
             }")

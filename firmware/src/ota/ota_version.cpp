@@ -10,6 +10,7 @@
 #include "ota_helpers.h"
 #include "../auth/device_credentials.h"
 #include "../common/ca_certs.h"
+#include "../common/board_utils.h"
 #include "../config/config_manager.h"
 #include "../debug/remote_logger.h"
 #include "../core/dependencies.h"
@@ -115,11 +116,10 @@ bool OTAManager::checkUpdateFromManifest() {
                   latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
 
     // Extract URLs for this board - prefer firmware-only (web assets embedded)
-    #if defined(ESP32_S3_BOARD)
-    const char* board_type = "esp32s3";
-    #else
-    const char* board_type = "esp32";
-    #endif
+    // Use runtime board detection instead of compile-time #ifdef
+    String board_type_str = getBoardType();
+    const char* board_type = board_type_str.c_str();
+    Serial.printf("[OTA] Detected board type: %s\n", board_type);
 
     // Try firmware-only first (preferred - web assets now embedded in firmware)
     firmware_url = doc["firmware"][board_type]["url"].as<String>();
@@ -232,17 +232,26 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
         // Check for firmware file
         if (name_lower.indexOf("firmware") >= 0) {
             int priority = 0;
-            #if defined(ESP32_S3_BOARD)
-            if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
-                priority = 200;
+            // Use runtime board detection instead of compile-time #ifdef
+            String board = getBoardType();
+            if (board == "esp32s3") {
+                if (name_lower.indexOf("esp32s3") >= 0 || name_lower.indexOf("esp32-s3") >= 0) {
+                    priority = 200;
+                }
+            } else if (board == "esp32s2") {
+                if (name_lower.indexOf("esp32s2") >= 0 || name_lower.indexOf("esp32-s2") >= 0) {
+                    priority = 200;
+                }
+            } else {
+                // Base ESP32 - avoid S2/S3 variants
+                if (name_lower.indexOf("esp32") >= 0 &&
+                    name_lower.indexOf("esp32s3") < 0 &&
+                    name_lower.indexOf("esp32-s3") < 0 &&
+                    name_lower.indexOf("esp32s2") < 0 &&
+                    name_lower.indexOf("esp32-s2") < 0) {
+                    priority = 200;
+                }
             }
-            #else
-            if (name_lower.indexOf("esp32") >= 0 &&
-                name_lower.indexOf("esp32s3") < 0 &&
-                name_lower.indexOf("esp32-s3") < 0) {
-                priority = 200;
-            }
-            #endif
             if (name_lower == "firmware.bin") {
                 priority = max(priority, 50);
             }

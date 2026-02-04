@@ -23,7 +23,8 @@ const DEVICE_COLUMNS = `
   blacklisted,
   registered_at,
   provisioned_at,
-  metadata
+  metadata,
+  release_channel
 `;
 
 // Helper to get devices from the display schema
@@ -288,6 +289,21 @@ export async function setDeviceBlacklisted(
     .schema("display")
     .from("devices")
     .update({ blacklisted })
+    .eq("serial_number", serialNumber);
+
+  if (error) throw error;
+}
+
+// Helper to set device release channel (beta/production)
+export async function setDeviceReleaseChannel(
+  serialNumber: string,
+  channel: 'beta' | 'production',
+): Promise<void> {
+  const supabase = await getSupabase();
+  const { error } = await supabase
+    .schema("display")
+    .from("devices")
+    .update({ release_channel: channel })
     .eq("serial_number", serialNumber);
 
   if (error) throw error;
