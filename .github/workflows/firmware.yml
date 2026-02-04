@@ -1,0 +1,362 @@
+# Firmware CI/CD Workflow (Data-Driven)
+# Dynamically builds all boards defined in boards.json
+
+name: Firmware
+
+on:
+  push:
+    branches: [main, master, beta]
+    tags:
+      - "v*"
+    paths:
+      - 'firmware/**'
+      - 'shared/**'
+      - 'boards.json'
+      - '.github/workflows/firmware.yml'
+  pull_request:
+    branches: [main, master, beta]
+    paths:
+      - 'firmware/**'
+      - 'shared/**'
+      - 'boards.json'
+      - '.github/workflows/firmware.yml'
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  PLATFORMIO_CORE_DIR: /root/.platformio
+
+jobs:
+  # ============================================================================
+  # Generate Build Matrix from Configuration
+  # ============================================================================
+  generate-matrix:
+    name: Generate Build Matrix
+    runs-on: self-hosted
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Generate matrix from boards.json
+        id: set-matrix
+        run: |
+          MATRIX=$(python3 scripts/generate_build_matrix.py)
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "Generated matrix:"
+          echo "$MATRIX" | jq '.'
+
+  # ============================================================================
+  # Firmware Unit Tests - MUST PASS BEFORE BUILDS RUN
+  # ============================================================================
+  firmware-unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Unity tests (ALL TESTS MUST PASS)
+        run: |
+          echo "Running all firmware unit tests..."
+          pio test -e native_test --verbose
+          
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # Build Firmware for All Boards (Dynamic Matrix)
+  # ============================================================================
+  firmware-build:
+    name: Build ${{ matrix.chip_family }}
+    runs-on: self-hosted
+    needs: [generate-matrix, firmware-unit-tests]
+    strategy:
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      fail-fast: false
+    env:
+      WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
+      WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fix workspace permissions
+        working-directory: ${{ github.workspace }}
+        run: chown -R $(id -u):$(id -g) . || true
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Create secrets.h
+        run: |
+          cat > include/secrets.h << EOF
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #define WEBEX_CLIENT_ID "${WEBEX_CLIENT_ID}"
+          #define WEBEX_CLIENT_SECRET "${WEBEX_CLIENT_SECRET}"
+          #endif
+          EOF
+
+      - name: Build firmware (${{ matrix.chip_family }})
+        run: pio run -e ${{ matrix.platformio_env }}
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/${{ matrix.platformio_env }}"
+          cp "$BUILD_DIR/firmware.bin" artifacts/firmware-${{ matrix.board_type }}.bin
+          echo "✓ ${{ matrix.chip_family }} firmware: $(stat -f%z artifacts/firmware-${{ matrix.board_type }}.bin 2>/dev/null || stat -c%s artifacts/firmware-${{ matrix.board_type }}.bin) bytes"
+
+      - name: Create merged binary
+        run: |
+          BUILD_DIR=".pio/build/${{ matrix.platformio_env }}"
+          PIO_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+          BOOT_APP0=$(find "$PIO_DIR/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          
+          # Determine chip type and flash settings
+          case "${{ matrix.board_type }}" in
+            esp32s3)
+              CHIP="esp32s3"
+              FLASH_FREQ="80m"
+              FLASH_SIZE="${{ matrix.flash_size }}"
+              BOOTLOADER_OFFSET="0x0000"
+              ;;
+            esp32s2)
+              CHIP="esp32s2"
+              FLASH_FREQ="80m"
+              FLASH_SIZE="${{ matrix.flash_size }}"
+              BOOTLOADER_OFFSET="0x0000"
+              ;;
+            *)
+              CHIP="esp32"
+              FLASH_FREQ="40m"
+              FLASH_SIZE="${{ matrix.flash_size }}"
+              BOOTLOADER_OFFSET="0x1000"
+              ;;
+          esac
+          
+          esptool.py --chip $CHIP merge_bin \
+            -o artifacts/firmware-merged-${{ matrix.board_type }}.bin \
+            --flash_mode dio \
+            --flash_freq $FLASH_FREQ \
+            --flash_size $FLASH_SIZE \
+            $BOOTLOADER_OFFSET $BUILD_DIR/bootloader.bin \
+            0x8000 $BUILD_DIR/partitions.bin \
+            0xE000 $BOOT_APP0 \
+            0x10000 $BUILD_DIR/firmware.bin
+          
+          echo "✓ Created merged binary"
+
+      - name: Fix permissions
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board_type }}
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # Create Release (only on version tags)
+  # ============================================================================
+  release:
+    name: Create Release
+    runs-on: self-hosted
+    needs: [generate-matrix, firmware-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/
+
+      - name: Create release archives
+        run: |
+          cd release
+          for dir in firmware-*/; do
+            board=$(basename "$dir" | sed 's/firmware-//')
+            cd "$dir" && zip -r ../firmware-${board}-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-beta') }}
+          generate_release_notes: true
+          files: release/*.zip
+
+      - name: Fix permissions
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # Upload to Supabase Storage
+  # ============================================================================
+  supabase-upload:
+    name: Upload to Supabase
+    runs-on: self-hosted
+    needs: [generate-matrix, release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: firmware-builds/
+
+      - name: Load board configuration
+        id: boards
+        run: |
+          BOARDS=$(jq -c '[.boards[] | .board_type]' boards.json)
+          echo "boards=$BOARDS" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware for all boards
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          
+          for board_dir in firmware-builds/firmware-*/; do
+            board=$(basename "$board_dir" | sed 's/firmware-//')
+            
+            echo "Uploading $board firmware..."
+            
+            # Upload OTA binary
+            curl -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-${board}.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @"${board_dir}firmware-${board}.bin"
+            
+            # Upload merged binary
+            curl -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-${board}.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @"${board_dir}firmware-merged-${board}.bin"
+          done
+
+      - name: Create or get release record
+        id: release
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="v${VERSION}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          IS_PRERELEASE=${{ contains(github.ref, '-beta') && 'true' || 'false' }}
+          
+          # Try to get existing release
+          RELEASE_ID=$(curl -s "${SUPABASE_URL}/rest/v1/releases?version=eq.${VERSION}&select=id" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Profile: display" | jq -r '.[0].id // empty')
+          
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Creating new release record..."
+            RELEASE_ID=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/releases" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "Content-Profile: display" \
+              -H "Prefer: return=representation" \
+              -d "{
+                \"version\": \"${VERSION}\",
+                \"tag\": \"${TAG}\",
+                \"name\": \"Release ${VERSION}\",
+                \"firmware_url\": \"${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin\",
+                \"build_date\": \"${BUILD_DATE}\",
+                \"is_prerelease\": ${IS_PRERELEASE}
+              }" | jq -r '.[0].id')
+          fi
+          
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "✓ Release ID: $RELEASE_ID"
+
+      - name: Create release artifacts in database
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          RELEASE_ID="${{ steps.release.outputs.RELEASE_ID }}"
+          
+          # Read board config and create artifacts
+          jq -c '.boards[]' boards.json | while read board; do
+            BOARD_TYPE=$(echo "$board" | jq -r '.board_type')
+            CHIP_FAMILY=$(echo "$board" | jq -r '.chip_family')
+            
+            FIRMWARE_PATH="firmware-builds/firmware-${BOARD_TYPE}/firmware-${BOARD_TYPE}.bin"
+            SIZE=$(stat -f%z "$FIRMWARE_PATH" 2>/dev/null || stat -c%s "$FIRMWARE_PATH")
+            
+            URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-${BOARD_TYPE}.bin"
+            MERGED_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-${BOARD_TYPE}.bin"
+            
+            curl -X POST "${SUPABASE_URL}/rest/v1/release_artifacts" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "Content-Profile: display" \
+              -H "Prefer: resolution=merge-duplicates" \
+              -d "{
+                \"release_id\": \"${RELEASE_ID}\",
+                \"board_type\": \"${BOARD_TYPE}\",
+                \"chip_family\": \"${CHIP_FAMILY}\",
+                \"firmware_url\": \"${URL}\",
+                \"firmware_merged_url\": \"${MERGED_URL}\",
+                \"firmware_size\": ${SIZE}
+              }"
+            
+            echo "✓ Created artifact for $BOARD_TYPE"
+          done
+
+      - name: Fix permissions
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true

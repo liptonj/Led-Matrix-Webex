@@ -1,0 +1,40 @@
+{
+  "boards": [
+    {
+      "board_type": "esp32s3",
+      "chip_family": "ESP32-S3",
+      "platformio_env": "esp32s3",
+      "flash_size": "8MB",
+      "partition_table": "partitions_8MB.csv",
+      "description": "ESP32-S3 DevKit with 8MB flash and PSRAM",
+      "usb_cdc": true,
+      "default_pins": "seengreat"
+    },
+    {
+      "board_type": "esp32s2",
+      "chip_family": "ESP32-S2",
+      "platformio_env": "esp32s2",
+      "flash_size": "4MB",
+      "partition_table": "partitions_4MB.csv",
+      "description": "Adafruit Metro ESP32-S2 with RGB Matrix Shield",
+      "usb_cdc": true,
+      "default_pins": "adafruit_shield"
+    },
+    {
+      "board_type": "esp32",
+      "chip_family": "ESP32",
+      "platformio_env": "esp32",
+      "flash_size": "4MB",
+      "partition_table": "partitions_4MB.csv",
+      "description": "Standard ESP32 DevKit with 4MB flash",
+      "usb_cdc": false,
+      "default_pins": "generic_hub75"
+    }
+  ],
+  "ci": {
+    "build_all_boards": true,
+    "test_before_build": true,
+    "upload_to_supabase": true,
+    "create_web_installer": true
+  }
+}

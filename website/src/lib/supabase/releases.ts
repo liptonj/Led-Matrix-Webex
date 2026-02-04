@@ -113,13 +113,17 @@ export async function deleteRelease(
   const { data: release } = await supabase
     .schema("display")
     .from("releases")
-    .select("is_latest")
+    .select("id, is_latest")
     .eq("version", version)
     .eq("release_channel", channel)
     .single();
   
   if (release?.is_latest) {
     throw new Error(`Cannot delete the latest ${channel} release. Set another release as latest first.`);
+  }
+  
+  if (!release) {
+    throw new Error(`Release ${version} not found in ${channel} channel`);
   }
   
   // Check if another channel uses these storage files
@@ -133,12 +137,41 @@ export async function deleteRelease(
   
   // Only delete storage files if no other channel uses them
   if (!otherChannel) {
-    await supabase.storage
-      .from("firmware")
-      .remove([`${version}/firmware.bin`, `${version}/firmware-merged.bin`]);
+    // Get all board artifacts to know which files to delete
+    const { data: artifacts } = await supabase
+      .schema("display")
+      .from("release_artifacts")
+      .select("board_type")
+      .eq("release_id", release.id);
+
+    if (artifacts && artifacts.length > 0) {
+      // Build list of board-specific files to delete
+      const filesToDelete: string[] = [];
+      for (const artifact of artifacts) {
+        filesToDelete.push(`${version}/firmware-${artifact.board_type}.bin`);
+        filesToDelete.push(`${version}/firmware-merged-${artifact.board_type}.bin`);
+      }
+      
+      // Delete board-specific storage files
+      await supabase.storage
+        .from("firmware")
+        .remove(filesToDelete);
+    } else {
+      // Fallback: delete legacy paths if no artifacts found
+      await supabase.storage
+        .from("firmware")
+        .remove([`${version}/firmware.bin`, `${version}/firmware-merged.bin`]);
+    }
+
+    // Delete release artifacts (cascade will handle this via FK, but explicit is clearer)
+    await supabase
+      .schema("display")
+      .from("release_artifacts")
+      .delete()
+      .eq("release_id", release.id);
   }
   
-  // Delete database record
+  // Delete database record (this will cascade delete artifacts via FK constraint)
   const { error } = await supabase
     .schema("display")
     .from("releases")

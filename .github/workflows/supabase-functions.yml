@@ -1,0 +1,75 @@
+# Supabase Edge Functions CI/CD Workflow
+# Tests Supabase Edge Functions and runs API health checks
+
+name: Supabase Functions
+
+on:
+  push:
+    branches: [main, master, beta]
+    tags:
+      - "v*"
+    paths:
+      - 'supabase/**'
+      - 'scripts/api-health-check.sh'
+      - '.github/workflows/supabase-functions.yml'
+  pull_request:
+    branches: [main, master, beta]
+    paths:
+      - 'supabase/**'
+      - 'scripts/api-health-check.sh'
+      - '.github/workflows/supabase-functions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Supabase Edge Functions Tests
+  # Runs Deno tests for Edge Functions
+  # ============================================================================
+  supabase-edge-functions-tests:
+    name: Edge Functions Tests
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: supabase/functions
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Run Deno tests
+        run: deno test --allow-net --allow-env _tests/
+
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # API Health Checks
+  # Verifies critical Edge Functions are accessible
+  # ============================================================================
+  api-health-checks:
+    name: API Health Checks
+    runs-on: self-hosted
+    needs: [supabase-edge-functions-tests]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run health checks
+        run: bash scripts/api-health-check.sh
+        env:
+          SUPABASE_URL: https://fmultmlsevqgtnqzaylg.supabase.co
+
+      - name: Fix permissions after checks
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true

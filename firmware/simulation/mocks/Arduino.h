@@ -436,6 +436,21 @@ public:
     uint32_t getSketchSize() { return 1024 * 1024; }
     uint32_t getFreeSketchSpace() { return 3 * 1024 * 1024; }
     String getSketchMD5() { return "simulation"; }
+    
+    // Chip model detection for board_utils.h
+    // In simulation, return based on compile-time defines for testing
+    const char* getChipModel() {
+        #if defined(ESP32_S3_BOARD)
+        return "ESP32-S3";
+        #elif defined(ESP32_S2_BOARD)
+        return "ESP32-S2";
+        #else
+        return "ESP32";
+        #endif
+    }
+    
+    // PSRAM detection (simulation has no PSRAM)
+    uint32_t getPsramSize() { return 0; }
 };
 
 extern EspClass ESP;

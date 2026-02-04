@@ -34,7 +34,6 @@ import { isDeviceInRollout } from "../_shared/rollout.ts";
 
 const SIGNED_URL_EXPIRY_SECONDS = 600;
 const DEVICE_NAME = "Webex LED Matrix Display";
-const BOARD_TYPES = ["esp32s3", "esp32"] as const;
 
 interface EspWebToolsManifest {
   name: string;
@@ -67,18 +66,75 @@ interface ReleaseRow {
   release_channel: string;
 }
 
-function buildLegacyManifest(
+interface ReleaseArtifact {
+  board_type: string;
+  chip_family: string;
+  firmware_url: string;
+  firmware_merged_url: string | null;
+  firmware_size: number | null;
+}
+
+// Supabase client type is complex - using explicit any with lint ignore
+// deno-lint-ignore no-explicit-any
+async function buildLegacyManifest(
   release: ReleaseRow,
-  otaUrl: string,
-  mergedUrl?: string,
-): LegacyManifest {
+  supabase: any, // deno-lint-ignore-line
+  authenticated: boolean,
+): Promise<LegacyManifest> {
   const firmware: Record<string, { url: string }> = {};
   const bundle: Record<string, { url: string }> = {};
 
-  for (const board of BOARD_TYPES) {
-    firmware[board] = { url: otaUrl };
+  // Fetch board-specific artifacts from database
+  const { data: artifacts, error } = await supabase
+    .schema("display")
+    .from("release_artifacts")
+    .select("board_type, chip_family, firmware_url, firmware_merged_url, firmware_size")
+    .eq("release_id", release.id);
+
+  if (error) {
+    console.error("Failed to fetch release artifacts:", error);
+    // Fallback to empty firmware object
+    return {
+      name: DEVICE_NAME,
+      version: release.version,
+      build_id: release.build_id,
+      build_date: release.build_date,
+      firmware: {},
+    };
+  }
+
+  // Generate signed URLs for each board if authenticated
+  for (const artifact of (artifacts as ReleaseArtifact[] || [])) {
+    const boardOtaPath = `${release.version}/firmware-${artifact.board_type}.bin`;
+    const boardMergedPath = `${release.version}/firmware-merged-${artifact.board_type}.bin`;
+
+    let otaUrl = artifact.firmware_url;
+    let mergedUrl = artifact.firmware_merged_url || "";
+
+    if (authenticated) {
+      // Generate signed URLs
+      const { data: signedOta } = await supabase.storage
+        .from("firmware")
+        .createSignedUrl(boardOtaPath, SIGNED_URL_EXPIRY_SECONDS);
+
+      if (signedOta) {
+        otaUrl = signedOta.signedUrl;
+      }
+
+      if (artifact.firmware_merged_url) {
+        const { data: signedMerged } = await supabase.storage
+          .from("firmware")
+          .createSignedUrl(boardMergedPath, SIGNED_URL_EXPIRY_SECONDS);
+
+        if (signedMerged) {
+          mergedUrl = signedMerged.signedUrl;
+        }
+      }
+    }
+
+    firmware[artifact.board_type] = { url: otaUrl };
     if (mergedUrl) {
-      bundle[board] = { url: mergedUrl };
+      bundle[artifact.board_type] = { url: mergedUrl };
     }
   }
 
@@ -90,7 +146,7 @@ function buildLegacyManifest(
     firmware,
   };
 
-  if (mergedUrl) {
+  if (Object.keys(bundle).length > 0) {
     manifest.bundle = bundle;
   }
 
@@ -173,33 +229,66 @@ serve(async (req: Request) => {
         });
       }
 
-      const firmwarePath = `${latestRelease.version}/firmware-merged.bin`;
-      let firmwareUrl = latestRelease.firmware_merged_url || "";
+      // Fetch all board artifacts for this release
+      const { data: artifacts, error: artifactsError } = await supabase
+        .schema("display")
+        .from("release_artifacts")
+        .select("board_type, chip_family, firmware_merged_url")
+        .eq("release_id", latestRelease.id);
 
-      // Always provide a signed URL for web install
-      const { data: signedUrl } = await supabase.storage
-        .from("firmware")
-        .createSignedUrl(firmwarePath, SIGNED_URL_EXPIRY_SECONDS);
+      if (artifactsError) {
+        console.error("Failed to fetch artifacts for ESP Web Tools:", artifactsError);
+        return new Response(
+          JSON.stringify({ error: "Failed to fetch firmware artifacts" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
 
-      if (signedUrl) {
-        firmwareUrl = signedUrl.signedUrl;
+      // Generate builds array with signed URLs for each board
+      const builds = [];
+      for (const artifact of (artifacts as ReleaseArtifact[] || [])) {
+        if (!artifact.firmware_merged_url) {
+          continue; // Skip if no merged firmware available
+        }
+
+        const mergedPath = `${latestRelease.version}/firmware-merged-${artifact.board_type}.bin`;
+        
+        // Always provide signed URL for web install
+        const { data: signedUrl } = await supabase.storage
+          .from("firmware")
+          .createSignedUrl(mergedPath, SIGNED_URL_EXPIRY_SECONDS);
+
+        if (signedUrl) {
+          builds.push({
+            chipFamily: artifact.chip_family,
+            parts: [
+              {
+                path: signedUrl.signedUrl,
+                offset: 0,
+              },
+            ],
+          });
+        }
+      }
+
+      if (builds.length === 0) {
+        return new Response(
+          JSON.stringify({ error: "No firmware builds available" }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
       }
 
       const manifest: EspWebToolsManifest = {
         name: DEVICE_NAME,
         version: latestRelease.version,
         new_install_prompt_erase: true,
-        builds: [
-          {
-            chipFamily: "ESP32-S3",
-            parts: [
-              {
-                path: firmwareUrl || "",
-                offset: 0,
-              },
-            ],
-          },
-        ],
+        builds,
       };
 
       return new Response(JSON.stringify(manifest), {
@@ -267,36 +356,11 @@ serve(async (req: Request) => {
       }
     }
 
-    let otaUrl = selectedRelease.firmware_url || "";
-    const filePath = `${selectedRelease.version}/firmware.bin`;
-
-    // Generate signed URL if authenticated
-    if (authenticated) {
-      const { data: signedUrl } = await supabase.storage
-        .from("firmware")
-        .createSignedUrl(filePath, SIGNED_URL_EXPIRY_SECONDS);
-
-      if (signedUrl) {
-        otaUrl = signedUrl.signedUrl;
-      }
-    }
-
-    let mergedUrl = selectedRelease.firmware_merged_url || "";
-    const mergedPath = `${selectedRelease.version}/firmware-merged.bin`;
-    if (authenticated) {
-      const { data: signedMerged } = await supabase.storage
-        .from("firmware")
-        .createSignedUrl(mergedPath, SIGNED_URL_EXPIRY_SECONDS);
-
-      if (signedMerged) {
-        mergedUrl = signedMerged.signedUrl;
-      }
-    }
-
-    const legacy = buildLegacyManifest(
+    // Build manifest using database artifacts
+    const legacy = await buildLegacyManifest(
       selectedRelease,
-      otaUrl,
-      mergedUrl || undefined,
+      supabase,
+      authenticated,
     );
 
     return new Response(JSON.stringify(legacy), {

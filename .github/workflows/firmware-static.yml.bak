@@ -1,0 +1,787 @@
+# Firmware CI/CD Workflow
+# Builds and tests ESP32 firmware, creates releases for tagged versions
+
+name: Firmware
+
+on:
+  push:
+    branches: [main, master, beta]
+    tags:
+      - "v*"
+    paths:
+      - 'firmware/**'
+      - 'shared/**'
+      - '.github/workflows/firmware.yml'
+  pull_request:
+    branches: [main, master, beta]
+    paths:
+      - 'firmware/**'
+      - 'shared/**'
+      - '.github/workflows/firmware.yml'
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  PLATFORMIO_CORE_DIR: /root/.platformio
+  BUILD_CONTAINER: ghcr.io/liptonj/led-matrix-builder:latest
+
+jobs:
+  # ============================================================================
+  # Firmware Unit Tests - MUST PASS BEFORE BUILDS RUN
+  # ============================================================================
+  firmware-unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Unity tests (ALL TESTS MUST PASS)
+        id: run_tests
+        run: |
+          echo "Running all firmware unit tests..."
+          pio test -e native_test --verbose
+          TEST_RESULT=$?
+          
+          echo "Test suite completed with exit code: $TEST_RESULT"
+          
+          if [ $TEST_RESULT -ne 0 ]; then
+            echo "ERROR: Tests failed! Pull request cannot be merged."
+            echo "Please fix failing tests before merging."
+            exit 1
+          fi
+          
+          echo "All tests passed successfully!"
+          exit 0
+
+      - name: Generate test coverage report
+        if: always()
+        run: |
+          echo "Test coverage summary:"
+          echo "====================="
+          
+          TEST_COUNT=$(find test -name "test_*.cpp" -type f | wc -l)
+          echo "Total test suites: $TEST_COUNT"
+          
+          echo ""
+          echo "Test suites:"
+          find test -name "test_*.cpp" -type f | sort | while read file; do
+            echo "  - $(basename $file .cpp)"
+          done
+
+      - name: Post test results to PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            const message = `## ❌ Firmware Unit Tests Failed
+            
+            The firmware unit tests have failed. Please review the test output above and fix the failing tests before merging.
+            
+            **Test suite**: \`pio test -e native_test\`
+            **Action**: [View test results](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            
+            All previously-passing tests must continue to pass. No regressions are allowed.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: message
+            });
+
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # Native Simulation Build and Test
+  # ============================================================================
+  firmware-native-test:
+    name: Native Simulation
+    runs-on: self-hosted
+    needs: [firmware-unit-tests]
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build native simulation
+        run: pio run -e native
+
+      - name: Run native simulation (smoke test)
+        run: |
+          if [ -f ".pio/build/native/program" ]; then
+            echo "quit" | timeout 10 .pio/build/native/program || true
+            echo "Native simulation smoke test passed"
+          else
+            echo "Native simulation binary not found, skipping"
+          fi
+
+      - name: Fix permissions after build
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # ESP32-S3 Build
+  # ============================================================================
+  firmware-build-esp32s3:
+    name: Build ESP32-S3
+    runs-on: self-hosted
+    needs: [firmware-unit-tests]
+    env:
+      WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
+      WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fix workspace permissions
+        working-directory: ${{ github.workspace }}
+        run: chown -R $(id -u):$(id -g) . || true
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Create secrets.h for build
+        run: |
+          cat > include/secrets.h << EOF
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #define WEBEX_CLIENT_ID "${WEBEX_CLIENT_ID}"
+          #define WEBEX_CLIENT_SECRET "${WEBEX_CLIENT_SECRET}"
+          #endif
+          EOF
+
+      - name: Build firmware (ESP32-S3)
+        run: |
+          echo "Building with Supabase URL: ${SUPABASE_URL:-not set}"
+          pio run -e esp32s3
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/esp32s3"
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s3.bin
+            echo "✓ Included firmware.bin for OTA"
+          fi
+          echo "ESP32-S3 artifacts:"
+          ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32s3"
+          PIO_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+          BOOT_APP0=$(find "$PIO_DIR/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          
+          if [ -z "$BOOT_APP0" ]; then
+            echo "ERROR: Could not find boot_app0.bin"
+            exit 1
+          fi
+          
+          echo "Found boot_app0.bin at: $BOOT_APP0"
+
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            esptool.py --chip esp32s3 merge_bin \
+              -o artifacts/firmware-merged-esp32s3.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 8MB \
+              0x0000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0xE000 $BOOT_APP0 \
+              0x10000 $BUILD_DIR/firmware.bin
+            echo "✓ Created merged binary for web installer"
+            ls -la artifacts/
+          else
+            echo "ERROR: Missing required files for merged binary"
+            exit 1
+          fi
+
+      - name: Fix permissions before upload
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+      - name: Upload ESP32-S3 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # ESP32-S2 Build
+  # ============================================================================
+  firmware-build-esp32s2:
+    name: Build ESP32-S2
+    runs-on: self-hosted
+    needs: [firmware-unit-tests]
+    env:
+      WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
+      WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fix workspace permissions
+        working-directory: ${{ github.workspace }}
+        run: chown -R $(id -u):$(id -g) . || true
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Create secrets.h for build
+        run: |
+          cat > include/secrets.h << EOF
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #define WEBEX_CLIENT_ID "${WEBEX_CLIENT_ID}"
+          #define WEBEX_CLIENT_SECRET "${WEBEX_CLIENT_SECRET}"
+          #endif
+          EOF
+
+      - name: Build firmware (ESP32-S2)
+        run: |
+          echo "Building with Supabase URL: ${SUPABASE_URL:-not set}"
+          pio run -e esp32s2
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/esp32s2"
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32s2.bin
+            echo "✓ Included firmware.bin for OTA"
+          fi
+          echo "ESP32-S2 artifacts:"
+          ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32s2"
+          PIO_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+          BOOT_APP0=$(find "$PIO_DIR/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          
+          if [ -z "$BOOT_APP0" ]; then
+            echo "ERROR: Could not find boot_app0.bin"
+            exit 1
+          fi
+          
+          echo "Found boot_app0.bin at: $BOOT_APP0"
+
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            esptool.py --chip esp32s2 merge_bin \
+              -o artifacts/firmware-merged-esp32s2.bin \
+              --flash_mode dio \
+              --flash_freq 80m \
+              --flash_size 4MB \
+              0x0000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0xE000 $BOOT_APP0 \
+              0x10000 $BUILD_DIR/firmware.bin
+            echo "✓ Created merged binary for web installer"
+            ls -la artifacts/
+          else
+            echo "ERROR: Missing required files for merged binary"
+            exit 1
+          fi
+
+      - name: Fix permissions before upload
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+      - name: Upload ESP32-S2 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s2
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # ESP32 Base Build
+  # ============================================================================
+  firmware-build-esp32:
+    name: Build ESP32
+    runs-on: self-hosted
+    needs: [firmware-unit-tests]
+    env:
+      WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
+      WEBEX_CLIENT_SECRET: ${{ secrets.WEBEX_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+    defaults:
+      run:
+        working-directory: firmware
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fix workspace permissions
+        working-directory: ${{ github.workspace }}
+        run: chown -R $(id -u):$(id -g) . || true
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Create secrets.h for build
+        run: |
+          cat > include/secrets.h << EOF
+          #ifndef SECRETS_H
+          #define SECRETS_H
+          #define WIFI_SSID "ci-placeholder"
+          #define WIFI_PASSWORD "ci-placeholder"
+          #define WEBEX_CLIENT_ID "${WEBEX_CLIENT_ID}"
+          #define WEBEX_CLIENT_SECRET "${WEBEX_CLIENT_SECRET}"
+          #endif
+          EOF
+
+      - name: Build firmware (ESP32)
+        run: |
+          echo "Building with Supabase URL: ${SUPABASE_URL:-not set}"
+          pio run -e esp32
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          BUILD_DIR=".pio/build/esp32"
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" artifacts/firmware-esp32.bin
+            echo "✓ Included firmware.bin for OTA"
+          fi
+          echo "ESP32 artifacts:"
+          ls -la artifacts/
+
+      - name: Create merged binary for web installer
+        run: |
+          BUILD_DIR=".pio/build/esp32"
+          PIO_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+          BOOT_APP0=$(find "$PIO_DIR/packages" -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          
+          if [ -z "$BOOT_APP0" ]; then
+            echo "ERROR: Could not find boot_app0.bin"
+            exit 1
+          fi
+          
+          echo "Found boot_app0.bin at: $BOOT_APP0"
+
+          if [ -f "$BUILD_DIR/firmware.bin" ] && [ -f "$BUILD_DIR/partitions.bin" ] && [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            esptool.py --chip esp32 merge_bin \
+              -o artifacts/firmware-merged-esp32.bin \
+              --flash_mode dio \
+              --flash_freq 40m \
+              --flash_size 4MB \
+              0x1000 $BUILD_DIR/bootloader.bin \
+              0x8000 $BUILD_DIR/partitions.bin \
+              0xE000 $BOOT_APP0 \
+              0x10000 $BUILD_DIR/firmware.bin
+            echo "✓ Created merged binary for web installer"
+            ls -la artifacts/
+          else
+            echo "ERROR: Missing required files for merged binary"
+            exit 1
+          fi
+
+      - name: Fix permissions before upload
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+      - name: Upload ESP32 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32
+          path: firmware/artifacts/
+          retention-days: 7
+
+  # ============================================================================
+  # Create Release (only on version tags)
+  # ============================================================================
+  release:
+    name: Create Release
+    runs-on: self-hosted
+    needs: 
+      - firmware-unit-tests
+      - firmware-native-test
+      - firmware-build-esp32s3
+      - firmware-build-esp32s2
+      - firmware-build-esp32
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download ESP32-S3 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: release/firmware-esp32s3/
+
+      - name: Download ESP32-S2 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s2
+          path: release/firmware-esp32s2/
+
+      - name: Download ESP32 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32
+          path: release/firmware-esp32/
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Update versions from tag
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Validate version matches platformio.ini
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          FIRMWARE_VERSION=$(awk '/^\[version\]/{flag=1} flag && /firmware_version = /{print; exit} /^\[/ && !/^\[version\]/{flag=0}' firmware/platformio.ini | sed 's/.*= *//' | tr -d '[:space:]')
+          
+          if [ -z "$FIRMWARE_VERSION" ]; then
+            echo "::error::Could not extract firmware_version from platformio.ini"
+            exit 1
+          fi
+          
+          if [ "$TAG_VERSION" != "$FIRMWARE_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match firmware version ($FIRMWARE_VERSION)"
+            exit 1
+          else
+            echo "✓ Firmware version matches: $FIRMWARE_VERSION"
+          fi
+
+      - name: Create release archives
+        run: |
+          cd release
+          cd firmware-esp32s3 && zip -r ../firmware-esp32s3-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+          cd firmware-esp32s2 && zip -r ../firmware-esp32s2-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+          cd firmware-esp32 && zip -r ../firmware-esp32-${{ steps.version.outputs.VERSION }}.zip . && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          generate_release_notes: true
+          files: |
+            release/firmware-esp32s3-${{ steps.version.outputs.VERSION }}.zip
+            release/firmware-esp32s3/firmware-esp32s3.bin
+            release/firmware-esp32s3/firmware-merged-esp32s3.bin
+            release/firmware-esp32s2-${{ steps.version.outputs.VERSION }}.zip
+            release/firmware-esp32s2/firmware-esp32s2.bin
+            release/firmware-esp32s2/firmware-merged-esp32s2.bin
+            release/firmware-esp32-${{ steps.version.outputs.VERSION }}.zip
+            release/firmware-esp32/firmware-esp32.bin
+            release/firmware-esp32/firmware-merged-esp32.bin
+
+      - name: Fix permissions after release
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # Upload to Supabase Storage (only on version tags, after release)
+  # ============================================================================
+  supabase-upload:
+    name: Upload to Supabase
+    runs-on: self-hosted
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download ESP32-S3 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s3
+          path: firmware-esp32s3/
+
+      - name: Download ESP32-S2 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-esp32s2
+          path: firmware-esp32s2/
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Upload ESP32-S3 firmware to Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Uploading ESP32-S3 firmware version $VERSION..."
+
+          # Upload OTA firmware
+          if [ -f "firmware-esp32s3/firmware-esp32s3.bin" ]; then
+            FIRMWARE_SIZE=$(stat -f%z "firmware-esp32s3/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware-esp32s3/firmware-esp32s3.bin")
+            
+            HTTP_CODE=$(curl -s -o /tmp/s3_upload.txt -w "%{http_code}" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @firmware-esp32s3/firmware-esp32s3.bin)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded ESP32-S3 firmware ($FIRMWARE_SIZE bytes)"
+            else
+              echo "::error::Failed to upload ESP32-S3 firmware - HTTP $HTTP_CODE"
+              cat /tmp/s3_upload.txt
+              exit 1
+            fi
+          fi
+
+          # Upload merged firmware
+          if [ -f "firmware-esp32s3/firmware-merged-esp32s3.bin" ]; then
+            HTTP_CODE=$(curl -s -o /tmp/s3_merged.txt -w "%{http_code}" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s3.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @firmware-esp32s3/firmware-merged-esp32s3.bin)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded ESP32-S3 merged firmware"
+            else
+              echo "::error::Failed to upload ESP32-S3 merged - HTTP $HTTP_CODE"
+              exit 1
+            fi
+          fi
+
+      - name: Upload ESP32-S2 firmware to Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "Uploading ESP32-S2 firmware version $VERSION..."
+
+          # Upload OTA firmware
+          if [ -f "firmware-esp32s2/firmware-esp32s2.bin" ]; then
+            FIRMWARE_SIZE=$(stat -f%z "firmware-esp32s2/firmware-esp32s2.bin" 2>/dev/null || stat -c%s "firmware-esp32s2/firmware-esp32s2.bin")
+            
+            HTTP_CODE=$(curl -s -o /tmp/s2_upload.txt -w "%{http_code}" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s2.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @firmware-esp32s2/firmware-esp32s2.bin)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded ESP32-S2 firmware ($FIRMWARE_SIZE bytes)"
+            else
+              echo "::error::Failed to upload ESP32-S2 firmware - HTTP $HTTP_CODE"
+              cat /tmp/s2_upload.txt
+              exit 1
+            fi
+          fi
+
+          # Upload merged firmware
+          if [ -f "firmware-esp32s2/firmware-merged-esp32s2.bin" ]; then
+            HTTP_CODE=$(curl -s -o /tmp/s2_merged.txt -w "%{http_code}" \
+              -X PUT "${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s2.bin" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary @firmware-esp32s2/firmware-merged-esp32s2.bin)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "✓ Uploaded ESP32-S2 merged firmware"
+            else
+              echo "::error::Failed to upload ESP32-S2 merged - HTTP $HTTP_CODE"
+              exit 1
+            fi
+          fi
+
+      - name: Create/Update release record in Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="${{ steps.version.outputs.TAG }}"
+          IS_PRERELEASE=${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # All CI releases go to beta channel
+          echo "CI release - setting as latest for beta channel"
+
+          # Get firmware sizes
+          S3_SIZE=$(stat -f%z "firmware-esp32s3/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware-esp32s3/firmware-esp32s3.bin")
+          S2_SIZE=$(stat -f%z "firmware-esp32s2/firmware-esp32s2.bin" 2>/dev/null || stat -c%s "firmware-esp32s2/firmware-esp32s2.bin")
+
+          # Build URLs
+          S3_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin"
+          S3_MERGED="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s3.bin"
+          S2_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s2.bin"
+          S2_MERGED="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s2.bin"
+
+          echo "Creating release record for version ${VERSION}..."
+          HTTP_CODE=$(curl -s -o /tmp/release.txt -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/releases" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "{
+              \"version\": \"${VERSION}\",
+              \"tag\": \"${TAG}\",
+              \"name\": \"Release ${TAG}\",
+              \"firmware_url\": \"${S3_URL}\",
+              \"firmware_merged_url\": \"${S3_MERGED}\",
+              \"firmware_size\": ${S3_SIZE},
+              \"firmware_esp32s2_url\": \"${S2_URL}\",
+              \"firmware_esp32s2_merged_url\": \"${S2_MERGED}\",
+              \"firmware_esp32s2_size\": ${S2_SIZE},
+              \"build_id\": \"${GITHUB_SHA}\",
+              \"build_date\": \"${BUILD_DATE}\",
+              \"release_channel\": \"beta\",
+              \"is_latest\": true,
+              \"is_prerelease\": ${IS_PRERELEASE},
+              \"rollout_percentage\": 100
+            }")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✓ Created/updated release record - HTTP $HTTP_CODE"
+            cat /tmp/release.txt | jq '.' || cat /tmp/release.txt
+          else
+            echo "::error::Failed to create release record - HTTP $HTTP_CODE"
+            cat /tmp/release.txt
+            exit 1
+          fi
+
+      - name: Create release artifacts records (board-specific firmware)
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          
+          # Get firmware sizes
+          S3_SIZE=$(stat -f%z "firmware-esp32s3/firmware-esp32s3.bin" 2>/dev/null || stat -c%s "firmware-esp32s3/firmware-esp32s3.bin")
+          S2_SIZE=$(stat -f%z "firmware-esp32s2/firmware-esp32s2.bin" 2>/dev/null || stat -c%s "firmware-esp32s2/firmware-esp32s2.bin")
+
+          # Build URLs
+          S3_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin"
+          S3_MERGED="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s3.bin"
+          S2_URL="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s2.bin"
+          S2_MERGED="${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-merged-esp32s2.bin"
+
+          echo "Creating release artifacts for ESP32-S3..."
+          HTTP_CODE=$(curl -s -o /tmp/artifact_s3.txt -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/release_artifacts" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: display" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "{
+              \"release_version\": \"${VERSION}\",
+              \"board_type\": \"esp32s3\",
+              \"chip_family\": \"ESP32-S3\",
+              \"firmware_url\": \"${S3_URL}\",
+              \"firmware_merged_url\": \"${S3_MERGED}\",
+              \"firmware_size\": ${S3_SIZE}
+            }")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✓ Created ESP32-S3 artifact record - HTTP $HTTP_CODE"
+          else
+            echo "::error::Failed to create ESP32-S3 artifact - HTTP $HTTP_CODE"
+            cat /tmp/artifact_s3.txt
+            exit 1
+          fi
+
+          echo "Creating release artifacts for ESP32-S2..."
+          HTTP_CODE=$(curl -s -o /tmp/artifact_s2.txt -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/release_artifacts" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: display" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "{
+              \"release_version\": \"${VERSION}\",
+              \"board_type\": \"esp32s2\",
+              \"chip_family\": \"ESP32-S2\",
+              \"firmware_url\": \"${S2_URL}\",
+              \"firmware_merged_url\": \"${S2_MERGED}\",
+              \"firmware_size\": ${S2_SIZE}
+            }")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✓ Created ESP32-S2 artifact record - HTTP $HTTP_CODE"
+          else
+            echo "::error::Failed to create ESP32-S2 artifact - HTTP $HTTP_CODE"
+            cat /tmp/artifact_s2.txt
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Release artifacts created for version ${VERSION}"
+          echo "   - ESP32-S3: ${S3_SIZE} bytes"
+          echo "   - ESP32-S2: ${S2_SIZE} bytes"
+
+      - name: Fix permissions after upload
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true

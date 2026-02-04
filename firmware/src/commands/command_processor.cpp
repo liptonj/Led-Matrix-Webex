@@ -3,6 +3,7 @@
  * @brief Command Processor Implementation
  */
 
+#include <Arduino.h>
 #include "command_processor.h"
 #include "../app_state.h"
 #include "../supabase/supabase_client.h"
