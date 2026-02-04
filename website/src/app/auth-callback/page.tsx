@@ -1,6 +1,7 @@
 'use client';
 
 import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
+import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 
 const OAUTH_CALLBACK_TIMEOUT_MS = 15000;
@@ -47,16 +48,34 @@ export default function AuthCallbackPage() {
           throw new Error(data?.error || 'Failed to complete authentication');
         }
 
+        // Extract token from redirect_url if present
+        const redirectUrl = new URL(data.redirect_url, window.location.origin);
+        const token = redirectUrl.searchParams.get('token');
+
+        if (token) {
+          // Use the token to establish a Supabase session
+          const supabase = createClient();
+          const { error: sessionError } = await supabase.auth.verifyOtp({
+            token_hash: token,
+            type: 'magiclink',
+          });
+
+          if (sessionError) {
+            console.error('Failed to establish session:', sessionError);
+            throw new Error('Failed to establish session');
+          }
+
+          // Remove token from URL before redirecting
+          redirectUrl.searchParams.delete('token');
+        }
+
         setStatus('success');
         setMessage('Authentication complete! Redirecting...');
 
         // Redirect to the appropriate dashboard (admin or user)
-        // The Edge Function determines this based on the user's role
-        if (data.redirect_url) {
-          setTimeout(() => {
-            window.location.href = data.redirect_url;
-          }, 1000);
-        }
+        setTimeout(() => {
+          window.location.href = redirectUrl.pathname;
+        }, 1000);
       } catch (err) {
         setStatus('error');
         setMessage(err instanceof Error ? err.message : 'Authentication failed');
