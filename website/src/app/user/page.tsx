@@ -1,0 +1,215 @@
+'use client';
+
+import { getSupabase } from '@/lib/supabase';
+import { getSession } from '@/lib/supabase/auth';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+
+interface Device {
+  serial_number: string;
+  provisioning_method: string;
+  created_at: string;
+  device: {
+    device_id: string;
+    display_name: string | null;
+    firmware_version: string | null;
+    last_seen: string;
+  };
+}
+
+interface DeviceSummary {
+  total: number;
+  online: number;
+  offline: number;
+}
+
+export default function UserDashboard() {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [summary, setSummary] = useState<DeviceSummary>({ total: 0, online: 0, offline: 0 });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadDevices() {
+      try {
+        const { data: { session } } = await getSession();
+        
+        if (!session) return;
+
+        const supabase = await getSupabase();
+        
+        // Get user's devices
+        const { data: assignments, error } = await supabase
+          .schema('display')
+          .from('user_devices')
+          .select(`
+            serial_number,
+            provisioning_method,
+            created_at,
+            devices!inner (
+              device_id,
+              display_name,
+              firmware_version,
+              last_seen
+            )
+          `)
+          .eq('user_id', session.user.id);
+
+        if (error) {
+          console.error('Error loading devices:', error);
+          setLoading(false);
+          return;
+        }
+
+        if (assignments) {
+          const deviceList: Device[] = assignments.map((d: any) => ({
+            serial_number: d.serial_number,
+            provisioning_method: d.provisioning_method || 'unknown',
+            created_at: d.created_at,
+            device: d.devices
+          }));
+
+          setDevices(deviceList);
+
+          // Calculate summary
+          const now = new Date();
+          const onlineThreshold = 5 * 60 * 1000; // 5 minutes
+          
+          const online = deviceList.filter((d) => {
+            const lastSeen = new Date(d.device.last_seen);
+            return now.getTime() - lastSeen.getTime() < onlineThreshold;
+          }).length;
+
+          setSummary({
+            total: deviceList.length,
+            online,
+            offline: deviceList.length - online
+          });
+        }
+      } catch (err) {
+        console.error('Error loading dashboard:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadDevices();
+  }, []);
+
+  const getStatusColor = (lastSeen: string) => {
+    const now = new Date();
+    const seen = new Date(lastSeen);
+    const diff = now.getTime() - seen.getTime();
+    
+    if (diff < 5 * 60 * 1000) return 'bg-green-500'; // Online
+    if (diff < 30 * 60 * 1000) return 'bg-yellow-500'; // Recently seen
+    return 'bg-gray-400 dark:bg-gray-600'; // Offline
+  };
+
+  const getStatusText = (lastSeen: string) => {
+    const now = new Date();
+    const seen = new Date(lastSeen);
+    const diff = now.getTime() - seen.getTime();
+    
+    if (diff < 5 * 60 * 1000) return 'Online';
+    if (diff < 30 * 60 * 1000) return 'Recently seen';
+    return 'Offline';
+  };
+
+  const getProvisioningMethodLabel = (method: string) => {
+    switch (method) {
+      case 'pairing_code':
+        return 'Pairing Code';
+      case 'web_serial':
+        return 'Web Install';
+      case 'admin_assigned':
+        return 'Admin Assigned';
+      case 'improv_wifi':
+        return 'Improv WiFi';
+      default:
+        return method || 'Unknown';
+    }
+  };
+
+  return (
+    <>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Manage your LED display devices</p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Devices</div>
+          <div className="text-3xl font-bold text-gray-900 dark:text-white">{summary.total}</div>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Online</div>
+          <div className="text-3xl font-bold text-green-600 dark:text-green-400">{summary.online}</div>
+        </div>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Offline</div>
+          <div className="text-3xl font-bold text-gray-400 dark:text-gray-500">{summary.offline}</div>
+        </div>
+      </div>
+
+      {/* Device List */}
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" />
+        </div>
+      ) : devices.length === 0 ? (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
+          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No devices yet</h3>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">
+            Get started by installing or approving your first LED display.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/user/install"
+              className="inline-block px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Install Your First Device
+            </Link>
+            <Link
+              href="/user/approve-device"
+              className="inline-block px-6 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+            >
+              Approve Device
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">My Devices</h2>
+          {devices.map((device) => (
+            <div key={device.serial_number} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-3 h-3 rounded-full ${getStatusColor(device.device.last_seen)}`} />
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {device.device.display_name || device.device.device_id}
+                    </h3>
+                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                      ({getStatusText(device.device.last_seen)})
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                    <p><span className="font-medium">Serial:</span> {device.serial_number}</p>
+                    <p><span className="font-medium">Firmware:</span> {device.device.firmware_version || 'Unknown'}</p>
+                    <p><span className="font-medium">Last seen:</span> {new Date(device.device.last_seen).toLocaleString()}</p>
+                    <p><span className="font-medium">Added:</span> {new Date(device.created_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium ml-4">
+                  {getProvisioningMethodLabel(device.provisioning_method)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,16 +1,15 @@
 'use client';
 
 import { useNavigation } from '@/hooks/useNavigation';
-import { usePathname } from 'next/navigation';
-import Link from 'next/link';
+import { APP_VERSION, cn } from '@/lib/utils';
 import Image from 'next/image';
-import { cn, APP_VERSION } from '@/lib/utils';
-import { ThemeToggle } from './ThemeToggle';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Avatar } from './Avatar';
+import { ThemeToggle } from './ThemeToggle';
 
 const navItems = [
   { href: '/', label: 'Home', icon: '🏠' },
-  { href: '/install/', label: 'Install', icon: '🔌' },
   { href: '/hardware/', label: 'Hardware', icon: '📦' },
   { href: '/troubleshooting/', label: 'Troubleshoot', icon: '🔧' },
   { href: '/versions/', label: 'Downloads', icon: '⬇️' },

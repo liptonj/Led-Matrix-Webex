@@ -1,33 +1,22 @@
-import type { Metadata } from 'next';
-import Script from 'next/script';
-import { Header, Footer, Breadcrumbs } from '@/components/layout';
-import { InstallWizard } from '@/components/install/InstallWizard';
+'use client';
 
-export const metadata: Metadata = {
-  title: 'Install Firmware',
-  description: 'Install LED Matrix Webex Display firmware directly from your browser - no software required',
-};
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
-export default function InstallPage() {
+export default function InstallRedirect() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Always redirect to user install page (login required)
+    router.replace('/user/install');
+  }, [router]);
+
   return (
-    <>
-      <Script
-        src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js"
-        type="module"
-        strategy="afterInteractive"
-      />
-      <Header 
-        title="LED Matrix Webex Display" 
-        tagline="Install firmware directly from your browser"
-        showBrand={true}
-      />
-      
-      <main className="container mx-auto px-4 py-8" id="main-content">
-        <Breadcrumbs />
-        <InstallWizard />
-      </main>
-
-      <Footer />
-    </>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+      <div className="text-center">
+        <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-gray-600 dark:text-gray-400">Redirecting to install page...</p>
+      </div>
+    </div>
   );
 }

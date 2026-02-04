@@ -274,7 +274,7 @@ export default function AdminShell({
         if (loading || isLoginPage) return;
 
         if (!authenticated) {
-            router.replace('/admin/login/');
+            router.replace('/login');
             return;
         }
 
@@ -288,7 +288,7 @@ export default function AdminShell({
 
     const handleSignOut = async () => {
         await signOut();
-        router.replace('/admin/login/');
+        router.replace('/login');
     };
 
     const navItems = useMemo(() => {
@@ -302,6 +302,7 @@ export default function AdminShell({
             { href: '/admin/releases', label: 'Releases' },
             { href: '/admin/oauth', label: 'OAuth' },
             { href: '/admin/users', label: 'Users' },
+            { href: '/user', label: 'User Portal', badge: 'Admin' },
         ];
     }, [admin]);
 
@@ -378,13 +379,18 @@ export default function AdminShell({
                                     <Link
                                         key={item.href}
                                         href={item.href}
-                                        className={`px-3 py-2 rounded-md text-sm font-medium ${
+                                        className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${
                                             pathname === item.href
                                                 ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200'
                                                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                         }`}
                                     >
                                         {item.label}
+                                        {'badge' in item && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                                                {item.badge}
+                                            </span>
+                                        )}
                                     </Link>
                                 ))}
                             </nav>
@@ -439,23 +445,28 @@ export default function AdminShell({
                         <Link
                             key={item.href}
                             href={item.href}
-                            className={`px-3 py-2 rounded-md text-sm font-medium ${
+                            className={`px-3 py-2 rounded-md text-sm font-medium flex items-center justify-between ${
                                 pathname === item.href
                                     ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200'
                                     : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                             }`}
                             onClick={() => setMobileMenuOpen(false)}
                         >
-                            {item.label}
-                        </Link>
-                    ))}
+                            <span>{item.label}</span>
+                            {'badge' in item && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                                    {item.badge}
+                                </span>
+                            )}
+                    </Link>
+                  ))}
                     <hr className="my-2 border-gray-200 dark:border-gray-700" />
                     <Link
-                        href="/"
-                        className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                        onClick={() => setMobileMenuOpen(false)}
+                      href="/"
+                      className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      onClick={() => setMobileMenuOpen(false)}
                     >
-                        View Site
+                      Main Site
                     </Link>
                     <button
                         onClick={() => {

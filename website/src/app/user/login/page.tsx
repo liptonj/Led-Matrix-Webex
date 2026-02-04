@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
-export default function OldAdminLoginPage() {
+export default function OldUserLoginPage() {
   const router = useRouter();
   
   useEffect(() => {
