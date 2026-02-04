@@ -1,7 +1,7 @@
 'use client';
 
+import { getSupabaseClient } from '@/lib/supabaseClient';
 import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
-import { createClient } from '@/lib/supabase/client';
 import { useEffect, useState } from 'react';
 
 const OAUTH_CALLBACK_TIMEOUT_MS = 15000;
@@ -54,7 +54,7 @@ export default function AuthCallbackPage() {
 
         if (token) {
           // Use the token to establish a Supabase session
-          const supabase = createClient();
+          const supabase = getSupabaseClient();
           const { error: sessionError } = await supabase.auth.verifyOtp({
             token_hash: token,
             type: 'magiclink',
