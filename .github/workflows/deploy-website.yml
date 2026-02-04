@@ -14,12 +14,8 @@ jobs:
   deploy:
     name: Deploy to Cloudflare Pages
     runs-on: self-hosted
-    container:
-      image: ghcr.io/liptonj/led-matrix-builder:latest
-      # Network handled by GitHub Actions runner
     permissions:
       contents: read
-      packages: read       # For pulling container image
       deployments: write
 
     steps:
@@ -28,15 +24,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: website
-        run: |
-          # Try to restore from container cache first
-          if [ -d "/opt/node_modules_cache/website/node_modules" ]; then
-            echo "Restoring node_modules from container cache..."
-            cp -r /opt/node_modules_cache/website/node_modules .
-            npm ci --prefer-offline
-          else
-            npm ci
-          fi
+        run: npm ci
 
       # Note: Firmware binaries are no longer downloaded here.
       # Firmware is stored in Supabase Storage and manifests are generated
