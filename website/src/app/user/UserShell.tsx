@@ -19,6 +19,7 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdminUser, setIsAdminUser] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isLoginPage = pathname === '/user/login' || pathname === '/user/callback';
 
   useEffect(() => {
@@ -96,62 +97,69 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
       <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
-            <div className="flex items-center space-x-8">
+            {/* Left side: Hamburger (mobile) + Logo + Desktop nav */}
+            <div className="flex items-center">
+              {/* Mobile hamburger menu button - moved to left */}
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="md:hidden p-3 -ml-2 mr-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600 touch-manipulation"
+                aria-label="Toggle menu"
+                aria-expanded={mobileMenuOpen}
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  {mobileMenuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+
               <Link href="/user" className="text-xl font-bold text-gray-900 dark:text-white">
                 LED Display
               </Link>
-              <div className="hidden md:flex items-center space-x-4">
+
+              {/* Desktop Navigation Links */}
+              <div className="hidden md:flex items-center space-x-1 ml-8">
                 <Link 
                   href="/user" 
-                  className={`text-sm font-medium ${
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     pathname === '/user' 
-                      ? 'text-blue-600 dark:text-blue-400' 
-                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' 
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
                 >
                   Dashboard
                 </Link>
                 <Link 
                   href="/user/install" 
-                  className={`text-sm font-medium ${
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     pathname === '/user/install' 
-                      ? 'text-blue-600 dark:text-blue-400' 
-                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' 
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
                 >
                   Install Device
                 </Link>
                 <Link 
                   href="/user/approve-device" 
-                  className={`text-sm font-medium ${
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     pathname === '/user/approve-device' 
-                      ? 'text-blue-600 dark:text-blue-400' 
-                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' 
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
                   }`}
-          >
-            Approve Device
-          </Link>
-          {isAdminUser && (
-            <Link 
-              href="/admin" 
-              className="block px-3 py-2 rounded-md text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-            >
-              Admin Portal
-            </Link>
-          )}
-          <Link 
-            href="/" 
-            className="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            Main Site
-          </Link>
-        </div>
-      </div>
+                >
+                  Approve Device
+                </Link>
+              </div>
+            </div>
 
-            <div className="flex items-center space-x-4">
+            {/* Right side: Desktop links + User info */}
+            <div className="flex items-center space-x-2 md:space-x-4">
+              {/* Desktop-only links */}
               <Link 
                 href="/" 
-                className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium"
+                className="hidden md:block px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 font-medium transition-colors"
               >
                 Main Site
               </Link>
@@ -159,28 +167,124 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
               {isAdminUser && (
                 <Link 
                   href="/admin" 
-                  className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm font-medium"
+                  className="hidden md:block px-3 py-2 rounded-lg text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 text-sm font-medium transition-colors"
                 >
                   Admin Portal
                 </Link>
               )}
               
+              {/* User avatar/info */}
               <div className="flex items-center space-x-2">
                 {profile?.avatar_url && (
                   <img
                     src={profile.avatar_url}
                     alt=""
-                    className="w-8 h-8 rounded-full"
+                    className="w-8 h-8 rounded-full ring-2 ring-gray-200 dark:ring-gray-700"
                   />
                 )}
-                <span className="text-sm text-gray-700 dark:text-gray-300 hidden sm:inline">
+                <span className="text-sm text-gray-700 dark:text-gray-300 hidden md:inline max-w-[120px] truncate">
                   {profile?.display_name || profile?.email}
                 </span>
               </div>
 
+              {/* Desktop Sign Out */}
               <button
                 onClick={handleSignOut}
-                className="text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium"
+                className="hidden md:block px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 font-medium transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Navigation Menu (collapsible with animation) */}
+        <div 
+          className={`md:hidden border-t border-gray-200 dark:border-gray-700 overflow-hidden transition-all duration-300 ease-in-out ${
+            mobileMenuOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+          }`}
+        >
+          <div className="px-4 py-3 space-y-1">
+            {/* User info for mobile */}
+            <div className="flex items-center space-x-3 px-3 py-3 mb-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+              {profile?.avatar_url && (
+                <img
+                  src={profile.avatar_url}
+                  alt=""
+                  className="w-10 h-10 rounded-full ring-2 ring-gray-200 dark:ring-gray-600"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                  {profile?.display_name || 'User'}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {profile?.email}
+                </p>
+              </div>
+            </div>
+
+            {/* Navigation links with larger touch targets */}
+            <Link 
+              href="/user" 
+              onClick={() => setMobileMenuOpen(false)}
+              className={`block px-4 py-3 rounded-lg text-base font-medium touch-manipulation active:scale-[0.98] transition-all ${
+                pathname === '/user' 
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-200' 
+                  : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600'
+              }`}
+            >
+              Dashboard
+            </Link>
+            <Link 
+              href="/user/install" 
+              onClick={() => setMobileMenuOpen(false)}
+              className={`block px-4 py-3 rounded-lg text-base font-medium touch-manipulation active:scale-[0.98] transition-all ${
+                pathname === '/user/install' 
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-200' 
+                  : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600'
+              }`}
+            >
+              Install Device
+            </Link>
+            <Link 
+              href="/user/approve-device" 
+              onClick={() => setMobileMenuOpen(false)}
+              className={`block px-4 py-3 rounded-lg text-base font-medium touch-manipulation active:scale-[0.98] transition-all ${
+                pathname === '/user/approve-device' 
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-200' 
+                  : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600'
+              }`}
+            >
+              Approve Device
+            </Link>
+            
+            {/* Mobile - Additional Links */}
+            <div className="pt-3 mt-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
+              <Link 
+                href="/" 
+                onClick={() => setMobileMenuOpen(false)}
+                className="block px-4 py-3 rounded-lg text-base font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600 touch-manipulation active:scale-[0.98] transition-all"
+              >
+                Main Site
+              </Link>
+              {isAdminUser && (
+                <Link 
+                  href="/admin" 
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block px-4 py-3 rounded-lg text-base font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 active:bg-blue-100 dark:active:bg-blue-900/50 touch-manipulation active:scale-[0.98] transition-all"
+                >
+                  Admin Portal
+                </Link>
+              )}
+              
+              {/* Sign Out moved to mobile menu */}
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleSignOut();
+                }}
+                className="w-full text-left px-4 py-3 rounded-lg text-base font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 active:bg-red-100 dark:active:bg-red-900/30 touch-manipulation active:scale-[0.98] transition-all"
               >
                 Sign Out
               </button>
@@ -189,62 +293,8 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      {/* Mobile Navigation */}
-      <div className="md:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="px-4 py-2 space-y-1">
-          <Link 
-            href="/user" 
-            className={`block px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/user' 
-                ? 'bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-200' 
-                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-          >
-            Dashboard
-          </Link>
-          <Link 
-            href="/user/install" 
-            className={`block px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/user/install' 
-                ? 'bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-200' 
-                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-          >
-            Install Device
-          </Link>
-          <Link 
-            href="/user/approve-device" 
-            className={`block px-3 py-2 rounded-md text-sm font-medium ${
-              pathname === '/user/approve-device' 
-                ? 'bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-200' 
-                : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-            }`}
-          >
-            Approve Device
-          </Link>
-          
-          {/* Mobile - Additional Links */}
-          <div className="pt-2 border-t border-gray-200 dark:border-gray-700 mt-2">
-            <Link 
-              href="/" 
-              className="block px-3 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-            >
-              Main Site
-            </Link>
-            {isAdminUser && (
-              <Link 
-                href="/admin" 
-                className="block px-3 py-2 rounded-md text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900"
-              >
-                Admin Portal
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children}
       </main>
     </div>

@@ -28,6 +28,7 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { isCodeExpired } from "../_shared/pairing_code.ts";
 
 interface ProvisionRequest {
   serial_number: string;
@@ -117,17 +118,46 @@ serve(async (req: Request) => {
     const { data: existingDevice, error: _lookupError } = await supabase
       .schema("display")
       .from("devices")
-      .select("device_id, pairing_code, is_provisioned, user_approved_by")
+      .select("device_id, pairing_code, is_provisioned, user_approved_by, created_at")
       .eq("serial_number", serial_number.toUpperCase())
       .single();
 
     if (existingDevice) {
       // CHECK: Device must be approved
       if (!existingDevice.user_approved_by) {
+        // Check if pairing code has expired (more than 4 minutes old)
+        if (existingDevice.created_at && isCodeExpired(existingDevice.created_at)) {
+          // Generate a new pairing code and update the device
+          const newPairingCode = generatePairingCode();
+          await supabase
+            .schema("display")
+            .from("devices")
+            .update({
+              pairing_code: newPairingCode,
+              created_at: new Date().toISOString(),
+            })
+            .eq("serial_number", serial_number.toUpperCase());
+
+          return new Response(
+            JSON.stringify({
+              error: "Device not approved yet. Ask device owner to approve it on the website.",
+              serial_number: serial_number.toUpperCase(),
+              pairing_code: newPairingCode,
+              awaiting_approval: true,
+            }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
+
+        // Device exists but not approved, and code hasn't expired yet
         return new Response(
           JSON.stringify({
             error: "Device not approved yet. Ask device owner to approve it on the website.",
             serial_number: serial_number.toUpperCase(),
+            pairing_code: existingDevice.pairing_code,
             awaiting_approval: true,
           }),
           {

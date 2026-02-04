@@ -83,7 +83,8 @@ export async function validateHmacRequest(
   }
 
   // Optional: Check for replay (timestamp must be newer than last used)
-  if (device.last_auth_timestamp && requestTime <= device.last_auth_timestamp) {
+  // Allow same timestamp if within 10 seconds to prevent provision->auth race condition
+  if (device.last_auth_timestamp && (currentTime - device.last_auth_timestamp > 10) && requestTime <= device.last_auth_timestamp) {
     return { valid: false, error: "Replay detected" };
   }
 

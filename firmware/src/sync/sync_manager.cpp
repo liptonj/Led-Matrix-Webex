@@ -4,6 +4,7 @@
  */
 
 #include "sync_manager.h"
+#include "provision_helpers.h"
 #include "../app_state.h"
 #include "../supabase/supabase_client.h"
 #include "../supabase/supabase_realtime.h"
@@ -214,12 +215,12 @@ bool provisionDeviceWithSupabase() {
     
     static bool provisioned = false;
     static unsigned long last_attempt = 0;
-    static unsigned long last_time_warn = 0;
     static unsigned long last_pending_log = 0;
     static unsigned long last_low_heap_log = 0;
-    const unsigned long retry_interval_ms = 60000;  // 60 seconds
+    const unsigned long retry_interval_ms = 30000;  // 30 seconds (Netflix-style polling)
     const unsigned long pending_retry_interval_ms = 1800000;  // 30 minutes
 
+    // Early returns for already provisioned
     if (provisioned) {
         return true;
     }
@@ -227,43 +228,22 @@ bool provisionDeviceWithSupabase() {
         provisioned = true;
         return true;
     }
-    if (!deps.app_state.wifi_connected) {
+
+    // Use helper for guard conditions
+    if (!ProvisionHelpers::shouldAttemptProvision()) {
         return false;
     }
-    // Guard: Check if supabaseClient is initialized before attempting provisioning
-    if (!deps.supabase.isInitialized()) {
-        Serial.println("[SUPABASE] Client not initialized - skipping provisioning");
-        return false;
-    }
-    if (deps.app_state.supabase_disabled || deps.app_state.supabase_blacklisted || deps.app_state.supabase_deleted) {
-        return false;
-    }
-    if (!deps.app_state.time_synced) {
-        unsigned long now = millis();
-        if (now - last_time_warn > 60000) {
-            last_time_warn = now;
-            Serial.println("[SUPABASE] Waiting for NTP sync before provisioning");
-        }
-        return false;
-    }
-    if (!deps.credentials.isProvisioned()) {
-        Serial.println("[SUPABASE] Credentials not ready - cannot provision");
-        return false;
-    }
-    String supabase_url = deps.config.getSupabaseUrl();
-    supabase_url.trim();
-    if (supabase_url.isEmpty()) {
-        Serial.println("[SUPABASE] No Supabase URL configured");
-        return false;
-    }
+
+    // Rate limiting check
     const unsigned long retry_interval =
         deps.app_state.supabase_approval_pending ? pending_retry_interval_ms : retry_interval_ms;
-    if (millis() - last_attempt < retry_interval) {
+    unsigned long now = millis();
+    if (now - last_attempt < retry_interval) {
         return false;
     }
-    unsigned long now = millis();
     last_attempt = now;
 
+    // Heap check
     if (!hasSafeTlsHeap(65000, 40000)) {
         if (now - last_low_heap_log > 60000) {
             last_low_heap_log = now;
@@ -272,6 +252,9 @@ bool provisionDeviceWithSupabase() {
         return false;
     }
 
+    // Build endpoint URL
+    String supabase_url = deps.config.getSupabaseUrl();
+    supabase_url.trim();
     if (supabase_url.endsWith("/")) {
         supabase_url.remove(supabase_url.length() - 1);
     }
@@ -279,6 +262,7 @@ bool provisionDeviceWithSupabase() {
 
     Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
 
+    // HTTP request setup (kept local as requested)
     WiFiClientSecure client;
     configureSecureClientWithTls(client, CA_CERT_BUNDLE_SUPABASE, 
                                  deps.config.getTlsVerify(), 2048, 2048);
@@ -288,49 +272,29 @@ bool provisionDeviceWithSupabase() {
     http.setTimeout(15000);
     http.addHeader("Content-Type", "application/json");
 
-    JsonDocument payload;
-    payload["serial_number"] = deps.credentials.getSerialNumber();
-    payload["key_hash"] = deps.credentials.getKeyHash();
-    payload["firmware_version"] = FIRMWARE_VERSION;
-    if (WiFi.isConnected()) {
-        payload["ip_address"] = WiFi.localIP().toString();
-    }
-    // Send existing pairing code for migration (preserves user's pairing during HMAC migration)
-    String existing_code = deps.pairing.getCode();
-    if (!existing_code.isEmpty()) {
-        payload["existing_pairing_code"] = existing_code;
-    }
-
-    String body;
-    body.reserve(256);
-    serializeJson(payload, body);
-
+    // Use helper to build payload
+    String body = ProvisionHelpers::buildProvisionPayload();
     int http_code = http.POST(body);
     String response = http.getString();
     http.end();
 
+    // Handle responses
     if (http_code < 200 || http_code >= 300) {
         Serial.printf("[SUPABASE] Provision failed: HTTP %d\n", http_code);
         Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
+        
         if (http_code == 409 && response.indexOf("approval_required") >= 0) {
             deps.app_state.supabase_approval_pending = true;
-            unsigned long now = millis();
             if (now - last_pending_log > 60000) {
                 last_pending_log = now;
                 Serial.println("[SUPABASE] Provisioning pending admin approval");
             }
         } else if (http_code == 403 && response.indexOf("awaiting_approval") >= 0) {
-            // Device needs user approval
-            static unsigned long last_approval_log = 0;
-            if (millis() - last_approval_log > 60000) {
-                last_approval_log = millis();
-                Serial.println("[SUPABASE] Device awaiting user approval");
-                Serial.printf("[SUPABASE] Serial: %s\n", deps.credentials.getSerialNumber().c_str());
-                
-                // Update display to show awaiting approval
-                deps.display.displayProvisioningStatus(deps.credentials.getSerialNumber());
+            // Use helper for awaiting approval handling
+            int result = ProvisionHelpers::handleAwaitingApproval(response);
+            if (result == 1) {
+                deps.app_state.provisioning_timeout = true;
             }
-            deps.app_state.supabase_approval_pending = true;
             return false;
         } else if (http_code == 403 && response.indexOf("device_disabled") >= 0) {
             deps.app_state.supabase_disabled = true;
@@ -348,6 +312,7 @@ bool provisionDeviceWithSupabase() {
         return false;
     }
 
+    // Parse success response
     JsonDocument result;
     DeserializationError error = deserializeJson(result, response);
     if (error) {
@@ -361,6 +326,7 @@ bool provisionDeviceWithSupabase() {
         return false;
     }
 
+    // Handle pairing code
     String pairing_code = result["pairing_code"] | "";
     if (!pairing_code.isEmpty()) {
         deps.pairing.setCode(pairing_code, true);
@@ -369,8 +335,11 @@ bool provisionDeviceWithSupabase() {
         Serial.println("[SUPABASE] Pairing code received and set");
     }
 
+    // Success - reset state using helper
     provisioned = true;
+    ProvisionHelpers::resetProvisionState();
     deps.app_state.supabase_approval_pending = false;
+    deps.app_state.provisioning_timeout = false;
     deps.app_state.supabase_disabled = false;
     deps.app_state.supabase_blacklisted = false;
     deps.app_state.supabase_deleted = false;

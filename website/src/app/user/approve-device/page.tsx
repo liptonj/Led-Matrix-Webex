@@ -1,21 +1,20 @@
 'use client';
 
+import { getSession } from '@/lib/supabase/auth';
 import { useState } from 'react';
 import UserShell from '../UserShell';
-import { getSupabase } from '@/lib/supabase';
-import { getSession } from '@/lib/supabase/auth';
 
 export default function ApproveDevicePage() {
-  const [serialNumber, setSerialNumber] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
-  const formatSerialNumber = (value: string) => {
-    // Remove all non-hex characters and convert to uppercase
-    const cleaned = value.replace(/[^A-Fa-f0-9]/g, '').toUpperCase();
-    // Limit to 8 characters
-    return cleaned.slice(0, 8);
+  const formatPairingCode = (value: string) => {
+    // Allow only A-HJ-NP-Z2-9 (no I, O, 0, 1) and convert to uppercase
+    const cleaned = value.replace(/[^A-HJ-NP-Z2-9a-hj-np-z]/gi, '').toUpperCase();
+    // Limit to 6 characters
+    return cleaned.slice(0, 6);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +48,7 @@ export default function ApproveDevicePage() {
             'Authorization': `Bearer ${session.access_token}`
           },
           body: JSON.stringify({ 
-            serial_number: serialNumber.toUpperCase() 
+            pairing_code: pairingCode.toUpperCase() 
           })
         }
       );
@@ -61,7 +60,7 @@ export default function ApproveDevicePage() {
       }
 
       setMessage(data.message || 'Device approved successfully!');
-      setSerialNumber('');
+      setPairingCode('');
 
       // Redirect to dashboard after 2 seconds
       setTimeout(() => {
@@ -75,7 +74,7 @@ export default function ApproveDevicePage() {
     }
   };
 
-  const isValidSerialNumber = serialNumber.length === 8 && /^[A-F0-9]{8}$/.test(serialNumber);
+  const isValidPairingCode = pairingCode.length === 6 && /^[A-HJ-NP-Z2-9]{6}$/.test(pairingCode);
 
   return (
     <UserShell>
@@ -84,32 +83,32 @@ export default function ApproveDevicePage() {
 
         <div className="bg-white rounded-lg shadow p-6">
           <p className="text-gray-600 mb-6 text-center">
-            Enter the 8-character serial number from your device to approve it.
+            Enter the 6-character pairing code from your device to approve it.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="serial" className="block text-sm font-medium text-gray-700 mb-2">
-                Serial Number
+              <label htmlFor="pairing-code" className="block text-sm font-medium text-gray-700 mb-2">
+                Pairing Code
               </label>
               <input
-                id="serial"
+                id="pairing-code"
                 type="text"
-                value={serialNumber}
-                onChange={(e) => setSerialNumber(formatSerialNumber(e.target.value))}
-                placeholder="A1B2C3D4"
-                maxLength={8}
-                className="w-full px-4 py-3 text-center text-2xl font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={pairingCode}
+                onChange={(e) => setPairingCode(formatPairingCode(e.target.value))}
+                placeholder="ABC123"
+                maxLength={6}
+                className="w-full px-4 py-3 text-center text-3xl tracking-widest font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               />
               <p className="mt-2 text-xs text-gray-500 text-center">
-                {serialNumber.length}/8 characters
+                {pairingCode.length}/6 characters
               </p>
             </div>
 
             <button
               type="submit"
-              disabled={loading || !isValidSerialNumber}
+              disabled={loading || !isValidPairingCode}
               className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? 'Approving...' : 'Approve Device'}
@@ -132,7 +131,7 @@ export default function ApproveDevicePage() {
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h2 className="font-semibold text-blue-900 mb-3">How it works:</h2>
           <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
-            <li>Find the serial number on your device (8 hex characters, e.g., A1B2C3D4)</li>
+            <li>Find the pairing code on your device (6 characters, e.g., ABC123)</li>
             <li>Enter it in the field above</li>
             <li>Click "Approve Device" to link it to your account</li>
             <li>The device will appear in your dashboard once approved</li>
@@ -140,7 +139,7 @@ export default function ApproveDevicePage() {
         </div>
 
         <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="font-semibold text-gray-900 mb-2">Where to find the serial number:</h3>
+          <h3 className="font-semibold text-gray-900 mb-2">Where to find the pairing code:</h3>
           <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
             <li>Printed on the device label</li>
             <li>Displayed on the LED matrix during boot</li>

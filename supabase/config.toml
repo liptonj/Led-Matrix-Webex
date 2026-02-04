@@ -132,3 +132,12 @@ verify_jwt = false
 
 [functions.webex-token]
 verify_jwt = false
+
+[functions.approve-device]
+verify_jwt = false
+
+[functions.webex-user-login]
+verify_jwt = false
+
+[functions.webex-user-callback]
+verify_jwt = false

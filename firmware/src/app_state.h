@@ -45,6 +45,7 @@ struct AppState {
     bool supabase_connected = false;           // Successfully authenticated with Supabase
     bool supabase_app_connected = false;       // App connected via Supabase (redundant with embedded_app_connected but explicit)
     bool supabase_approval_pending = false;    // Provisioning awaiting admin approval
+    bool provisioning_timeout = false;         // Provisioning timeout flag
     bool supabase_disabled = false;            // Disabled by admin
     bool supabase_blacklisted = false;         // Permanently blocked
     bool supabase_deleted = false;             // Server deleted device record

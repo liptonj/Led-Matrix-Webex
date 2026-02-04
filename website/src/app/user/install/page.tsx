@@ -21,11 +21,12 @@ export default function InstallDevicePage() {
           <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-6">
             <p className="text-sm text-blue-900 dark:text-blue-200 mb-2">
               <strong>For logged-in users only:</strong> This installation process will automatically 
-              approve your device after successful firmware installation. You must be logged in to 
+              monitor Serial output and approve your device using the pairing code. You must be logged in to 
               complete the installation.
             </p>
             <p className="text-sm text-blue-800 dark:text-blue-300">
-              After installation, your device will appear in your dashboard and start syncing 
+              After flashing, the installer will monitor Serial output for the pairing code and automatically 
+              approve your device. Your device will appear in your dashboard and start syncing 
               your Webex status automatically.
             </p>
           </div>
@@ -40,11 +41,13 @@ export default function InstallDevicePage() {
             ✓ Device Auto-Approval
           </h2>
           <p className="text-sm text-green-800 dark:text-green-300 mb-3">
-            Once the firmware is successfully installed and your device connects to WiFi, it will 
-            automatically be approved and linked to your account. No manual approval needed!
+            After flashing completes, the installer will automatically monitor Serial output to extract 
+            the pairing code and approve your device. No manual approval needed!
           </p>
           <ul className="text-sm text-green-800 dark:text-green-300 space-y-2 list-disc list-inside">
-            <li>Device will appear in your <Link href="/user" className="underline font-medium">dashboard</Link> within a few minutes</li>
+            <li>Serial output is monitored for pairing code pattern</li>
+            <li>Device is automatically approved when pairing code is found</li>
+            <li>Device will appear in your <Link href="/user" className="underline font-medium">dashboard</Link> immediately after approval</li>
             <li>Status will sync automatically once connected</li>
             <li>You can manage your device from the dashboard</li>
           </ul>

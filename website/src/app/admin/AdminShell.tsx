@@ -351,11 +351,11 @@ export default function AdminShell({
             <header className="bg-white dark:bg-gray-800 shadow relative z-40">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center py-4">
-                        <div className="flex items-center space-x-4 lg:space-x-8">
+                        <div className="flex items-center space-x-2 lg:space-x-8">
                             {/* Mobile menu button */}
                             <button
                                 type="button"
-                                className="lg:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+                                className="lg:hidden inline-flex items-center justify-center p-3 -ml-2 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 touch-manipulation"
                                 aria-controls="mobile-menu"
                                 aria-expanded={mobileMenuOpen}
                                 onClick={toggleMobileMenu}
@@ -430,25 +430,25 @@ export default function AdminShell({
                 }`}
             >
                 <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <span className="text-lg font-semibold text-gray-900 dark:text-white">Menu</span>
+                    <span className="text-lg font-semibold text-gray-900 dark:text-white">Admin Menu</span>
                     <button
                         type="button"
-                        className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700"
+                        className="p-3 -mr-2 rounded-lg text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600 touch-manipulation"
                         onClick={() => setMobileMenuOpen(false)}
                     >
                         <span className="sr-only">Close menu</span>
                         <CloseIcon className="h-6 w-6" />
                     </button>
                 </div>
-                <nav className="flex flex-col p-4 space-y-2">
+                <nav className="flex flex-col p-4 space-y-1">
                     {navItems.map((item) => (
                         <Link
                             key={item.href}
                             href={item.href}
-                            className={`px-3 py-2 rounded-md text-sm font-medium flex items-center justify-between ${
+                            className={`px-4 py-3 rounded-lg text-base font-medium flex items-center justify-between touch-manipulation active:scale-[0.98] transition-all ${
                                 pathname === item.href
-                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200'
-                                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200'
+                                    : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600'
                             }`}
                             onClick={() => setMobileMenuOpen(false)}
                         >
@@ -458,22 +458,22 @@ export default function AdminShell({
                                     {item.badge}
                                 </span>
                             )}
-                    </Link>
-                  ))}
-                    <hr className="my-2 border-gray-200 dark:border-gray-700" />
+                        </Link>
+                    ))}
+                    <hr className="my-3 border-gray-200 dark:border-gray-700" />
                     <Link
-                      href="/"
-                      className="px-3 py-2 rounded-md text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                      onClick={() => setMobileMenuOpen(false)}
+                        href="/"
+                        className="px-4 py-3 rounded-lg text-base font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600 touch-manipulation active:scale-[0.98] transition-all"
+                        onClick={() => setMobileMenuOpen(false)}
                     >
-                      Main Site
+                        Main Site
                     </Link>
                     <button
                         onClick={() => {
                             setMobileMenuOpen(false);
                             handleSignOut();
                         }}
-                        className="px-3 py-2 rounded-md text-sm font-medium text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        className="w-full text-left px-4 py-3 rounded-lg text-base font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 active:bg-red-100 dark:active:bg-red-900/30 touch-manipulation active:scale-[0.98] transition-all"
                     >
                         Sign Out
                     </button>

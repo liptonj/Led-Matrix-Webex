@@ -1,13 +1,13 @@
 /**
  * Approve Device Edge Function
  *
- * Allows authenticated users to approve devices by serial number.
+ * Allows authenticated users to approve devices by pairing code.
  * Updates devices table with user_approved_by and approved_at.
  * Creates entry in user_devices table.
  *
  * Request body:
  * {
- *   "serial_number": "A1B2C3D4"  // 8 hex characters
+ *   "pairing_code": "ABC123"  // 6 characters
  * }
  *
  * Response:
@@ -20,9 +20,11 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
+import { getUserFromRequest } from "../_shared/user_auth.ts";
+import { validatePairingCode, isCodeExpired } from "../_shared/pairing_code.ts";
 
 interface ApproveRequest {
-  serial_number: string;
+  pairing_code: string;
 }
 
 serve(async (req: Request) => {
@@ -42,44 +44,19 @@ serve(async (req: Request) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    // Get user from Bearer token
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response(
-        JSON.stringify({ error: "Missing Bearer token" }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
+    // Authenticate user
+    const authResult = await getUserFromRequest(req);
+    if (authResult.error) {
+      return authResult.error;
     }
+    const { user } = authResult;
 
-    const token = authHeader.slice(7);
-    const userSupabase = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-
-    const { data: { user }, error: authError } = await userSupabase.auth.getUser();
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid or expired token" }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
+    // Parse and validate pairing code
     const body: ApproveRequest = await req.json();
-    const { serial_number } = body;
-
-    if (!serial_number) {
+    const validation = validatePairingCode(body.pairing_code);
+    if (!validation.valid) {
       return new Response(
-        JSON.stringify({ error: "Missing serial_number" }),
+        JSON.stringify({ error: validation.error }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -87,30 +64,18 @@ serve(async (req: Request) => {
       );
     }
 
-    // Validate serial number format (8 hex characters)
-    if (!/^[A-Fa-f0-9]{8}$/.test(serial_number)) {
-      return new Response(
-        JSON.stringify({
-          error: "Invalid serial_number format. Expected 8 hex characters.",
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    const normalizedSerial = serial_number.toUpperCase();
+    const normalizedCode = validation.code!;
 
     // Use service role client for database operations
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Check if device exists
+    // Look up device by pairing_code
     const { data: device, error: deviceError } = await supabase
       .schema("display")
-      .from("devices")
-      .select("serial_number, user_approved_by")
-      .eq("serial_number", normalizedSerial)
+      .select("serial_number, user_approved_by, created_at")
+      .eq("pairing_code", normalizedCode)
       .single();
 
     if (deviceError || !device) {
@@ -118,6 +83,17 @@ serve(async (req: Request) => {
         JSON.stringify({ error: "Device not found" }),
         {
           status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Check if pairing code expired
+    if (isCodeExpired(device.created_at)) {
+      return new Response(
+        JSON.stringify({ error: "Pairing code has expired" }),
+        {
+          status: 410,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -145,7 +121,7 @@ serve(async (req: Request) => {
         user_approved_by: user.id,
         approved_at: new Date().toISOString(),
       })
-      .eq("serial_number", normalizedSerial);
+      .eq("pairing_code", normalizedCode);
 
     if (updateError) {
       console.error("Failed to update device approval:", updateError);
@@ -165,7 +141,7 @@ serve(async (req: Request) => {
       .upsert(
         {
           user_id: user.id,
-          serial_number: normalizedSerial,
+          serial_number: device.serial_number,
           created_by: user.id,
           provisioning_method: "user_approved",
           provisioned_at: new Date().toISOString(),
