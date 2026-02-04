@@ -1,6 +1,10 @@
 # GitHub Actions Self-Hosted Runners for Led-Matrix-Webex
 # Runs 7 parallel runners in Docker containers
 #
+# CURRENT HOST: 4 CPU cores, 8 GB RAM
+# With these resources, only 3-4 jobs can run simultaneously
+# Consider reducing to 4 runners total if you want fewer idle containers
+#
 # Usage:
 #   cd .github/docker
 #   echo "GITHUB_PAT=ghp_your_token" > .env
@@ -31,6 +35,17 @@ x-runner-common: &runner-common
     - runner-cache-pnpm:/root/.local/share/pnpm
   networks:
     - runners
+  # Resource limits - Very light for 4-core, 8GB host
+  # Total for 7 runners: ~3.5 cores, 7 GB RAM
+  # Only 3-4 runners will be active at once due to limits
+  deploy:
+    resources:
+      limits:
+        cpus: '0.5'        # 0.5 CPU cores per runner (half a core)
+        memory: 1G         # 1GB RAM per runner
+      reservations:
+        cpus: '0.25'       # Reserve at least 0.25 cores
+        memory: 512M       # Reserve at least 512MB RAM
   environment: &runner-env
     REPO_URL: https://github.com/liptonj/Led-Matrix-Webex
     ACCESS_TOKEN: ${GITHUB_PAT}
