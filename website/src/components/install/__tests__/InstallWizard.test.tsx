@@ -2,6 +2,11 @@
  * InstallWizard Component Tests
  *
  * Tests for the firmware installation wizard.
+ * 
+ * The wizard has 3 steps:
+ * 1. Firmware Install - Flash firmware to device
+ * 2. Device Approval - Monitor Serial and auto-approve device
+ * 3. Success - Installation complete
  */
 
 import { render, screen } from "@/test-utils";
@@ -15,6 +20,12 @@ jest.mock("../FirmwareInstallStep", () => ({
       <h2>Firmware Install Step</h2>
       <button onClick={onContinue}>Continue to Next Step</button>
     </div>
+  ),
+}));
+
+jest.mock("../SerialMonitor", () => ({
+  SerialMonitor: () => (
+    <div data-testid="serial-monitor">Serial Monitor Component</div>
   ),
 }));
 
@@ -33,19 +44,20 @@ describe("InstallWizard", () => {
       render(<InstallWizard />);
       
       expect(screen.getByText("Firmware Install Step")).toBeInTheDocument();
+      expect(screen.queryByText("Device Approval")).not.toBeInTheDocument();
       expect(screen.queryByText("Success Step")).not.toBeInTheDocument();
     });
 
-    it("should show progress indicator", () => {
+    it("should show progress indicator with 3 steps", () => {
       const { container } = render(<InstallWizard />);
       
       const indicators = container.querySelectorAll(".rounded-full");
-      expect(indicators).toHaveLength(2);
+      expect(indicators).toHaveLength(3);
     });
   });
 
   describe("Step Navigation", () => {
-    it("should navigate to success step when continue is clicked", async () => {
+    it("should navigate to device approval step when continue is clicked", async () => {
       const user = userEvent.setup();
       render(<InstallWizard />);
       
@@ -54,7 +66,8 @@ describe("InstallWizard", () => {
       const continueButton = screen.getByText("Continue to Next Step");
       await user.click(continueButton);
       
-      expect(screen.getByText("Success Step")).toBeInTheDocument();
+      // Step 2 is Device Approval with Serial monitoring
+      expect(screen.getByText("Device Approval")).toBeInTheDocument();
       expect(screen.queryByText("Firmware Install Step")).not.toBeInTheDocument();
     });
 
@@ -91,11 +104,11 @@ describe("InstallWizard", () => {
       expect(indicators[0]).toHaveTextContent("✓");
     });
 
-    it("should show connector between steps", () => {
+    it("should show 2 connectors between 3 steps", () => {
       const { container } = render(<InstallWizard />);
       
       const connectors = container.querySelectorAll(".w-12.h-1");
-      expect(connectors).toHaveLength(1);
+      expect(connectors).toHaveLength(2);
     });
   });
 });
