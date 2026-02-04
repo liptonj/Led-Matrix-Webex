@@ -2,7 +2,8 @@
 
 import { getSession } from '@/lib/supabase/auth';
 import { useState } from 'react';
-import UserShell from '../UserShell';
+
+// Note: UserShell is provided by the parent layout.tsx - do NOT wrap again here
 
 export default function ApproveDevicePage() {
   const [pairingCode, setPairingCode] = useState('');
@@ -77,76 +78,74 @@ export default function ApproveDevicePage() {
   const isValidPairingCode = pairingCode.length === 6 && /^[A-HJ-NP-Z2-9]{6}$/.test(pairingCode);
 
   return (
-    <UserShell>
-      <div className="max-w-md mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6 text-center">Approve Device</h1>
+    <div className="max-w-md mx-auto">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">Approve Device</h1>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <p className="text-gray-600 mb-6 text-center">
-            Enter the 6-character pairing code from your device to approve it.
-          </p>
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+        <p className="text-gray-600 dark:text-gray-300 mb-6 text-center">
+          Enter the 6-character pairing code from your device to approve it.
+        </p>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="pairing-code" className="block text-sm font-medium text-gray-700 mb-2">
-                Pairing Code
-              </label>
-              <input
-                id="pairing-code"
-                type="text"
-                value={pairingCode}
-                onChange={(e) => setPairingCode(formatPairingCode(e.target.value))}
-                placeholder="ABC123"
-                maxLength={6}
-                className="w-full px-4 py-3 text-center text-3xl tracking-widest font-mono border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              />
-              <p className="mt-2 text-xs text-gray-500 text-center">
-                {pairingCode.length}/6 characters
-              </p>
-            </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="pairing-code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Pairing Code
+            </label>
+            <input
+              id="pairing-code"
+              type="text"
+              value={pairingCode}
+              onChange={(e) => setPairingCode(formatPairingCode(e.target.value))}
+              placeholder="ABC123"
+              maxLength={6}
+              className="w-full px-4 py-3 text-center text-3xl tracking-widest font-mono border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white uppercase"
+              required
+            />
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 text-center">
+              {pairingCode.length}/6 characters
+            </p>
+          </div>
 
-            <button
-              type="submit"
-              disabled={loading || !isValidPairingCode}
-              className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? 'Approving...' : 'Approve Device'}
-            </button>
-          </form>
+          <button
+            type="submit"
+            disabled={loading || !isValidPairingCode}
+            className="w-full py-3 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+          >
+            {loading ? 'Approving...' : 'Approve Device'}
+          </button>
+        </form>
 
-          {message && (
-            <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded text-green-800 text-sm">
-              {message}
-            </div>
-          )}
+        {message && (
+          <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded text-green-800 dark:text-green-200 text-sm">
+            {message}
+          </div>
+        )}
 
-          {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-800 text-sm">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h2 className="font-semibold text-blue-900 mb-3">How it works:</h2>
-          <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
-            <li>Find the pairing code on your device (6 characters, e.g., ABC123)</li>
-            <li>Enter it in the field above</li>
-            <li>Click "Approve Device" to link it to your account</li>
-            <li>The device will appear in your dashboard once approved</li>
-          </ol>
-        </div>
-
-        <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h3 className="font-semibold text-gray-900 mb-2">Where to find the pairing code:</h3>
-          <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
-            <li>Printed on the device label</li>
-            <li>Displayed on the LED matrix during boot</li>
-            <li>Shown in device logs or serial output</li>
-          </ul>
-        </div>
+        {error && (
+          <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded text-red-800 dark:text-red-200 text-sm">
+            {error}
+          </div>
+        )}
       </div>
-    </UserShell>
+
+      <div className="mt-6 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <h2 className="font-semibold text-blue-900 dark:text-blue-200 mb-3">How it works:</h2>
+        <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800 dark:text-blue-300">
+          <li>Find the pairing code on your device (6 characters, e.g., ABC123)</li>
+          <li>Enter it in the field above</li>
+          <li>Click &quot;Approve Device&quot; to link it to your account</li>
+          <li>The device will appear in your dashboard once approved</li>
+        </ol>
+      </div>
+
+      <div className="mt-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+        <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Where to find the pairing code:</h3>
+        <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
+          <li>Printed on the device label</li>
+          <li>Displayed on the LED matrix during boot</li>
+          <li>Shown in device logs or serial output</li>
+        </ul>
+      </div>
+    </div>
   );
 }

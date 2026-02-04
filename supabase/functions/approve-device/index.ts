@@ -74,6 +74,7 @@ serve(async (req: Request) => {
     // Look up device by pairing_code
     const { data: device, error: deviceError } = await supabase
       .schema("display")
+      .from("devices")
       .select("serial_number, user_approved_by, created_at")
       .eq("pairing_code", normalizedCode)
       .single();
