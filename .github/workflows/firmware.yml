@@ -58,18 +58,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio/.cache
-            ~/.platformio/packages
-            ~/.platformio/platforms
-            firmware/.pio
-          key: ${{ runner.os }}-pio-test-${{ hashFiles('**/platformio.ini', 'firmware/test/**/*.cpp') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-test-
-            ${{ runner.os }}-pio-
+      # Note: Cache disabled for self-hosted runners - using Docker persistent volumes instead
+      # See docker-compose.yml for volume configuration
 
       - name: Run Unity tests (ALL TESTS MUST PASS)
         run: |
@@ -104,18 +94,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio/.cache
-            ~/.platformio/packages
-            ~/.platformio/platforms
-            firmware/.pio/build/${{ matrix.platformio_env }}/lib
-          key: ${{ runner.os }}-pio-${{ matrix.platformio_env }}-${{ hashFiles('**/platformio.ini', 'firmware/src/**/*.cpp', 'firmware/src/**/*.h') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-${{ matrix.platformio_env }}-
-            ${{ runner.os }}-pio-
+      # Note: Cache disabled for self-hosted runners - using Docker persistent volumes instead
+      # See docker-compose.yml for volume configuration
 
       - name: Fix workspace permissions
         working-directory: ${{ github.workspace }}
