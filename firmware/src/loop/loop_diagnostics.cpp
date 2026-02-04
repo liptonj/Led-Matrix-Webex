@@ -11,6 +11,7 @@
 
 #include <WiFi.h>
 #include "discovery/mdns_manager.h"
+#include "common/pairing_manager.h"
 
 // =============================================================================
 // CONNECTION STATUS LOGGING HANDLER
@@ -33,6 +34,9 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
         ? (ctx.app_state->embedded_app_connected ? "embedded_app" : "unknown")
         : ctx.app_state->webex_status_source.c_str();
 
+    // Get pairing code for display
+    String pairing_code = ctx.pairing_manager ? ctx.pairing_manager->getCode() : "";
+    
     Serial.println();
     Serial.println("=== WEBEX STATUS DISPLAY ===");
     Serial.printf("IP: %s | mDNS: %s.local\n",
@@ -46,6 +50,9 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
                   ctx.app_state->supabase_connected ? "Yes" : "No",
                   ctx.app_state->embedded_app_connected ? "Yes" : "No",
                   status_source);
+    if (!pairing_code.isEmpty()) {
+        Serial.printf("PAIRING CODE: %s\n", pairing_code.c_str());
+    }
     Serial.println("============================");
 }
 
