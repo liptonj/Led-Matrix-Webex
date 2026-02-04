@@ -163,7 +163,7 @@ export default function ReleasesPage() {
                                         max="100"
                                         value={release.rollout_percentage}
                                         onChange={(e) =>
-                                            handleRolloutChange(release.version, parseInt(e.target.value))
+                                            handleRolloutChange(release.version, parseInt(e.target.value), release.release_channel)
                                         }
                                         disabled={updating === release.version}
                                         className="flex-1 max-w-[120px]"
@@ -174,7 +174,7 @@ export default function ReleasesPage() {
                                 </div>
                                 {!release.is_latest && (
                                     <button
-                                        onClick={() => handleSetLatest(release.version)}
+                                        onClick={() => handleSetLatest(release.version, release.release_channel)}
                                         disabled={updating === release.version}
                                         className="text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
                                     >
