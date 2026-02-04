@@ -58,6 +58,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            firmware/.pio
+          key: ${{ runner.os }}-pio-test-${{ hashFiles('**/platformio.ini', 'firmware/test/**/*.cpp') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-test-
+            ${{ runner.os }}-pio-
+
       - name: Run Unity tests (ALL TESTS MUST PASS)
         run: |
           echo "Running all firmware unit tests..."
@@ -90,6 +103,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            firmware/.pio/build/${{ matrix.platformio_env }}/lib
+          key: ${{ runner.os }}-pio-${{ matrix.platformio_env }}-${{ hashFiles('**/platformio.ini', 'firmware/src/**/*.cpp', 'firmware/src/**/*.h') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-${{ matrix.platformio_env }}-
+            ${{ runner.os }}-pio-
 
       - name: Fix workspace permissions
         working-directory: ${{ github.workspace }}

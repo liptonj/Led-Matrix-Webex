@@ -24,6 +24,11 @@ x-runner-common: &runner-common
   restart: always
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+    # Persistent cache volumes for faster builds
+    - runner-cache-pio:/root/.platformio
+    - runner-cache-pip:/root/.cache/pip
+    - runner-cache-npm:/root/.npm
+    - runner-cache-pnpm:/root/.local/share/pnpm
   networks:
     - runners
   environment: &runner-env
@@ -34,6 +39,11 @@ x-runner-common: &runner-common
     RUNNER_SCOPE: repo
     DISABLE_AUTO_UPDATE: "true"
     RUN_AS_ROOT: "true"
+    # Cache directories
+    PLATFORMIO_CORE_DIR: /root/.platformio
+    PIP_CACHE_DIR: /root/.cache/pip
+    NPM_CONFIG_CACHE: /root/.npm
+    PNPM_HOME: /root/.local/share/pnpm
 
 networks:
   runners:
@@ -91,3 +101,18 @@ services:
     environment:
       <<: *runner-env
       RUNNER_NAME: led-matrix-runner-7
+
+# Persistent cache volumes shared across all runners
+# These significantly speed up builds by caching:
+# - PlatformIO toolchains and libraries
+# - Python pip packages
+# - NPM/PNPM packages for website builds
+volumes:
+  runner-cache-pio:
+    name: led-matrix-cache-platformio
+  runner-cache-pip:
+    name: led-matrix-cache-pip
+  runner-cache-npm:
+    name: led-matrix-cache-npm
+  runner-cache-pnpm:
+    name: led-matrix-cache-pnpm
