@@ -314,16 +314,22 @@ jobs:
           TAG="v${VERSION}"
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           IS_PRERELEASE=${{ contains(github.ref, '-beta') && 'true' || 'false' }}
+          RELEASE_CHANNEL=${{ contains(github.ref, '-beta') && '"beta"' || '"production"' }}
           
           # Try to get existing release
-          RELEASE_ID=$(curl -s "${SUPABASE_URL}/rest/v1/releases?version=eq.${VERSION}&select=id" \
+          echo "Checking for existing release in $RELEASE_CHANNEL channel..."
+          RESPONSE=$(curl -s "${SUPABASE_URL}/rest/v1/releases?version=eq.${VERSION}&release_channel=eq.${RELEASE_CHANNEL}&select=id" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
             -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-            -H "Content-Profile: display" | jq -r '.[0].id // empty')
+            -H "Content-Profile: display")
           
-          if [ -z "$RELEASE_ID" ]; then
-            echo "Creating new release record..."
-            RELEASE_ID=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/releases" \
+          # Check if response is an array and has elements
+          if echo "$RESPONSE" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1; then
+            RELEASE_ID=$(echo "$RESPONSE" | jq -r '.[0].id')
+            echo "Found existing release: $RELEASE_ID"
+          else
+            echo "Creating new release record in $RELEASE_CHANNEL channel..."
+            RESPONSE=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/releases" \
               -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
               -H "Content-Type: application/json" \
@@ -333,10 +339,26 @@ jobs:
                 \"version\": \"${VERSION}\",
                 \"tag\": \"${TAG}\",
                 \"name\": \"Release ${VERSION}\",
+                \"release_channel\": ${RELEASE_CHANNEL},
                 \"firmware_url\": \"${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin\",
                 \"build_date\": \"${BUILD_DATE}\",
                 \"is_prerelease\": ${IS_PRERELEASE}
-              }" | jq -r '.[0].id')
+              }")
+            
+            # Check if creation was successful
+            if echo "$RESPONSE" | jq -e 'type == "array" and length > 0' > /dev/null 2>&1; then
+              RELEASE_ID=$(echo "$RESPONSE" | jq -r '.[0].id')
+              echo "Created new release: $RELEASE_ID"
+            else
+              echo "Error creating release:"
+              echo "$RESPONSE" | jq '.'
+              exit 1
+            fi
+          fi
+          
+          if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+            echo "Failed to get or create release ID"
+            exit 1
           fi
           
           echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
