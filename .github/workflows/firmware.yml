@@ -5,14 +5,8 @@ name: Firmware
 
 on:
   push:
-    branches: [main, master, beta]
     tags:
-      - "v*"
-    paths:
-      - 'firmware/**'
-      - 'shared/**'
-      - 'boards.json'
-      - '.github/workflows/firmware.yml'
+      - "v*"       # Only build/release on version tags
   pull_request:
     branches: [main, master, beta]
     paths:
