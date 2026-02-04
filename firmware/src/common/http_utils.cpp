@@ -3,6 +3,7 @@
  * @brief Shared HTTP Client Utilities Implementation
  */
 
+#include <Arduino.h>
 #include "http_utils.h"
 #include "../debug/remote_logger.h"
 

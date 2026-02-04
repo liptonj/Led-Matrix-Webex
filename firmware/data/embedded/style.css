@@ -532,3 +532,44 @@
     border-bottom: none;
     padding-bottom: 0;
 }
+
+/* Pin Configuration Grid */
+.pin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.pin-input {
+    display: flex;
+    flex-direction: column;
+}
+
+.pin-input label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.pin-input input {
+    width: 100%;
+    padding: var(--spacing-xs);
+    font-size: 0.75rem;
+    text-align: center;
+}
+
+#custom-pins-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-md);
+    margin-top: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+#custom-pins-section h4 {
+    margin-top: 0;
+    margin-bottom: var(--spacing-sm);
+    font-size: 0.85rem;
+}

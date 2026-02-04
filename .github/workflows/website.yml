@@ -1,0 +1,195 @@
+# Website CI/CD Workflow
+# Tests and deploys Next.js website
+
+name: Website
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - "v*"
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'website/**'
+      - '.github/workflows/website.yml'
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  # ============================================================================
+  # Website Unit Tests
+  # Runs Jest tests for React components, hooks, and utilities
+  # ============================================================================
+  website-unit-tests:
+    name: Unit Tests
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: website
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Jest tests
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          directory: ./website/coverage
+          flags: website
+
+      - name: Fix permissions after tests
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
+
+  # ============================================================================
+  # Deploy Website
+  # Deploys to Cloudflare Pages on pushes to main or version tags
+  # ============================================================================
+  deploy-website:
+    name: Deploy to Cloudflare Pages
+    runs-on: self-hosted
+    needs: [website-unit-tests]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for website changes
+        id: website-changes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          # Get the previous tag (if exists)
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            # No previous tag, check if website directory exists and has files
+            if [ -d "website" ] && [ "$(git ls-tree -r HEAD --name-only | grep -c '^website/')" -gt 0 ]; then
+              echo "No previous tag found, but website directory exists - will deploy"
+              echo "changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No previous tag and no website files - skipping deploy"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # Compare current tag with previous tag
+            CHANGED_FILES=$(git diff --name-only $PREV_TAG HEAD | grep -E '^(website/|\.github/workflows/website\.yml)' || true)
+            
+            if [ -z "$CHANGED_FILES" ]; then
+              echo "No website-related files changed since $PREV_TAG - skipping deploy"
+              echo "changed=false" >> $GITHUB_OUTPUT
+            else
+              # Check if only package.json version changed
+              CHANGED_COUNT=$(echo "$CHANGED_FILES" | grep -c "^website/package.json$" || echo "0")
+              if [ "$CHANGED_COUNT" -eq 1 ] && [ "$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')" -eq 1 ]; then
+                PACKAGE_JSON_DIFF=$(git diff $PREV_TAG HEAD -- website/package.json 2>/dev/null || echo "")
+                
+                if [ -n "$PACKAGE_JSON_DIFF" ]; then
+                  CONTENT_CHANGES=$(echo "$PACKAGE_JSON_DIFF" | grep -E "^[+-]" | grep -v "^[+-][+-][+-]" | grep -v "\"version\"" || echo "")
+                  
+                  if [ -z "$CONTENT_CHANGES" ]; then
+                    echo "Only version number changed in website/package.json - skipping deploy"
+                    echo "changed=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "Website package.json changed (not just version) - deploying"
+                    echo "changed=true" >> $GITHUB_OUTPUT
+                  fi
+                else
+                  echo "Website files changed - deploying"
+                  echo "changed=true" >> $GITHUB_OUTPUT
+                fi
+              else
+                echo "Website files changed - deploying"
+                echo "changed=true" >> $GITHUB_OUTPUT
+              fi
+            fi
+          fi
+
+      - name: Skip deployment message
+        if: startsWith(github.ref, 'refs/tags/v') && steps.website-changes.outputs.changed != 'true'
+        run: |
+          echo "⏭️ Skipping website deployment - no website changes detected in this release"
+          exit 0
+
+      - name: Update versions from tag
+        if: startsWith(github.ref, 'refs/tags/v') && (steps.website-changes.outputs.changed == 'true' || steps.website-changes.outputs.changed == '')
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Updating versions to ${VERSION}..."
+          python3 scripts/update_version.py "${VERSION}"
+
+      - name: Install dependencies
+        if: |
+          github.ref == 'refs/heads/main' || 
+          github.ref == 'refs/heads/master' || 
+          (startsWith(github.ref, 'refs/tags/v') && steps.website-changes.outputs.changed == 'true')
+        working-directory: website
+        run: |
+          # Try to restore from container cache first
+          if [ -d "/opt/node_modules_cache/website/node_modules" ]; then
+            echo "Restoring node_modules from container cache..."
+            cp -r /opt/node_modules_cache/website/node_modules .
+            npm ci --prefer-offline
+          else
+            npm ci
+          fi
+
+      - name: Build website (Next.js)
+        if: |
+          github.ref == 'refs/heads/main' || 
+          github.ref == 'refs/heads/master' || 
+          (startsWith(github.ref, 'refs/tags/v') && steps.website-changes.outputs.changed == 'true')
+        working-directory: website
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Verify build output
+        if: |
+          github.ref == 'refs/heads/main' || 
+          github.ref == 'refs/heads/master' || 
+          (startsWith(github.ref, 'refs/tags/v') && steps.website-changes.outputs.changed == 'true')
+        run: |
+          echo "Build output contents:"
+          ls -la website/out/
+          echo ""
+          echo "Pages generated:"
+          find website/out -name "index.html" | head -20
+
+      - name: Publish to Cloudflare Pages
+        if: |
+          github.ref == 'refs/heads/main' || 
+          github.ref == 'refs/heads/master' || 
+          (startsWith(github.ref, 'refs/tags/v') && steps.website-changes.outputs.changed == 'true')
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler pages deploy out --project-name led-matrix-webex --branch main
+
+      - name: Fix permissions after deploy
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: chmod -R a+rw . || true
