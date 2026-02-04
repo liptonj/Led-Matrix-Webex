@@ -113,13 +113,17 @@ export async function deleteRelease(
   const { data: release } = await supabase
     .schema("display")
     .from("releases")
-    .select("is_latest")
+    .select("id, is_latest")
     .eq("version", version)
     .eq("release_channel", channel)
     .single();
   
   if (release?.is_latest) {
     throw new Error(`Cannot delete the latest ${channel} release. Set another release as latest first.`);
+  }
+  
+  if (!release) {
+    throw new Error(`Release ${version} not found in ${channel} channel`);
   }
   
   // Check if another channel uses these storage files
@@ -138,7 +142,7 @@ export async function deleteRelease(
       .schema("display")
       .from("release_artifacts")
       .select("board_type")
-      .eq("release_version", version);
+      .eq("release_id", release.id);
 
     if (artifacts && artifacts.length > 0) {
       // Build list of board-specific files to delete
@@ -164,7 +168,7 @@ export async function deleteRelease(
       .schema("display")
       .from("release_artifacts")
       .delete()
-      .eq("release_version", version);
+      .eq("release_id", release.id);
   }
   
   // Delete database record (this will cascade delete artifacts via FK constraint)

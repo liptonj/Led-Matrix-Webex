@@ -89,7 +89,7 @@ async function buildLegacyManifest(
     .schema("display")
     .from("release_artifacts")
     .select("board_type, chip_family, firmware_url, firmware_merged_url, firmware_size")
-    .eq("release_version", release.version);
+    .eq("release_id", release.id);
 
   if (error) {
     console.error("Failed to fetch release artifacts:", error);
@@ -234,7 +234,7 @@ serve(async (req: Request) => {
         .schema("display")
         .from("release_artifacts")
         .select("board_type, chip_family, firmware_merged_url")
-        .eq("release_version", latestRelease.version);
+        .eq("release_id", latestRelease.id);
 
       if (artifactsError) {
         console.error("Failed to fetch artifacts for ESP Web Tools:", artifactsError);

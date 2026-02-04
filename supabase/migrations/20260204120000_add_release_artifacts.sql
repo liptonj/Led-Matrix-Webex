@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS display.release_artifacts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  release_version TEXT NOT NULL REFERENCES display.releases(version) ON DELETE CASCADE,
+  release_id UUID NOT NULL REFERENCES display.releases(id) ON DELETE CASCADE,
   
   -- Board identification
   board_type TEXT NOT NULL,      -- 'esp32s3', 'esp32s2', 'esp32' (normalized, no hyphens)
@@ -19,13 +19,13 @@ CREATE TABLE IF NOT EXISTS display.release_artifacts (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   
   -- Constraints
-  UNIQUE(release_version, board_type)
+  UNIQUE(release_id, board_type)
 );
 
 -- Indexes for fast lookups
-CREATE INDEX idx_release_artifacts_version ON display.release_artifacts(release_version);
+CREATE INDEX idx_release_artifacts_release ON display.release_artifacts(release_id);
 CREATE INDEX idx_release_artifacts_board ON display.release_artifacts(board_type);
-CREATE INDEX idx_release_artifacts_composite ON display.release_artifacts(release_version, board_type);
+CREATE INDEX idx_release_artifacts_composite ON display.release_artifacts(release_id, board_type);
 
 -- Enable RLS
 ALTER TABLE display.release_artifacts ENABLE ROW LEVEL SECURITY;

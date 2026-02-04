@@ -287,10 +287,45 @@ jobs:
               --data-binary @"${board_dir}firmware-merged-${board}.bin"
           done
 
+      - name: Create or get release record
+        id: release
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TAG="v${VERSION}"
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          IS_PRERELEASE=${{ contains(github.ref, '-beta') && 'true' || 'false' }}
+          
+          # Try to get existing release
+          RELEASE_ID=$(curl -s "${SUPABASE_URL}/rest/v1/releases?version=eq.${VERSION}&select=id" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Content-Profile: display" | jq -r '.[0].id // empty')
+          
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Creating new release record..."
+            RELEASE_ID=$(curl -s -X POST "${SUPABASE_URL}/rest/v1/releases" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "Content-Profile: display" \
+              -H "Prefer: return=representation" \
+              -d "{
+                \"version\": \"${VERSION}\",
+                \"tag\": \"${TAG}\",
+                \"name\": \"Release ${VERSION}\",
+                \"firmware_url\": \"${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin\",
+                \"build_date\": \"${BUILD_DATE}\",
+                \"is_prerelease\": ${IS_PRERELEASE}
+              }" | jq -r '.[0].id')
+          fi
+          
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "✓ Release ID: $RELEASE_ID"
+
       - name: Create release artifacts in database
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RELEASE_ID="${{ steps.release.outputs.RELEASE_ID }}"
           
           # Read board config and create artifacts
           jq -c '.boards[]' boards.json | while read board; do
@@ -310,7 +345,7 @@ jobs:
               -H "Content-Profile: display" \
               -H "Prefer: resolution=merge-duplicates" \
               -d "{
-                \"release_version\": \"${VERSION}\",
+                \"release_id\": \"${RELEASE_ID}\",
                 \"board_type\": \"${BOARD_TYPE}\",
                 \"chip_family\": \"${CHIP_FAMILY}\",
                 \"firmware_url\": \"${URL}\",
