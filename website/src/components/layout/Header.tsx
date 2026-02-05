@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Avatar } from './Avatar';
+import { LoginButton } from './LoginButton';
 import { Navigation } from './Navigation';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -43,8 +44,9 @@ export function Header({
           {/* Navigation - includes hamburger on mobile, desktop nav on large screens */}
           <Navigation />
 
-          {/* Theme Toggle and Avatar */}
+          {/* Theme Toggle, Login Button, and Avatar */}
           <div className="flex items-center gap-2">
+            <LoginButton />
             <div className="hidden sm:block">
               <ThemeToggle />
             </div>

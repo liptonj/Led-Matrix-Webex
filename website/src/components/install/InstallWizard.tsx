@@ -18,6 +18,10 @@ export function InstallWizard() {
   // Firmware installation state
   const [flashStatus, setFlashStatus] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null);
   
+  // WiFi configuration tracking
+  const [wifiConfigured, setWifiConfigured] = useState<boolean | null>(null);
+  const [showWifiConfirmation, setShowWifiConfirmation] = useState(false);
+  
   // Approval state
   const [approvalState, setApprovalState] = useState<{
     status: 'idle' | 'approving' | 'success' | 'error';
@@ -71,8 +75,15 @@ export function InstallWizard() {
     stopMonitoringRef.current = stopMonitoring;
   }, [stopMonitoring]);
 
-  // Navigation handler - start monitoring when moving to step 2
-  const handleContinueToMonitoring = useCallback(async () => {
+  // Show WiFi confirmation first
+  const handleShowWifiConfirmation = useCallback(() => {
+    setShowWifiConfirmation(true);
+  }, []);
+
+  // Handle WiFi confirmation and proceed to monitoring
+  const handleWifiConfirmation = useCallback(async (configured: boolean) => {
+    setWifiConfigured(configured);
+    setShowWifiConfirmation(false);
     setCurrentStep(2);
     // Reset approval state
     setApprovalState({ status: 'idle', message: '' });
@@ -127,12 +138,42 @@ export function InstallWizard() {
 
       {/* Step 1: Firmware Installation */}
       {currentStep === 1 && (
-        <FirmwareInstallStep
-          flashStatus={flashStatus}
-          showAdvanced={showAdvanced}
-          onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
-          onContinue={handleContinueToMonitoring}
-        />
+        <>
+          <FirmwareInstallStep
+            flashStatus={flashStatus}
+            showAdvanced={showAdvanced}
+            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+            onContinue={handleShowWifiConfirmation}
+          />
+          
+          {/* WiFi Configuration Confirmation */}
+          {showWifiConfirmation && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 max-w-md mx-4 shadow-2xl">
+                <h3 className="text-xl font-bold mb-4">WiFi Configuration</h3>
+                <p className="text-[var(--color-text-muted)] mb-6">
+                  Did you configure WiFi during the installation dialog?
+                </p>
+                <div className="flex gap-3">
+                  <Button 
+                    variant="success" 
+                    onClick={() => handleWifiConfirmation(true)}
+                    className="flex-1"
+                  >
+                    Yes, WiFi is set up
+                  </Button>
+                  <Button 
+                    variant="default" 
+                    onClick={() => handleWifiConfirmation(false)}
+                    className="flex-1"
+                  >
+                    No, I&apos;ll use AP mode
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Step 2: Serial Monitoring & Auto-Approval */}
@@ -217,7 +258,7 @@ export function InstallWizard() {
 
       {/* Step 3: Success */}
       {currentStep === 3 && (
-        <SuccessStep wifiConfigured={true} />
+        <SuccessStep wifiConfigured={wifiConfigured ?? false} />
       )}
     </div>
   );

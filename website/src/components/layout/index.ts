@@ -4,3 +4,4 @@ export { Navigation } from './Navigation';
 export { ThemeToggle } from './ThemeToggle';
 export { Breadcrumbs } from './Breadcrumbs';
 export { Avatar } from './Avatar';
+export { LoginButton } from './LoginButton';

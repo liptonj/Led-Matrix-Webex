@@ -57,7 +57,7 @@ describe("InstallWizard", () => {
   });
 
   describe("Step Navigation", () => {
-    it("should navigate to device approval step when continue is clicked", async () => {
+    it("should show WiFi confirmation modal when continue is clicked", async () => {
       const user = userEvent.setup();
       render(<InstallWizard />);
       
@@ -65,6 +65,22 @@ describe("InstallWizard", () => {
       
       const continueButton = screen.getByText("Continue to Next Step");
       await user.click(continueButton);
+      
+      // WiFi confirmation modal should appear
+      expect(screen.getByText("WiFi Configuration")).toBeInTheDocument();
+      expect(screen.getByText("Yes, WiFi is set up")).toBeInTheDocument();
+    });
+
+    it("should navigate to device approval step after WiFi confirmation", async () => {
+      const user = userEvent.setup();
+      render(<InstallWizard />);
+      
+      const continueButton = screen.getByText("Continue to Next Step");
+      await user.click(continueButton);
+      
+      // Click WiFi confirmation button
+      const wifiConfirmButton = screen.getByText("Yes, WiFi is set up");
+      await user.click(wifiConfirmButton);
       
       // Step 2 is Device Approval with Serial monitoring
       expect(screen.getByText("Device Approval")).toBeInTheDocument();
@@ -77,6 +93,10 @@ describe("InstallWizard", () => {
       
       const continueButton = screen.getByText("Continue to Next Step");
       await user.click(continueButton);
+      
+      // Click WiFi confirmation to proceed
+      const wifiConfirmButton = screen.getByText("Yes, WiFi is set up");
+      await user.click(wifiConfirmButton);
       
       // Check for checkmark in first step indicator
       const indicators = container.querySelectorAll(".rounded-full");
@@ -98,6 +118,10 @@ describe("InstallWizard", () => {
       
       const continueButton = screen.getByText("Continue to Next Step");
       await user.click(continueButton);
+      
+      // Click WiFi confirmation to proceed to step 2
+      const wifiConfirmButton = screen.getByText("Yes, WiFi is set up");
+      await user.click(wifiConfirmButton);
       
       const indicators = container.querySelectorAll(".rounded-full");
       expect(indicators[0]).toHaveClass("bg-success");

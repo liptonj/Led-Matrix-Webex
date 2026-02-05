@@ -5,7 +5,9 @@ import { useEspWebTools } from '@/hooks/useEspWebTools';
 import {
     SUPPORTED_BROWSERS,
     TYPICAL_FLASH_DURATION_MAX_SECONDS,
-    TYPICAL_FLASH_DURATION_SECONDS
+    TYPICAL_FLASH_DURATION_SECONDS,
+    WIFI_AP_NAME,
+    WIFI_AP_IP
 } from './constants';
 import { EspWebInstallButton } from './EspWebInstallButton';
 
@@ -54,6 +56,23 @@ export function FirmwareInstallStep({
           <strong>WiFi Setup Included!</strong> After flashing, you&apos;ll be prompted to configure 
           WiFi directly in the installation dialog. No separate setup required.
         </Alert>
+      )}
+
+      {/* WiFi Fallback Instructions */}
+      {configured && !error && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-4">
+          <h4 className="font-semibold text-amber-900 dark:text-amber-200 mb-2">
+            WiFi Not Working or Timed Out?
+          </h4>
+          <p className="text-sm text-amber-800 dark:text-amber-300 mb-2">
+            If WiFi setup didn&apos;t work during installation, don&apos;t worry! You can configure it manually:
+          </p>
+          <ol className="list-decimal list-inside text-sm text-amber-800 dark:text-amber-300 space-y-1">
+            <li>Connect to the device&apos;s WiFi: <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">{WIFI_AP_NAME}</code></li>
+            <li>Open <code className="bg-amber-100 dark:bg-amber-800 px-1 rounded">{WIFI_AP_IP}</code> in your browser</li>
+            <li>Complete WiFi and provisioning setup there</li>
+          </ol>
+        </div>
       )}
 
       {/* Install Button */}
@@ -112,17 +131,19 @@ export function FirmwareInstallStep({
           </ol>
         </div>
         
-        <div className="flex flex-col items-center gap-3">
+        {/* Prominent Next Step CTA */}
+        <div className="bg-green-50 dark:bg-green-900/20 border-2 border-green-500 dark:border-green-600 rounded-xl p-6 text-center mt-6">
+          <h3 className="text-lg font-bold text-green-900 dark:text-green-100 mb-2">Ready to Continue?</h3>
+          <p className="text-sm text-green-800 dark:text-green-300 mb-4">
+            Click below after you&apos;ve completed WiFi setup in the installation dialog
+          </p>
           <Button 
             variant="success" 
             onClick={onContinue}
-            className="text-lg px-8 py-3"
+            className="text-xl px-10 py-4 font-bold shadow-lg animate-pulse-subtle"
           >
-            Installation Complete →
+            Continue to Device Approval →
           </Button>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Click after you&apos;ve configured WiFi in the installation dialog
-          </p>
         </div>
       </div>
 
