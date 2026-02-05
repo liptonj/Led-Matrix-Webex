@@ -5,7 +5,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { requireAdminUser } from "../_shared/admin_auth.ts";
 
@@ -35,7 +35,7 @@ serve(async (req: Request) => {
     return value;
   };
   const safeHeaders: Record<string, string> = {};
-  for (const [name, value] of req.headers.entries()) {
+  for (const [name, value] of Array.from(req.headers.entries())) {
     safeHeaders[name] = redactHeader(name, value);
   }
 
@@ -127,7 +127,7 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: existing, error: lookupError } = await serviceClient
+    const { data: existing, error: lookupError } = await (serviceClient as any)
       .schema("display")
       .from("oauth_clients")
       .select("id, client_secret_id")
@@ -160,7 +160,7 @@ serve(async (req: Request) => {
       const secretName = `${provider}_client_secret_${clientId}`;
 
       if (clientSecretId) {
-        const { error: secretError } = await serviceClient.schema("display").rpc("vault_update_secret", {
+        const { error: secretError } = await (serviceClient as any).schema("display").rpc("vault_update_secret", {
           p_secret_id: clientSecretId,
           p_secret: clientSecret,
           p_name: secretName,
@@ -188,7 +188,7 @@ serve(async (req: Request) => {
           });
         }
       } else {
-        const { data: secretData, error: secretError } = await serviceClient
+        const { data: secretData, error: secretError } = await (serviceClient as any)
           .schema("display")
           .rpc("vault_create_secret", {
             p_name: secretName,
@@ -243,7 +243,7 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: saved, error: upsertError } = await serviceClient
+    const { data: saved, error: upsertError } = await (serviceClient as any)
       .schema("display")
       .from("oauth_clients")
       .upsert(

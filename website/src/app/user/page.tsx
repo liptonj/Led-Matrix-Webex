@@ -11,6 +11,7 @@ interface Device {
   serial_number: string;
   provisioning_method: string;
   created_at: string;
+  webex_polling_enabled: boolean;
   device: {
     device_id: string;
     display_name: string | null;
@@ -50,6 +51,7 @@ export default function UserDashboard() {
             serial_number,
             provisioning_method,
             created_at,
+            webex_polling_enabled,
             devices!inner (
               device_id,
               display_name,
@@ -70,6 +72,7 @@ export default function UserDashboard() {
             serial_number: d.serial_number,
             provisioning_method: d.provisioning_method || 'unknown',
             created_at: d.created_at,
+            webex_polling_enabled: d.webex_polling_enabled || false,
             device: d.devices
           }));
 
@@ -158,6 +161,31 @@ export default function UserDashboard() {
     }
   }
 
+  async function handleToggleWebexPolling(serialNumber: string, currentValue: boolean) {
+    try {
+      const supabase = await getSupabase();
+      const { error } = await supabase
+        .schema('display')
+        .from('user_devices')
+        .update({ webex_polling_enabled: !currentValue })
+        .eq('serial_number', serialNumber);
+
+      if (error) {
+        console.error('Error toggling webex polling:', error);
+        return;
+      }
+
+      // Update local state
+      setDevices((prev) => prev.map((d) =>
+        d.serial_number === serialNumber
+          ? { ...d, webex_polling_enabled: !currentValue }
+          : d
+      ));
+    } catch (err) {
+      console.error('Error toggling webex polling:', err);
+    }
+  }
+
   return (
     <>
       <div className="mb-6">
@@ -228,6 +256,19 @@ export default function UserDashboard() {
                     <p><span className="font-medium">Firmware:</span> {device.device.firmware_version || 'Unknown'}</p>
                     <p><span className="font-medium">Last seen:</span> {new Date(device.device.last_seen).toLocaleString()}</p>
                     <p><span className="font-medium">Added:</span> {new Date(device.created_at).toLocaleDateString()}</p>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={device.webex_polling_enabled}
+                        onChange={() => handleToggleWebexPolling(device.serial_number, device.webex_polling_enabled)}
+                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        Enable Webex status sync
+                      </span>
+                    </label>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

@@ -6,9 +6,17 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
+import {
+  fetchWebexStatus,
+  normalizeWebexStatus,
+  refreshWebexToken,
+  CANONICAL_STATUSES,
+  STATUS_ALIASES,
+} from "../_shared/webex.ts";
 
 interface TokenPayload {
   sub: string;
@@ -30,35 +38,6 @@ interface SyncRequest {
   webex_status?: string;
 }
 
-const CANONICAL_STATUSES = [
-  "active",
-  "away",
-  "dnd",
-  "busy",
-  "meeting",
-  "call",
-  "presenting",
-  "ooo",
-  "pending",
-  "unknown",
-  "offline",
-];
-
-const STATUS_ALIASES: Record<string, string> = {
-  available: "active",
-  inactive: "away",
-  brb: "away",
-  donotdisturb: "dnd",
-  outofoffice: "ooo",
-};
-
-function normalizeWebexStatus(value: string | null | undefined): string {
-  if (!value) return "unknown";
-  const key = value.trim().toLowerCase();
-  const normalized = STATUS_ALIASES[key] ?? key;
-  return CANONICAL_STATUSES.includes(normalized) ? normalized : "unknown";
-}
-
 function getBearerToken(req: Request): string | null {
   const authHeader = req.headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -66,97 +45,6 @@ function getBearerToken(req: Request): string | null {
   }
   const tokenHeader = req.headers.get("X-Device-Token") || req.headers.get("X-Auth-Token");
   return tokenHeader || null;
-}
-
-async function fetchDecryptedSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string,
-): Promise<string> {
-  const { data, error } = await client.schema("display").rpc("vault_read_secret", {
-    p_secret_id: secretId,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to read secret from vault");
-  }
-  return data as string;
-}
-
-async function updateSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string | null,
-  secretValue: string,
-  nameHint: string,
-): Promise<string> {
-  if (secretId) {
-    const { error } = await client.schema("display").rpc("vault_update_secret", {
-      p_secret_id: secretId,
-      p_secret: secretValue,
-      p_name: null,
-      p_description: null,
-      p_key_id: null,
-    });
-
-    if (error) {
-      throw new Error("Failed to update vault secret");
-    }
-
-    return secretId;
-  }
-
-  const { data, error } = await client.schema("display").rpc("vault_create_secret", {
-    p_secret: secretValue,
-    p_name: nameHint,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to create vault secret");
-  }
-
-  return data as string;
-}
-
-async function refreshWebexToken(args: {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
-}): Promise<{ access_token: string; refresh_token?: string; expires_in?: number }> {
-  const body = new URLSearchParams();
-  body.set("grant_type", "refresh_token");
-  body.set("refresh_token", args.refreshToken);
-  body.set("client_id", args.clientId);
-  body.set("client_secret", args.clientSecret);
-
-  const response = await fetch("https://webexapis.com/v1/access_token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.error_description || data?.error || "Failed to refresh token";
-    throw new Error(message);
-  }
-
-  return data as { access_token: string; refresh_token?: string; expires_in?: number };
-}
-
-async function fetchWebexStatus(accessToken: string): Promise<string> {
-  const response = await fetch("https://webexapis.com/v1/people/me", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.message || data?.error || "Webex API error";
-    throw new Error(message);
-  }
-
-  const status = data?.status || data?.presence || data?.availability || data?.state || data?.activity;
-  return normalizeWebexStatus(status);
 }
 
 serve(async (req: Request) => {

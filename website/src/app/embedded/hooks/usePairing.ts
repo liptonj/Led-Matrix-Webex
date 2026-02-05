@@ -1,7 +1,8 @@
 'use client';
 
 import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseClient } from '@/lib/supabaseClient';
+import { createClient, type SupabaseClient, type Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG } from '../constants';
 import type { AppToken, RealtimeStatus } from '../types';
@@ -10,6 +11,13 @@ const API_TIMEOUT_MS = 15000;
 
 export interface UsePairingOptions {
   addLog: (message: string) => void;
+}
+
+export interface UserDevice {
+  device_uuid: string;
+  serial_number: string;
+  display_name?: string;
+  last_seen?: string;
 }
 
 export interface UsePairingResult {
@@ -29,6 +37,12 @@ export interface UsePairingResult {
   exchangePairingCode: (code: string) => Promise<AppToken | null>;
   updateAppStateViaEdge: (stateData: { webex_status?: string; camera_on?: boolean; mic_muted?: boolean; in_call?: boolean; display_name?: string }) => Promise<boolean>;
   shouldRefreshToken: (token: AppToken) => boolean;
+  // New session-related exports
+  session: Session | null;
+  userDevices: UserDevice[];
+  selectedDeviceUuid: string | null;
+  setSelectedDeviceUuid: (deviceUuid: string) => void;
+  isLoggedIn: boolean;
 }
 
 export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
@@ -40,6 +54,12 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const [appToken, setAppToken] = useState<AppToken | null>(null);
   const [pairingCode, setPairingCode] = useState('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  
+  // New session-related state
+  const [session, setSession] = useState<Session | null>(null);
+  const [userDevices, setUserDevices] = useState<UserDevice[]>([]);
+  const [selectedDeviceUuid, setSelectedDeviceUuid] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const supabaseAuthRef = useRef<string | null>(null);
@@ -266,5 +286,51 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   useEffect(() => { if (!isPaired || !pairingCode || !appToken || rtStatus !== 'connected') return; const pollInterval = setInterval(() => { refreshPairingSnapshot(pairingCode, appToken.token, 'heartbeat poll').catch(() => {}); }, 10000); return () => clearInterval(pollInterval); }, [isPaired, pairingCode, appToken, rtStatus, refreshPairingSnapshot]);
   useEffect(() => { return () => { if (tokenRefreshIntervalRef.current) clearInterval(tokenRefreshIntervalRef.current); if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); if (connectionWatchdogRef.current) clearInterval(connectionWatchdogRef.current); }; }, []);
 
-  return { isPaired, isPeerConnected, lastDeviceSeenAt, lastDeviceSeenMs, rtStatus, appToken, pairingCode, connectionError, setPairingCode, supabaseRef, handleConnect, handleDisconnect, refreshPairingSnapshot, exchangePairingCode, updateAppStateViaEdge, shouldRefreshToken };
+  // Check for existing Supabase session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const supabase = getSupabaseClient();
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession) {
+          setSession(currentSession);
+          setIsLoggedIn(true);
+          addLog('User session found');
+          
+          // Fetch user's devices - select device_uuid as primary identifier
+          const { data, error } = await supabase
+            .schema('display')
+            .from('user_devices')
+            .select('device_uuid, serial_number, devices(display_name, last_seen)')
+            .eq('user_id', currentSession.user.id);
+          
+          if (error) {
+            addLog(`Failed to fetch devices: ${error.message}`);
+          } else if (data) {
+            // Transform nested devices data to flat structure
+            const transformedDevices: UserDevice[] = data.map((item: any) => ({
+              device_uuid: item.device_uuid || item.serial_number, // Fallback to serial_number if uuid missing
+              serial_number: item.serial_number,
+              display_name: item.devices?.display_name,
+              last_seen: item.devices?.last_seen,
+            }));
+            setUserDevices(transformedDevices);
+            addLog(`Found ${transformedDevices.length} devices`);
+          }
+        } else {
+          setIsLoggedIn(false);
+          setSession(null);
+          setUserDevices([]);
+        }
+      } catch (err) {
+        addLog(`Failed to check session: ${err instanceof Error ? err.message : 'unknown error'}`);
+        setIsLoggedIn(false);
+        setSession(null);
+        setUserDevices([]);
+      }
+    };
+    checkSession();
+  }, [addLog]);
+
+  return { isPaired, isPeerConnected, lastDeviceSeenAt, lastDeviceSeenMs, rtStatus, appToken, pairingCode, connectionError, setPairingCode, supabaseRef, handleConnect, handleDisconnect, refreshPairingSnapshot, exchangePairingCode, updateAppStateViaEdge, shouldRefreshToken, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn };
 }

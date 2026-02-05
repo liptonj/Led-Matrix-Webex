@@ -6,7 +6,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { requireAdminUser } from "../_shared/admin_auth.ts";
 
@@ -125,7 +125,7 @@ serve(async (req: Request) => {
       }
     }
 
-    const { data: existingProfile } = await serviceClient
+    const { data: existingProfile } = await (serviceClient as any)
       .schema("display")
       .from("user_profiles")
       .select("email, role, first_name, last_name, disabled")
@@ -163,7 +163,7 @@ serve(async (req: Request) => {
           : existingProfile?.disabled ?? false,
     };
 
-    const { error: profileError } = await serviceClient
+    const { error: profileError } = await (serviceClient as any)
       .schema("display")
       .from("user_profiles")
       .upsert(profileUpdate, { onConflict: "user_id" });
@@ -176,7 +176,7 @@ serve(async (req: Request) => {
     }
 
     if (body.role === "admin") {
-      const { error: adminInsertError } = await serviceClient
+      const { error: adminInsertError } = await (serviceClient as any)
         .schema("display")
         .from("admin_users")
         .upsert({
@@ -193,7 +193,7 @@ serve(async (req: Request) => {
     }
 
     if (body.role === "user") {
-      const { error: adminDeleteError } = await serviceClient
+      const { error: adminDeleteError } = await (serviceClient as any)
         .schema("display")
         .from("admin_users")
         .delete()

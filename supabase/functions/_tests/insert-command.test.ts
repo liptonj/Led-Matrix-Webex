@@ -10,8 +10,13 @@
 import {
   assertEquals,
   assertExists,
+  assertNotEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import {
+  TEST_DEVICE_UUID,
+  TEST_PAIRING_CODE,
+} from "./fixtures/uuid-fixtures.ts";
 
 // Constants from the Edge Function
 const COMMAND_EXPIRY_SECONDS = 300; // 5 minutes
@@ -335,4 +340,86 @@ Deno.test("insert-command: 500 for insert failure", () => {
   };
 
   assertEquals(errorResponse.success, false);
+});
+
+// ============================================================================
+// UUID-Based Device Identity Tests
+// ============================================================================
+
+Deno.test("insert-command: accepts device_uuid in request", () => {
+  const mockRequest = {
+    command: "set_brightness",
+    payload: { value: 128 },
+    device_uuid: TEST_DEVICE_UUID,
+  };
+
+  assertExists(mockRequest.device_uuid);
+  assertEquals(mockRequest.device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("insert-command: command inserted with device_uuid", () => {
+  const mockCommand = {
+    pairing_code: TEST_PAIRING_CODE,
+    serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    command: "set_brightness",
+    payload: { value: 128 },
+    status: "pending",
+  };
+
+  assertExists(mockCommand.device_uuid);
+  assertEquals(mockCommand.device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("insert-command: inserts with device_uuid (not just serial_number)", () => {
+  const mockCommand = {
+    device_uuid: TEST_DEVICE_UUID,
+    serial_number: "A1B2C3D4", // Kept for backward compatibility
+    pairing_code: TEST_PAIRING_CODE,
+    command: "set_brightness",
+  };
+
+  // device_uuid is preferred identifier
+  assertExists(mockCommand.device_uuid);
+  assertEquals(mockCommand.device_uuid.length, 36);
+  // serial_number still present for backward compatibility
+  assertExists(mockCommand.serial_number);
+});
+
+Deno.test("insert-command: prefers device_uuid from request over token", () => {
+  const requestDeviceUuid = TEST_DEVICE_UUID;
+  const tokenDeviceUuid = "550e8400-e29b-41d4-a716-446655440002";
+
+  const deviceUuid = requestDeviceUuid || tokenDeviceUuid;
+  assertEquals(deviceUuid, TEST_DEVICE_UUID);
+  assertNotEquals(deviceUuid, tokenDeviceUuid);
+});
+
+Deno.test("insert-command: falls back to device_uuid from token when not in request", () => {
+  const requestDeviceUuid = undefined;
+  const tokenDeviceUuid = TEST_DEVICE_UUID;
+
+  const deviceUuid = requestDeviceUuid || tokenDeviceUuid;
+  assertEquals(deviceUuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("insert-command: looks up device_uuid from pairing_code when missing", () => {
+  const pairingRecord = {
+    pairing_code: TEST_PAIRING_CODE,
+    device_uuid: TEST_DEVICE_UUID,
+  };
+
+  const deviceUuid = pairingRecord.device_uuid;
+  assertExists(deviceUuid);
+  assertEquals(deviceUuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("insert-command: 404 when device_uuid not found", () => {
+  const errorResponse = {
+    success: false,
+    error: "Device UUID not found. Device may not be properly registered.",
+  };
+
+  assertEquals(errorResponse.success, false);
+  assertStringIncludes(errorResponse.error, "Device UUID not found");
 });

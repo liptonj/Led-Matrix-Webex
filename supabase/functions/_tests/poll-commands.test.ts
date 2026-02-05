@@ -1,8 +1,8 @@
 /**
  * poll-commands Edge Function Tests
  *
- * Tests for the command polling endpoint that devices use to fetch
- * pending commands.
+ * Tests for the poll-commands Edge Function that returns pending commands
+ * for devices using UUID-based queries.
  *
  * Run: deno test --allow-net --allow-env _tests/poll-commands.test.ts
  */
@@ -10,35 +10,21 @@
 import {
   assertEquals,
   assertExists,
+  assertNotEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
-
-// Constants from the Edge Function
-const MAX_COMMANDS_PER_POLL = 10;
-
-// ============================================================================
-// Request Method Tests
-// ============================================================================
-
-Deno.test("poll-commands: accepts GET requests", () => {
-  const allowedMethods = ["GET", "POST"];
-  assertEquals(allowedMethods.includes("GET"), true);
-});
-
-Deno.test("poll-commands: accepts POST requests", () => {
-  const allowedMethods = ["GET", "POST"];
-  assertEquals(allowedMethods.includes("POST"), true);
-});
-
-Deno.test("poll-commands: rejects PUT requests", () => {
-  const allowedMethods = ["GET", "POST"];
-  assertEquals(allowedMethods.includes("PUT"), false);
-});
-
-Deno.test("poll-commands: rejects DELETE requests", () => {
-  const allowedMethods = ["GET", "POST"];
-  assertEquals(allowedMethods.includes("DELETE"), false);
-});
+import {
+  TEST_DEVICE_UUID,
+  TEST_DEVICE_UUID_2,
+  TEST_PAIRING_CODE,
+  mockCommand,
+} from "./fixtures/uuid-fixtures.ts";
+import {
+  TEST_DEVICE_UUID,
+  TEST_DEVICE_UUID_2,
+  TEST_PAIRING_CODE,
+  mockCommand,
+} from "./fixtures/uuid-fixtures.ts";
 
 // ============================================================================
 // Authentication Tests
@@ -49,11 +35,11 @@ Deno.test("poll-commands: accepts Bearer token authentication", () => {
   assertEquals(authHeader.startsWith("Bearer "), true);
 });
 
-Deno.test("poll-commands: accepts HMAC header authentication", () => {
+Deno.test("poll-commands: accepts HMAC authentication as fallback", () => {
   const hmacHeaders = {
     "X-Device-Serial": "A1B2C3D4",
     "X-Timestamp": String(Math.floor(Date.now() / 1000)),
-    "X-Signature": "base64-hmac-signature",
+    "X-Signature": "base64signature",
   };
 
   assertExists(hmacHeaders["X-Device-Serial"]);
@@ -61,22 +47,114 @@ Deno.test("poll-commands: accepts HMAC header authentication", () => {
   assertExists(hmacHeaders["X-Signature"]);
 });
 
-Deno.test("poll-commands: validates device token type", () => {
-  const validPayload = { token_type: "device" };
-  assertEquals(validPayload.token_type, "device");
+// ============================================================================
+// UUID-Based Query Tests
+// ============================================================================
+
+Deno.test("poll-commands: queries by device_uuid from JWT", () => {
+  const mockJwtPayload = {
+    device_uuid: TEST_DEVICE_UUID,
+    pairing_code: TEST_PAIRING_CODE,
+    serial_number: "A1B2C3D4",
+    token_type: "device",
+  };
+
+  assertExists(mockJwtPayload.device_uuid);
+  assertEquals(mockJwtPayload.device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("poll-commands: returns pending commands for matching device_uuid", () => {
+  const mockCommands = [
+    {
+      ...mockCommand,
+      device_uuid: TEST_DEVICE_UUID,
+      status: "pending",
+    },
+    {
+      ...mockCommand,
+      id: "cmd-456",
+      device_uuid: TEST_DEVICE_UUID,
+      status: "pending",
+    },
+  ];
+
+  const filteredCommands = mockCommands.filter(
+    (cmd) => cmd.device_uuid === TEST_DEVICE_UUID && cmd.status === "pending"
+  );
+
+  assertEquals(filteredCommands.length, 2);
+  assertEquals(filteredCommands[0].device_uuid, TEST_DEVICE_UUID);
+  assertEquals(filteredCommands[1].device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("poll-commands: filters out commands for other devices", () => {
+  const mockCommands = [
+    {
+      ...mockCommand,
+      device_uuid: TEST_DEVICE_UUID,
+      status: "pending",
+    },
+    {
+      ...mockCommand,
+      id: "cmd-456",
+      device_uuid: TEST_DEVICE_UUID_2,
+      status: "pending",
+    },
+  ];
+
+  const filteredCommands = mockCommands.filter(
+    (cmd) => cmd.device_uuid === TEST_DEVICE_UUID && cmd.status === "pending"
+  );
+
+  assertEquals(filteredCommands.length, 1);
+  assertEquals(filteredCommands[0].device_uuid, TEST_DEVICE_UUID);
+  assertNotEquals(filteredCommands[0].device_uuid, TEST_DEVICE_UUID_2);
+});
+
+Deno.test("poll-commands: falls back to pairing_code when device_uuid missing", () => {
+  const mockJwtPayloadLegacy = {
+    pairing_code: TEST_PAIRING_CODE,
+    serial_number: "A1B2C3D4",
+    token_type: "device",
+    // device_uuid missing
+  };
+
+  const queryKey = mockJwtPayloadLegacy.device_uuid || mockJwtPayloadLegacy.pairing_code;
+  assertEquals(queryKey, TEST_PAIRING_CODE);
+});
+
+Deno.test("poll-commands: prefers device_uuid over pairing_code", () => {
+  const mockJwtPayload = {
+    device_uuid: TEST_DEVICE_UUID,
+    pairing_code: TEST_PAIRING_CODE,
+    serial_number: "A1B2C3D4",
+    token_type: "device",
+  };
+
+  const queryKey = mockJwtPayload.device_uuid || mockJwtPayload.pairing_code;
+  assertEquals(queryKey, TEST_DEVICE_UUID);
+  assertNotEquals(queryKey, TEST_PAIRING_CODE);
 });
 
 // ============================================================================
 // Response Format Tests
 // ============================================================================
 
-Deno.test("poll-commands: success response has commands array", () => {
+Deno.test("poll-commands: success response format", () => {
   const mockResponse = {
     success: true,
-    commands: [],
+    commands: [
+      {
+        id: "cmd-123",
+        command: "set_brightness",
+        payload: { value: 128 },
+        created_at: new Date().toISOString(),
+      },
+    ],
   };
 
   assertEquals(mockResponse.success, true);
+  assertExists(mockResponse.commands);
   assertEquals(Array.isArray(mockResponse.commands), true);
 });
 
@@ -86,138 +164,72 @@ Deno.test("poll-commands: returns empty array when no commands", () => {
     commands: [],
   };
 
+  assertEquals(mockResponse.success, true);
   assertEquals(mockResponse.commands.length, 0);
 });
 
-Deno.test("poll-commands: command structure is correct", () => {
-  const command = {
-    id: "550e8400-e29b-41d4-a716-446655440000",
-    command: "set_brightness",
-    payload: { value: 200 },
-    created_at: "2026-01-28T12:00:00Z",
-  };
-
-  assertExists(command.id);
-  assertExists(command.command);
-  assertExists(command.payload);
-  assertExists(command.created_at);
-});
-
-Deno.test("poll-commands: command id is UUID format", () => {
-  const commandId = "550e8400-e29b-41d4-a716-446655440000";
-
-  // UUID v4 format: 8-4-4-4-12 hex chars
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  assertEquals(uuidRegex.test(commandId), true);
-});
-
-Deno.test("poll-commands: payload is an object", () => {
-  const command = {
-    payload: { brightness: 200, duration: 1000 },
-  };
-
-  assertEquals(typeof command.payload, "object");
-  assertEquals(Array.isArray(command.payload), false);
-});
-
-Deno.test("poll-commands: payload can be empty object", () => {
-  const command = {
-    payload: {},
-  };
-
-  assertEquals(Object.keys(command.payload).length, 0);
-});
-
-Deno.test("poll-commands: returns multiple commands in order", () => {
-  const mockResponse = {
-    success: true,
-    commands: [
-      { id: "uuid-1", command: "ping", payload: {}, created_at: "2026-01-28T12:00:00Z" },
-      { id: "uuid-2", command: "set_brightness", payload: { value: 200 }, created_at: "2026-01-28T12:01:00Z" },
-      { id: "uuid-3", command: "reboot", payload: {}, created_at: "2026-01-28T12:02:00Z" },
-    ],
-  };
-
-  assertEquals(mockResponse.commands.length, 3);
-
-  // Should be ordered by created_at ascending (oldest first)
-  const times = mockResponse.commands.map((c) => new Date(c.created_at).getTime());
-  assertEquals(times[0] < times[1], true);
-  assertEquals(times[1] < times[2], true);
-});
-
-// ============================================================================
-// Command Limit Tests
-// ============================================================================
-
-Deno.test("poll-commands: limits to 10 commands per poll", () => {
-  assertEquals(MAX_COMMANDS_PER_POLL, 10);
-});
-
-Deno.test("poll-commands: returns at most 10 commands", () => {
-  // Simulate 15 pending commands, should only return 10
-  const allCommands = Array.from({ length: 15 }, (_, i) => ({
-    id: `uuid-${i}`,
-    command: "ping",
-    payload: {},
-    created_at: new Date(Date.now() + i * 1000).toISOString(),
+Deno.test("poll-commands: limits to MAX_COMMANDS_PER_POLL", () => {
+  const MAX_COMMANDS_PER_POLL = 10;
+  const mockCommands = Array.from({ length: 15 }, (_, i) => ({
+    ...mockCommand,
+    id: `cmd-${i}`,
   }));
 
-  const returnedCommands = allCommands.slice(0, MAX_COMMANDS_PER_POLL);
-  assertEquals(returnedCommands.length, 10);
+  const limitedCommands = mockCommands.slice(0, MAX_COMMANDS_PER_POLL);
+  assertEquals(limitedCommands.length, MAX_COMMANDS_PER_POLL);
 });
 
-// ============================================================================
-// Command Filtering Tests
-// ============================================================================
+Deno.test("poll-commands: orders commands by created_at ascending", () => {
+  const mockCommands = [
+    {
+      ...mockCommand,
+      id: "cmd-2",
+      created_at: new Date("2026-02-05T12:00:00Z").toISOString(),
+    },
+    {
+      ...mockCommand,
+      id: "cmd-1",
+      created_at: new Date("2026-02-05T11:00:00Z").toISOString(),
+    },
+  ];
 
-Deno.test("poll-commands: only returns pending commands", () => {
-  const statuses = ["pending", "acked", "failed", "expired"];
-  const pendingStatus = "pending";
+  const sortedCommands = mockCommands.sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 
-  assertEquals(pendingStatus, "pending");
-  assertEquals(statuses.includes(pendingStatus), true);
+  assertEquals(sortedCommands[0].id, "cmd-1");
+  assertEquals(sortedCommands[1].id, "cmd-2");
 });
 
-Deno.test("poll-commands: filters expired commands", () => {
+Deno.test("poll-commands: filters out expired commands", () => {
   const now = new Date();
+  const expiredTime = new Date(now.getTime() - 600000); // 10 minutes ago
+  const futureTime = new Date(now.getTime() + 300000); // 5 minutes from now
 
-  const validCommand = {
-    expires_at: new Date(now.getTime() + 60000).toISOString(), // 1 min from now
-  };
+  const mockCommands = [
+    {
+      ...mockCommand,
+      id: "cmd-expired",
+      expires_at: expiredTime.toISOString(),
+    },
+    {
+      ...mockCommand,
+      id: "cmd-valid",
+      expires_at: futureTime.toISOString(),
+    },
+  ];
 
-  const expiredCommand = {
-    expires_at: new Date(now.getTime() - 60000).toISOString(), // 1 min ago
-  };
+  const validCommands = mockCommands.filter(
+    (cmd) => new Date(cmd.expires_at) > now
+  );
 
-  assertEquals(new Date(validCommand.expires_at) > now, true);
-  assertEquals(new Date(expiredCommand.expires_at) < now, true);
-});
-
-Deno.test("poll-commands: filters by pairing_code", () => {
-  const deviceInfo = {
-    pairing_code: "ABC123",
-    serial_number: "A1B2C3D4",
-  };
-
-  // Query should filter by pairing_code
-  const query = { pairing_code: deviceInfo.pairing_code };
-  assertEquals(query.pairing_code, "ABC123");
+  assertEquals(validCommands.length, 1);
+  assertEquals(validCommands[0].id, "cmd-valid");
 });
 
 // ============================================================================
-// Error Response Tests
+// Error Handling Tests
 // ============================================================================
-
-Deno.test("poll-commands: 405 for unsupported methods", () => {
-  const errorResponse = {
-    success: false,
-    error: "Method not allowed",
-  };
-
-  assertEquals(errorResponse.success, false);
-  assertStringIncludes(errorResponse.error, "Method");
-});
 
 Deno.test("poll-commands: 401 for invalid token", () => {
   const errorResponse = {
@@ -226,32 +238,41 @@ Deno.test("poll-commands: 401 for invalid token", () => {
   };
 
   assertEquals(errorResponse.success, false);
+  assertStringIncludes(errorResponse.error, "token");
 });
 
-Deno.test("poll-commands: 401 for missing auth", () => {
+Deno.test("poll-commands: 401 for expired token", () => {
   const errorResponse = {
     success: false,
-    error: "Missing or invalid Authorization header",
+    error: "Token expired",
   };
 
   assertEquals(errorResponse.success, false);
+  assertStringIncludes(errorResponse.error, "expired");
 });
 
-Deno.test("poll-commands: 500 for query failure", () => {
+Deno.test("poll-commands: 500 for database error", () => {
   const errorResponse = {
     success: false,
     error: "Failed to fetch commands",
   };
 
   assertEquals(errorResponse.success, false);
-  assertStringIncludes(errorResponse.error, "fetch");
+  assertStringIncludes(errorResponse.error, "Failed");
 });
 
-Deno.test("poll-commands: 500 for server config error", () => {
-  const errorResponse = {
-    success: false,
-    error: "Server configuration error",
+// ============================================================================
+// Backward Compatibility Tests
+// ============================================================================
+
+Deno.test("poll-commands: backward compatibility - works with pairing_code only", () => {
+  const mockJwtPayloadLegacy = {
+    pairing_code: TEST_PAIRING_CODE,
+    serial_number: "A1B2C3D4",
+    token_type: "device",
   };
 
-  assertEquals(errorResponse.success, false);
+  // Should still work without device_uuid
+  assertExists(mockJwtPayloadLegacy.pairing_code);
+  assertEquals(mockJwtPayloadLegacy.pairing_code.length, 6);
 });

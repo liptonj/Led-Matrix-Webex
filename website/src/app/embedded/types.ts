@@ -11,6 +11,8 @@ import type { DeviceConfig as BaseDeviceConfig, DeviceStatus as BaseDeviceStatus
 export interface AppToken {
   serial_number: string;
   device_id: string;
+  device_uuid?: string;
+  user_uuid?: string;
   token: string;
   expires_at: string;
 }
@@ -30,8 +32,21 @@ export type DebugLevel = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'activity
  * Extends base DeviceConfig with additional embedded-specific fields.
  */
 export interface DeviceConfig extends Omit<BaseDeviceConfig, 'poll_interval' | 'pairing_code'> {
+  device_uuid?: string;
+  user_uuid?: string | null;
+  display_name?: string | null;
+  last_webex_status?: string | null;
+  serial_number?: string;
+  firmware_version?: string;
+  wifi_ssid?: string;
+  wifi_rssi?: number;
+  free_heap?: number;
+  uptime_seconds?: number;
+  brightness?: number;
+  scroll_speed?: number;
   scroll_speed_ms?: number;
   page_interval_ms?: number;
+  color_scheme?: string;
   sensor_page_enabled?: boolean;
   date_color?: string;
   time_color?: string;
@@ -104,3 +119,16 @@ export interface StatusButtonConfig {
  * OAuth status for Webex authorization flow.
  */
 export type WebexOAuthStatus = 'idle' | 'starting' | 'error';
+
+/**
+ * Realtime status event payload for webex_status broadcasts.
+ */
+export interface WebexStatusBroadcast {
+  device_uuid: string;
+  webex_status: string;
+  in_call?: boolean;
+  camera_on?: boolean;
+  mic_muted?: boolean;
+  display_name?: string;
+  updated_at: string;
+}

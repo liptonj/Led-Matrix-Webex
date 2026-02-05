@@ -22,7 +22,7 @@
  *   }
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { create, getNumericDate } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
@@ -36,6 +36,8 @@ interface DeviceAuthResponse {
   serial_number: string;
   pairing_code: string;
   device_id: string;
+  device_uuid: string;
+  user_uuid: string | null;
   token: string;
   expires_at: string;
   target_firmware_version: string | null;
@@ -123,8 +125,29 @@ Deno.serve(async (req) => {
 
     const device = validation.device;
 
-    // Ensure pairing row exists (upsert)
-    const { error: pairingError } = await supabase
+    // Get device UUID from devices table
+    const { data: deviceRecord, error: deviceRecordError } = await (supabase as any)
+      .schema("display")
+      .from("devices")
+      .select("id")
+      .eq("serial_number", device.serial_number)
+      .single();
+
+    if (deviceRecordError || !deviceRecord) {
+      console.error("Failed to fetch device UUID:", deviceRecordError);
+      return new Response(
+        JSON.stringify({ success: false, error: "Device record not found" }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const deviceUuid = deviceRecord.id;
+
+    // Ensure pairing row exists (upsert) with device_uuid
+    const { error: pairingError } = await (supabase as any)
       .schema("display")
       .from("pairings")
       .upsert(
@@ -132,6 +155,7 @@ Deno.serve(async (req) => {
           pairing_code: device.pairing_code,
           serial_number: device.serial_number,
           device_id: device.device_id,
+          device_uuid: deviceUuid,
           device_connected: true,
           device_last_seen: new Date().toISOString(),
         },
@@ -146,6 +170,16 @@ Deno.serve(async (req) => {
       // Continue anyway - pairing might already exist
     }
 
+    // Get user_uuid from pairings table (null if not assigned)
+    const { data: pairingRecord } = await (supabase as any)
+      .schema("display")
+      .from("pairings")
+      .select("user_uuid")
+      .eq("pairing_code", device.pairing_code)
+      .maybeSingle();
+
+    const userUuid = pairingRecord?.user_uuid || null;
+
     // Calculate token expiration
     const now = Math.floor(Date.now() / 1000);
     const expiresAt = now + DEVICE_TOKEN_TTL_SECONDS;
@@ -159,6 +193,8 @@ Deno.serve(async (req) => {
       serial_number: device.serial_number,
       pairing_code: device.pairing_code,
       device_id: device.device_id,
+      device_uuid: deviceUuid,
+      user_uuid: userUuid,
       token_type: "device",
       iat: getNumericDate(0),
       exp: getNumericDate(DEVICE_TOKEN_TTL_SECONDS),
@@ -214,7 +250,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      const jwkSanitized = { ...jwk } as JsonWebKey;
+      const jwkSanitized = { ...jwk } as JsonWebKey & { kid?: string };
       // Deno importKey is strict about key_ops/use; remove to avoid validation errors.
       // We only need the private key material for signing here.
       // deno-lint-ignore no-explicit-any
@@ -239,8 +275,9 @@ Deno.serve(async (req) => {
               ["sign"],
             );
 
+      const kid = deviceJwtKid ?? jwkSanitized.kid;
       token = await create(
-        { alg, typ: "JWT", kid: deviceJwtKid ?? jwk.kid },
+        { alg, typ: "JWT", ...(kid ? { kid } : {}) },
         payload,
         key,
       );
@@ -275,6 +312,8 @@ Deno.serve(async (req) => {
       serial_number: device.serial_number,
       pairing_code: device.pairing_code,
       device_id: device.device_id,
+      device_uuid: deviceUuid,
+      user_uuid: userUuid,
       token,
       expires_at: expiresAtISO,
       target_firmware_version: device.target_firmware_version,

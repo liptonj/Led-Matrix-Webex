@@ -25,9 +25,10 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getOAuthConfig } from "../_shared/oauth-config.ts";
+import { updateSecret } from "../_shared/vault.ts";
 
 const WEBEX_TOKEN_URL = "https://webexapis.com/v1/access_token";
 const WEBEX_USERINFO_URL = "https://webexapis.com/v1/userinfo";
@@ -197,6 +198,15 @@ serve(async (req: Request) => {
 
     const webexUser = await userInfoResponse.json();
 
+    // Store user's Webex tokens in vault
+    const accessTokenId = await updateSecret(
+      supabase, null, tokens.access_token, `webex_user_access_${webexUser.sub}`
+    );
+
+    const refreshTokenId = tokens.refresh_token 
+      ? await updateSecret(supabase, null, tokens.refresh_token, `webex_user_refresh_${webexUser.sub}`)
+      : null;
+
     // Check if user exists, create or update
     const { data: existingProfile } = await supabase
       .schema("display")
@@ -292,6 +302,18 @@ serve(async (req: Request) => {
       }
     }
 
+    // Store OAuth tokens in oauth_tokens table
+    await supabase.schema("display").from("oauth_tokens").upsert({
+      provider: "webex",
+      user_id: userId,
+      token_scope: "user",
+      serial_number: null,
+      pairing_code: null,
+      access_token_id: accessTokenId,
+      refresh_token_id: refreshTokenId,
+      expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
+    }, { onConflict: "provider,user_id", ignoreDuplicates: false });
+
     // Generate Supabase session for the user
     const { data: sessionData, error: sessionError } = await supabase.auth.admin
       .generateLink({
@@ -341,9 +363,11 @@ serve(async (req: Request) => {
       );
     }
 
-    // Determine redirect based on admin status
-    // If they're an admin, redirect to admin portal, otherwise user portal
-    const finalRedirect = adminCheck ? '/admin' : '/user';
+    // Determine redirect based on redirect_to parameter and admin status
+    // For embedded app flow, respect redirect_to; for portal flow, check admin status
+    const finalRedirect = redirectTo.startsWith('/embedded') 
+      ? redirectTo  // Embedded app flow - use requested redirect
+      : (adminCheck ? '/admin' : '/user');  // Portal flow - check admin status
 
     // Build redirect URL with session token
     const redirectUrl = sessionData.properties?.hashed_token

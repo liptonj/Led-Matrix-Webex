@@ -4,7 +4,7 @@
  * and returns the authenticated user and Supabase client.
  */
 
-import { createClient, type User } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type User } from "@supabase/supabase-js";
 import { corsHeaders } from "./cors.ts";
 
 interface AuthResult {

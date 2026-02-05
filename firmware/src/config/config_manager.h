@@ -56,6 +56,14 @@ public:
     void setDeviceName(const String& name);
     String getDisplayName() const;
     void setDisplayName(const String& name);
+    
+    // UUID-based Device Identity (Phase 3)
+    String getDeviceUuid() const;
+    void setDeviceUuid(const String& uuid);
+    String getUserUuid() const;
+    void setUserUuid(const String& uuid);
+    String getLastWebexStatus() const;
+    void setLastWebexStatus(const String& status);
     uint8_t getBrightness() const;
     void setBrightness(uint8_t brightness);
     uint16_t getScrollSpeedMs() const;
@@ -142,6 +150,12 @@ public:
     String getSupabaseAnonKey() const;
     void setSupabaseAnonKey(const String& key);
 
+    // UUID-based Device Identity
+    String getUserUuid() const;
+    void setUserUuid(const String& uuid);
+    String getDeviceUuid() const;
+    void setDeviceUuid(const String& uuid);
+
     // Partition Version Tracking (for OTA version display)
     String getPartitionVersion(const String& partition_label) const;
     void setPartitionVersion(const String& partition_label, const String& version);
@@ -197,6 +211,9 @@ private:
     mutable String cached_password;
     mutable String cached_device_name;
     mutable String cached_display_name;
+    mutable String cached_device_uuid;
+    mutable String cached_user_uuid;
+    mutable String cached_last_webex_status;
     mutable String cached_client_id;
     mutable String cached_client_secret;
     mutable String cached_access_token;
@@ -229,6 +246,8 @@ private:
     mutable String cached_date_format;
     mutable String cached_supabase_url;
     mutable String cached_supabase_anon_key;
+    mutable String cached_user_uuid;
+    mutable String cached_device_uuid;
     mutable bool cached_tls_verify;
     mutable bool cached_debug_display;
     mutable bool cached_debug_realtime;

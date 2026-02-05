@@ -41,10 +41,8 @@ x-runner-common: &runner-common
   deploy:
     resources:
       limits:
-        cpus: '1'        # 0.5 CPU cores per runner (half a core)
-        memory: 3G         # 1GB RAM per runner
+        memory: 4G         # 1GB RAM per runner
       reservations:
-        cpus: '0.25'       # Reserve at least 0.25 cores
         memory: 512M       # Reserve at least 512MB RAM
   environment: &runner-env
     REPO_URL: https://github.com/liptonj/Led-Matrix-Webex

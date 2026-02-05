@@ -9,9 +9,11 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
+import { refreshWebexToken } from "../_shared/webex.ts";
 
 interface TokenPayload {
   sub: string;
@@ -28,80 +30,6 @@ function getBearerToken(req: Request): string | null {
     return authHeader.slice(7);
   }
   return null;
-}
-
-async function fetchDecryptedSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string,
-): Promise<string> {
-  const { data, error } = await client.schema("display").rpc("vault_read_secret", {
-    p_secret_id: secretId,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to read secret from vault");
-  }
-  return data as string;
-}
-
-async function updateSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string | null,
-  secretValue: string,
-  nameHint: string,
-): Promise<string> {
-  if (secretId) {
-    const { error } = await client.schema("display").rpc("vault_update_secret", {
-      p_secret_id: secretId,
-      p_secret: secretValue,
-      p_name: null,
-      p_description: null,
-      p_key_id: null,
-    });
-
-    if (error) {
-      throw new Error("Failed to update vault secret");
-    }
-
-    return secretId;
-  }
-
-  const { data, error } = await client.schema("display").rpc("vault_create_secret", {
-    p_secret: secretValue,
-    p_name: nameHint,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to create vault secret");
-  }
-
-  return data as string;
-}
-
-async function refreshWebexToken(args: {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
-}): Promise<{ access_token: string; refresh_token?: string; expires_in?: number }> {
-  const body = new URLSearchParams();
-  body.set("grant_type", "refresh_token");
-  body.set("refresh_token", args.refreshToken);
-  body.set("client_id", args.clientId);
-  body.set("client_secret", args.clientSecret);
-
-  const response = await fetch("https://webexapis.com/v1/access_token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.error_description || data?.error || "Failed to refresh token";
-    throw new Error(message);
-  }
-
-  return data as { access_token: string; refresh_token?: string; expires_in?: number };
 }
 
 serve(async (req: Request) => {
@@ -125,6 +53,12 @@ serve(async (req: Request) => {
       });
     }
 
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
     const bearerToken = getBearerToken(req);
     if (!bearerToken) {
       return new Response(JSON.stringify({ error: "Missing token" }), {
@@ -133,50 +67,73 @@ serve(async (req: Request) => {
       });
     }
 
-    let tokenPayload: TokenPayload;
-    try {
-      tokenPayload = await verifyDeviceToken(bearerToken, tokenSecret);
-    } catch {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Try Supabase user auth first
+    const { data: { user }, error: userError } = await supabase.auth.getUser(bearerToken);
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    let tokenRow;
+    let serialNumber = null;
+    let pairingCode = null;
 
-    const pairingCode = tokenPayload.pairing_code ?? null;
-    const serialNumber = tokenPayload.serial_number ?? null;
+    if (user && !userError) {
+      // User token path - lookup by user_id
+      const { data, error } = await supabase
+        .schema("display")
+        .from("oauth_tokens")
+        .select("id, access_token_id, refresh_token_id, expires_at")
+        .eq("provider", "webex")
+        .eq("user_id", user.id)
+        .eq("token_scope", "user")
+        .maybeSingle();
+        
+      if (error || !data) {
+        return new Response(JSON.stringify({ error: "Webex token not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      tokenRow = data;
+    } else {
+      // Device token path - existing logic with verifyDeviceToken()
+      let tokenPayload: TokenPayload;
+      try {
+        tokenPayload = await verifyDeviceToken(bearerToken, tokenSecret);
+      } catch {
+        return new Response(JSON.stringify({ error: "Invalid token" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    if (!serialNumber && !pairingCode) {
-      return new Response(JSON.stringify({ error: "Missing device selector" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+      pairingCode = tokenPayload.pairing_code ?? null;
+      serialNumber = tokenPayload.serial_number ?? null;
 
-    let tokenQuery = supabase
-      .schema("display")
-      .from("oauth_tokens")
-      .select("id, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at")
-      .eq("provider", "webex");
+      if (!serialNumber && !pairingCode) {
+        return new Response(JSON.stringify({ error: "Missing device selector" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
-    if (serialNumber) {
-      tokenQuery = tokenQuery.eq("serial_number", serialNumber);
-    } else if (pairingCode) {
-      tokenQuery = tokenQuery.eq("pairing_code", pairingCode);
-    }
+      let tokenQuery = supabase
+        .schema("display")
+        .from("oauth_tokens")
+        .select("id, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at")
+        .eq("provider", "webex");
 
-    const { data: tokenRow, error: tokenErr } = await tokenQuery.maybeSingle();
-    if (tokenErr || !tokenRow) {
-      return new Response(JSON.stringify({ error: "Webex token not found" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      if (serialNumber) {
+        tokenQuery = tokenQuery.eq("serial_number", serialNumber);
+      } else if (pairingCode) {
+        tokenQuery = tokenQuery.eq("pairing_code", pairingCode);
+      }
+
+      const { data, error: tokenErr } = await tokenQuery.maybeSingle();
+      if (tokenErr || !data) {
+        return new Response(JSON.stringify({ error: "Webex token not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      tokenRow = data;
     }
 
     let accessToken = await fetchDecryptedSecret(supabase, tokenRow.access_token_id as string);
@@ -218,7 +175,7 @@ serve(async (req: Request) => {
       const expiresIn = typeof refreshed.expires_in === "number" ? refreshed.expires_in : 3600;
       expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-      const secretKey = serialNumber || pairingCode || "token";
+      const secretKey = user ? `user_${user.id}` : (serialNumber || pairingCode || "token");
       const accessTokenId = await updateSecret(
         supabase,
         tokenRow.access_token_id as string,

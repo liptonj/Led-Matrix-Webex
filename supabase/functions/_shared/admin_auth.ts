@@ -6,7 +6,7 @@
  * Optional: allow service role token to bypass user/admin checks.
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 
 interface AdminAuthOptions {
   corsHeaders?: Record<string, string>;

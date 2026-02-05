@@ -6,7 +6,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { requireAdminUser } from "../_shared/admin_auth.ts";
 
@@ -68,7 +68,7 @@ serve(async (req: Request) => {
 
     if (createError) {
       const { data: existingUser, error: lookupError } =
-        await serviceClient.auth.admin.getUserByEmail(email);
+        await (serviceClient.auth.admin as any).getUserByEmail(email);
 
       if (lookupError || !existingUser?.user) {
         return new Response(JSON.stringify({ error: createError.message }), {
@@ -90,7 +90,7 @@ serve(async (req: Request) => {
       });
     }
 
-    const { error: profileError } = await serviceClient
+    const { error: profileError } = await (serviceClient as any)
       .schema("display")
       .from("user_profiles")
       .upsert(
@@ -111,7 +111,7 @@ serve(async (req: Request) => {
     }
 
     if (role === "admin") {
-      const { error: adminInsertError } = await serviceClient
+      const { error: adminInsertError } = await (serviceClient as any)
         .schema("display")
         .from("admin_users")
         .upsert(

@@ -7,130 +7,18 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-
-const CANONICAL_STATUSES = [
-  "active",
-  "away",
-  "dnd",
-  "busy",
-  "meeting",
-  "call",
-  "presenting",
-  "ooo",
-  "pending",
-  "unknown",
-  "offline",
-];
-
-const STATUS_ALIASES: Record<string, string> = {
-  available: "active",
-  inactive: "away",
-  brb: "away",
-  donotdisturb: "dnd",
-  outofoffice: "ooo",
-};
+import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
+import {
+  fetchWebexStatus,
+  normalizeWebexStatus,
+  refreshWebexToken,
+  CANONICAL_STATUSES,
+  STATUS_ALIASES,
+} from "../_shared/webex.ts";
 
 const COLLISION_WINDOW_MS = 15_000; // skip only if embedded app updated very recently
-
-function normalizeWebexStatus(value: string | null | undefined): string {
-  if (!value) return "unknown";
-  const key = value.trim().toLowerCase();
-  const normalized = STATUS_ALIASES[key] ?? key;
-  return CANONICAL_STATUSES.includes(normalized) ? normalized : "unknown";
-}
-
-async function fetchDecryptedSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string,
-): Promise<string> {
-  const { data, error } = await client.schema("display").rpc("vault_read_secret", {
-    p_secret_id: secretId,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to read secret from vault");
-  }
-  return data as string;
-}
-
-async function updateSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string | null,
-  secretValue: string,
-  nameHint: string,
-): Promise<string> {
-  if (secretId) {
-    const { error } = await client.schema("display").rpc("vault_update_secret", {
-      p_secret_id: secretId,
-      p_secret: secretValue,
-      p_name: null,
-      p_description: null,
-      p_key_id: null,
-    });
-
-    if (error) {
-      throw new Error("Failed to update vault secret");
-    }
-
-    return secretId;
-  }
-
-  const { data, error } = await client.schema("display").rpc("vault_create_secret", {
-    p_secret: secretValue,
-    p_name: nameHint,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to create vault secret");
-  }
-
-  return data as string;
-}
-
-async function refreshWebexToken(args: {
-  clientId: string;
-  clientSecret: string;
-  refreshToken: string;
-}): Promise<{ access_token: string; refresh_token?: string; expires_in?: number }> {
-  const body = new URLSearchParams();
-  body.set("grant_type", "refresh_token");
-  body.set("refresh_token", args.refreshToken);
-  body.set("client_id", args.clientId);
-  body.set("client_secret", args.clientSecret);
-
-  const response = await fetch("https://webexapis.com/v1/access_token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.error_description || data?.error || "Failed to refresh token";
-    throw new Error(message);
-  }
-
-  return data as { access_token: string; refresh_token?: string; expires_in?: number };
-}
-
-async function fetchWebexStatus(accessToken: string): Promise<string> {
-  const response = await fetch("https://webexapis.com/v1/people/me", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.message || data?.error || "Webex API error";
-    throw new Error(message);
-  }
-
-  const status = data?.status || data?.presence || data?.availability || data?.state || data?.activity;
-  return normalizeWebexStatus(status);
-}
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -276,6 +164,14 @@ serve(async (req: Request) => {
           continue;
         }
 
+        // Get device_uuid and user_uuid for broadcast
+        const { data: pairingWithUuids } = await supabase
+          .schema("display")
+          .from("pairings")
+          .select("device_uuid, user_uuid")
+          .eq("pairing_code", pairingCode)
+          .maybeSingle();
+
         await supabase
           .schema("display")
           .from("pairings")
@@ -285,10 +181,195 @@ serve(async (req: Request) => {
           })
           .eq("pairing_code", pairingCode);
 
+        // Broadcast to device channel if device_uuid is available
+        if (pairingWithUuids?.device_uuid) {
+          try {
+            await sendBroadcast(
+              `device:${pairingWithUuids.device_uuid}`,
+              "webex_status",
+              {
+                webex_status: webexStatus,
+                in_call: inCall,
+                device_uuid: pairingWithUuids.device_uuid,
+              },
+            );
+          } catch (broadcastError) {
+            console.error("Failed to broadcast webex_status to device channel:", broadcastError);
+            // Don't fail the request - status is already updated
+          }
+        }
+
+        // Broadcast to user channel if user_uuid is available
+        if (pairingWithUuids?.user_uuid) {
+          try {
+            await sendBroadcast(
+              `user:${pairingWithUuids.user_uuid}`,
+              "webex_status",
+              {
+                webex_status: webexStatus,
+                in_call: inCall,
+                user_uuid: pairingWithUuids.user_uuid,
+              },
+            );
+          } catch (broadcastError) {
+            console.error("Failed to broadcast webex_status to user channel:", broadcastError);
+            // Don't fail the request - status is already updated
+          }
+        }
+
         updated++;
       } catch (err) {
         console.error("Sweep token failed:", err);
         failed++;
+      }
+    }
+
+    // Phase 2: Poll using user tokens for devices with webex_polling_enabled
+    const { data: enabledDevices } = await supabase
+      .schema("display")
+      .from("user_devices")
+      .select("user_id, serial_number")
+      .eq("webex_polling_enabled", true);
+
+    if (enabledDevices?.length) {
+      // Group by user_id to avoid duplicate API calls per user
+      const devicesByUser = new Map<string, string[]>();
+      for (const d of enabledDevices) {
+        const list = devicesByUser.get(d.user_id) || [];
+        list.push(d.serial_number);
+        devicesByUser.set(d.user_id, list);
+      }
+
+      for (const [userId, serialNumbers] of devicesByUser) {
+        try {
+          // Get user's Webex token
+          const { data: userToken } = await supabase
+            .schema("display")
+            .from("oauth_tokens")
+            .select("id, access_token_id, refresh_token_id, expires_at")
+            .eq("user_id", userId)
+            .eq("token_scope", "user")
+            .eq("provider", "webex")
+            .maybeSingle();
+
+          if (!userToken) continue; // User hasn't connected Webex
+
+          // Fetch and potentially refresh access token
+          let accessToken = await fetchDecryptedSecret(supabase, userToken.access_token_id as string);
+          const expiresAt = userToken.expires_at ? new Date(userToken.expires_at as string) : null;
+          const shouldRefresh = !expiresAt || expiresAt.getTime() - now < 60_000;
+
+          if (shouldRefresh && userToken.refresh_token_id) {
+            const clientSecret = await fetchDecryptedSecret(
+              supabase,
+              clientRow.client_secret_id as string,
+            );
+            const refreshToken = await fetchDecryptedSecret(supabase, userToken.refresh_token_id as string);
+
+            const refreshed = await refreshWebexToken({
+              clientId: clientRow.client_id as string,
+              clientSecret,
+              refreshToken,
+            });
+
+            accessToken = refreshed.access_token;
+            const accessTokenId = await updateSecret(
+              supabase,
+              userToken.access_token_id as string,
+              accessToken,
+              `webex_user_access_${userId}`,
+            );
+
+            let refreshTokenIdUpdated = userToken.refresh_token_id as string;
+            if (refreshed.refresh_token) {
+              refreshTokenIdUpdated = await updateSecret(
+                supabase,
+                userToken.refresh_token_id as string,
+                refreshed.refresh_token,
+                `webex_user_refresh_${userId}`,
+              );
+            }
+
+            const newExpiresAt = refreshed.expires_in
+              ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+              : null;
+
+            await supabase
+              .schema("display")
+              .from("oauth_tokens")
+              .update({
+                access_token_id: accessTokenId,
+                refresh_token_id: refreshTokenIdUpdated,
+                expires_at: newExpiresAt,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", userToken.id);
+          }
+
+          // Poll Webex once for this user
+          const webexStatus = await fetchWebexStatus(accessToken);
+          const inCall = ["meeting", "call", "presenting", "busy"].includes(webexStatus);
+
+          // Update all user's enabled devices
+          for (const serialNumber of serialNumbers) {
+            // Get pairing code and UUIDs for this device
+            const { data: pairing } = await supabase
+              .schema("display")
+              .from("pairings")
+              .select("pairing_code, webex_status, device_uuid, user_uuid")
+              .eq("serial_number", serialNumber)
+              .maybeSingle();
+
+            if (pairing && pairing.webex_status !== webexStatus) {
+              await supabase
+                .schema("display")
+                .from("pairings")
+                .update({ webex_status: webexStatus, in_call: inCall })
+                .eq("pairing_code", pairing.pairing_code);
+
+              // Broadcast to device channel if device_uuid is available
+              if (pairing.device_uuid) {
+                try {
+                  await sendBroadcast(
+                    `device:${pairing.device_uuid}`,
+                    "webex_status",
+                    {
+                      webex_status: webexStatus,
+                      in_call: inCall,
+                      device_uuid: pairing.device_uuid,
+                    },
+                  );
+                } catch (broadcastError) {
+                  console.error("Failed to broadcast webex_status to device channel:", broadcastError);
+                  // Don't fail the request - status is already updated
+                }
+              }
+
+              // Broadcast to user channel
+              try {
+                await sendBroadcast(
+                  `user:${userId}`,
+                  "webex_status",
+                  {
+                    webex_status: webexStatus,
+                    in_call: inCall,
+                    user_uuid: userId,
+                  },
+                );
+              } catch (broadcastError) {
+                console.error("Failed to broadcast webex_status to user channel:", broadcastError);
+                // Don't fail the request - status is already updated
+              }
+
+              updated++;
+            } else {
+              skipped++;
+            }
+          }
+        } catch (err) {
+          console.error("User token sweep failed:", err);
+          failed++;
+        }
       }
     }
 

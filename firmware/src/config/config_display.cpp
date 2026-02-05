@@ -22,6 +22,30 @@ void ConfigManager::setDisplayName(const String& name) {
     cached_display_name = name;
 }
 
+// UUID-based Device Identity (Phase 3)
+CONFIG_CACHED_STRING_GETTER(DeviceUuid, "device_uuid", cached_device_uuid, "")
+
+void ConfigManager::setDeviceUuid(const String& uuid) {
+    saveString("device_uuid", uuid);
+    cached_device_uuid = uuid;
+    Serial.printf("[CONFIG] Device UUID set to: %s\n", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
+}
+
+CONFIG_CACHED_STRING_GETTER(UserUuid, "user_uuid", cached_user_uuid, "")
+
+void ConfigManager::setUserUuid(const String& uuid) {
+    saveString("user_uuid", uuid);
+    cached_user_uuid = uuid;
+    Serial.printf("[CONFIG] User UUID set to: %s\n", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
+}
+
+CONFIG_CACHED_STRING_GETTER(LastWebexStatus, "last_webex_status", cached_last_webex_status, "")
+
+void ConfigManager::setLastWebexStatus(const String& status) {
+    saveString("last_webex_status", status);
+    cached_last_webex_status = status;
+}
+
 CONFIG_CACHED_UINT8_GETTER(Brightness, "brightness", cached_brightness, DEFAULT_BRIGHTNESS)
 CONFIG_CACHED_UINT8_SETTER(Brightness, "brightness", cached_brightness)
 

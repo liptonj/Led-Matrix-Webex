@@ -6,10 +6,11 @@
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { decodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
 
 interface StatePayload {
   pairing_code: string;
@@ -23,54 +24,6 @@ function fromBase64Url(input: string): string {
   const padded = input.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((input.length + 3) % 4);
   const bytes = decodeBase64(padded);
   return new TextDecoder().decode(bytes);
-}
-
-async function fetchDecryptedSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string,
-): Promise<string> {
-  const { data, error } = await client.schema("display").rpc("vault_read_secret", {
-    p_secret_id: secretId,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to read secret from vault");
-  }
-  return data as string;
-}
-
-async function updateSecret(
-  client: ReturnType<typeof createClient>,
-  secretId: string | null,
-  secretValue: string,
-  nameHint: string,
-): Promise<string> {
-  if (secretId) {
-    const { error } = await client.schema("display").rpc("vault_update_secret", {
-      p_secret_id: secretId,
-      p_secret: secretValue,
-      p_name: null,
-      p_description: null,
-      p_key_id: null,
-    });
-
-    if (error) {
-      throw new Error("Failed to update vault secret");
-    }
-
-    return secretId;
-  }
-
-  const { data, error } = await client.schema("display").rpc("vault_create_secret", {
-    p_secret: secretValue,
-    p_name: nameHint,
-  });
-
-  if (error || !data) {
-    throw new Error("Failed to create vault secret");
-  }
-
-  return data as string;
 }
 
 serve(async (req: Request) => {

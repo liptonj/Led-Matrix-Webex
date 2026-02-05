@@ -20,7 +20,7 @@
  *   }
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
@@ -45,6 +45,8 @@ interface TokenPayload {
   serial_number: string;
   token_type: string;
   exp: number;
+  device_uuid?: string;
+  user_uuid?: string | null;
 }
 
 /**
@@ -125,7 +127,7 @@ Deno.serve(async (req) => {
       body = await req.text();
     }
 
-    let deviceInfo: { serial_number: string; pairing_code: string };
+    let deviceInfo: { serial_number: string; pairing_code: string; device_uuid?: string };
 
     // Try bearer token first, fall back to HMAC
     const authHeader = req.headers.get("Authorization");
@@ -144,6 +146,7 @@ Deno.serve(async (req) => {
       deviceInfo = {
         serial_number: tokenResult.device.serial_number,
         pairing_code: tokenResult.device.pairing_code,
+        device_uuid: tokenResult.device.device_uuid,
       };
     } else {
       // Fall back to HMAC authentication
@@ -163,16 +166,24 @@ Deno.serve(async (req) => {
       };
     }
 
-    // Query pending commands for this device's pairing code
-    const { data: commands, error: queryError } = await supabase
+    // Query pending commands for this device using device_uuid (preferred) or pairing_code (fallback)
+    let query = supabase
       .schema("display")
       .from("commands")
       .select("id, command, payload, created_at")
-      .eq("pairing_code", deviceInfo.pairing_code)
       .eq("status", "pending")
       .gt("expires_at", new Date().toISOString()) // Only non-expired commands
       .order("created_at", { ascending: true })
       .limit(MAX_COMMANDS_PER_POLL);
+
+    // Use device_uuid if available, otherwise fall back to pairing_code
+    if (deviceInfo.device_uuid) {
+      query = query.eq("device_uuid", deviceInfo.device_uuid);
+    } else {
+      query = query.eq("pairing_code", deviceInfo.pairing_code);
+    }
+
+    const { data: commands, error: queryError } = await query;
 
     if (queryError) {
       console.error("Failed to query commands:", queryError);

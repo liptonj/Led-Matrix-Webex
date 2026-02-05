@@ -10,7 +10,7 @@
  * Authentication: Requires service role key or admin JWT
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 
 const RETENTION_DAYS = 7;

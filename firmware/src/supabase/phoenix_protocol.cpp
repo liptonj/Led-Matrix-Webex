@@ -151,6 +151,23 @@ bool SupabaseRealtime::subscribeBroadcast() {
     return subscribeMultiple("", nullptr, 0, "", false);
 }
 
+bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
+    if (user_uuid.isEmpty()) {
+        Serial.println("[REALTIME] Cannot subscribe to user channel - user_uuid is empty");
+        return false;
+    }
+    
+    // Set channel topic to user:{user_uuid}
+    String channelTopic = "user:" + user_uuid;
+    setChannelTopic(channelTopic);
+    
+    Serial.printf("[REALTIME] Subscribing to user channel: %s\n", channelTopic.c_str());
+    
+    // Subscribe as private broadcast channel (no postgres_changes)
+    _privateChannel = true;
+    return subscribeMultiple("", nullptr, 0, "", false);
+}
+
 bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tables[],
                                           int tableCount, const String& filter,
                                           bool includePostgresChanges) {

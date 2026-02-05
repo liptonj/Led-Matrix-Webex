@@ -101,6 +101,9 @@ void ConfigManager::loadCache() const {
     cached_password = loadString("wifi_pass");
     cached_device_name = loadString("device_name", DEFAULT_DEVICE_NAME);
     cached_display_name = loadString("display_name");
+    cached_device_uuid = loadString("device_uuid");
+    cached_user_uuid = loadString("user_uuid");
+    cached_last_webex_status = loadString("last_webex_status");
     cached_client_id = loadString("webex_client");
     cached_client_secret = loadString("webex_secret");
     cached_access_token = loadString("webex_access");
@@ -139,6 +142,8 @@ void ConfigManager::loadCache() const {
     // Load Supabase config
     cached_supabase_url = loadString("supabase_url", "");
     cached_supabase_anon_key = loadString("supabase_anon", "");
+    cached_user_uuid = loadString("user_uuid", "");
+    cached_device_uuid = loadString("device_uuid", "");
     cached_tls_verify = loadBool("tls_verify", true);
     
     // Load debug flags

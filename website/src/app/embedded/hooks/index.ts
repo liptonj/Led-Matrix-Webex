@@ -6,6 +6,8 @@ export { useDeviceConfig } from './useDeviceConfig';
 export type { UseDeviceConfigOptions, UseDeviceConfigResult } from './useDeviceConfig';
 export { usePairing } from './usePairing';
 export type { UsePairingOptions, UsePairingResult } from './usePairing';
+export { useRealtimeStatus } from './useRealtimeStatus';
+export type { UseRealtimeStatusOptions, UseRealtimeStatusResult, DeviceWebexStatus } from './useRealtimeStatus';
 export { useWebexStatus } from './useWebexStatus';
 export type { UseWebexStatusOptions, UseWebexStatusResult } from './useWebexStatus';
 

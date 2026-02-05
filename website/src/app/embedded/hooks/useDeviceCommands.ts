@@ -18,6 +18,7 @@ const API_TIMEOUT_MS = 15000;
 export interface UseDeviceCommandsOptions {
   appToken: AppToken | null;
   pairingCode: string;
+  deviceUuid?: string | null;
   supabaseRef: React.MutableRefObject<SupabaseClient | null>;
   addLog: (message: string) => void;
 }
@@ -50,7 +51,7 @@ export interface UseDeviceCommandsReturn {
 }
 
 export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceCommandsReturn {
-  const { appToken, pairingCode, supabaseRef, addLog } = options;
+  const { appToken, pairingCode, deviceUuid, supabaseRef, addLog } = options;
 
   // Update app state via Edge Function (more secure than direct DB update)
   const updateAppStateViaEdge = useCallback(async (stateData: {
@@ -103,6 +104,12 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
     }
 
     try {
+      // Include device_uuid in request body if available
+      const requestBody: Record<string, unknown> = { command, payload };
+      if (deviceUuid) {
+        requestBody.device_uuid = deviceUuid;
+      }
+
       const response = await fetchWithTimeout(
         `${supabaseUrl}/functions/v1/insert-command`,
         {
@@ -111,7 +118,7 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${appToken.token}`,
           },
-          body: JSON.stringify({ command, payload }),
+          body: JSON.stringify(requestBody),
         },
         API_TIMEOUT_MS
       );
@@ -126,7 +133,7 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
-  }, [appToken]);
+  }, [appToken, deviceUuid]);
 
   // Send command and wait for acknowledgment
   const sendCommand = useCallback(async (

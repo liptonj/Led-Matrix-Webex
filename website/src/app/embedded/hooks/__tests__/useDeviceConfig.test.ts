@@ -9,6 +9,10 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useDeviceConfig, type UseDeviceConfigOptions } from '../useDeviceConfig';
 import type { CommandResponse } from '../useDeviceCommands';
 
+// UUID test fixtures
+const TEST_DEVICE_UUID = '550e8400-e29b-41d4-a716-446655440000';
+const TEST_USER_UUID = '550e8400-e29b-41d4-a716-446655440001';
+
 describe('useDeviceConfig hook', () => {
   const mockAddLog = jest.fn();
   const mockSendCommand = jest.fn<Promise<CommandResponse>, [string, Record<string, unknown>?]>();
@@ -584,6 +588,102 @@ describe('useDeviceConfig hook', () => {
       expect(result.current.mqttTopic).toBe('test/topic/#');
       expect(result.current.displaySensorMac).toBe('11:22:33:44:55:66');
       expect(result.current.displayMetric).toBe('pm2_5');
+    });
+  });
+
+  describe('UUID-based device identity', () => {
+    it('should fetch config from HTTP API when deviceIp provided', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          device_uuid: TEST_DEVICE_UUID,
+          user_uuid: TEST_USER_UUID,
+          brightness: 150,
+          device_name: 'test-device',
+        }),
+      });
+
+      const options = { ...defaultOptions, deviceIp: '192.168.1.100' };
+      const { result } = renderHook(() => useDeviceConfig(options));
+
+      await waitFor(() => {
+        expect(result.current.deviceConfig).not.toBeNull();
+      });
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://192.168.1.100/api/config',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(result.current.deviceConfig?.device_uuid).toBe(TEST_DEVICE_UUID);
+      expect(result.current.deviceConfig?.user_uuid).toBe(TEST_USER_UUID);
+    });
+
+    it('should fetch config via commands when no deviceIp', async () => {
+      mockSendCommand.mockResolvedValueOnce({
+        success: true,
+        data: {
+          device_uuid: TEST_DEVICE_UUID,
+          user_uuid: TEST_USER_UUID,
+          brightness: 150,
+        },
+      });
+
+      const options = { ...defaultOptions, deviceIp: null };
+      const { result } = renderHook(() => useDeviceConfig(options));
+
+      await waitFor(() => {
+        expect(result.current.deviceConfig).not.toBeNull();
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledWith('get_config');
+      expect(result.current.deviceConfig?.device_uuid).toBe(TEST_DEVICE_UUID);
+      expect(result.current.deviceConfig?.user_uuid).toBe(TEST_USER_UUID);
+    });
+
+    it('should include device_uuid and user_uuid in config', async () => {
+      mockSendCommand.mockResolvedValueOnce({
+        success: true,
+        data: {
+          device_uuid: TEST_DEVICE_UUID,
+          user_uuid: TEST_USER_UUID,
+          brightness: 128,
+        },
+      });
+
+      const { result } = renderHook(() => useDeviceConfig(defaultOptions));
+
+      await waitFor(() => {
+        expect(result.current.deviceConfig).not.toBeNull();
+      });
+
+      expect(result.current.deviceConfig?.device_uuid).toBe(TEST_DEVICE_UUID);
+      expect(result.current.deviceConfig?.user_uuid).toBe(TEST_USER_UUID);
+    });
+
+    it('should updateDeviceConfig send PATCH request with UUID', async () => {
+      global.fetch = jest.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          device_uuid: TEST_DEVICE_UUID,
+          user_uuid: TEST_USER_UUID,
+          brightness: 200,
+        }),
+      });
+
+      const options = { ...defaultOptions, deviceIp: '192.168.1.100' };
+      const { result } = renderHook(() => useDeviceConfig(options));
+
+      await act(async () => {
+        await result.current.updateDeviceConfig({ brightness: 200 });
+      });
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://192.168.1.100/api/config',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ brightness: 200 }),
+        })
+      );
     });
   });
 });

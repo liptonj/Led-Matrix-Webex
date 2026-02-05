@@ -6,7 +6,7 @@
  * Supports multiple OAuth purposes (user auth, device auth, etc.)
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 
 export interface OAuthConfig {
   clientId: string;
@@ -38,7 +38,7 @@ export async function getOAuthConfig(
   const supabase = createClient(supabaseUrl, serviceKey);
 
   // Query oauth_clients table for active client with specific purpose
-  const { data: oauthClient, error: clientError } = await supabase
+  const { data: oauthClient, error: clientError } = await (supabase as any)
     .schema("display")
     .from("oauth_clients")
     .select("client_id, client_secret_id, redirect_uri")
@@ -61,7 +61,7 @@ export async function getOAuthConfig(
   }
 
   // Fetch the client secret from vault
-  const { data: clientSecret, error: secretError } = await supabase
+  const { data: clientSecret, error: secretError } = await (supabase as any)
     .schema("display")
     .rpc("vault_read_secret", {
       p_secret_id: oauthClient.client_secret_id,

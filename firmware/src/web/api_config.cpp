@@ -14,11 +14,41 @@
 #include "../core/dependencies.h"
 #include "../config/pin_config.h"
 #include "../common/board_utils.h"
+#include "../auth/device_credentials.h"
 #include <ArduinoJson.h>
+#include <WiFi.h>
+#include <esp_ota_ops.h>
 
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     auto& deps = getDependencies();
     JsonDocument doc;
+
+    // UUID-based Device Identity (Phase 3)
+    doc["device_uuid"] = config_manager->getDeviceUuid().isEmpty() ? "" : config_manager->getDeviceUuid();
+    doc["user_uuid"] = config_manager->getUserUuid().isEmpty() ? "" : config_manager->getUserUuid();
+    doc["last_webex_status"] = config_manager->getLastWebexStatus().isEmpty() ? "" : config_manager->getLastWebexStatus();
+    
+    // Device identification
+    doc["serial_number"] = deps.credentials.getSerialNumber();
+    #ifdef FIRMWARE_VERSION
+    doc["firmware_version"] = FIRMWARE_VERSION;
+    #else
+    doc["firmware_version"] = "unknown";
+    #endif
+    
+    // WiFi status
+    String wifi_ssid;
+    if (WiFi.status() == WL_CONNECTED && !WiFi.SSID().isEmpty()) {
+        wifi_ssid = WiFi.SSID();
+    } else {
+        wifi_ssid = config_manager->getWiFiSSID();
+    }
+    doc["wifi_ssid"] = wifi_ssid.isEmpty() ? "" : wifi_ssid;
+    doc["wifi_rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
+    
+    // System telemetry
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["uptime_seconds"] = millis() / 1000;
 
     // Device configuration - always include all fields
     doc["device_name"] = config_manager->getDeviceName();
@@ -33,6 +63,13 @@ void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     doc["time_color"] = config_manager->getTimeColor();
     doc["name_color"] = config_manager->getNameColor();
     doc["metric_color"] = config_manager->getMetricColor();
+    
+    // Color scheme (composite object for convenience)
+    JsonObject color_scheme = doc["color_scheme"].to<JsonObject>();
+    color_scheme["date"] = config_manager->getDateColor();
+    color_scheme["time"] = config_manager->getTimeColor();
+    color_scheme["name"] = config_manager->getNameColor();
+    color_scheme["metric"] = config_manager->getMetricColor();
     doc["poll_interval"] = config_manager->getWebexPollInterval();
     doc["xapi_poll_interval"] = config_manager->getXAPIPollInterval();
     // Boolean flags - always include as explicit booleans

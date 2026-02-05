@@ -6,6 +6,8 @@ export interface TokenPayload {
   serial_number: string;
   token_type: string;
   exp: number;
+  device_uuid?: string; // Optional UUID from devices.id
+  user_uuid?: string | null; // Optional UUID from auth.users.id, can be null if not assigned
 }
 
 function sanitizeJwk(jwk: JsonWebKey): JsonWebKey {

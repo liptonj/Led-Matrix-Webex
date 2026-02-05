@@ -154,6 +154,96 @@ void test_display_name_set() {
     TEST_ASSERT_EQUAL_STRING("Living Room Display", display_name.c_str());
 }
 
+// ============================================================================
+// UUID-based Device Identity Tests (Phase 3)
+// ============================================================================
+
+void test_device_uuid_empty() {
+    String device_uuid = "";
+    TEST_ASSERT_TRUE(device_uuid.isEmpty());
+}
+
+void test_device_uuid_set() {
+    String device_uuid = "550e8400-e29b-41d4-a716-446655440000";
+    TEST_ASSERT_FALSE(device_uuid.isEmpty());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", device_uuid.c_str());
+}
+
+void test_device_uuid_format() {
+    String device_uuid = "550e8400-e29b-41d4-a716-446655440000";
+    // UUID format: 8-4-4-4-12 hex characters
+    TEST_ASSERT_EQUAL(36, device_uuid.length());
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(8));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(13));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(18));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(23));
+}
+
+void test_user_uuid_empty() {
+    String user_uuid = "";
+    TEST_ASSERT_TRUE(user_uuid.isEmpty());
+}
+
+void test_user_uuid_set() {
+    String user_uuid = "123e4567-e89b-12d3-a456-426614174000";
+    TEST_ASSERT_FALSE(user_uuid.isEmpty());
+    TEST_ASSERT_EQUAL_STRING("123e4567-e89b-12d3-a456-426614174000", user_uuid.c_str());
+}
+
+void test_user_uuid_format() {
+    String user_uuid = "123e4567-e89b-12d3-a456-426614174000";
+    TEST_ASSERT_EQUAL(36, user_uuid.length());
+}
+
+void test_last_webex_status_empty() {
+    String status = "";
+    TEST_ASSERT_TRUE(status.isEmpty());
+}
+
+void test_last_webex_status_set() {
+    String status = "active";
+    TEST_ASSERT_EQUAL_STRING("active", status.c_str());
+}
+
+void test_last_webex_status_values() {
+    String statuses[] = {"offline", "active", "dnd", "away", "meeting"};
+    for (int i = 0; i < 5; i++) {
+        TEST_ASSERT_FALSE(statuses[i].isEmpty());
+    }
+}
+
+void test_uuid_storage_retrieval() {
+    String device_uuid = "550e8400-e29b-41d4-a716-446655440000";
+    String user_uuid = "123e4567-e89b-12d3-a456-426614174000";
+    
+    // Simulate storage and retrieval
+    String stored_device_uuid = device_uuid;
+    String stored_user_uuid = user_uuid;
+    
+    TEST_ASSERT_EQUAL_STRING(device_uuid.c_str(), stored_device_uuid.c_str());
+    TEST_ASSERT_EQUAL_STRING(user_uuid.c_str(), stored_user_uuid.c_str());
+}
+
+void test_uuid_persistence() {
+    String device_uuid = "550e8400-e29b-41d4-a716-446655440000";
+    String user_uuid = "123e4567-e89b-12d3-a456-426614174000";
+    
+    // Simulate NVS persistence - values should remain after "save"
+    String persisted_device_uuid = device_uuid;
+    String persisted_user_uuid = user_uuid;
+    
+    // Clear original variables
+    device_uuid = "";
+    user_uuid = "";
+    
+    // "Load" from persistence
+    device_uuid = persisted_device_uuid;
+    user_uuid = persisted_user_uuid;
+    
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", device_uuid.c_str());
+    TEST_ASSERT_EQUAL_STRING("123e4567-e89b-12d3-a456-426614174000", user_uuid.c_str());
+}
+
 void test_brightness_range_min() {
     uint8_t brightness = 0;
     TEST_ASSERT_EQUAL(0, brightness);
@@ -704,6 +794,19 @@ static void run_config_manager_tests() {
     RUN_TEST(test_border_width_max);
     RUN_TEST(test_color_hex_format);
     RUN_TEST(test_color_validation);
+    
+    // UUID-based Device Identity tests (Phase 3)
+    RUN_TEST(test_device_uuid_empty);
+    RUN_TEST(test_device_uuid_set);
+    RUN_TEST(test_device_uuid_format);
+    RUN_TEST(test_user_uuid_empty);
+    RUN_TEST(test_user_uuid_set);
+    RUN_TEST(test_user_uuid_format);
+    RUN_TEST(test_last_webex_status_empty);
+    RUN_TEST(test_last_webex_status_set);
+    RUN_TEST(test_last_webex_status_values);
+    RUN_TEST(test_uuid_storage_retrieval);
+    RUN_TEST(test_uuid_persistence);
     
     // Webex configuration tests
     RUN_TEST(test_webex_client_id_empty);

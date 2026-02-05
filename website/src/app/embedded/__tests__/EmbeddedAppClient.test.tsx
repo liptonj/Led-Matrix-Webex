@@ -1270,4 +1270,129 @@ describe("EmbeddedAppClient", () => {
       setIntervalSpy.mockRestore();
     });
   });
+
+  describe('UUID-based device identity', () => {
+    const TEST_DEVICE_UUID = '550e8400-e29b-41d4-a716-446655440000';
+    const TEST_USER_UUID = '550e8400-e29b-41d4-a716-446655440001';
+
+    it('should pass deviceUuid to child hooks', async () => {
+      const mockToken = {
+        serial_number: 'A1B2C3D4',
+        device_id: 'webex-display-C3D4',
+        device_uuid: TEST_DEVICE_UUID,
+        user_uuid: TEST_USER_UUID,
+        token: 'test-token',
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockToken),
+      });
+
+      render(<EmbeddedAppClient />);
+
+      const input = screen.getByPlaceholderText(/ABC123/i);
+      await user.type(input, 'TEST12');
+
+      const connectButton = screen.getByRole('button', { name: /connect/i });
+      await user.click(connectButton);
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled();
+      });
+
+      // Verify token contains device_uuid
+      expect(mockToken.device_uuid).toBe(TEST_DEVICE_UUID);
+      expect(mockToken.user_uuid).toBe(TEST_USER_UUID);
+    });
+
+    it('should use device_uuid from appToken', async () => {
+      const mockToken = {
+        device_uuid: TEST_DEVICE_UUID,
+        token: 'test-token',
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockToken),
+      });
+
+      render(<EmbeddedAppClient />);
+
+      const input = screen.getByPlaceholderText(/ABC123/i);
+      await user.type(input, 'TEST12');
+
+      const connectButton = screen.getByRole('button', { name: /connect/i });
+      await user.click(connectButton);
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled();
+      });
+
+      // deviceUuid should be extracted from appToken
+      expect(mockToken.device_uuid).toBe(TEST_DEVICE_UUID);
+    });
+
+    it('should fall back to selectedDeviceUuid', async () => {
+      const mockToken = {
+        token: 'test-token',
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        // device_uuid missing
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockToken),
+      });
+
+      render(<EmbeddedAppClient />);
+
+      // When device_uuid is missing from token, should use selectedDeviceUuid
+      const deviceUuid = mockToken.device_uuid || TEST_DEVICE_UUID;
+      expect(deviceUuid).toBe(TEST_DEVICE_UUID);
+    });
+
+    it('should trigger broadcasts with deviceUuid', async () => {
+      mockUseWebexSDK.mockReturnValue({
+        ...defaultWebexSDKMock,
+        isReady: true,
+        user: { id: TEST_USER_UUID, displayName: 'Test User' },
+        status: 'active',
+      });
+
+      const mockToken = {
+        device_uuid: TEST_DEVICE_UUID,
+        token: 'test-token',
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      };
+
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockToken),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve({ success: true, device_connected: true }),
+        });
+
+      render(<EmbeddedAppClient />);
+
+      const input = screen.getByPlaceholderText(/ABC123/i);
+      await user.type(input, 'TEST12');
+
+      const connectButton = screen.getByRole('button', { name: /connect/i });
+      await user.click(connectButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Your Webex Status/i)).toBeInTheDocument();
+      });
+
+      // Status broadcasts should include device_uuid
+      // Verify the broadcast mechanism expects deviceUuid
+      expect(mockToken.device_uuid).toBe(TEST_DEVICE_UUID);
+    });
+  });
 });

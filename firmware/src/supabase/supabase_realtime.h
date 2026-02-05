@@ -123,6 +123,13 @@ public:
     bool subscribeBroadcast();
 
     /**
+     * @brief Subscribe to user channel (user:{user_uuid}) for user-specific events
+     * @param user_uuid User UUID to subscribe to
+     * @return true if subscription request sent
+     */
+    bool subscribeToUserChannel(const String& user_uuid);
+
+    /**
      * @brief Unsubscribe from current channel
      */
     void unsubscribe();

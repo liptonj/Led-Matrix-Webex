@@ -34,10 +34,16 @@ export function EmbeddedAppClient() {
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const { debugVisible, setDebugVisible, debugLogs, clearDebugLogs, activityLog, addLog, handleCopyDebug, formatRelativeTime } = useDebugConsole();
-  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, appToken, pairingCode, connectionError, setPairingCode, supabaseRef, handleConnect, handleDisconnect, refreshPairingSnapshot, updateAppStateViaEdge } = usePairing({ addLog });
-  const { sendCommand } = useDeviceCommands({ appToken, pairingCode, supabaseRef, addLog });
-  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog });
-  const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth } = useWebexStatus({ appToken, isPaired, addLog });
+  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, appToken, pairingCode, connectionError, setPairingCode, supabaseRef, handleConnect, handleDisconnect, refreshPairingSnapshot, updateAppStateViaEdge, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
+  
+  // Get device UUID from appToken or selected device
+  const deviceUuid = appToken?.device_uuid || selectedDeviceUuid || null;
+  // Get device IP from deviceStatus if available
+  const deviceIp = deviceStatus?.ip_address || null;
+  
+  const { sendCommand } = useDeviceCommands({ appToken, pairingCode, deviceUuid, supabaseRef, addLog });
+  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp });
+  const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth, broadcastStatusUpdate } = useWebexStatus({ appToken, isPaired, session, deviceUuid, supabaseRef, addLog });
   const { isReady: webexReady, user, status: webexStatus, isVideoOn, isMuted, isInCall, error: webexError, initialize } = useWebexSDK();
 
   const autoConnectRef = useRef(false);
@@ -65,7 +71,25 @@ export function EmbeddedAppClient() {
   const normalizedStatus = statusToDisplay === 'call' || statusToDisplay === 'presenting' ? 'meeting' : statusToDisplay;
   const statusColor = normalizedStatus === 'active' || normalizedStatus === 'away' || normalizedStatus === 'meeting' || normalizedStatus === 'dnd' || normalizedStatus === 'offline' ? normalizedStatus : 'offline';
 
-  useEffect(() => { if (rtStatus !== 'connected' || !isPaired) return; const code = pairingCode.trim().toUpperCase(); if (!code) return; if (CONFIG.useEdgeFunctions) updateAppStateViaEdge({ webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).catch(() => {}); else { const supabase = supabaseRef.current; if (!supabase) return; supabase.schema('display').from('pairings').update({ app_connected: true, app_last_seen: new Date().toISOString(), webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).eq('pairing_code', code).then(({ error }) => { if (error) addLog(`pairings update failed: ${error.message}`); }); } }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, updateAppStateViaEdge, addLog, supabaseRef]);
+  useEffect(() => { 
+    if (rtStatus !== 'connected' || !isPaired) return; 
+    const code = pairingCode.trim().toUpperCase(); 
+    if (!code) return; 
+    
+    // Broadcast status update to user channel
+    if (deviceUuid && session) {
+      broadcastStatusUpdate(statusToDisplay, inCall, cameraOn, micMuted, displayName).catch(() => {});
+    }
+    
+    // Also update via Edge Function or direct DB for backward compatibility
+    if (CONFIG.useEdgeFunctions) {
+      updateAppStateViaEdge({ webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).catch(() => {}); 
+    } else { 
+      const supabase = supabaseRef.current; 
+      if (!supabase) return; 
+      supabase.schema('display').from('pairings').update({ app_connected: true, app_last_seen: new Date().toISOString(), webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).eq('pairing_code', code).then(({ error }) => { if (error) addLog(`pairings update failed: ${error.message}`); }); 
+    } 
+  }, [rtStatus, isPaired, pairingCode, statusToDisplay, cameraOn, micMuted, inCall, displayName, deviceUuid, session, broadcastStatusUpdate, updateAppStateViaEdge, addLog, supabaseRef]);
 
   const handleStatusChange = (status: WebexStatus) => { if (webexReady) { addLog('Webex manages your status while embedded.'); return; } setManualStatus(status); addLog(`Status set to: ${formatStatus(status)}`); };
   const toggleCamera = () => { if (webexReady) { addLog('Webex controls camera state while embedded.'); return; } const nextValue = !manualCameraOn; setManualCameraOn(nextValue); addLog(`Camera: ${nextValue ? 'On' : 'Off'}`); };
@@ -88,7 +112,19 @@ export function EmbeddedAppClient() {
             <div className="flex items-center gap-3"><Image src="/icon-512.png" alt="LED Matrix Display" width={40} height={40} className="rounded-lg" /><h1 className="text-xl font-semibold">LED Matrix Display</h1></div>
             <div className="flex items-center gap-2"><div className={`flex items-center gap-2 text-sm ${connectionTextColor}`}><span className={`w-2 h-2 rounded-full ${connectionDotColor}`} /><span>{connectionLabel}</span></div><Button size="sm" variant={debugVisible ? 'success' : 'default'} onClick={() => setDebugVisible((prev) => !prev)}>{debugVisible ? 'Debug On' : 'Debug Off'}</Button></div>
           </header>
-          {showSetup && <SetupScreen pairingCode={pairingCode} onPairingCodeChange={setPairingCode} connectionError={connectionError} onConnect={handleConnect} />}
+          {showSetup && (
+            <SetupScreen 
+              pairingCode={pairingCode} 
+              onPairingCodeChange={setPairingCode} 
+              connectionError={connectionError} 
+              onConnect={handleConnect}
+              onWebexLogin={startWebexOAuth}
+              isLoggedIn={isLoggedIn}
+              userDevices={userDevices}
+              selectedDeviceUuid={selectedDeviceUuid || null}
+              onDeviceSelect={setSelectedDeviceUuid}
+            />
+          )}
           {!showSetup && (
             <>
               <nav className="flex gap-1 mb-6 p-1 bg-[var(--color-surface-alt)] rounded-lg">{(['status', 'display', 'mqtt', 'webex', 'system'] as TabId[]).map((tab) => (<button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors capitalize ${activeTab === tab ? 'bg-[var(--color-bg-card)] text-[var(--color-text)] shadow' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>{tab === 'mqtt' ? 'MQTT' : tab}</button>))}</nav>

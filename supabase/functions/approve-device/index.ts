@@ -18,10 +18,11 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { isCodeExpired, validatePairingCode } from "../_shared/pairing_code.ts";
 import { getUserFromRequest } from "../_shared/user_auth.ts";
+import { sendBroadcast } from "../_shared/broadcast.ts";
 
 interface ApproveRequest {
   pairing_code: string;
@@ -50,6 +51,15 @@ serve(async (req: Request) => {
       return authResult.error;
     }
     const { user } = authResult;
+    if (!user) {
+      return new Response(
+        JSON.stringify({ error: "User not found" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
     // Parse and validate pairing code
     const body: ApproveRequest = await req.json();
@@ -71,11 +81,11 @@ serve(async (req: Request) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Look up device by pairing_code
-    const { data: device, error: deviceError } = await supabase
+    // Look up device by pairing_code (include device UUID)
+    const { data: device, error: deviceError } = await (supabase as any)
       .schema("display")
       .from("devices")
-      .select("serial_number, user_approved_by, created_at")
+      .select("id, serial_number, user_approved_by, created_at")
       .eq("pairing_code", normalizedCode)
       .single();
 
@@ -115,7 +125,7 @@ serve(async (req: Request) => {
     }
 
     // Update device with approval
-    const { error: updateError } = await supabase
+    const { error: updateError } = await (supabase as any)
       .schema("display")
       .from("devices")
       .update({
@@ -135,14 +145,15 @@ serve(async (req: Request) => {
       );
     }
 
-    // Create or update user_devices entry
-    const { error: upsertError } = await supabase
+    // Create or update user_devices entry (include device_uuid)
+    const { error: upsertError } = await (supabase as any)
       .schema("display")
       .from("user_devices")
       .upsert(
         {
           user_id: user.id,
           serial_number: device.serial_number,
+          device_uuid: device.id,
           created_by: user.id,
           provisioning_method: "user_approved",
           provisioned_at: new Date().toISOString(),
@@ -155,6 +166,39 @@ serve(async (req: Request) => {
 
     if (upsertError) {
       console.error("Failed to create user_devices entry:", upsertError);
+      // Don't fail the request - device is already approved
+      // Just log the error
+    }
+
+    // Update pairings.user_uuid
+    const { error: pairingUpdateError } = await (supabase as any)
+      .schema("display")
+      .from("pairings")
+      .update({
+        user_uuid: user.id,
+      })
+      .eq("pairing_code", normalizedCode);
+
+    if (pairingUpdateError) {
+      console.error("Failed to update pairings.user_uuid:", pairingUpdateError);
+      // Don't fail the request - device is already approved
+      // Just log the error
+    }
+
+    // Broadcast user_assigned event to device channel
+    try {
+      await sendBroadcast(
+        `device:${device.id}`,
+        "user_assigned",
+        {
+          user_uuid: user.id,
+          device_uuid: device.id,
+          pairing_code: normalizedCode,
+        },
+      );
+      console.log(`Broadcasted user_assigned event to device:${device.id}`);
+    } catch (broadcastError) {
+      console.error("Failed to broadcast user_assigned event:", broadcastError);
       // Don't fail the request - device is already approved
       // Just log the error
     }

@@ -20,7 +20,7 @@
  *   }
  */
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
 
@@ -30,6 +30,7 @@ const COMMAND_EXPIRY_SECONDS = 300;
 interface InsertCommandRequest {
   command: string;
   payload?: Record<string, unknown>;
+  device_uuid?: string; // Optional device UUID (preferred over serial_number)
 }
 
 interface InsertCommandResponse {
@@ -44,6 +45,8 @@ interface TokenPayload {
   serial_number: string;
   token_type: string;
   exp: number;
+  device_uuid?: string;
+  user_uuid?: string | null;
 }
 
 // Valid command names (whitelist for security)
@@ -155,6 +158,34 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Determine device_uuid: prefer from request body, then from token, then look up from pairing_code
+    let deviceUuid: string | undefined = commandData.device_uuid || appInfo.device_uuid;
+
+    // If device_uuid not available, look it up from pairing_code
+    if (!deviceUuid) {
+      const { data: pairingRecord } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("device_uuid")
+        .eq("pairing_code", appInfo.pairing_code)
+        .maybeSingle();
+
+      deviceUuid = pairingRecord?.device_uuid;
+    }
+
+    if (!deviceUuid) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Device UUID not found. Device may not be properly registered.",
+        }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     // Validate command name
     if (!commandData.command || typeof commandData.command !== "string") {
       return new Response(
@@ -205,13 +236,14 @@ Deno.serve(async (req) => {
     // Calculate expiry
     const expiresAt = new Date(Date.now() + COMMAND_EXPIRY_SECONDS * 1000);
 
-    // Insert command
+    // Insert command with device_uuid
     const { data: command, error: insertError } = await supabase
       .schema("display")
       .from("commands")
       .insert({
         pairing_code: appInfo.pairing_code,
-        serial_number: appInfo.serial_number,
+        serial_number: appInfo.serial_number, // Keep for backward compatibility
+        device_uuid: deviceUuid,
         command: commandData.command,
         payload: commandData.payload || {},
         status: "pending",
@@ -247,7 +279,7 @@ Deno.serve(async (req) => {
     }
 
     console.log(
-      `Command ${commandData.command} queued for ${appInfo.pairing_code} (id: ${command.id})`,
+      `Command ${commandData.command} queued for device ${deviceUuid} (pairing: ${appInfo.pairing_code}, id: ${command.id})`,
     );
 
     const response: InsertCommandResponse = {

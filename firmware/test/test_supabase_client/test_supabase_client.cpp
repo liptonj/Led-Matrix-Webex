@@ -50,6 +50,19 @@ const char* mockAuthResponseNoOTA = R"({
     "expires_at": "2026-01-28T13:00:00Z"
 })";
 
+// Auth response with UUID fields (Phase 3)
+const char* mockAuthResponseWithUUIDs = R"({
+    "success": true,
+    "serial_number": "A1B2C3D4",
+    "pairing_code": "XYZ789",
+    "device_id": "webex-display-C3D4",
+    "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "user_uuid": "123e4567-e89b-12d3-a456-426614174000",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJBMUIyQzNENCJ9.signature",
+    "expires_at": "2026-01-28T13:00:00Z",
+    "target_firmware_version": "1.5.2"
+})";
+
 // Auth failure - invalid credentials
 const char* mockAuthFailure401 = R"({
     "success": false,
@@ -270,6 +283,88 @@ void test_parse_auth_expiry_format() {
     TEST_ASSERT_EQUAL(20, expiresAt.length());
     TEST_ASSERT_EQUAL('T', expiresAt.charAt(10));
     TEST_ASSERT_EQUAL('Z', expiresAt.charAt(19));
+}
+
+// ============================================================================
+// UUID Parsing Tests (Phase 3)
+// ============================================================================
+
+void test_parse_auth_response_with_device_uuid() {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, mockAuthResponseWithUUIDs);
+    
+    TEST_ASSERT_FALSE(error);
+    TEST_ASSERT_TRUE(doc["success"].as<bool>());
+    
+    String device_uuid = doc["device_uuid"] | "";
+    TEST_ASSERT_FALSE(device_uuid.isEmpty());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", device_uuid.c_str());
+    TEST_ASSERT_EQUAL(36, device_uuid.length()); // UUID format length
+}
+
+void test_parse_auth_response_with_user_uuid() {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, mockAuthResponseWithUUIDs);
+    
+    TEST_ASSERT_FALSE(error);
+    TEST_ASSERT_TRUE(doc["success"].as<bool>());
+    
+    String user_uuid = doc["user_uuid"] | "";
+    TEST_ASSERT_FALSE(user_uuid.isEmpty());
+    TEST_ASSERT_EQUAL_STRING("123e4567-e89b-12d3-a456-426614174000", user_uuid.c_str());
+    TEST_ASSERT_EQUAL(36, user_uuid.length()); // UUID format length
+}
+
+void test_parse_auth_response_uuid_format() {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, mockAuthResponseWithUUIDs);
+    
+    TEST_ASSERT_FALSE(error);
+    
+    String device_uuid = doc["device_uuid"] | "";
+    String user_uuid = doc["user_uuid"] | "";
+    
+    // Verify UUID format: 8-4-4-4-12 hex characters
+    TEST_ASSERT_EQUAL(36, device_uuid.length());
+    TEST_ASSERT_EQUAL(36, user_uuid.length());
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(8));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(13));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(18));
+    TEST_ASSERT_EQUAL('-', device_uuid.charAt(23));
+}
+
+void test_parse_auth_response_uuid_optional() {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, mockAuthResponse);
+    
+    TEST_ASSERT_FALSE(error);
+    TEST_ASSERT_TRUE(doc["success"].as<bool>());
+    
+    // UUIDs are optional - should default to empty string if not present
+    String device_uuid = doc["device_uuid"] | "";
+    String user_uuid = doc["user_uuid"] | "";
+    
+    TEST_ASSERT_TRUE(device_uuid.isEmpty());
+    TEST_ASSERT_TRUE(user_uuid.isEmpty());
+}
+
+void test_parse_auth_response_uuid_storage() {
+    // Simulate ConfigManager storage after parsing
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, mockAuthResponseWithUUIDs);
+    
+    TEST_ASSERT_FALSE(error);
+    
+    String device_uuid = doc["device_uuid"] | "";
+    String user_uuid = doc["user_uuid"] | "";
+    
+    // Simulate storing in ConfigManager
+    String stored_device_uuid = device_uuid;
+    String stored_user_uuid = user_uuid;
+    
+    // Verify storage
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", stored_device_uuid.c_str());
+    TEST_ASSERT_EQUAL_STRING("123e4567-e89b-12d3-a456-426614174000", stored_user_uuid.c_str());
 }
 
 // ============================================================================
@@ -906,6 +1001,13 @@ static void run_supabase_client_tests() {
     RUN_TEST(test_authenticate_failure_server_error);
     RUN_TEST(test_parse_auth_response_token_format);
     RUN_TEST(test_parse_auth_expiry_format);
+    
+    // UUID parsing tests (Phase 3)
+    RUN_TEST(test_parse_auth_response_with_device_uuid);
+    RUN_TEST(test_parse_auth_response_with_user_uuid);
+    RUN_TEST(test_parse_auth_response_uuid_format);
+    RUN_TEST(test_parse_auth_response_uuid_optional);
+    RUN_TEST(test_parse_auth_response_uuid_storage);
 
     // ========================================================================
     // Device state tests (test-firmware-supabase: postDeviceState)

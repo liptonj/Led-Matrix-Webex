@@ -8,10 +8,10 @@
  */
 
 import {
-  assertEquals,
-  assertExists,
-  assertNotEquals,
-  assertStringIncludes,
+    assertEquals,
+    assertExists,
+    assertNotEquals,
+    assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 
 // Valid pairing code charset (excludes confusing characters I, O, 0, 1)

@@ -27,7 +27,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { isDeviceInRollout } from "../_shared/rollout.ts";
@@ -55,6 +55,7 @@ interface LegacyManifest {
 }
 
 interface ReleaseRow {
+  id: string;
   version: string;
   firmware_url: string | null;
   firmware_merged_url: string | null;
@@ -203,7 +204,7 @@ serve(async (req: Request) => {
       .schema("display")
       .from("releases")
       .select(
-        "version, firmware_url, firmware_merged_url, build_id, build_date, is_latest, is_prerelease, rollout_percentage, release_channel",
+        "id, version, firmware_url, firmware_merged_url, build_id, build_date, is_latest, is_prerelease, rollout_percentage, release_channel",
       )
       .order("created_at", { ascending: false });
 

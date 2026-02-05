@@ -9,6 +9,8 @@
 #include <time.h>
 #include "../auth/device_credentials.h"
 #include "../debug/remote_logger.h"
+#include "../config/config_manager.h"
+#include "../core/dependencies.h"
 
 bool SupabaseClient::isAuthenticated() const {
     if (_token.isEmpty()) {
@@ -92,6 +94,8 @@ bool SupabaseClient::authenticate() {
     _targetFirmwareVersion = result.target_firmware_version;
     _remoteDebugEnabled = result.debug_enabled;
     _supabaseAnonKey = result.anon_key;
+    
+    // UUIDs are already stored in ConfigManager by parseAuthResponse()
 
     // Debug: log auth response summary without secrets
 #if SUPABASE_AUTH_DEBUG
@@ -165,6 +169,32 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     result.target_firmware_version = doc["target_firmware_version"] | "";
     result.debug_enabled = doc["debug_enabled"] | false;
     result.anon_key = doc["anon_key"] | "";
+    
+    // Parse UUID fields (Phase 3) - extract from auth response
+    String device_uuid = doc["device_uuid"] | "";
+    String user_uuid = doc["user_uuid"] | "";
+    
+    // Store UUIDs in ConfigManager if present
+    if (!device_uuid.isEmpty() || !user_uuid.isEmpty()) {
+        auto& deps = getDependencies();
+        String previousUserUuid = deps.config.getUserUuid();
+        
+        if (!device_uuid.isEmpty()) {
+            deps.config.setDeviceUuid(device_uuid);
+            Serial.printf("[SUPABASE] Device UUID parsed: %s\n", device_uuid.substring(0, 8).c_str());
+        }
+        if (!user_uuid.isEmpty()) {
+            deps.config.setUserUuid(user_uuid);
+            Serial.printf("[SUPABASE] User UUID parsed: %s\n", user_uuid.substring(0, 8).c_str());
+            
+            // If user_uuid is newly assigned, trigger realtime reconnection to subscribe to user channel
+            if (previousUserUuid.isEmpty() || previousUserUuid != user_uuid) {
+                Serial.println("[SUPABASE] User UUID assigned - will reconnect realtime to user channel");
+                // Disconnect realtime - it will reconnect on next loop iteration with user channel
+                deps.realtime.disconnect();
+            }
+        }
+    }
     
     // Parse expires_at ISO string to Unix timestamp
     String expiresAtStr = doc["expires_at"] | "";

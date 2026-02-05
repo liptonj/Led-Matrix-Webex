@@ -12,7 +12,7 @@
  */
 
 import { create, getNumericDate } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Token configuration

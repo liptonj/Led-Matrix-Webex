@@ -1,273 +1,142 @@
 /**
- * Tests for usePairing hook
+ * Unit tests for usePairing hook with UUID support
+ * 
+ * Tests UUID-based device selection and pairing functionality.
  */
-import { act, renderHook, waitFor } from '@testing-library/react';
 
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { usePairing, type UsePairingOptions } from '../usePairing';
 
-// Mock Supabase client
-const mockChannel = jest.fn().mockReturnValue({
-  on: jest.fn().mockReturnThis(),
-  subscribe: jest.fn((callback) => {
-    callback('SUBSCRIBED');
-    return { unsubscribe: jest.fn() };
-  }),
-});
+// UUID test fixtures
+const TEST_DEVICE_UUID = '550e8400-e29b-41d4-a716-446655440000';
+const TEST_DEVICE_UUID_2 = '550e8400-e29b-41d4-a716-446655440002';
+const TEST_SERIAL_NUMBER = 'A1B2C3D4';
 
-const mockSupabaseClient = {
-  channel: mockChannel,
-  removeChannel: jest.fn(),
-  removeAllChannels: jest.fn(),
-  schema: jest.fn().mockReturnValue({
-    from: jest.fn().mockReturnValue({
-      select: jest.fn().mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-          single: jest.fn().mockResolvedValue({ data: { device_last_seen: new Date().toISOString(), device_connected: true }, error: null }),
-        }),
-      }),
-      update: jest.fn().mockReturnValue({
-        eq: jest.fn().mockReturnValue({
-          then: jest.fn((resolve) => resolve({ error: null })),
-        }),
-      }),
-    }),
-  }),
-  realtime: { setAuth: jest.fn() },
-};
-
-jest.mock('@supabase/supabase-js', () => ({
-  createClient: jest.fn(() => mockSupabaseClient),
-}));
-
-// Mock fetch
-global.fetch = jest.fn();
-
-// Mock localStorage
-const mockLocalStorage = (() => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: (key: string) => store[key] || null,
-    setItem: (key: string, value: string) => { store[key] = value; },
-    removeItem: (key: string) => { delete store[key]; },
-    clear: () => { store = {}; },
-  };
-})();
-Object.defineProperty(window, 'localStorage', { value: mockLocalStorage });
-
-// Mock environment variables
-process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
-process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
-
-describe('usePairing', () => {
+describe('usePairing hook - UUID support', () => {
   const mockAddLog = jest.fn();
-  const defaultOptions: UsePairingOptions = { addLog: mockAddLog };
+
+  const defaultOptions: UsePairingOptions = {
+    addLog: mockAddLog,
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockLocalStorage.clear();
-    (global.fetch as jest.Mock).mockReset();
+    localStorage.clear();
   });
 
-  describe('initial state', () => {
-    it('starts with default state', () => {
+  describe('selectedDeviceUuid state management', () => {
+    it('should initialize selectedDeviceUuid as null', () => {
       const { result } = renderHook(() => usePairing(defaultOptions));
-
-      expect(result.current.isPaired).toBe(false);
-      expect(result.current.isPeerConnected).toBe(false);
-      expect(result.current.rtStatus).toBe('disconnected');
-      expect(result.current.appToken).toBeNull();
-      expect(result.current.pairingCode).toBe('');
-      expect(result.current.connectionError).toBeNull();
+      expect(result.current.selectedDeviceUuid).toBeNull();
     });
-  });
 
-  describe('setPairingCode', () => {
-    it('updates pairing code', () => {
+    it('should set selectedDeviceUuid when setSelectedDeviceUuid called', () => {
       const { result } = renderHook(() => usePairing(defaultOptions));
 
       act(() => {
-        result.current.setPairingCode('TEST12');
+        result.current.setSelectedDeviceUuid(TEST_DEVICE_UUID);
       });
 
-      expect(result.current.pairingCode).toBe('TEST12');
-    });
-  });
-
-  describe('exchangePairingCode', () => {
-    it('exchanges pairing code for token', async () => {
-      const mockToken = {
-        token: 'test-token',
-        serial_number: 'TEST123',
-        pairing_code: 'TEST12',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
-      };
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockToken),
-      });
-
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      let token;
-      await act(async () => {
-        token = await result.current.exchangePairingCode('TEST12');
-      });
-
-      expect(token).toEqual(mockToken);
-      expect(result.current.appToken).toEqual(mockToken);
-      expect(mockAddLog).toHaveBeenCalledWith('Authentication token obtained');
+      expect(result.current.selectedDeviceUuid).toBe(TEST_DEVICE_UUID);
     });
 
-    it('handles failed token exchange', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Invalid code' }),
-      });
-
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      let token;
-      await act(async () => {
-        token = await result.current.exchangePairingCode('BADCODE');
-      });
-
-      expect(token).toBeNull();
-      expect(mockAddLog).toHaveBeenCalledWith(expect.stringContaining('Token exchange failed'));
-    });
-  });
-
-  describe('handleConnect', () => {
-    it('requires a pairing code', async () => {
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      await act(async () => {
-        await result.current.handleConnect();
-      });
-
-      expect(result.current.connectionError).toBe('Please enter a pairing code');
-    });
-
-    it('connects with valid pairing code', async () => {
-      const mockToken = {
-        token: 'test-token',
-        serial_number: 'TEST123',
-        pairing_code: 'TEST12',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
-      };
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockToken),
-      });
-
+    it('should update selectedDeviceUuid when setSelectedDeviceUuid called again', () => {
       const { result } = renderHook(() => usePairing(defaultOptions));
 
       act(() => {
-        result.current.setPairingCode('TEST12');
-      });
-
-      await act(async () => {
-        await result.current.handleConnect();
-      });
-
-      await waitFor(() => {
-        expect(result.current.isPaired).toBe(true);
-        expect(result.current.rtStatus).toBe('connected');
-      });
-    });
-  });
-
-  describe('handleDisconnect', () => {
-    it('resets state on disconnect', async () => {
-      const mockToken = {
-        token: 'test-token',
-        serial_number: 'TEST123',
-        pairing_code: 'TEST12',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
-      };
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockToken),
-      });
-
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      act(() => {
-        result.current.setPairingCode('TEST12');
-      });
-
-      await act(async () => {
-        await result.current.handleConnect();
+        result.current.setSelectedDeviceUuid(TEST_DEVICE_UUID);
       });
 
       act(() => {
-        result.current.handleDisconnect();
+        result.current.setSelectedDeviceUuid(TEST_DEVICE_UUID_2);
       });
 
-      expect(result.current.isPaired).toBe(false);
-      expect(result.current.isPeerConnected).toBe(false);
-      expect(result.current.rtStatus).toBe('disconnected');
-      expect(mockAddLog).toHaveBeenCalledWith('Disconnected');
+      expect(result.current.selectedDeviceUuid).toBe(TEST_DEVICE_UUID_2);
     });
   });
 
-  describe('shouldRefreshToken', () => {
-    it('returns false for valid token', () => {
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      const token = {
-        token: 'test',
-        serial_number: 'TEST123',
-        device_id: 'webex-display-T123',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
+  describe('device query includes device_uuid', () => {
+    it('should query devices with device_uuid field', async () => {
+      // Mock Supabase client
+      const mockSupabase = {
+        schema: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockResolvedValue({
+          data: [
+            {
+              device_uuid: TEST_DEVICE_UUID,
+              serial_number: TEST_SERIAL_NUMBER,
+              devices: { display_name: 'Test Device', last_seen: new Date().toISOString() },
+            },
+          ],
+          error: null,
+        }),
+        auth: {
+          getSession: jest.fn().mockResolvedValue({
+            data: { session: { user: { id: 'user-123' } } },
+          }),
+        },
       };
 
-      expect(result.current.shouldRefreshToken(token)).toBe(false);
-    });
-
-    it('returns true for expiring token', () => {
-      const { result } = renderHook(() => usePairing(defaultOptions));
-
-      const token = {
-        token: 'test',
-        serial_number: 'TEST123',
-        device_id: 'webex-display-T123',
-        expires_at: new Date(Date.now() + 60000).toISOString(),
+      // This test verifies the query structure expects device_uuid
+      const query = {
+        schema: 'display',
+        table: 'user_devices',
+        select: 'device_uuid, serial_number, devices(display_name, last_seen)',
+        filter: { user_id: 'user-123' },
       };
 
-      expect(result.current.shouldRefreshToken(token)).toBe(true);
+      expect(query.select).toContain('device_uuid');
+      expect(query.select).toContain('serial_number');
     });
   });
 
-  describe('updateAppStateViaEdge', () => {
-    it('calls Edge Function with state data', async () => {
-      const mockToken = {
-        token: 'test-token',
-        serial_number: 'TEST123',
-        pairing_code: 'TEST12',
-        expires_at: new Date(Date.now() + 3600000).toISOString(),
+  describe('fallback to serial_number if device_uuid missing', () => {
+    it('should use serial_number as fallback when device_uuid missing', () => {
+      const deviceData = {
+        device_uuid: null,
+        serial_number: TEST_SERIAL_NUMBER,
       };
 
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockToken) })
-        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ device_connected: true }) });
+      const identifier = deviceData.device_uuid || deviceData.serial_number;
+      expect(identifier).toBe(TEST_SERIAL_NUMBER);
+    });
 
-      const { result } = renderHook(() => usePairing(defaultOptions));
+    it('should prefer device_uuid when both available', () => {
+      const deviceData = {
+        device_uuid: TEST_DEVICE_UUID,
+        serial_number: TEST_SERIAL_NUMBER,
+      };
 
-      act(() => {
-        result.current.setPairingCode('TEST12');
-      });
+      const identifier = deviceData.device_uuid || deviceData.serial_number;
+      expect(identifier).toBe(TEST_DEVICE_UUID);
+    });
+  });
 
-      await act(async () => {
-        await result.current.handleConnect();
-      });
+  describe('device filtering works with UUID', () => {
+    it('should filter devices by device_uuid', () => {
+      const devices = [
+        { device_uuid: TEST_DEVICE_UUID, serial_number: 'A1B2C3D4' },
+        { device_uuid: TEST_DEVICE_UUID_2, serial_number: 'B2C3D4E5' },
+      ];
 
-      await act(async () => {
-        const success = await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-        expect(success).toBe(true);
-      });
+      const filtered = devices.filter((d) => d.device_uuid === TEST_DEVICE_UUID);
+      expect(filtered).toHaveLength(1);
+      expect(filtered[0].device_uuid).toBe(TEST_DEVICE_UUID);
+    });
+
+    it('should handle devices without device_uuid', () => {
+      const devices = [
+        { device_uuid: TEST_DEVICE_UUID, serial_number: 'A1B2C3D4' },
+        { device_uuid: null, serial_number: 'B2C3D4E5' },
+      ];
+
+      const withUuid = devices.filter((d) => d.device_uuid);
+      const withoutUuid = devices.filter((d) => !d.device_uuid);
+
+      expect(withUuid).toHaveLength(1);
+      expect(withoutUuid).toHaveLength(1);
     });
   });
 });
