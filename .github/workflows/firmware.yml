@@ -293,8 +293,15 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           TAG="v${VERSION}"
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          IS_PRERELEASE=${{ contains(github.ref, '-beta') && 'true' || 'false' }}
-          RELEASE_CHANNEL=${{ contains(github.ref, '-beta') && '"beta"' || '"production"' }}
+          
+          # Determine release channel (beta or production)
+          if [[ "${{ github.ref }}" == *"-beta"* ]]; then
+            RELEASE_CHANNEL="beta"
+            IS_PRERELEASE="true"
+          else
+            RELEASE_CHANNEL="production"
+            IS_PRERELEASE="false"
+          fi
           
           # Try to get existing release
           echo "Checking for existing release in $RELEASE_CHANNEL channel..."
@@ -319,7 +326,7 @@ jobs:
                 \"version\": \"${VERSION}\",
                 \"tag\": \"${TAG}\",
                 \"name\": \"Release ${VERSION}\",
-                \"release_channel\": ${RELEASE_CHANNEL},
+                \"release_channel\": \"${RELEASE_CHANNEL}\",
                 \"firmware_url\": \"${SUPABASE_URL}/storage/v1/object/firmware/${VERSION}/firmware-esp32s3.bin\",
                 \"build_date\": \"${BUILD_DATE}\",
                 \"is_prerelease\": ${IS_PRERELEASE}
