@@ -2,25 +2,52 @@
 -- This allows storing user OAuth tokens in addition to device OAuth tokens
 
 -- Allow NULL for serial_number and pairing_code (user tokens don't have these)
+-- These are safe to run multiple times
 ALTER TABLE display.oauth_tokens 
-  ALTER COLUMN serial_number DROP NOT NULL,
+  ALTER COLUMN serial_number DROP NOT NULL;
+ALTER TABLE display.oauth_tokens 
   ALTER COLUMN pairing_code DROP NOT NULL;
 
--- Add user token columns
-ALTER TABLE display.oauth_tokens 
-  ADD COLUMN user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  ADD COLUMN token_scope TEXT NOT NULL DEFAULT 'device' 
-    CHECK (token_scope IN ('device', 'user'));
+-- Add user token columns (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'display' AND table_name = 'oauth_tokens' AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE display.oauth_tokens 
+      ADD COLUMN user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
--- Constraint: user tokens must have user_id, device tokens must have serial_number
-ALTER TABLE display.oauth_tokens
-  ADD CONSTRAINT oauth_tokens_scope_check CHECK (
-    (token_scope = 'device' AND serial_number IS NOT NULL) OR
-    (token_scope = 'user' AND user_id IS NOT NULL)
-  );
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'display' AND table_name = 'oauth_tokens' AND column_name = 'token_scope'
+  ) THEN
+    ALTER TABLE display.oauth_tokens 
+      ADD COLUMN token_scope TEXT NOT NULL DEFAULT 'device' 
+        CHECK (token_scope IN ('device', 'user'));
+  END IF;
+END $$;
 
--- Unique constraint for user tokens (one token per provider per user)
-CREATE UNIQUE INDEX oauth_tokens_provider_user_idx 
+-- Constraint: user tokens must have user_id, device tokens must have serial_number (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'oauth_tokens_scope_check'
+  ) THEN
+    ALTER TABLE display.oauth_tokens
+      ADD CONSTRAINT oauth_tokens_scope_check CHECK (
+        (token_scope = 'device' AND serial_number IS NOT NULL) OR
+        (token_scope = 'user' AND user_id IS NOT NULL)
+      );
+  END IF;
+END $$;
+
+-- Unique constraint for user tokens (one token per provider per user) (idempotent)
+CREATE UNIQUE INDEX IF NOT EXISTS oauth_tokens_provider_user_idx 
   ON display.oauth_tokens (provider, user_id) 
   WHERE token_scope = 'user';
 
