@@ -1,9 +1,9 @@
 /**
  * @file main.cpp
- * @brief ESP32-S3 Webex Status Display - Main Entry Point
+ * @brief ESP32 Webex Status Display - Main Entry Point
  *
  * Displays Webex presence status, camera/mic state, and Meraki MT sensor
- * data on a 64x32 RGB LED matrix.
+ * data on a 64x32 RGB LED matrix. Supports ESP32, ESP32-S2, and ESP32-S3.
  */
 
 // System includes
@@ -16,6 +16,7 @@
 // Core components
 #include "auth/device_credentials.h"
 #include "boot_validator.h"
+#include "common/board_utils.h"
 #include "config/config_manager.h"
 #include "debug.h"
 #include "debug/remote_logger.h"
@@ -205,14 +206,22 @@ void loop() {
 
 void initSerialAndWatchdog() {
     Serial.begin(115200);
-    delay(100);  // Reduced from 1000ms for faster Improv detection
+    
+    // ESP32-S2 uses TinyUSB for USB CDC which needs more time to enumerate
+    // than native USB on ESP32-S3. Without sufficient delay, USB may not
+    // be ready for Improv WiFi provisioning via ESP Web Tools.
+    #if defined(ESP32_S2_BOARD)
+    delay(1000);  // TinyUSB needs longer to enumerate
+    #else
+    delay(100);   // Native USB enumerates faster
+    #endif
 
     // CRITICAL: Configure watchdog timeout FIRST to prevent boot loops
     esp_task_wdt_init(30, false);  // 30 second timeout, no panic
 
     Serial.println();
     Serial.println("===========================================");
-    Serial.println("  Webex Status Display - ESP32-S3");
+    Serial.printf("  Webex Status Display - %s\n", getChipDescription().c_str());
     Serial.printf("  Firmware Version: %s\n", FIRMWARE_VERSION);
     Serial.println("===========================================");
     Serial.println();

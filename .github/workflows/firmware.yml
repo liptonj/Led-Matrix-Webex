@@ -80,6 +80,7 @@ jobs:
     needs: [generate-matrix, firmware-unit-tests]
     strategy:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      max-parallel: 1  # Build boards one at a time to avoid resource exhaustion
       fail-fast: false
     env:
       WEBEX_CLIENT_ID: ${{ secrets.WEBEX_CLIENT_ID }}
@@ -148,7 +149,7 @@ jobs:
               CHIP="esp32s2"
               FLASH_FREQ="80m"
               FLASH_SIZE="${{ matrix.flash_size }}"
-              BOOTLOADER_OFFSET="0x0000"
+              BOOTLOADER_OFFSET="0x1000"  # ESP32-S2 uses 0x1000 like original ESP32
               ;;
             *)
               CHIP="esp32"

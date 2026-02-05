@@ -30,7 +30,7 @@ export function FirmwareInstallStep({
     <div className="card animate-fade-in">
       <h2 className="text-2xl font-semibold mb-2">Install Firmware</h2>
       <p className="text-[var(--color-text-muted)] mb-6">
-        Flash your ESP32-S3 device with the LED Matrix firmware
+        Flash your ESP32 device with the LED Matrix firmware
       </p>
 
       {/* Configuration Error */}
@@ -96,6 +96,27 @@ export function FirmwareInstallStep({
         )}
       </div>
 
+      {/* Device Not Detected - Bootloader Mode Instructions */}
+      {configured && !error && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
+          <h4 className="font-semibold text-blue-900 dark:text-blue-200 mb-2">
+            Device Not Appearing?
+          </h4>
+          <p className="text-sm text-blue-800 dark:text-blue-300 mb-2">
+            If your device doesn&apos;t show up in the device list, you may need to put it in bootloader mode:
+          </p>
+          <ol className="list-decimal list-inside text-sm text-blue-800 dark:text-blue-300 space-y-1">
+            <li>Hold the <strong>BOOT</strong> button on your device</li>
+            <li>While holding BOOT, press and release <strong>RESET</strong></li>
+            <li>Release the BOOT button</li>
+            <li>Try clicking &quot;Install Firmware&quot; again</li>
+          </ol>
+          <p className="text-xs text-blue-700 dark:text-blue-400 mt-2">
+            This is required for devices that aren&apos;t booting or have corrupted firmware.
+          </p>
+        </div>
+      )}
+
       {/* Status */}
       {flashStatus && (
         <Alert 
@@ -124,7 +145,7 @@ export function FirmwareInstallStep({
           <h3 className="font-semibold mb-2">Installation Steps:</h3>
           <ol className="list-decimal list-inside text-sm text-[var(--color-text-muted)] space-y-1">
             <li>Click &quot;Install Firmware&quot; above</li>
-            <li>Select your ESP32-S3 device from the popup</li>
+            <li>Select your ESP32 device from the popup</li>
             <li>Wait for the firmware to upload (about {TYPICAL_FLASH_DURATION_SECONDS}-{TYPICAL_FLASH_DURATION_MAX_SECONDS} seconds)</li>
             <li><strong>Configure WiFi</strong> when the dialog prompts you</li>
             <li>Close the dialog and click the button below</li>
@@ -160,7 +181,7 @@ export function FirmwareInstallStep({
           <div className="bg-[var(--color-surface-alt)] p-4 rounded-lg text-sm">
             <h3 className="font-semibold mb-2">What Gets Installed:</h3>
             <ul className="list-disc list-inside space-y-1 text-[var(--color-text-muted)]">
-              <li>ESP32-S3 bootloader</li>
+              <li>Bootloader (ESP32, ESP32-S2, or ESP32-S3)</li>
               <li>Partition table</li>
               <li>LED Matrix Webex Display firmware</li>
               <li>Web Serial requires Chrome or Edge browser</li>
