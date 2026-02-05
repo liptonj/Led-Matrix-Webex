@@ -12,7 +12,12 @@
 #include <Preferences.h>
 #include "common/nvs_utils.h"
 
-// Note: Static storage for Preferences mock is defined in globals.cpp
+// Include source files directly since PlatformIO test builds
+// don't link src/ files automatically for native tests
+#include "../simulation/mocks/globals.cpp"
+#include "common/nvs_utils.cpp"
+
+// Note: Static storage for Preferences mock is defined inline in Preferences.h
 
 // Test namespaces (mimicking real namespaces used in firmware)
 static const char* TEST_NAMESPACE = "test_nvs";

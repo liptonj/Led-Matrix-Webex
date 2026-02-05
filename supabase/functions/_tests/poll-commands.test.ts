@@ -19,12 +19,6 @@ import {
   TEST_PAIRING_CODE,
   mockCommand,
 } from "./fixtures/uuid-fixtures.ts";
-import {
-  TEST_DEVICE_UUID,
-  TEST_DEVICE_UUID_2,
-  TEST_PAIRING_CODE,
-  mockCommand,
-} from "./fixtures/uuid-fixtures.ts";
 
 // ============================================================================
 // Authentication Tests
@@ -116,8 +110,8 @@ Deno.test("poll-commands: falls back to pairing_code when device_uuid missing", 
     pairing_code: TEST_PAIRING_CODE,
     serial_number: "A1B2C3D4",
     token_type: "device",
-    // device_uuid missing
-  };
+    device_uuid: undefined, // device_uuid missing
+  } as { pairing_code: string; serial_number: string; token_type: string; device_uuid?: string };
 
   const queryKey = mockJwtPayloadLegacy.device_uuid || mockJwtPayloadLegacy.pairing_code;
   assertEquals(queryKey, TEST_PAIRING_CODE);

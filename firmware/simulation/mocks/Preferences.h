@@ -244,12 +244,12 @@ private:
     bool _readonly;
     std::string _namespace;
     
-    // Static storage shared across all instances
-    static std::map<std::string, std::map<std::string, std::string>> _storage;
-    static std::map<std::string, std::map<std::string, uint32_t>> _intStorage;
-    static std::map<std::string, std::map<std::string, int64_t>> _int64Storage;
-    static std::map<std::string, std::map<std::string, float>> _floatStorage;
-    static std::map<std::string, std::map<std::string, std::string>> _bytesStorage;
+    // Static storage shared across all instances (inline static for C++17 header-only definition)
+    inline static std::map<std::string, std::map<std::string, std::string>> _storage;
+    inline static std::map<std::string, std::map<std::string, uint32_t>> _intStorage;
+    inline static std::map<std::string, std::map<std::string, int64_t>> _int64Storage;
+    inline static std::map<std::string, std::map<std::string, float>> _floatStorage;
+    inline static std::map<std::string, std::map<std::string, std::string>> _bytesStorage;
 };
 
 #endif // PREFERENCES_H

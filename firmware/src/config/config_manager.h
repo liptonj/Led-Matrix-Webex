@@ -150,12 +150,6 @@ public:
     String getSupabaseAnonKey() const;
     void setSupabaseAnonKey(const String& key);
 
-    // UUID-based Device Identity
-    String getUserUuid() const;
-    void setUserUuid(const String& uuid);
-    String getDeviceUuid() const;
-    void setDeviceUuid(const String& uuid);
-
     // Partition Version Tracking (for OTA version display)
     String getPartitionVersion(const String& partition_label) const;
     void setPartitionVersion(const String& partition_label, const String& version);
@@ -246,8 +240,6 @@ private:
     mutable String cached_date_format;
     mutable String cached_supabase_url;
     mutable String cached_supabase_anon_key;
-    mutable String cached_user_uuid;
-    mutable String cached_device_uuid;
     mutable bool cached_tls_verify;
     mutable bool cached_debug_display;
     mutable bool cached_debug_realtime;

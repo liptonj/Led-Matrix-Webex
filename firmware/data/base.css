@@ -3,30 +3,53 @@
  * Shared by both main UI and embedded app
  */
 
-/* CSS Variables */
+/* CSS Variables - Standard naming aligned with website */
 :root {
-    /* Colors */
-    --bg-primary: #0a0e14;
-    --bg-secondary: #141a22;
-    --bg-card: #1a2230;
-    --bg-tertiary: #2e2e2e;
-    --text-primary: #e6e6e6;
-    --text-secondary: #8b9eb0;
-    --text-muted: #808080;
-    --accent-primary: #00bceb;
-    --accent-secondary: #6cc04a;
-    --accent-warning: #ffcc00;
-    --accent-danger: #ff5c5c;
-    --border-color: #2a3545;
+    /* Colors - aligned with website globals.css */
+    --color-bg: #1a1a2e;
+    --color-surface: #16213e;
+    --color-bg-card: #16213e;
+    --color-surface-alt: #1f3460;
+    --color-bg-hover: #1f3460;
+    --color-text: #ffffff;
+    --color-text-secondary: #a0a8b4;
+    --color-text-muted: #8892a0;
+    --color-primary: #00bceb;
+    --color-primary-dark: #0097c1;
+    --color-success: #6cc04a;
+    --color-warning: #ffcc00;
+    --color-danger: #ff5c5c;
+    --color-purple: #9b59b6;
+    --color-border: #2d3a4f;
     
-    /* Status colors */
-    --status-available: #6cc04a;
-    --status-away: #ffcc00;
-    --status-busy: #ff5c5c;
-    --status-dnd: #ff5c5c;
-    --status-meeting: #ff5c5c;
-    --status-ooo: #9d63c1;
-    --status-offline: #808080;
+    /* Status colors - aligned with website */
+    --color-active: #6cc04a;
+    --color-meeting: #ff5c5c;
+    --color-dnd: #ff5c5c;
+    --color-away: #ffcc00;
+    --color-ooo: #9b59b6;
+    --color-offline: #8892a0;
+    
+    /* Legacy aliases for backward compatibility */
+    --bg-primary: var(--color-bg);
+    --bg-secondary: var(--color-surface);
+    --bg-card: var(--color-bg-card);
+    --bg-tertiary: var(--color-surface-alt);
+    --text-primary: var(--color-text);
+    --text-secondary: var(--color-text-secondary);
+    --text-muted: var(--color-text-muted);
+    --accent-primary: var(--color-primary);
+    --accent-secondary: var(--color-success);
+    --accent-warning: var(--color-warning);
+    --accent-danger: var(--color-danger);
+    --border-color: var(--color-border);
+    --status-available: var(--color-active);
+    --status-away: var(--color-away);
+    --status-busy: var(--color-meeting);
+    --status-dnd: var(--color-dnd);
+    --status-meeting: var(--color-meeting);
+    --status-ooo: var(--color-ooo);
+    --status-offline: var(--color-offline);
     
     /* Spacing */
     --spacing-xs: 4px;
@@ -55,8 +78,8 @@
 
 body {
     font-family: var(--font-main);
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    background: var(--color-bg);
+    color: var(--color-text);
     line-height: 1.6;
     min-height: 100vh;
 }
@@ -74,12 +97,12 @@ header {
     justify-content: space-between;
     align-items: center;
     padding: var(--spacing-md) 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--color-border);
     margin-bottom: var(--spacing-md);
 }
 
 header h1 {
-    color: var(--accent-primary);
+    color: var(--color-primary);
     font-weight: 600;
     font-size: 1.8rem;
 }
@@ -90,23 +113,23 @@ header h1 {
     align-items: center;
     gap: var(--spacing-xs);
     font-size: 0.8rem;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
 }
 
 .status-indicator .dot {
     width: 12px;
     height: 12px;
     border-radius: var(--radius-full);
-    background: var(--text-secondary);
+    background: var(--color-text-secondary);
     animation: pulse 2s infinite;
 }
 
 .status-indicator.connected .dot {
-    background: var(--accent-secondary);
+    background: var(--color-success);
 }
 
 .status-indicator.error .dot {
-    background: var(--accent-danger);
+    background: var(--color-danger);
 }
 
 @keyframes pulse {
@@ -114,38 +137,43 @@ header h1 {
     50% { opacity: 0.5; }
 }
 
-/* Tabs */
+/* Tabs - aligned with website tab patterns */
 .tabs {
     display: flex;
-    gap: 5px;
+    gap: 4px;
     margin-bottom: var(--spacing-md);
     overflow-x: auto;
     padding-bottom: 5px;
+    border-bottom: 1px solid var(--color-border);
     -webkit-overflow-scrolling: touch;
 }
 
 .tab-btn {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-muted);
     padding: 10px 16px;
-    border-radius: var(--radius);
+    border-radius: 0;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s;
     white-space: nowrap;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
+    font-weight: 500;
     flex-shrink: 0;
+    margin-bottom: -1px;
 }
 
 .tab-btn:hover {
-    background: var(--bg-card);
-    color: var(--text-primary);
+    background: transparent;
+    color: var(--color-text);
+    border-bottom-color: var(--color-border);
 }
 
 .tab-btn.active {
-    background: var(--accent-primary);
-    color: var(--bg-primary);
-    border-color: var(--accent-primary);
+    background: transparent;
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
 }
 
 .tab-content {
@@ -156,27 +184,29 @@ header h1 {
     display: block;
 }
 
-/* Cards */
+/* Cards - aligned with website Card component */
 .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    padding: var(--spacing-md);
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
     margin-bottom: var(--spacing-md);
     box-shadow: var(--shadow);
 }
 
 .card h2 {
-    color: var(--accent-primary);
-    font-size: 1.2rem;
+    color: var(--color-primary);
+    font-size: 1.125rem;
+    font-weight: 600;
     margin-bottom: var(--spacing-md);
     padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--color-border);
 }
 
 .card h3 {
-    color: var(--text-primary);
+    color: var(--color-text);
     font-size: 1rem;
+    font-weight: 600;
     margin: 15px 0 10px;
 }
 
@@ -331,52 +361,64 @@ header h1 {
     color: var(--accent-primary);
 }
 
-/* Buttons */
+/* Buttons - aligned with website Button component */
 .btn {
-    display: inline-block;
-    padding: 10px 20px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius);
-    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 10px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    color: var(--color-text);
     cursor: pointer;
-    font-size: 0.9rem;
-    transition: all 0.2s;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.15s;
     margin-right: 10px;
     margin-bottom: 10px;
 }
 
 .btn:hover {
-    background: var(--bg-card);
-    border-color: var(--accent-primary);
+    background: var(--color-bg-hover);
+    border-color: var(--color-primary);
 }
 
 .btn-primary {
-    background: var(--accent-primary);
-    color: var(--bg-primary);
-    border-color: var(--accent-primary);
+    background: var(--color-primary);
+    color: white;
+    border-color: var(--color-primary);
 }
 
 .btn-primary:hover {
-    background: #00a5d0;
+    background: var(--color-primary-dark);
 }
 
 .btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border-color: var(--border-color);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+    border-color: var(--color-border);
 }
 
 .btn-warning {
-    background: var(--accent-warning);
-    color: var(--bg-primary);
-    border-color: var(--accent-warning);
+    background: transparent;
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+}
+
+.btn-warning:hover {
+    background: rgba(255, 204, 0, 0.15);
 }
 
 .btn-danger {
-    background: var(--accent-danger);
-    color: var(--bg-primary);
-    border-color: var(--accent-danger);
+    background: transparent;
+    color: var(--color-danger);
+    border-color: var(--color-danger);
+}
+
+.btn-danger:hover {
+    background: rgba(255, 92, 92, 0.15);
 }
 
 .btn:disabled {

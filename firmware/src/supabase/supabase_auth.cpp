@@ -6,6 +6,7 @@
  */
 
 #include "supabase_client.h"
+#include "supabase_realtime.h"
 #include <time.h>
 #include "../auth/device_credentials.h"
 #include "../debug/remote_logger.h"

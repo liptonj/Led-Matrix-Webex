@@ -89,7 +89,7 @@ export default function AdminDashboardPage() {
 
     return (
         <div className="space-y-6 lg:space-y-8">
-            <h1 className="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white">
+            <h1 className="text-xl lg:text-2xl font-bold text-[var(--color-text)]">
                 Dashboard
             </h1>
 
@@ -121,14 +121,14 @@ export default function AdminDashboardPage() {
             </div>
 
             {/* Recent Devices */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-                <div className="px-4 lg:px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                    <h2 className="text-base lg:text-lg font-medium text-gray-900 dark:text-white">
+            <div className="bg-[var(--color-bg-card)] rounded-lg shadow">
+                <div className="px-4 lg:px-6 py-4 border-b border-[var(--color-border)] flex justify-between items-center">
+                    <h2 className="text-base lg:text-lg font-medium text-[var(--color-text)]">
                         Recent Devices
                     </h2>
                     <Link
                         href="/admin/devices"
-                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                        className="text-sm text-primary hover:underline"
                     >
                         View All
                     </Link>
@@ -137,7 +137,7 @@ export default function AdminDashboardPage() {
                 {/* Mobile Card View */}
                 <div className="lg:hidden p-4 space-y-3">
                     {recentDevices.length === 0 ? (
-                        <p className="text-center text-gray-500 dark:text-gray-400 py-4">
+                        <p className="text-center text-[var(--color-text-muted)] py-4">
                             No devices registered yet
                         </p>
                     ) : (
@@ -145,22 +145,22 @@ export default function AdminDashboardPage() {
                             const lastSeen = getLastSeenValue(device, heartbeats[device.pairing_code]);
                             const isOnline = isDeviceOnlineWithHeartbeat(device, heartbeats[device.pairing_code], Date.now());
                             return (
-                                <div key={device.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+                                <div key={device.id} className="border border-[var(--color-border)] rounded-lg p-3">
                                     <div className="flex items-center justify-between mb-2">
-                                        <span className="font-mono text-sm text-gray-900 dark:text-white">
+                                        <span className="font-mono text-sm text-[var(--color-text)]">
                                             {device.serial_number}
                                         </span>
                                         <span
                                             className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                                                 isOnline
-                                                    ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                                                    ? 'bg-success/10 text-success'
+                                                    : 'bg-[var(--color-surface-alt)] text-[var(--color-text-muted)]'
                                             }`}
                                         >
                                             {isOnline ? 'Online' : 'Offline'}
                                         </span>
                                     </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                                    <div className="text-xs text-[var(--color-text-muted)] space-y-1">
                                         <p>Firmware: {device.firmware_version || 'Unknown'}</p>
                                         <p>Last seen: {lastSeen ? new Date(lastSeen).toLocaleString() : 'Unknown'}</p>
                                     </div>
@@ -172,32 +172,32 @@ export default function AdminDashboardPage() {
 
                 {/* Desktop Table View */}
                 <div className="hidden lg:block overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                        <thead className="bg-gray-50 dark:bg-gray-700">
+                    <table className="min-w-full divide-y divide-[var(--color-border)]">
+                        <thead className="bg-[var(--color-surface-alt)]">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
                                     Serial
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
                                     Pairing Code
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
                                     Firmware
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
                                     Last Seen
                                 </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                                <th className="px-6 py-3 text-left text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
                                     Status
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        <tbody className="bg-[var(--color-bg-card)] divide-y divide-[var(--color-border)]">
                             {recentDevices.length === 0 ? (
                                 <tr>
                                     <td
                                         colSpan={5}
-                                        className="px-6 py-4 text-center text-gray-500 dark:text-gray-400"
+                                        className="px-6 py-4 text-center text-[var(--color-text-muted)]"
                                     >
                                         No devices registered yet
                                     </td>
@@ -233,20 +233,20 @@ function StatCard({
     link?: string;
 }) {
     const colorClasses = {
-        blue: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-        green: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
-        yellow: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800',
-        red: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800',
+        blue: 'bg-primary/10 border-primary/20',
+        green: 'bg-success/10 border-success/20',
+        yellow: 'bg-warning/10 border-warning/20',
+        red: 'bg-danger/10 border-danger/20',
     };
 
     const content = (
         <div className={`${colorClasses[color]} border rounded-lg p-4 lg:p-6`}>
             <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                    <p className="text-xs lg:text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
+                    <p className="text-xs lg:text-sm font-medium text-[var(--color-text-muted)] truncate">
                         {title}
                     </p>
-                    <p className="mt-1 text-lg lg:text-2xl font-semibold text-gray-900 dark:text-white truncate">
+                    <p className="mt-1 text-lg lg:text-2xl font-semibold text-[var(--color-text)] truncate">
                         {value}
                     </p>
                 </div>
@@ -280,22 +280,22 @@ function DeviceRow({
     return (
         <tr>
             <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm font-mono text-gray-900 dark:text-white">
+                <span className="text-sm font-mono text-[var(--color-text)]">
                     {device.serial_number}
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm font-mono text-gray-900 dark:text-white">
+                <span className="text-sm font-mono text-[var(--color-text)]">
                     {device.pairing_code}
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="text-sm text-[var(--color-text-muted)]">
                     {device.firmware_version || 'Unknown'}
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="text-sm text-[var(--color-text-muted)]">
                     {lastSeenLabel}
                 </span>
             </td>
@@ -303,8 +303,8 @@ function DeviceRow({
                 <span
                     className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         isOnline
-                            ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300'
+                            ? 'bg-success/10 text-success'
+                            : 'bg-[var(--color-surface-alt)] text-[var(--color-text-muted)]'
                     }`}
                 >
                     {isOnline ? 'Online' : 'Offline'}

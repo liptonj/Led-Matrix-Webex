@@ -322,7 +322,7 @@ void test_edge_case_missing_required_fields() {
 // Test Runner
 // ============================================================================
 
-void setup() {
+int main(int argc, char **argv) {
     UNITY_BEGIN();
     
     // User Channel Subscription Tests
@@ -358,11 +358,7 @@ void setup() {
     RUN_TEST(test_edge_case_malformed_json);
     RUN_TEST(test_edge_case_missing_required_fields);
     
-    UNITY_END();
-}
-
-void loop() {
-    // Empty - tests run once in setup()
+    return UNITY_END();
 }
 
 #endif // UNIT_TEST

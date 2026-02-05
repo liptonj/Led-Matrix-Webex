@@ -18,9 +18,22 @@ env: "Environment"  # noqa: F821
 
 Import("env")  # noqa: F821
 
-# Add simulation main and globals to the build
+# Add simulation main, common utilities, and globals to the build
 env.Append(  # noqa: F821
     SRC_FILTER=[
         "+<../simulation/main_sim.cpp>",
+        # Common utilities needed for tests
+        "+<common/nvs_utils.cpp>",
+        # Config domain files
+        "+<config/config_manager.cpp>",
+        "+<config/config_wifi.cpp>",
+        "+<config/config_display.cpp>",
+        "+<config/config_webex.cpp>",
+        "+<config/config_mqtt.cpp>",
+        "+<config/config_supabase.cpp>",
+        "+<config/config_time.cpp>",
+        "+<config/config_export.cpp>",
     ]
 )
+
+print("[SIM] Added simulation sources, utilities and config to build")

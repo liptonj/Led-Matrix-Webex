@@ -14,6 +14,7 @@
 
 // Forward declarations
 void handleSupabaseCommand(const SupabaseCommand& cmd);
+void handleUserChannelBroadcast(JsonDocument& payload);
 
 /**
  * @brief Validate command ID

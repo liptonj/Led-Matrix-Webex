@@ -31,7 +31,7 @@ export type DebugLevel = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'activity
  * Extended device configuration interface matching firmware response from get_config command.
  * Extends base DeviceConfig with additional embedded-specific fields.
  */
-export interface DeviceConfig extends Omit<BaseDeviceConfig, 'poll_interval' | 'pairing_code'> {
+export interface DeviceConfig extends Omit<BaseDeviceConfig, 'poll_interval' | 'pairing_code' | 'display_name'> {
   device_uuid?: string;
   user_uuid?: string | null;
   display_name?: string | null;

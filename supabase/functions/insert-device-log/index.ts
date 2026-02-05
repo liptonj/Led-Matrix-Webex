@@ -15,7 +15,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 
 const MAX_LOGS_PER_MINUTE = 60;
 const RATE_WINDOW_SECONDS = 60;
@@ -26,17 +26,6 @@ interface InsertLogRequest {
   level: LogLevel;
   message: string;
   metadata?: Record<string, unknown>;
-}
-
-interface TokenPayload {
-  sub: string;
-  role: string;
-  aud: string;
-  pairing_code: string;
-  serial_number: string;
-  device_id: string;
-  token_type: string;
-  exp: number;
 }
 
 async function validateBearerToken(
@@ -56,7 +45,7 @@ async function validateBearerToken(
       return { valid: false, error: "Invalid token type" };
     }
 
-    if (!payload.serial_number || !payload.device_id) {
+    if (!payload.serial_number) {
       return { valid: false, error: "Invalid token payload" };
     }
 
@@ -113,7 +102,6 @@ Deno.serve(async (req) => {
         });
       }
       serialNumber = tokenResult.device.serial_number;
-      deviceId = tokenResult.device.device_id;
     } else {
       const hmacResult = await validateHmacRequest(req, supabase, bodyText);
       if (!hmacResult.valid || !hmacResult.device) {
@@ -127,15 +115,18 @@ Deno.serve(async (req) => {
       isDebugEnabled = hmacResult.device.debug_enabled;
     }
 
-    // If we used a bearer token, fetch debug_enabled once (service role, cheap query).
-    if (!isDebugEnabled) {
+    // If we used a bearer token, fetch device_id and debug_enabled (service role, cheap query).
+    if (!deviceId || !isDebugEnabled) {
       const { data: dev } = await supabase
         .schema("display")
         .from("devices")
-        .select("debug_enabled")
+        .select("device_id, debug_enabled")
         .eq("serial_number", serialNumber)
         .single();
-      isDebugEnabled = dev?.debug_enabled === true;
+      if (dev) {
+        if (!deviceId) deviceId = dev.device_id;
+        if (!isDebugEnabled) isDebugEnabled = dev.debug_enabled === true;
+      }
     }
 
     let logData: InsertLogRequest;

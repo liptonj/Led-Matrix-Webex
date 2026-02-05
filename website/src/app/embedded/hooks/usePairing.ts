@@ -130,7 +130,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     } catch (err) { addLog(`update-app-state error: ${err instanceof Error ? err.message : 'unknown error'}`); return false; }
   }, [appToken, addLog]);
 
-  const getSupabaseClient = useCallback((token: string): SupabaseClient => {
+  const getAuthorizedSupabaseClient = useCallback((token: string): SupabaseClient => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     if (!supabaseUrl || !supabaseAnonKey) throw new Error('Supabase not configured');
@@ -177,7 +177,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   attemptReconnectRef.current = attemptReconnect;
 
   const subscribeToPairing = useCallback(async (code: string, token: string) => {
-    const supabase = getSupabaseClient(token);
+    const supabase = getAuthorizedSupabaseClient(token);
     if (pairingChannelRef.current) { supabase.removeChannel(pairingChannelRef.current); pairingChannelRef.current = null; }
     const { data: heartbeat } = await supabase.schema('display').from('connection_heartbeats').select('device_last_seen, device_connected').eq('pairing_code', code).single();
     if (heartbeat) { const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0; setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000); setLastDeviceSeenAt(heartbeat.device_last_seen ?? null); setLastDeviceSeenMs(lastSeen || null); lastPairingSnapshotRef.current = Date.now(); }
@@ -233,16 +233,16 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       }
     });
     pairingChannelRef.current = channel;
-  }, [getSupabaseClient, isPaired, addLog]);
+  }, [getAuthorizedSupabaseClient, isPaired, addLog]);
   subscribeToPairingRef.current = subscribeToPairing;
 
   const refreshPairingSnapshot = useCallback(async (code: string, token: string, reason: string) => {
     try {
-      const supabase = getSupabaseClient(token);
+      const supabase = getAuthorizedSupabaseClient(token);
       const { data: heartbeat } = await supabase.schema('display').from('connection_heartbeats').select('device_last_seen, device_connected').eq('pairing_code', code).single();
       if (heartbeat) { const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0; setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000); setLastDeviceSeenAt(heartbeat.device_last_seen ?? null); setLastDeviceSeenMs(lastSeen || null); lastPairingSnapshotRef.current = Date.now(); addLog(`Refreshed display status (${reason})`); }
     } catch (err) { addLog(`Failed to refresh display status: ${err instanceof Error ? err.message : 'unknown error'}`); }
-  }, [addLog, getSupabaseClient]);
+  }, [addLog, getAuthorizedSupabaseClient]);
 
   const handleConnect = useCallback(async () => {
     const code = pairingCode.trim().toUpperCase();

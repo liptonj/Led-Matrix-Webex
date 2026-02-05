@@ -160,6 +160,9 @@ void test_device_stores_both_uuids_after_auth() {
 }
 
 void test_device_only_stores_device_uuid_when_user_uuid_null() {
+    // Clear all static storage before test to prevent interference from previous tests
+    Preferences::clearAll();
+    
     Preferences prefs;
     prefs.begin(CONFIG_NAMESPACE, false);
     
@@ -261,9 +264,9 @@ void test_parseAuthResponse_extracts_all_required_fields() {
     
     TEST_ASSERT_TRUE(error == DeserializationError::Ok);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
-    TEST_ASSERT_FALSE(doc["token"].as<String>().isEmpty());
-    TEST_ASSERT_FALSE(doc["pairing_code"].as<String>().isEmpty());
-    TEST_ASSERT_FALSE(doc["device_uuid"].as<String>().isEmpty());
+    TEST_ASSERT_FALSE(String(doc["token"].as<const char*>()).isEmpty());
+    TEST_ASSERT_FALSE(String(doc["pairing_code"].as<const char*>()).isEmpty());
+    TEST_ASSERT_FALSE(String(doc["device_uuid"].as<const char*>()).isEmpty());
 }
 
 // ============================================================================

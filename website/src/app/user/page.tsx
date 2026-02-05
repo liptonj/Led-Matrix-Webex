@@ -1,6 +1,9 @@
 'use client';
 
 import { ConfirmDialog, useConfirmDialog } from '@/components/ui';
+import { Card } from '@/components/ui/Card';
+import { Spinner } from '@/components/ui/Spinner';
+import { Button } from '@/components/ui/Button';
 import { getSupabase } from '@/lib/supabase';
 import { getSession } from '@/lib/supabase/auth';
 import { removeMyDeviceAssignment } from '@/lib/supabase/users';
@@ -108,9 +111,9 @@ export default function UserDashboard() {
     const seen = new Date(lastSeen);
     const diff = now.getTime() - seen.getTime();
     
-    if (diff < 5 * 60 * 1000) return 'bg-green-500'; // Online
-    if (diff < 30 * 60 * 1000) return 'bg-yellow-500'; // Recently seen
-    return 'bg-gray-400 dark:bg-gray-600'; // Offline
+    if (diff < 5 * 60 * 1000) return 'bg-success'; // Online
+    if (diff < 30 * 60 * 1000) return 'bg-warning'; // Recently seen
+    return 'bg-[var(--color-text-muted)]'; // Offline
   };
 
   const getStatusText = (lastSeen: string) => {
@@ -189,69 +192,69 @@ export default function UserDashboard() {
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">Manage your LED display devices</p>
+        <h1 className="text-2xl font-bold text-[var(--color-text)]">Dashboard</h1>
+        <p className="mt-1 text-sm text-[var(--color-text-muted)]">Manage your LED display devices</p>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Devices</div>
-          <div className="text-3xl font-bold text-gray-900 dark:text-white">{summary.total}</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Online</div>
-          <div className="text-3xl font-bold text-green-600 dark:text-green-400">{summary.online}</div>
-        </div>
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Offline</div>
-          <div className="text-3xl font-bold text-gray-400 dark:text-gray-500">{summary.offline}</div>
-        </div>
+        <Card className="p-6">
+          <div className="text-sm text-[var(--color-text-muted)] mb-1">Total Devices</div>
+          <div className="text-3xl font-bold text-[var(--color-text)]">{summary.total}</div>
+        </Card>
+        <Card className="p-6">
+          <div className="text-sm text-[var(--color-text-muted)] mb-1">Online</div>
+          <div className="text-3xl font-bold text-success">{summary.online}</div>
+        </Card>
+        <Card className="p-6">
+          <div className="text-sm text-[var(--color-text-muted)] mb-1">Offline</div>
+          <div className="text-3xl font-bold text-[var(--color-text-muted)]">{summary.offline}</div>
+        </Card>
       </div>
 
       {/* Device List */}
       {loading ? (
         <div className="flex justify-center py-12">
-          <div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full" />
+          <Spinner size="lg" />
         </div>
       ) : devices.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-8 text-center">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No devices yet</h3>
-          <p className="text-gray-600 dark:text-gray-400 mb-6">
+        <Card className="p-8 text-center">
+          <h3 className="text-lg font-medium text-[var(--color-text)] mb-2">No devices yet</h3>
+          <p className="text-[var(--color-text-muted)] mb-6">
             Get started by installing or approving your first LED display.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
               href="/user/install"
-              className="inline-block px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="inline-block px-6 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition-opacity"
             >
               Install Your First Device
             </Link>
             <Link
               href="/user/approve-device"
-              className="inline-block px-6 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              className="inline-block px-6 py-2 bg-[var(--color-surface-alt)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
             >
               Approve Device
             </Link>
           </div>
-        </div>
+        </Card>
       ) : (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">My Devices</h2>
+          <h2 className="text-xl font-semibold text-[var(--color-text)]">My Devices</h2>
           {devices.map((device) => (
-            <div key={device.serial_number} className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+            <Card key={device.serial_number} className="p-6">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     <div className={`w-3 h-3 rounded-full ${getStatusColor(device.device.last_seen)}`} />
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    <h3 className="text-lg font-semibold text-[var(--color-text)]">
                       {device.device.display_name || device.device.device_id}
                     </h3>
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                    <span className="text-sm text-[var(--color-text-muted)]">
                       ({getStatusText(device.device.last_seen)})
                     </span>
                   </div>
-                  <div className="mt-2 text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                  <div className="mt-2 text-sm text-[var(--color-text-muted)] space-y-1">
                     <p><span className="font-medium">Serial:</span> {device.serial_number}</p>
                     <p><span className="font-medium">Firmware:</span> {device.device.firmware_version || 'Unknown'}</p>
                     <p><span className="font-medium">Last seen:</span> {new Date(device.device.last_seen).toLocaleString()}</p>
@@ -263,30 +266,31 @@ export default function UserDashboard() {
                         type="checkbox"
                         checked={device.webex_polling_enabled}
                         onChange={() => handleToggleWebexPolling(device.serial_number, device.webex_polling_enabled)}
-                        className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        className="w-4 h-4 text-primary rounded focus:ring-primary"
                       />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                      <span className="text-sm text-[var(--color-text)]">
                         Enable Webex status sync
                       </span>
                     </label>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
+                  <span className="px-3 py-1 bg-[var(--color-surface-alt)] text-[var(--color-text)] rounded-full text-xs font-medium">
                     {getProvisioningMethodLabel(device.provisioning_method)}
                   </span>
-                  <button
+                  <Button
                     onClick={() => {
                       setPendingRemoveSerial(device.serial_number);
                       confirmRemove.open();
                     }}
-                    className="px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                    variant="danger"
+                    size="sm"
                   >
                     Remove
-                  </button>
+                  </Button>
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}

@@ -175,7 +175,7 @@ void test_handleWebexStatusUpdate_updates_existing_status() {
     
     String stored = prefs.getString("last_webex_status", "");
     TEST_ASSERT_EQUAL_STRING("meeting", stored.c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING("active", stored.c_str());
+    TEST_ASSERT_FALSE(strcmp("active", stored.c_str()) == 0);
     
     prefs.end();
 }
@@ -241,7 +241,7 @@ void test_user_channel_vs_device_channel() {
     
     TEST_ASSERT_TRUE(userChannel.startsWith("user:"));
     TEST_ASSERT_TRUE(deviceChannel.startsWith("device:"));
-    TEST_ASSERT_NOT_EQUAL_STRING(userChannel.c_str(), deviceChannel.c_str());
+    TEST_ASSERT_FALSE(strcmp(userChannel.c_str(), deviceChannel.c_str()) == 0);
 }
 
 // ============================================================================

@@ -56,14 +56,6 @@ void ConfigManager::setSupabaseAnonKey(const String& key) {
     Serial.printf("[CONFIG] Supabase anon key saved: %s\n", key.isEmpty() ? "(empty)" : "(set)");
 }
 
-// UUID-based Device Identity
-
-CONFIG_CACHED_STRING_GETTER(UserUuid, "user_uuid", cached_user_uuid, "")
-CONFIG_CACHED_STRING_SETTER(UserUuid, "user_uuid", cached_user_uuid)
-
-CONFIG_CACHED_STRING_GETTER(DeviceUuid, "device_uuid", cached_device_uuid, "")
-CONFIG_CACHED_STRING_SETTER(DeviceUuid, "device_uuid", cached_device_uuid)
-
 // OTA Configuration
 
 String ConfigManager::getOTAUrl() const {

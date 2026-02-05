@@ -14,6 +14,7 @@ import {
   assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
+import { TEST_DEVICE_UUID, TEST_USER_UUID, mockJwtPayload } from "./fixtures/uuid-fixtures.ts";
 
 // Constants from the Edge Function
 const DEVICE_TOKEN_TTL_SECONDS = 86400; // 24 hours
@@ -384,4 +385,64 @@ Deno.test("device-auth: 500 for server config error", () => {
 
   assertEquals(errorResponse.success, false);
   assertStringIncludes(errorResponse.error, "configuration");
+});
+
+// ============================================================================
+// UUID Field Tests
+// ============================================================================
+
+Deno.test("device-auth: includes device_uuid in auth response", () => {
+  const mockResponse = {
+    success: true,
+    serial_number: "A1B2C3D4",
+    pairing_code: "XYZ789",
+    device_id: "webex-display-C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    expires_at: "2026-01-29T12:00:00Z",
+    target_firmware_version: "1.5.2",
+    debug_enabled: false,
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  };
+
+  assertExists(mockResponse.device_uuid);
+  assertEquals(mockResponse.device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("device-auth: includes user_uuid when device is assigned", () => {
+  const mockResponse = {
+    success: true,
+    serial_number: "A1B2C3D4",
+    pairing_code: "XYZ789",
+    device_id: "webex-display-C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: TEST_USER_UUID,
+    token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    expires_at: "2026-01-29T12:00:00Z",
+    target_firmware_version: "1.5.2",
+    debug_enabled: false,
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  };
+
+  assertExists(mockResponse.user_uuid);
+  assertEquals(mockResponse.user_uuid, TEST_USER_UUID);
+});
+
+Deno.test("device-auth: user_uuid is null when device unassigned", () => {
+  const mockResponse = {
+    success: true,
+    serial_number: "A1B2C3D4",
+    pairing_code: "XYZ789",
+    device_id: "webex-display-C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: null,
+    token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    expires_at: "2026-01-29T12:00:00Z",
+    target_firmware_version: "1.5.2",
+    debug_enabled: false,
+    anon_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  };
+
+  assertEquals(mockResponse.user_uuid, null);
+  assertExists(mockResponse.device_uuid);
 });

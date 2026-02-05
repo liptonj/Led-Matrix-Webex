@@ -206,14 +206,14 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
       await subscribePromise;
 
       // Send broadcast
-      const { error: broadcastError } = await channel.send({
+      const sendResult = await channel.send({
         type: 'broadcast',
         event: 'webex_status',
         payload,
       });
 
-      if (broadcastError) {
-        addLog(`Failed to broadcast status: ${broadcastError.message}`);
+      if (sendResult !== 'ok') {
+        addLog(`Failed to broadcast status: ${sendResult}`);
       } else {
         addLog(`Broadcasted webex_status to ${channelName} for device ${deviceUuid}`);
       }

@@ -38,11 +38,9 @@ export function EmbeddedAppClient() {
   
   // Get device UUID from appToken or selected device
   const deviceUuid = appToken?.device_uuid || selectedDeviceUuid || null;
-  // Get device IP from deviceStatus if available
-  const deviceIp = deviceStatus?.ip_address || null;
   
   const { sendCommand } = useDeviceCommands({ appToken, pairingCode, deviceUuid, supabaseRef, addLog });
-  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp });
+  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog });
   const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth, broadcastStatusUpdate } = useWebexStatus({ appToken, isPaired, session, deviceUuid, supabaseRef, addLog });
   const { isReady: webexReady, user, status: webexStatus, isVideoOn, isMuted, isInCall, error: webexError, initialize } = useWebexSDK();
 

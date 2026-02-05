@@ -14,8 +14,9 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import { sendBroadcast } from "../_shared/broadcast.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 
 const MAX_LOGS_PER_MINUTE = 60;
 const RATE_WINDOW_SECONDS = 60;
@@ -26,17 +27,6 @@ interface InsertLogRequest {
   level: LogLevel;
   message: string;
   metadata?: Record<string, unknown>;
-}
-
-interface TokenPayload {
-  sub: string;
-  role: string;
-  aud: string;
-  pairing_code: string;
-  serial_number: string;
-  device_id: string;
-  token_type: string;
-  exp: number;
 }
 
 async function validateBearerToken(
@@ -56,7 +46,7 @@ async function validateBearerToken(
       return { valid: false, error: "Invalid token type" };
     }
 
-    if (!payload.serial_number || !payload.device_id) {
+    if (!payload.serial_number || !payload.device_uuid) {
       return { valid: false, error: "Invalid token payload" };
     }
 
@@ -113,7 +103,7 @@ Deno.serve(async (req) => {
         });
       }
       serialNumber = tokenResult.device.serial_number;
-      deviceId = tokenResult.device.device_id;
+      deviceId = tokenResult.device.device_uuid || "";
     } else {
       const hmacResult = await validateHmacRequest(req, supabase, bodyText);
       if (!hmacResult.valid || !hmacResult.device) {
@@ -198,30 +188,11 @@ Deno.serve(async (req) => {
       metadata: logData.metadata || {},
       ts: Date.now(),
     };
-    const realtimeUrl = `${supabaseUrl.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
-    const broadcastBody = {
-      messages: [
-        {
-          topic: `device_logs:${serialNumber}`,
-          event: "log",
-          payload,
-        },
-      ],
-    };
 
-    const broadcastResp = await fetch(realtimeUrl, {
-      method: "POST",
-      headers: {
-        "apikey": supabaseKey,
-        "Authorization": `Bearer ${supabaseKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(broadcastBody),
-    });
-
-    if (!broadcastResp.ok) {
-      const errText = await broadcastResp.text();
-      console.error("Broadcast send failed:", broadcastResp.status, errText);
+    try {
+      await sendBroadcast(`device_logs:${serialNumber}`, "log", payload);
+    } catch (err) {
+      console.error("Broadcast send failed:", err);
       return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

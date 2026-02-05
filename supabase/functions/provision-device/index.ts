@@ -118,7 +118,7 @@ serve(async (req: Request) => {
     const { data: existingDevice, error: _lookupError } = await supabase
       .schema("display")
       .from("devices")
-      .select("device_id, pairing_code, is_provisioned, user_approved_by, created_at")
+      .select("id, device_id, pairing_code, is_provisioned, user_approved_by, created_at")
       .eq("serial_number", serial_number.toUpperCase())
       .single();
 
@@ -186,6 +186,8 @@ serve(async (req: Request) => {
           success: true,
           device_id: existingDevice.device_id,
           pairing_code: existingDevice.pairing_code,
+          device_uuid: existingDevice.id,
+          user_uuid: existingDevice.user_approved_by || null,
           already_provisioned: existingDevice.is_provisioned,
         }),
         {

@@ -209,7 +209,7 @@ void test_uuid_update_overwrites_previous() {
     
     String retrieved = prefs.getString("device_uuid", "");
     TEST_ASSERT_EQUAL_STRING(TEST_DEVICE_UUID_2, retrieved.c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING(TEST_DEVICE_UUID, retrieved.c_str());
+    TEST_ASSERT_FALSE(strcmp(TEST_DEVICE_UUID, retrieved.c_str()) == 0);
     
     prefs.end();
 }
