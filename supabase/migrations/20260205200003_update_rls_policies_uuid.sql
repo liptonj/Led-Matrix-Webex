@@ -40,6 +40,9 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
 
 -- Function for device_uuid (new UUID-based lookup)
+-- Drop existing function first to allow parameter rename
+DROP FUNCTION IF EXISTS display.user_can_access_device(UUID);
+
 CREATE OR REPLACE FUNCTION display.user_can_access_device(target_device_uuid UUID)
 RETURNS BOOLEAN AS $$
 BEGIN
