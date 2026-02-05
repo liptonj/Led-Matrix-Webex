@@ -26,7 +26,7 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders } from "../_shared/cors.ts";
 import { isCodeExpired } from "../_shared/pairing_code.ts";
 
@@ -168,18 +168,18 @@ serve(async (req: Request) => {
       }
 
       // Device already registered - return existing pairing code
-      // Update firmware version if provided
-      if (firmware_version) {
-        await supabase
-          .schema("display")
-          .from("devices")
-          .update({
-            firmware_version,
-            last_seen: new Date().toISOString(),
-            ip_address: ip_address || null,
-          })
-          .eq("serial_number", serial_number.toUpperCase());
-      }
+      // CRITICAL: Always update key_hash to support re-provisioning after factory reset
+      console.log(`Updating key_hash for existing device ${serial_number.toUpperCase()}`);
+      await supabase
+        .schema("display")
+        .from("devices")
+        .update({
+          key_hash,  // Always update - fixes auth after NVS wipe/factory reset
+          last_seen: new Date().toISOString(),
+          ...(firmware_version && { firmware_version }),
+          ...(ip_address && { ip_address }),
+        })
+        .eq("serial_number", serial_number.toUpperCase());
 
       return new Response(
         JSON.stringify({

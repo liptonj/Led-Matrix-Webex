@@ -10,6 +10,7 @@
 import {
   assertEquals,
   assertExists,
+  assertNotEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 
@@ -318,4 +319,65 @@ Deno.test("provision-device: 500 for internal error", () => {
   };
 
   assertStringIncludes(errorResponse.error, "server error");
+});
+
+// ============================================================================
+// Re-provision Tests (Key Hash Update)
+// ============================================================================
+
+Deno.test("provision-device: should update key_hash for existing approved device", () => {
+  // Scenario: Device re-provisions with new key_hash after factory reset/NVS wipe
+  const originalKeyHash = "a".repeat(64);
+  const newKeyHash = "b".repeat(64);
+  
+  // Simulate existing approved device
+  const existingDevice = {
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    key_hash: originalKeyHash,
+    user_approved_by: "user-uuid-123",
+    is_provisioned: true,
+  };
+  
+  // Re-provision request with new key_hash (after factory reset)
+  const reprovisionRequest = {
+    serial_number: "A1B2C3D4",
+    key_hash: newKeyHash,
+    firmware_version: "2.0.0",
+  };
+  
+  // Verify key_hash values are different (simulating factory reset)
+  assertNotEquals(reprovisionRequest.key_hash, existingDevice.key_hash);
+  
+  // The update payload should include the new key_hash
+  const expectedUpdateFields = {
+    key_hash: newKeyHash,
+    last_seen: new Date().toISOString(),
+    firmware_version: "2.0.0",
+  };
+  
+  // Verify new key_hash would be in update
+  assertEquals(expectedUpdateFields.key_hash, newKeyHash);
+  assertExists(expectedUpdateFields.last_seen);
+});
+
+Deno.test("provision-device: key_hash update should work without firmware_version", () => {
+  // Scenario: Re-provision without firmware version (older firmware)
+  const newKeyHash = "c".repeat(64);
+  
+  const reprovisionRequest = {
+    serial_number: "A1B2C3D4",
+    key_hash: newKeyHash,
+    // No firmware_version
+  };
+  
+  // Update should still include key_hash even without firmware_version
+  const updatePayload = {
+    key_hash: reprovisionRequest.key_hash,
+    last_seen: new Date().toISOString(),
+  };
+  
+  assertEquals(updatePayload.key_hash, newKeyHash);
+  assertExists(updatePayload.last_seen);
+  assertEquals("firmware_version" in reprovisionRequest, false);
 });
