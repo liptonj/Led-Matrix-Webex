@@ -12,10 +12,9 @@
 #include <Preferences.h>
 #include "common/nvs_utils.h"
 
-// Include source files directly since PlatformIO test builds
-// don't link src/ files automatically for native tests
-#include "../simulation/mocks/globals.cpp"
-#include "common/nvs_utils.cpp"
+// Note: Source files (globals.cpp, nvs_utils.cpp) are added to the build
+// by scripts/add_test_sources.py - do NOT include .cpp files directly here
+// as it causes multiple definition linker errors.
 
 // Note: Static storage for Preferences mock is defined inline in Preferences.h
 
