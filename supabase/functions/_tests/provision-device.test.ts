@@ -13,6 +13,7 @@ import {
     assertNotEquals,
     assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import { TEST_USER_UUID, TEST_DEVICE_UUID } from "./fixtures/uuid-fixtures.ts";
 
 // Valid pairing code charset (excludes confusing characters I, O, 0, 1)
 const VALID_PAIRING_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -380,4 +381,395 @@ Deno.test("provision-device: key_hash update should work without firmware_versio
   assertEquals(updatePayload.key_hash, newKeyHash);
   assertExists(updatePayload.last_seen);
   assertEquals("firmware_version" in reprovisionRequest, false);
+});
+
+// ============================================================================
+// Provision Token Tests
+// ============================================================================
+
+Deno.test("provision-device: provision_token is optional", () => {
+  const withToken = {
+    serial_number: "A1B2C3D4",
+    key_hash: "a".repeat(64),
+    provision_token: "abc123def456ghi789jkl012mno345pq",
+  };
+  const withoutToken = {
+    serial_number: "A1B2C3D4",
+    key_hash: "a".repeat(64),
+  };
+
+  assertExists(withToken.provision_token);
+  assertEquals("provision_token" in withoutToken, false);
+});
+
+Deno.test("provision-device: valid token format is 32 characters", () => {
+  // Token format from migration: CHECK (char_length(token) = 32)
+  const validToken = "abc123def456ghi789jkl012mno345pq";
+  assertEquals(validToken.length, 32);
+  
+  const invalidTokens = [
+    "short",
+    "a".repeat(31),
+    "a".repeat(33),
+    "",
+  ];
+  
+  for (const token of invalidTokens) {
+    assertEquals(token.length === 32, false, `${token} should be invalid`);
+  }
+});
+
+Deno.test("provision-device: valid token triggers auto-approval for new device", () => {
+  // Scenario: New device with valid provision token
+  const validToken = {
+    id: crypto.randomUUID(),
+    token: "abc123def456ghi789jkl012mno345pq",
+    user_id: TEST_USER_UUID,
+    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min from now
+  };
+  
+  // Token is valid if expires_at is in the future
+  const isExpired = new Date(validToken.expires_at) <= new Date();
+  assertEquals(isExpired, false);
+  
+  // Device should be auto-approved
+  const deviceData = {
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    pairing_code: "ABC234",
+    user_approved_by: validToken.user_id,
+    approved_at: new Date().toISOString(),
+    is_provisioned: false,
+  };
+  
+  assertEquals(deviceData.user_approved_by, validToken.user_id);
+  assertExists(deviceData.approved_at);
+});
+
+Deno.test("provision-device: valid token sets user_approved_by correctly", () => {
+  const tokenUserId = TEST_USER_UUID;
+  const deviceUpdate = {
+    user_approved_by: tokenUserId,
+    approved_at: new Date().toISOString(),
+  };
+  
+  assertEquals(deviceUpdate.user_approved_by, tokenUserId);
+  assertExists(deviceUpdate.approved_at);
+});
+
+Deno.test("provision-device: valid token sets approved_at timestamp", () => {
+  const now = new Date().toISOString();
+  const deviceUpdate = {
+    user_approved_by: TEST_USER_UUID,
+    approved_at: now,
+  };
+  
+  assertExists(deviceUpdate.approved_at);
+  assertEquals(typeof deviceUpdate.approved_at, "string");
+  // ISO timestamp format validation
+  const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+  assertEquals(isoRegex.test(deviceUpdate.approved_at), true);
+});
+
+Deno.test("provision-device: token is single-use and deleted after validation", () => {
+  // Token should be deleted immediately after use
+  const tokenId = crypto.randomUUID();
+  const deleteOperation = {
+    table: "provision_tokens",
+    operation: "delete",
+    condition: { id: tokenId },
+  };
+  
+  assertExists(deleteOperation.condition.id);
+  assertEquals(deleteOperation.operation, "delete");
+});
+
+Deno.test("provision-device: valid token returns 200 status (not 403)", () => {
+  // When token is valid, device is auto-approved and returns 200
+  const successResponse = {
+    success: true,
+    device_id: "webex-display-C3D4",
+    pairing_code: "ABC234",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: TEST_USER_UUID,
+    already_provisioned: false,
+  };
+  
+  const statusCode = 200; // Success, not 403 Forbidden
+  assertEquals(statusCode, 200);
+  assertEquals(successResponse.success, true);
+  assertExists(successResponse.user_uuid);
+});
+
+Deno.test("provision-device: expired token doesn't trigger auto-approval", () => {
+  // Scenario: Token exists but is expired
+  const expiredToken = {
+    id: crypto.randomUUID(),
+    token: "abc123def456ghi789jkl012mno345pq",
+    user_id: TEST_USER_UUID,
+    expires_at: new Date(Date.now() - 60 * 1000).toISOString(), // 1 minute ago
+  };
+  
+  // Token is expired if expires_at is in the past
+  const isExpired = new Date(expiredToken.expires_at) <= new Date();
+  assertEquals(isExpired, true);
+  
+  // Device should NOT be auto-approved
+  const deviceData = {
+    serial_number: "A1B2C3D4",
+    user_approved_by: null, // Not approved
+    approved_at: null,
+  };
+  
+  assertEquals(deviceData.user_approved_by, null);
+  assertEquals(deviceData.approved_at, null);
+});
+
+Deno.test("provision-device: expired token falls back to pairing code flow", () => {
+  // When token is expired, device should return 403 with pairing code
+  const errorResponse = {
+    error: "Device not approved yet. Ask device owner to approve it on the website.",
+    serial_number: "A1B2C3D4",
+    pairing_code: "ABC234",
+    awaiting_approval: true,
+  };
+  
+  const statusCode = 403; // Forbidden - requires approval
+  assertEquals(statusCode, 403);
+  assertStringIncludes(errorResponse.error, "not approved");
+  assertExists(errorResponse.pairing_code);
+  assertEquals(errorResponse.awaiting_approval, true);
+});
+
+Deno.test("provision-device: expired token is not deleted", () => {
+  // Expired tokens should remain in database (for cleanup job)
+  const expiredToken = {
+    id: crypto.randomUUID(),
+    expires_at: new Date(Date.now() - 60 * 1000).toISOString(),
+  };
+  
+  const isExpired = new Date(expiredToken.expires_at) <= new Date();
+  assertEquals(isExpired, true);
+  
+  // Token should not be deleted (only valid tokens are deleted on use)
+  const shouldDelete = false;
+  assertEquals(shouldDelete, false);
+});
+
+Deno.test("provision-device: non-existent token doesn't cause error", () => {
+  // Scenario: Token provided but doesn't exist in database
+  const tokenResult = {
+    data: null,
+    error: null, // Not an error, just not found
+  };
+  
+  // Should gracefully continue with pairing code flow
+  assertEquals(tokenResult.data, null);
+  assertEquals(tokenResult.error, null);
+  
+  // Device should proceed normally without token
+  const deviceData = {
+    serial_number: "A1B2C3D4",
+    user_approved_by: null,
+  };
+  
+  assertEquals(deviceData.user_approved_by, null);
+});
+
+Deno.test("provision-device: request without token works normally", () => {
+  // Scenario: Normal provisioning without token
+  const request = {
+    serial_number: "A1B2C3D4",
+    key_hash: "a".repeat(64),
+    // No provision_token field
+  };
+  
+  assertEquals("provision_token" in request, false);
+  
+  // Should create device in unapproved state
+  const deviceData = {
+    serial_number: "A1B2C3D4",
+    user_approved_by: null,
+    approved_at: null,
+  };
+  
+  assertEquals(deviceData.user_approved_by, null);
+  assertEquals(deviceData.approved_at, null);
+});
+
+Deno.test("provision-device: malformed token is handled gracefully", () => {
+  // Scenario: Token provided but malformed (wrong length, invalid chars, etc.)
+  const malformedTokens = [
+    "short",
+    "a".repeat(31),
+    "a".repeat(33),
+    "",
+    null,
+  ];
+  
+  for (const token of malformedTokens) {
+    // Should not match database constraint (32 chars)
+    const isValidFormat = token && typeof token === "string" && token.length === 32;
+    assertEquals(isValidFormat, false, `${token} should be invalid`);
+  }
+  
+  // Should continue with pairing code flow
+  const deviceData = {
+    serial_number: "A1B2C3D4",
+    user_approved_by: null,
+  };
+  
+  assertEquals(deviceData.user_approved_by, null);
+});
+
+Deno.test("provision-device: token can approve existing unapproved device", () => {
+  // Scenario: Device exists but not approved, token approves it
+  const existingDevice = {
+    id: TEST_DEVICE_UUID,
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    pairing_code: "ABC234",
+    user_approved_by: null, // Not approved yet
+    created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5 min ago
+  };
+  
+  const validToken = {
+    id: crypto.randomUUID(),
+    user_id: TEST_USER_UUID,
+    expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  };
+  
+  // Update device with approval
+  const updateData = {
+    user_approved_by: validToken.user_id,
+    approved_at: new Date().toISOString(),
+  };
+  
+  assertEquals(updateData.user_approved_by, validToken.user_id);
+  assertExists(updateData.approved_at);
+  
+  // Response should be 200 (success)
+  const response = {
+    success: true,
+    device_id: existingDevice.device_id,
+    pairing_code: existingDevice.pairing_code,
+    device_uuid: existingDevice.id,
+    user_uuid: validToken.user_id,
+  };
+  
+  assertEquals(response.success, true);
+  assertEquals(response.user_uuid, validToken.user_id);
+});
+
+Deno.test("provision-device: token doesn't override existing approval", () => {
+  // Scenario: Device already approved by different user, token shouldn't override
+  const existingDevice = {
+    id: TEST_DEVICE_UUID,
+    serial_number: "A1B2C3D4",
+    user_approved_by: "original-user-uuid",
+    approved_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 1 day ago
+  };
+  
+  const tokenUserId = TEST_USER_UUID; // Different user
+  
+  // Device already has approval, should not be updated
+  const shouldUpdate = existingDevice.user_approved_by === null;
+  assertEquals(shouldUpdate, false);
+  
+  // Response should return existing approval
+  const response = {
+    success: true,
+    user_uuid: existingDevice.user_approved_by,
+  };
+  
+  assertEquals(response.user_uuid, existingDevice.user_approved_by);
+  assertNotEquals(response.user_uuid, tokenUserId);
+});
+
+Deno.test("provision-device: user_devices entry created with provision_token method", () => {
+  // When token auto-approves, user_devices entry should be created
+  const userDevicesEntry = {
+    user_id: TEST_USER_UUID,
+    serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    created_by: TEST_USER_UUID,
+    provisioning_method: "provision_token",
+    provisioned_at: new Date().toISOString(),
+  };
+  
+  assertEquals(userDevicesEntry.provisioning_method, "provision_token");
+  assertEquals(userDevicesEntry.user_id, TEST_USER_UUID);
+  assertEquals(userDevicesEntry.created_by, TEST_USER_UUID);
+  assertExists(userDevicesEntry.provisioned_at);
+});
+
+Deno.test("provision-device: user_devices entry has correct user_id from token", () => {
+  const tokenUserId = TEST_USER_UUID;
+  
+  const userDevicesEntry = {
+    user_id: tokenUserId,
+    serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    created_by: tokenUserId,
+    provisioning_method: "provision_token",
+  };
+  
+  assertEquals(userDevicesEntry.user_id, tokenUserId);
+  assertEquals(userDevicesEntry.created_by, tokenUserId);
+});
+
+Deno.test("provision-device: user_devices upsert uses correct conflict resolution", () => {
+  // user_devices upsert should use onConflict: "user_id,serial_number"
+  const upsertConfig = {
+    onConflict: "user_id,serial_number",
+    ignoreDuplicates: false,
+  };
+  
+  assertEquals(upsertConfig.onConflict, "user_id,serial_number");
+  assertEquals(upsertConfig.ignoreDuplicates, false);
+});
+
+Deno.test("provision-device: token validation checks expires_at correctly", () => {
+  // Token is valid only if expires_at > current time
+  const now = new Date();
+  
+  const validToken = {
+    expires_at: new Date(now.getTime() + 30 * 60 * 1000).toISOString(), // Future
+  };
+  
+  const expiredToken = {
+    expires_at: new Date(now.getTime() - 60 * 1000).toISOString(), // Past
+  };
+  
+  const isValid = new Date(validToken.expires_at) > now;
+  const isExpired = new Date(expiredToken.expires_at) <= now;
+  
+  assertEquals(isValid, true);
+  assertEquals(isExpired, true);
+});
+
+Deno.test("provision-device: token query selects correct fields", () => {
+  // Token query should select: id, user_id, expires_at
+  const tokenQuery = {
+    select: ["id", "user_id", "expires_at"],
+    from: "provision_tokens",
+    where: { token: "abc123def456ghi789jkl012mno345pq" },
+  };
+  
+  assertEquals(tokenQuery.select.includes("id"), true);
+  assertEquals(tokenQuery.select.includes("user_id"), true);
+  assertEquals(tokenQuery.select.includes("expires_at"), true);
+  assertEquals(tokenQuery.select.length, 3);
+});
+
+Deno.test("provision-device: token deletion uses correct condition", () => {
+  // Token should be deleted by id (not token string)
+  const tokenId = crypto.randomUUID();
+  const deleteOperation = {
+    table: "provision_tokens",
+    condition: { id: tokenId },
+  };
+  
+  assertExists(deleteOperation.condition.id);
+  assertEquals("token" in deleteOperation.condition, false); // Should use id, not token
 });

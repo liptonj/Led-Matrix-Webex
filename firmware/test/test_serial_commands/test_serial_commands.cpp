@@ -10,6 +10,7 @@
 
 #include <unity.h>
 #include <Arduino.h>
+#include "serial/serial_commands.h"
 
 // Test that WIFI command parsing extracts SSID correctly
 void test_wifi_command_ssid_extraction() {
@@ -214,6 +215,296 @@ void test_wifi_command_case_insensitive() {
     TEST_ASSERT_FALSE(command_lower.startsWith("WIFI:")); // Should be case-sensitive
 }
 
+// ============================================================================
+// PROVISION_TOKEN Command Tests
+// ============================================================================
+
+// Test PROVISION_TOKEN command recognition
+void test_provision_token_command_recognition() {
+    TEST_ASSERT_TRUE(String("PROVISION_TOKEN:abc123").startsWith("PROVISION_TOKEN:"));
+    TEST_ASSERT_FALSE(String("PROVISION_TOKEN").startsWith("PROVISION_TOKEN:"));
+}
+
+// Test PROVISION_TOKEN command parsing - extract token correctly
+void test_provision_token_extraction() {
+    // Format: PROVISION_TOKEN:<token>
+    String command = "PROVISION_TOKEN:12345678901234567890123456789012"; // 32 chars
+    const int prefix_len = 16;  // "PROVISION_TOKEN:"
+    
+    String token = command.substring(prefix_len);
+    token.trim();  // Remove any whitespace
+    
+    TEST_ASSERT_EQUAL(32, token.length());
+    TEST_ASSERT_EQUAL_STRING("12345678901234567890123456789012", token.c_str());
+}
+
+// Test PROVISION_TOKEN command parsing - handles whitespace trimming
+void test_provision_token_trim_whitespace() {
+    String command = "PROVISION_TOKEN:  12345678901234567890123456789012  ";
+    const int prefix_len = 16;
+    
+    String token = command.substring(prefix_len);
+    token.trim();
+    
+    TEST_ASSERT_EQUAL(32, token.length());
+    TEST_ASSERT_EQUAL_STRING("12345678901234567890123456789012", token.c_str());
+}
+
+// Test valid token length (exactly 32 characters)
+void test_provision_token_valid_length() {
+    String token = "12345678901234567890123456789012"; // Exactly 32 chars
+    TEST_ASSERT_EQUAL(32, token.length());
+}
+
+// Test invalid token length - too short
+void test_provision_token_too_short() {
+    String token = "1234567890123456789012345678901"; // Only 31 chars
+    TEST_ASSERT_NOT_EQUAL(32, token.length());
+    TEST_ASSERT_LESS_THAN(32, token.length());
+}
+
+// Test invalid token length - too long
+void test_provision_token_too_long() {
+    String token = "123456789012345678901234567890123"; // 33 chars
+    TEST_ASSERT_NOT_EQUAL(32, token.length());
+    TEST_ASSERT_GREATER_THAN(32, token.length());
+}
+
+// Test invalid token length - empty token
+void test_provision_token_empty_token() {
+    String command = "PROVISION_TOKEN:";
+    const int prefix_len = 16;
+    
+    String token = command.substring(prefix_len);
+    token.trim();
+    
+    TEST_ASSERT_EQUAL(0, token.length());
+    TEST_ASSERT_NOT_EQUAL(32, token.length());
+}
+
+// Test invalid token length - command too short (no token)
+void test_provision_token_command_too_short() {
+    String command = "PROVISION_TOKEN"; // No colon, no token
+    const int prefix_len = 16;
+    
+    bool has_token = (command.length() > prefix_len);
+    TEST_ASSERT_FALSE(has_token);
+}
+
+// Test valid token format - alphanumeric only (lowercase)
+void test_provision_token_valid_format_lowercase() {
+    String token = "abcdefghijklmnopqrstuvwxyz123456"; // 32 chars, lowercase + digits
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_TRUE(is_valid);
+}
+
+// Test valid token format - alphanumeric only (uppercase)
+void test_provision_token_valid_format_uppercase() {
+    String token = "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"; // 32 chars, uppercase + digits
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_TRUE(is_valid);
+}
+
+// Test valid token format - alphanumeric only (mixed case)
+void test_provision_token_valid_format_mixed_case() {
+    String token = "AbCdEfGhIjKlMnOpQrStUvWxYz123456"; // 32 chars, mixed case + digits
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_TRUE(is_valid);
+}
+
+// Test invalid token format - special characters
+void test_provision_token_invalid_format_special_chars() {
+    String token = "1234567890123456789012345678901@"; // 32 chars with @
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_FALSE(is_valid);
+}
+
+// Test invalid token format - spaces
+void test_provision_token_invalid_format_spaces() {
+    String token = "123456789012345678901234567890 1"; // 32 chars with space
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_FALSE(is_valid);
+}
+
+// Test invalid token format - multiple special characters
+void test_provision_token_invalid_format_multiple_special() {
+    String token = "123456789012345678901234567890!@"; // 32 chars with ! and @
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_FALSE(is_valid);
+}
+
+// Test invalid token format - hyphen
+void test_provision_token_invalid_format_hyphen() {
+    String token = "1234567890123456789012345678901-"; // 32 chars with hyphen
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_FALSE(is_valid);
+}
+
+// Test invalid token format - underscore
+void test_provision_token_invalid_format_underscore() {
+    String token = "1234567890123456789012345678901_"; // 32 chars with underscore
+    bool is_valid = true;
+    
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    TEST_ASSERT_FALSE(is_valid);
+}
+
+// Test token lifecycle - set and get valid token
+void test_provision_token_set_and_get() {
+    // Initialize serial commands (clears any existing token)
+    serial_commands_begin();
+    
+    String valid_token = "12345678901234567890123456789012"; // 32 chars
+    set_provision_token(valid_token);
+    
+    String retrieved_token = get_provision_token();
+    TEST_ASSERT_EQUAL_STRING(valid_token.c_str(), retrieved_token.c_str());
+    TEST_ASSERT_EQUAL(32, retrieved_token.length());
+}
+
+// Test token lifecycle - clear token
+void test_provision_token_clear() {
+    // Set a token first
+    String valid_token = "12345678901234567890123456789012";
+    set_provision_token(valid_token);
+    
+    // Verify it's set
+    TEST_ASSERT_FALSE(get_provision_token().isEmpty());
+    
+    // Clear it
+    clear_provision_token();
+    
+    // Verify it's cleared
+    String retrieved_token = get_provision_token();
+    TEST_ASSERT_TRUE(retrieved_token.isEmpty());
+    TEST_ASSERT_EQUAL(0, retrieved_token.length());
+}
+
+// Test token lifecycle - get returns empty string initially
+void test_provision_token_get_empty_initially() {
+    // Initialize serial commands (clears any existing token)
+    serial_commands_begin();
+    
+    String retrieved_token = get_provision_token();
+    TEST_ASSERT_TRUE(retrieved_token.isEmpty());
+    TEST_ASSERT_EQUAL(0, retrieved_token.length());
+}
+
+// Test token lifecycle - set multiple times (last one wins)
+void test_provision_token_set_multiple_times() {
+    // Initialize serial commands
+    serial_commands_begin();
+    
+    // Set first token
+    String token1 = "11111111111111111111111111111111"; // 32 chars
+    set_provision_token(token1);
+    TEST_ASSERT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    
+    // Set second token
+    String token2 = "22222222222222222222222222222222"; // 32 chars
+    set_provision_token(token2);
+    TEST_ASSERT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    
+    // Set third token
+    String token3 = "33333333333333333333333333333333"; // 32 chars
+    set_provision_token(token3);
+    TEST_ASSERT_EQUAL_STRING(token3.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_NOT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
+}
+
+// Test token lifecycle - set, clear, set again
+void test_provision_token_set_clear_set() {
+    // Initialize serial commands
+    serial_commands_begin();
+    
+    // Set token
+    String token1 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 32 chars
+    set_provision_token(token1);
+    TEST_ASSERT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    
+    // Clear token
+    clear_provision_token();
+    TEST_ASSERT_TRUE(get_provision_token().isEmpty());
+    
+    // Set different token
+    String token2 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"; // 32 chars
+    set_provision_token(token2);
+    TEST_ASSERT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+}
+
 static void run_serial_commands_tests() {
     UNITY_BEGIN();
     
@@ -243,6 +534,29 @@ static void run_serial_commands_tests() {
     RUN_TEST(test_wifi_command_only_colons);
     RUN_TEST(test_wifi_command_missing_colon);
     RUN_TEST(test_wifi_command_case_insensitive);
+    
+    // PROVISION_TOKEN command tests
+    RUN_TEST(test_provision_token_command_recognition);
+    RUN_TEST(test_provision_token_extraction);
+    RUN_TEST(test_provision_token_trim_whitespace);
+    RUN_TEST(test_provision_token_valid_length);
+    RUN_TEST(test_provision_token_too_short);
+    RUN_TEST(test_provision_token_too_long);
+    RUN_TEST(test_provision_token_empty_token);
+    RUN_TEST(test_provision_token_command_too_short);
+    RUN_TEST(test_provision_token_valid_format_lowercase);
+    RUN_TEST(test_provision_token_valid_format_uppercase);
+    RUN_TEST(test_provision_token_valid_format_mixed_case);
+    RUN_TEST(test_provision_token_invalid_format_special_chars);
+    RUN_TEST(test_provision_token_invalid_format_spaces);
+    RUN_TEST(test_provision_token_invalid_format_multiple_special);
+    RUN_TEST(test_provision_token_invalid_format_hyphen);
+    RUN_TEST(test_provision_token_invalid_format_underscore);
+    RUN_TEST(test_provision_token_set_and_get);
+    RUN_TEST(test_provision_token_clear);
+    RUN_TEST(test_provision_token_get_empty_initially);
+    RUN_TEST(test_provision_token_set_multiple_times);
+    RUN_TEST(test_provision_token_set_clear_set);
     
     UNITY_END();
 }
