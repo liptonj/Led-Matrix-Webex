@@ -41,11 +41,23 @@ export default memo(function DeviceInfoCard({
                 ? 'bg-yellow-100 text-yellow-800'
                 : 'bg-gray-200 text-gray-700';
 
+    const pairedUserDisplay = device.paired_user_name
+        ? device.paired_user_name
+        : device.paired_user_email
+            ? device.paired_user_email
+            : 'Not paired';
+
     return (
         <div className="panel">
             <h3 className="panel-header">Device</h3>
             <p className="text-sm mt-2" style={{ color: 'var(--color-text)' }}>{device.display_name || 'Unnamed device'}</p>
             <p className="panel-subtext">Firmware {device.firmware_version || 'Unknown'}</p>
+            <div className="mt-2">
+                <span className="panel-subtext">Paired user:</span>
+                <span className="ml-2 text-sm" style={{ color: 'var(--color-text)' }}>
+                    {pairedUserDisplay}
+                </span>
+            </div>
             <div className="mt-2">
                 <span className="panel-subtext">Access:</span>
                 <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 text-gray-700">

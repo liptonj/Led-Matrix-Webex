@@ -22,8 +22,6 @@ export const CONFIG = {
   reconnectDelayMs: 2000,
   /** Maximum reconnection attempts */
   reconnectMaxAttempts: 5,
-  /** Feature flag: use Edge Functions instead of direct DB updates for better security */
-  useEdgeFunctions: process.env.NEXT_PUBLIC_USE_SUPABASE_EDGE_FUNCTIONS === 'true',
   /** Default Webex API poll interval */
   webexPollIntervalMs: 30 * 1000,
 } as const;

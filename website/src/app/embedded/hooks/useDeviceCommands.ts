@@ -166,35 +166,14 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
     const supabase = getSupabaseClient();
     let commandId: string;
 
-    // Insert command - use Edge Function or direct DB based on feature flag
-    if (CONFIG.useEdgeFunctions) {
-      const result = await insertCommandViaEdge(command, payload);
-      if (!result.success || !result.command_id) {
-        throw new Error(result.error || 'Failed to queue command');
-      }
-      commandId = result.command_id;
-    } else {
-      // Direct database insert using device_uuid
-      const { data: inserted, error } = await supabase
-        .schema('display')
-        .from('commands')
-        .insert({
-          device_uuid: deviceUuid,
-          command,
-          payload,
-          status: 'pending',
-        })
-        .select('id')
-        .single();
-
-      if (error || !inserted?.id) {
-        addLog(`Command insert failed: ${error?.message || 'Unknown error'}`);
-        throw new Error(error?.message || 'Failed to queue command');
-      }
-      commandId = inserted.id as string;
+    // Insert command via Edge Function (for validation, logging, and broadcast)
+    const result = await insertCommandViaEdge(command, payload);
+    if (!result.success || !result.command_id) {
+      throw new Error(result.error || 'Failed to queue command');
     }
+    commandId = result.command_id;
 
-    // Subscribe to command updates (same for both modes)
+    // Subscribe to command updates
     return await new Promise<CommandResponse>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error(`Command "${command}" timed out`)), CONFIG.commandTimeoutMs);
 

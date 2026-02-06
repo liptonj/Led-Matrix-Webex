@@ -65,6 +65,52 @@ export async function getConnectionHeartbeats(
   return data || [];
 }
 
+// Helper to get paired user for a device
+export async function getPairedUser(deviceUuid: string): Promise<{ name?: string; email?: string } | null> {
+  const supabase = await getSupabase();
+  
+  // Query 1: Get user_id from user_devices
+  const { data: userDevice, error: userDeviceError } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_devices")
+      .select("user_id")
+      .eq("device_uuid", deviceUuid)
+      .maybeSingle(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading user device assignment.",
+  );
+
+  if (userDeviceError) throw userDeviceError;
+  if (!userDevice?.user_id) return null;
+
+  // Query 2: Get user profile from user_profiles
+  const { data: profile, error: profileError } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_profiles")
+      .select("first_name, last_name, email")
+      .eq("user_id", userDevice.user_id)
+      .maybeSingle(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading user profile.",
+  );
+
+  if (profileError) throw profileError;
+  if (!profile) return null;
+
+  // Build name from first_name and last_name
+  const nameParts: string[] = [];
+  if (profile.first_name) nameParts.push(profile.first_name);
+  if (profile.last_name) nameParts.push(profile.last_name);
+  const name = nameParts.length > 0 ? nameParts.join(" ") : undefined;
+
+  return {
+    name,
+    email: profile.email,
+  };
+}
+
 // Helper to get a single device
 export async function getDevice(serialNumber: string): Promise<Device | null> {
   const supabase = await getSupabase();
@@ -80,6 +126,36 @@ export async function getDevice(serialNumber: string): Promise<Device | null> {
   );
 
   if (error && error.code !== "PGRST116") throw error;
+  
+  // If device found, enrich with paired user info
+  if (data) {
+    try {
+      const pairedUser = await getPairedUser(data.id);
+      if (pairedUser) {
+        return {
+          ...data,
+          paired_user_name: pairedUser.name ?? null,
+          paired_user_email: pairedUser.email ?? null,
+        };
+      } else {
+        return {
+          ...data,
+          paired_user_name: null,
+          paired_user_email: null,
+        };
+      }
+    } catch (err) {
+      // If paired user lookup fails, return device without paired user info
+      // This allows the device to still be displayed even if user lookup fails
+      console.error("Failed to load paired user:", err);
+      return {
+        ...data,
+        paired_user_name: null,
+        paired_user_email: null,
+      };
+    }
+  }
+  
   return data;
 }
 

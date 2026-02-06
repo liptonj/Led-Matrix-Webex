@@ -82,6 +82,7 @@ interface TokenPayload {
   serial_number: string;
   token_type: string;
   exp: number;
+  device_uuid?: string;
 }
 
 /**
@@ -258,11 +259,13 @@ Deno.serve(async (req) => {
       .single();
 
     // ALWAYS update heartbeat table (does NOT trigger realtime to device)
+    // Include device_uuid for UUID-based queries
     await supabase
       .schema("display")
       .from("connection_heartbeats")
       .upsert({
         pairing_code: deviceInfo.pairing_code,
+        device_uuid: deviceInfo.device_uuid || null,
         device_last_seen: now,
         device_connected: true,
       }, { onConflict: "pairing_code" });
@@ -332,12 +335,13 @@ Deno.serve(async (req) => {
           console.error("Failed to create pairing:", insertError);
         }
 
-        // Also ensure heartbeat record exists
+        // Also ensure heartbeat record exists with device_uuid
         await supabase
           .schema("display")
           .from("connection_heartbeats")
           .upsert({
             pairing_code: deviceInfo.pairing_code,
+            device_uuid: deviceInfo.device_uuid || null,
             device_last_seen: now,
             device_connected: true,
           }, { onConflict: "pairing_code" });

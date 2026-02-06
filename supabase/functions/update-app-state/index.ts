@@ -1,4 +1,8 @@
 /**
+ * @deprecated This Edge Function is deprecated and will be removed.
+ * Status updates now use direct client-to-DB writes with a Postgres trigger for presence tracking.
+ * See migration: pairings_presence_trigger.sql
+ *
  * Update App State Edge Function
  *
  * Embedded app calls this to update its Webex status in the pairings table.
@@ -313,10 +317,68 @@ Deno.serve(async (req) => {
     }
 
     // Fetch current status values to check if anything actually changed
-    const { data: currentPairing, error: fetchError } = await pairingQuery.maybeSingle();
+    let { data: currentPairing, error: fetchError } = await pairingQuery.maybeSingle();
 
     if (fetchError && fetchError.code !== "PGRST116") {
       console.error("Failed to fetch current pairing:", fetchError);
+    }
+
+    // If no pairing exists for user session with device_uuid, create one
+    // This handles the case where a user connects to a device that has no pairing row yet
+    if (!currentPairing && authResult.type === "user" && targetDeviceUuid) {
+      // Look up device info to create pairing
+      const { data: device, error: deviceLookupError } = await supabase
+        .schema("display")
+        .from("devices")
+        .select("pairing_code, serial_number, device_id")
+        .eq("id", targetDeviceUuid)
+        .single();
+
+      if (device && !deviceLookupError) {
+        // Build pairing data with provided state
+        const pairingData: Record<string, unknown> = {
+          pairing_code: device.pairing_code,
+          serial_number: device.serial_number,
+          device_id: device.device_id,
+          device_uuid: targetDeviceUuid,
+          user_uuid: authResult.userUuid,
+          app_connected: true,
+        };
+
+        // Include any status fields provided in the request
+        if (typeof stateData.webex_status === "string") {
+          pairingData.webex_status = stateData.webex_status;
+        }
+        if (typeof stateData.camera_on === "boolean") {
+          pairingData.camera_on = stateData.camera_on;
+        }
+        if (typeof stateData.mic_muted === "boolean") {
+          pairingData.mic_muted = stateData.mic_muted;
+        }
+        if (typeof stateData.in_call === "boolean") {
+          pairingData.in_call = stateData.in_call;
+        }
+        if (typeof stateData.display_name === "string") {
+          pairingData.display_name = stateData.display_name;
+        }
+
+        // Upsert pairing (in case of race condition with device-auth)
+        const { data: newPairing, error: insertError } = await supabase
+          .schema("display")
+          .from("pairings")
+          .upsert(pairingData, { onConflict: "pairing_code" })
+          .select("pairing_code, webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid")
+          .single();
+
+        if (newPairing && !insertError) {
+          currentPairing = newPairing;
+          console.log(`Created pairing for user session: device_uuid=${targetDeviceUuid}`);
+        } else if (insertError) {
+          console.error("Failed to create pairing for user session:", insertError);
+        }
+      } else {
+        console.error("Device not found for user session pairing creation:", targetDeviceUuid, deviceLookupError);
+      }
     }
 
     // Track if any status-relevant fields are changing
@@ -378,11 +440,14 @@ Deno.serve(async (req) => {
     }
 
     // ALWAYS update heartbeat table (does NOT trigger realtime to device)
+    // Include device_uuid for UUID-based queries
+    const heartbeatDeviceUuid = targetDeviceUuid || currentPairing?.device_uuid;
     await supabase
       .schema("display")
       .from("connection_heartbeats")
       .upsert({
         pairing_code: pairingCode,
+        device_uuid: heartbeatDeviceUuid || null,
         app_last_seen: now,
         app_connected: true,
       }, { onConflict: "pairing_code" });
@@ -464,11 +529,11 @@ Deno.serve(async (req) => {
     if (updateError) {
       // If pairing doesn't exist, try to create it (only for app tokens)
       if (updateError.code === "PGRST116" && authResult.type === "app") {
-        // Look up serial_number from devices table
+        // Look up device info from devices table (including id for device_uuid)
         const { data: device } = await supabase
           .schema("display")
           .from("devices")
-          .select("serial_number, device_id")
+          .select("id, serial_number, device_id")
           .eq("pairing_code", authResult.pairingCode)
           .single();
 
@@ -480,6 +545,7 @@ Deno.serve(async (req) => {
               pairing_code: authResult.pairingCode,
               serial_number: device.serial_number,
               device_id: device.device_id,
+              device_uuid: device.id,
               app_connected: true,
               ...stateData,
             });
@@ -488,12 +554,13 @@ Deno.serve(async (req) => {
             console.error("Failed to create pairing:", insertError);
           }
 
-          // Also create heartbeat record
+          // Also create heartbeat record with device_uuid
           await supabase
             .schema("display")
             .from("connection_heartbeats")
             .upsert({
               pairing_code: authResult.pairingCode,
+              device_uuid: device.id,
               app_last_seen: now,
               app_connected: true,
             }, { onConflict: "pairing_code" });

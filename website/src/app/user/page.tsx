@@ -1,9 +1,9 @@
 'use client';
 
 import { ConfirmDialog, useConfirmDialog } from '@/components/ui';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Spinner } from '@/components/ui/Spinner';
-import { Button } from '@/components/ui/Button';
 import { getSupabase } from '@/lib/supabase';
 import { getSession } from '@/lib/supabase/auth';
 import { removeMyDeviceAssignment } from '@/lib/supabase/users';
@@ -55,7 +55,7 @@ export default function UserDashboard() {
             provisioning_method,
             created_at,
             webex_polling_enabled,
-            devices!inner (
+            devices!user_devices_device_uuid_fkey (
               device_id,
               display_name,
               firmware_version,

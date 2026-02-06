@@ -23,6 +23,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { sendBroadcast } from "../_shared/broadcast.ts";
 
 // Command expiry (5 minutes)
 const COMMAND_EXPIRY_SECONDS = 300;
@@ -144,6 +145,17 @@ Deno.serve(async (req) => {
 
     const appInfo = tokenResult.token;
 
+    // Create Supabase client with service role (needed before first use)
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
     // Parse request body
     let commandData: InsertCommandRequest;
     try {
@@ -222,17 +234,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Create Supabase client with service role
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    const supabase = createClient(supabaseUrl, supabaseKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    });
-
     // Calculate expiry
     const expiresAt = new Date(Date.now() + COMMAND_EXPIRY_SECONDS * 1000);
 
@@ -281,6 +282,25 @@ Deno.serve(async (req) => {
     console.log(
       `Command ${commandData.command} queued for device ${deviceUuid} (pairing: ${appInfo.pairing_code}, id: ${command.id})`,
     );
+
+    // Broadcast to user channel if user_uuid is available
+    if (appInfo.user_uuid) {
+      try {
+        await sendBroadcast(`user:${appInfo.user_uuid}`, "command", {
+          device_uuid: deviceUuid,
+          command: {
+            id: command.id,
+            command: commandData.command,
+            payload: commandData.payload || {},
+            status: "pending",
+            expires_at: expiresAt.toISOString(),
+          },
+        });
+      } catch (broadcastError) {
+        console.error("Failed to broadcast to user channel:", broadcastError);
+        // Don't fail the request - command is already queued
+      }
+    }
 
     const response: InsertCommandResponse = {
       success: true,

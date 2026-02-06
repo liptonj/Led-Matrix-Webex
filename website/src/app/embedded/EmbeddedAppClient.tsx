@@ -10,7 +10,7 @@ import Script from 'next/script';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import pkg from '../../../package.json';
 import { SetupScreen } from './components';
-import { CONFIG, getAppVersion } from './constants';
+import { getAppVersion } from './constants';
 import { useDebugConsole, useDeviceCommands, useDeviceConfig, usePairing, useWebexStatus } from './hooks';
 import type { TabId } from './types';
 
@@ -32,7 +32,7 @@ export function EmbeddedAppClient() {
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const { debugVisible, setDebugVisible, debugLogs, clearDebugLogs, activityLog, addLog, handleCopyDebug, formatRelativeTime } = useDebugConsole();
-  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updateAppStateViaEdge, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
+  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updatePairingState, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
   
   // Get device UUID from selected device
   const deviceUuid = selectedDeviceUuid || null;
@@ -107,11 +107,9 @@ export function EmbeddedAppClient() {
     // Broadcast status update to user channel
     broadcastStatusUpdate(statusToDisplay, inCall, cameraOn, micMuted, displayName).catch(() => {});
     
-    // Also update via Edge Function for backward compatibility
-    if (CONFIG.useEdgeFunctions) {
-      updateAppStateViaEdge({ webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).catch(() => {}); 
-    }
-  }, [rtStatus, isPaired, statusToDisplay, cameraOn, micMuted, inCall, displayName, deviceUuid, session, broadcastStatusUpdate, updateAppStateViaEdge]);
+    // Update pairing state directly in database
+    updatePairingState({ webex_status: statusToDisplay, camera_on: cameraOn, muted: micMuted, sharing: inCall, display_name: displayName }).catch(() => {}); 
+  }, [rtStatus, isPaired, statusToDisplay, cameraOn, micMuted, inCall, displayName, deviceUuid, session, broadcastStatusUpdate, updatePairingState]);
 
   const handleStatusChange = (status: WebexStatus) => { 
     if (webexReady) { 
@@ -164,20 +162,16 @@ export function EmbeddedAppClient() {
     setManualDisplayName(newName); 
     if (isPaired && rtStatus === 'connected' && deviceUuid) { 
       const name = user?.displayName || newName; 
-      if (CONFIG.useEdgeFunctions) {
-        updateAppStateViaEdge({ display_name: name }).catch(() => {}); 
-      }
+      updatePairingState({ display_name: name }).catch(() => {}); 
     } 
-  }, [isPaired, rtStatus, deviceUuid, user, updateAppStateViaEdge, setManualDisplayName]);
+  }, [isPaired, rtStatus, deviceUuid, user, updatePairingState, setManualDisplayName]);
   
   const handleDisplayNameBlur = useCallback(() => { 
     if (isPaired && rtStatus === 'connected' && deviceUuid) { 
       const name = user?.displayName || manualDisplayName; 
-      if (CONFIG.useEdgeFunctions) {
-        updateAppStateViaEdge({ display_name: name }).catch(() => {}); 
-      }
+      updatePairingState({ display_name: name }).catch(() => {}); 
     } 
-  }, [isPaired, rtStatus, deviceUuid, user, manualDisplayName, updateAppStateViaEdge]);
+  }, [isPaired, rtStatus, deviceUuid, user, manualDisplayName, updatePairingState]);
 
   const isBridgeConnected = rtStatus === 'connected';
   const connectionLabel = isBridgeConnected ? (isPeerConnected ? 'Connected' : 'Waiting for display') : rtStatus === 'connecting' ? 'Connecting...' : 'Disconnected';
@@ -195,6 +189,25 @@ export function EmbeddedAppClient() {
               <h1 className="text-xl font-semibold">LED Matrix Display</h1>
             </div>
             <div className="flex items-center gap-2">
+              {/* Device selector for multi-device users */}
+              {userDevices.length > 1 && (
+                <select
+                  value={selectedDeviceUuid || ''}
+                  onChange={(e) => {
+                    setSelectedDeviceUuid(e.target.value);
+                    addLog(`Switched to device: ${e.target.value.slice(0, 8)}...`);
+                  }}
+                  className="text-sm bg-[var(--color-surface)] border border-[var(--color-border)] 
+                             rounded-md px-2 py-1 text-[var(--color-text)] max-w-[120px] truncate"
+                  title="Select device"
+                >
+                  {userDevices.map((device) => (
+                    <option key={device.device_uuid} value={device.device_uuid}>
+                      {device.display_name || device.serial_number}
+                    </option>
+                  ))}
+                </select>
+              )}
               <div className={`flex items-center gap-2 text-sm ${connectionTextColor}`}>
                 <span className={`w-2 h-2 rounded-full ${connectionDotColor}`} />
                 <span>{connectionLabel}</span>

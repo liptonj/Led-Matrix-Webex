@@ -31,7 +31,7 @@ export interface UsePairingResult {
   handleConnect: () => Promise<void>;
   handleDisconnect: () => void;
   refreshPairingSnapshot: (deviceUuid: string, reason: string) => Promise<void>;
-  updateAppStateViaEdge: (stateData: { webex_status?: string; camera_on?: boolean; mic_muted?: boolean; in_call?: boolean; display_name?: string }) => Promise<boolean>;
+  updatePairingState: (stateData: { webex_status?: string; camera_on?: boolean; muted?: boolean; sharing?: boolean; display_name?: string }) => Promise<boolean>;
   // Session-related exports
   session: Session | null;
   userDevices: UserDevice[];
@@ -68,33 +68,24 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const attemptReconnectRef = useRef<((userId: string) => Promise<void>) | null>(null);
 
 
-  const updateAppStateViaEdge = useCallback(async (stateData: { webex_status?: string; camera_on?: boolean; mic_muted?: boolean; in_call?: boolean; display_name?: string }): Promise<boolean> => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl || !session || !selectedDeviceUuid) return false;
-    
-    const supabase = getSupabaseClient();
-    const { data: { session: currentSession } } = await supabase.auth.getSession();
-    if (!currentSession) return false;
-    
+  const updatePairingState = useCallback(async (stateData: { 
+    webex_status?: string;
+    camera_on?: boolean;
+    muted?: boolean;
+    sharing?: boolean;
+    display_name?: string;
+  }): Promise<boolean> => {
+    if (!session || !selectedDeviceUuid || !supabaseRef.current) return false;
     try {
-      const response = await fetchWithTimeout(
-        `${supabaseUrl}/functions/v1/update-app-state`,
-        { 
-          method: 'POST', 
-          headers: { 
-            'Content-Type': 'application/json', 
-            'Authorization': `Bearer ${currentSession.access_token}` 
-          }, 
-          body: JSON.stringify({ ...stateData, device_uuid: selectedDeviceUuid }) 
-        },
-        API_TIMEOUT_MS
-      );
-      if (!response.ok) { const error = await response.json().catch(() => ({ error: 'Unknown error' })); addLog(`update-app-state failed: ${error.error || response.status}`); return false; }
-      const result = await response.json();
-      if (typeof result.device_connected === 'boolean') setIsPeerConnected(result.device_connected);
+      const { error } = await supabaseRef.current
+        .schema('display')
+        .from('pairings')
+        .update(stateData)
+        .eq('device_uuid', selectedDeviceUuid);
+      if (error) { addLog(`Pairing update failed: ${error.message}`); return false; }
       return true;
-    } catch (err) { addLog(`update-app-state error: ${err instanceof Error ? err.message : 'unknown error'}`); return false; }
-  }, [session, selectedDeviceUuid, addLog]);
+    } catch (err) { addLog(`Pairing update error: ${err instanceof Error ? err.message : 'unknown'}`); return false; }
+  }, [session, selectedDeviceUuid, supabaseRef, addLog]);
 
   // Initialize Supabase client with session
   useEffect(() => {
@@ -152,30 +143,47 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const refreshPairingSnapshot = useCallback(async (deviceUuid: string, reason: string) => {
     if (!supabaseRef.current || !deviceUuid) return;
     try {
-      // Get pairing_code from pairings table first, then query connection_heartbeats
-      const { data: pairing } = await supabaseRef.current
+      // Query devices table by UUID to get pairing_code (always exists for assigned devices)
+      // This avoids the 406 error when no pairing row exists yet
+      const { data: device, error: deviceError } = await supabaseRef.current
         .schema('display')
-        .from('pairings')
-        .select('pairing_code')
-        .eq('device_uuid', deviceUuid)
-        .single();
-      
-      if (pairing?.pairing_code) {
-        const { data: heartbeat } = await supabaseRef.current
-          .schema('display')
-          .from('connection_heartbeats')
-          .select('device_last_seen, device_connected')
-          .eq('pairing_code', pairing.pairing_code)
-          .single();
+        .from('devices')
+        .select('pairing_code, last_seen')
+        .eq('id', deviceUuid)
+        .maybeSingle();
+
+      if (!device || deviceError) {
+        addLog(`No device found for UUID ${deviceUuid.slice(0, 8)}...`);
+        setIsPeerConnected(false);
+        return;
+      }
+
+      // Query heartbeat by pairing_code (may not exist yet if device hasn't connected)
+      const { data: heartbeat } = await supabaseRef.current
+        .schema('display')
+        .from('connection_heartbeats')
+        .select('device_last_seen, device_connected')
+        .eq('pairing_code', device.pairing_code)
+        .maybeSingle();
+
+      if (heartbeat) {
+        const staleThresholdMs = 60_000;
+        const lastSeen = heartbeat.device_last_seen 
+          ? new Date(heartbeat.device_last_seen).getTime() 
+          : 0;
+        const isStale = Date.now() - lastSeen > staleThresholdMs;
         
-        if (heartbeat) {
-          const lastSeen = heartbeat.device_last_seen ? new Date(heartbeat.device_last_seen).getTime() : 0;
-          setIsPeerConnected(!!heartbeat.device_connected && Date.now() - lastSeen < 60_000);
-          setLastDeviceSeenAt(heartbeat.device_last_seen ?? null);
-          setLastDeviceSeenMs(lastSeen || null);
-          lastPairingSnapshotRef.current = Date.now();
-          addLog(`Refreshed display status (${reason})`);
-        }
+        setIsPeerConnected(!!heartbeat.device_connected && !isStale);
+        setLastDeviceSeenAt(heartbeat.device_last_seen ?? null);
+        setLastDeviceSeenMs(lastSeen || null);
+        lastPairingSnapshotRef.current = Date.now();
+        addLog(`[${reason}] device_connected=${heartbeat.device_connected}, stale=${isStale}`);
+      } else {
+        // No heartbeat yet - device hasn't connected
+        setIsPeerConnected(false);
+        setLastDeviceSeenAt(null);
+        setLastDeviceSeenMs(null);
+        addLog(`[${reason}] No heartbeat found - device hasn't connected yet`);
       }
     } catch (err) { 
       addLog(`Failed to refresh display status: ${err instanceof Error ? err.message : 'unknown error'}`); 
@@ -290,19 +298,14 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       
       // Start heartbeat interval
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = setInterval(() => {
-        if (CONFIG.useEdgeFunctions) {
-          updateAppStateViaEdge({}).catch(() => {});
-        } else if (supabaseRef.current && selectedDeviceUuid) {
-          // Update pairings table for heartbeat (deprecated but kept for compatibility)
-          supabaseRef.current
-            .schema('display')
-            .from('pairings')
-            .update({ app_connected: true, app_last_seen: new Date().toISOString() })
-            .eq('device_uuid', selectedDeviceUuid)
-            .then(({ error }) => {
-              if (error) addLog(`pairings heartbeat failed: ${error.message}`);
-            });
+      heartbeatIntervalRef.current = setInterval(async () => {
+        if (!supabaseRef.current || !selectedDeviceUuid) return;
+        try {
+          await supabaseRef.current.schema('display').from('connection_heartbeats')
+            .upsert({ device_uuid: selectedDeviceUuid, app_last_seen: new Date().toISOString(), app_connected: true },
+              { onConflict: 'device_uuid' });
+        } catch (error) {
+          // Silently fail heartbeat upsert
         }
       }, CONFIG.heartbeatIntervalMs);
       
@@ -324,7 +327,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     } finally {
       connectInFlightRef.current = false;
     }
-  }, [addLog, session, selectedDeviceUuid, subscribeToUserChannel, updateAppStateViaEdge, rtStatus]);
+  }, [addLog, session, selectedDeviceUuid, subscribeToUserChannel, rtStatus]);
 
   const handleDisconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -471,7 +474,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     handleConnect,
     handleDisconnect,
     refreshPairingSnapshot,
-    updateAppStateViaEdge,
+    updatePairingState,
     session,
     userDevices,
     selectedDeviceUuid,

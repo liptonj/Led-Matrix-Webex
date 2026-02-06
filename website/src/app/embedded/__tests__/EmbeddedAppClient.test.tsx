@@ -175,7 +175,7 @@ const defaultUsePairingMock = {
   rtStatus: "disconnected" as const,
   supabaseRef: React.createRef(),
   handleDisconnect: jest.fn(),
-  updateAppStateViaEdge: jest.fn(() => Promise.resolve(true)),
+  updatePairingState: jest.fn(() => Promise.resolve(true)),
   session: null,
   userDevices: [],
   selectedDeviceUuid: null,

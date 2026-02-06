@@ -14,6 +14,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import { sendBroadcast } from "../_shared/broadcast.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 
@@ -90,6 +91,7 @@ Deno.serve(async (req) => {
 
     let serialNumber = "";
     let deviceId = "";
+    let deviceUuid = "";
     let isDebugEnabled = false;
 
     const authHeader = req.headers.get("Authorization");
@@ -115,18 +117,40 @@ Deno.serve(async (req) => {
       isDebugEnabled = hmacResult.device.debug_enabled;
     }
 
-    // If we used a bearer token, fetch device_id and debug_enabled (service role, cheap query).
-    if (!deviceId || !isDebugEnabled) {
+    // If we used a bearer token, fetch device_id, device_uuid (id), and debug_enabled (service role, cheap query).
+    if (!deviceId || !deviceUuid || !isDebugEnabled) {
       const { data: dev } = await supabase
         .schema("display")
         .from("devices")
-        .select("device_id, debug_enabled")
+        .select("id, device_id, debug_enabled")
         .eq("serial_number", serialNumber)
         .single();
       if (dev) {
         if (!deviceId) deviceId = dev.device_id;
+        if (!deviceUuid) deviceUuid = dev.id;
         if (!isDebugEnabled) isDebugEnabled = dev.debug_enabled === true;
       }
+    }
+
+    // Fetch user_uuid from pairings table
+    let userUuid: string | null = null;
+    if (deviceUuid) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid")
+        .eq("device_uuid", deviceUuid)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid || null;
+    } else {
+      // Fallback: query by serial_number if device_uuid not available
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid")
+        .eq("serial_number", serialNumber)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid || null;
     }
 
     let logData: InsertLogRequest;
@@ -212,40 +236,39 @@ Deno.serve(async (req) => {
       metadata: logData.metadata || {},
       ts: Date.now(),
     };
-    const realtimeUrl = `${supabaseUrl.replace(/\/$/, "")}/realtime/v1/api/broadcast`;
-    const channelTopic = `device_logs:${serialNumber}`;
-    const broadcastBody = {
-      messages: [
-        {
-          topic: channelTopic,
-          event: "log",
-          payload,
-        },
-      ],
-    };
 
+    // Broadcast to device_logs channel
+    const channelTopic = `device_logs:${serialNumber}`;
     console.log(`[insert-device-log] Broadcasting to topic: ${channelTopic}, level: ${normalizedLevel}`);
 
-    const broadcastResp = await fetch(realtimeUrl, {
-      method: "POST",
-      headers: {
-        "apikey": supabaseKey,
-        "Authorization": `Bearer ${supabaseKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(broadcastBody),
-    });
-
-    if (!broadcastResp.ok) {
-      const errText = await broadcastResp.text();
-      console.error(`[insert-device-log] Broadcast failed: HTTP ${broadcastResp.status}`, errText);
+    try {
+      await sendBroadcast(channelTopic, "log", payload);
+      console.log(`[insert-device-log] Broadcast successful to ${channelTopic}`);
+    } catch (broadcastError) {
+      console.error(`[insert-device-log] Broadcast failed:`, broadcastError);
       return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log(`[insert-device-log] Broadcast successful to ${channelTopic}`);
+    // Broadcast to user channel if user_uuid is available
+    if (userUuid) {
+      try {
+        await sendBroadcast(`user:${userUuid}`, "debug_log", {
+          device_uuid: deviceUuid,
+          serial_number: serialNumber,
+          level: normalizedLevel,
+          message: logData.message,
+          metadata: logData.metadata || {},
+          ts: Date.now(),
+        });
+        console.log(`[insert-device-log] Broadcast successful to user:${userUuid}`);
+      } catch (userBroadcastError) {
+        // Log error but don't fail the request - device_logs broadcast succeeded
+        console.error(`[insert-device-log] User channel broadcast failed:`, userBroadcastError);
+      }
+    }
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
