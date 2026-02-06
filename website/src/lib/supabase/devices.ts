@@ -55,7 +55,7 @@ export async function getConnectionHeartbeats(
     supabase
       .schema("display")
       .from("connection_heartbeats")
-      .select("pairing_code, app_last_seen, device_last_seen, app_connected, device_connected")
+      .select("pairing_code, device_uuid, app_last_seen, device_last_seen, app_connected, device_connected")
       .in("pairing_code", pairingCodes),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while loading connection heartbeats.",

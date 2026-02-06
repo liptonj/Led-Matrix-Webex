@@ -20,7 +20,7 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isLoginPage = pathname === '/user/login' || pathname === '/user/callback';
+  const isLoginPage = pathname === '/user/login';
 
   useEffect(() => {
     // Don't check auth on login/callback pages
