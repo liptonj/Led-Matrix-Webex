@@ -3,6 +3,8 @@
 import { Alert, Button } from '@/components/ui';
 import { useSerialMonitor } from '@/hooks/useSerialMonitor';
 import { autoApproveDevice } from '@/lib/device/autoApprove';
+import { createProvisionToken, waitForDeviceApproval } from '@/lib/device/provisionToken';
+import { getSession } from '@/lib/supabase/auth';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FirmwareInstallStep } from './FirmwareInstallStep';
 import { SerialMonitor } from './SerialMonitor';
@@ -28,15 +30,32 @@ export function InstallWizard() {
     message: string;
   }>({ status: 'idle', message: '' });
 
+  // Provision token state
+  const [provisionToken, setProvisionToken] = useState<string | null>(null);
+  const [tokenSent, setTokenSent] = useState(false);
+  const approvalPollingRef = useRef<AbortController | null>(null);
+  const approvalSucceededRef = useRef(false);
+
   // Handle pairing code found callback
   const handlePairingCodeFound = useCallback(async (code: string) => {
+    // If already approved, ignore pairing code
+    if (approvalSucceededRef.current) {
+      return;
+    }
+
     setApprovalState({ status: 'approving', message: `Approving device with pairing code: ${code}...` });
     
     try {
       const result = await autoApproveDevice(code);
       
       if (result.success) {
+        approvalSucceededRef.current = true;
         setApprovalState({ status: 'success', message: result.message });
+        // Stop token polling if active
+        if (approvalPollingRef.current) {
+          approvalPollingRef.current.abort();
+          approvalPollingRef.current = null;
+        }
         // Move to success step after a delay
         setTimeout(() => {
           setCurrentStep(3);
@@ -56,6 +75,70 @@ export function InstallWizard() {
     }
   }, []);
 
+  // Handle provision token ACK callback
+  const handleProvisionTokenAck = useCallback(async (success: boolean, error?: string) => {
+    if (!success) {
+      console.warn('[InstallWizard] Provision token ACK error:', error);
+      // Continue with pairing code fallback - don't update state, just log
+      return;
+    }
+
+    // If already approved, don't start polling
+    if (approvalSucceededRef.current) {
+      return;
+    }
+
+    console.log('[InstallWizard] Provision token ACK received, starting approval polling...');
+    
+    // Get user ID for polling
+    try {
+      const { data: { session }, error: sessionError } = await getSession();
+      if (sessionError || !session?.user?.id) {
+        console.error('[InstallWizard] Failed to get user session for approval polling:', sessionError);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      // Start polling for device approval
+      const abortController = new AbortController();
+      approvalPollingRef.current = abortController;
+
+      // Poll in background (non-blocking)
+      waitForDeviceApproval(userId, 60_000)
+        .then((device) => {
+          // Check if polling was aborted or already succeeded
+          if (abortController.signal.aborted || approvalSucceededRef.current) {
+            return;
+          }
+
+          if (device) {
+            approvalSucceededRef.current = true;
+            console.log('[InstallWizard] Device approved via provision token:', device.id);
+            setApprovalState({ 
+              status: 'success', 
+              message: 'Device approved successfully via provision token!' 
+            });
+            // Stop monitoring
+            stopMonitoringRef.current();
+            // Move to success step after a delay
+            setTimeout(() => {
+              setCurrentStep(3);
+            }, 2000);
+          } else {
+            console.log('[InstallWizard] Provision token approval polling timed out, continuing with pairing code fallback');
+          }
+        })
+        .catch((error) => {
+          if (!abortController.signal.aborted && !approvalSucceededRef.current) {
+            console.error('[InstallWizard] Error during approval polling:', error);
+          }
+        });
+    } catch (error) {
+      console.error('[InstallWizard] Failed to start approval polling:', error);
+    }
+  }, []);
+
   // Serial monitoring and auto-approval
   const {
     serialOutput,
@@ -64,9 +147,11 @@ export function InstallWizard() {
     extractedPairingCode,
     startMonitoring,
     stopMonitoring,
+    sendCommand,
     isMonitoring,
   } = useSerialMonitor({
     onPairingCodeFound: handlePairingCodeFound,
+    onProvisionTokenAck: handleProvisionTokenAck,
   });
 
   // Store stopMonitoring in a ref so callback can access it
@@ -85,20 +170,68 @@ export function InstallWizard() {
     setWifiConfigured(configured);
     setShowWifiConfirmation(false);
     setCurrentStep(2);
-    // Reset approval state
+    // Reset approval state and token state
     setApprovalState({ status: 'idle', message: '' });
+    setProvisionToken(null);
+    setTokenSent(false);
+    approvalSucceededRef.current = false;
+    
+    // Abort any existing polling
+    if (approvalPollingRef.current) {
+      approvalPollingRef.current.abort();
+      approvalPollingRef.current = null;
+    }
+
     // Start Serial monitoring after a short delay to allow UI to update
-    setTimeout(() => {
-      startMonitoring().catch((error) => {
+    setTimeout(async () => {
+      try {
+        await startMonitoring();
+        
+        // Generate and send provision token
+        const token = await createProvisionToken();
+        if (token) {
+          setProvisionToken(token);
+          
+          // Send token via serial with retry
+          const sendTokenWithRetry = async (retries = 3): Promise<boolean> => {
+            for (let i = 0; i < retries; i++) {
+              const success = await sendCommand(`PROVISION_TOKEN:${token}`);
+              if (success) {
+                setTokenSent(true);
+                console.log('[InstallWizard] Provision token sent successfully');
+                return true;
+              }
+              if (i < retries - 1) {
+                // Wait 1 second before retry
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+            console.warn('[InstallWizard] Failed to send provision token after retries, continuing with pairing code fallback');
+            return false;
+          };
+
+          // Send token (non-blocking, will wait for ACK via callback)
+          sendTokenWithRetry().catch((error) => {
+            console.error('[InstallWizard] Error sending provision token:', error);
+          });
+        } else {
+          console.warn('[InstallWizard] Failed to create provision token, continuing with pairing code fallback');
+        }
+      } catch (error) {
         console.error('Failed to start Serial monitoring:', error);
-      });
+      }
     }, 500);
-  }, [startMonitoring]);
+  }, [startMonitoring, sendCommand]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopMonitoring();
+      // Abort approval polling if active
+      if (approvalPollingRef.current) {
+        approvalPollingRef.current.abort();
+        approvalPollingRef.current = null;
+      }
     };
   }, [stopMonitoring]);
 
@@ -185,9 +318,20 @@ export function InstallWizard() {
           </p>
 
           {/* Auto-approval status */}
+          {tokenSent && provisionToken && (
+            <Alert variant="info" className="mb-4">
+              <strong>Provision token sent.</strong> Waiting for device approval via token...
+            </Alert>
+          )}
+
           {approvalState.status === 'approving' && (
             <Alert variant="info" className="mb-4">
-              <strong>Approving device...</strong> Using pairing code: <strong className="font-mono">{extractedPairingCode}</strong>
+              <strong>Approving device...</strong>{' '}
+              {extractedPairingCode ? (
+                <>Using pairing code: <strong className="font-mono">{extractedPairingCode}</strong></>
+              ) : (
+                <>Using provision token...</>
+              )}
             </Alert>
           )}
 

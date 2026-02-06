@@ -4,6 +4,7 @@
  * 
  * Provides serial commands for the website's Web Serial interface:
  * - WIFI:<ssid>:<password> - Configure WiFi credentials
+ * - PROVISION_TOKEN:<token> - Set provision token (32 alphanumeric chars, RAM-only)
  * - SCAN - Scan and list available WiFi networks
  * - STATUS - Print current device status
  * - FACTORY_RESET - Clear all settings and reboot
@@ -48,5 +49,22 @@ String serial_wifi_get_ssid();
  * @return Password string
  */
 String serial_wifi_get_password();
+
+/**
+ * @brief Set the provision token (RAM-only, non-persistent)
+ * @param token Provision token string (should be 32 alphanumeric characters)
+ */
+void set_provision_token(const String& token);
+
+/**
+ * @brief Get the current provision token
+ * @return Provision token string (empty if not set)
+ */
+String get_provision_token();
+
+/**
+ * @brief Clear the provision token
+ */
+void clear_provision_token();
 
 #endif // SERIAL_COMMANDS_H

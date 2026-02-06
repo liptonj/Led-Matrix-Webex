@@ -11,6 +11,7 @@
 #include "../common/pairing_manager.h"
 #include "../config/config_manager.h"
 #include "../display/matrix_display.h"
+#include "../serial/serial_commands.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
@@ -81,6 +82,14 @@ String buildProvisionPayload() {
         payload["existing_pairing_code"] = existing_code;
     }
     
+    // Include provision token if available (single-use)
+    String token = get_provision_token();
+    if (token.length() > 0) {
+        payload["provision_token"] = token;
+        Serial.printf("[PROVISION] Including provision token in payload (length: %d)\n", token.length());
+        clear_provision_token();  // Clear after use to ensure single-use
+    }
+    
     String body;
     body.reserve(256);
     serializeJson(payload, body);
@@ -122,6 +131,8 @@ int handleAwaitingApproval(const String& response) {
     
     // If pairing code exists, display it with timeout
     if (!pairing_code.isEmpty()) {
+        deps.pairing.setCode(pairing_code, true);
+        deps.supabase.setPairingCode(pairing_code);
         if (pairing_start_time == 0) {
             pairing_start_time = now;
         }

@@ -14,7 +14,8 @@
  *   "serial_number": "A1B2C3D4",       // CRC32 of eFuse MAC (8 hex chars)
  *   "key_hash": "sha256-hex-string",   // SHA256 hash of device secret
  *   "firmware_version": "1.4.4",       // Current firmware version
- *   "existing_pairing_code": "ABC123"  // Optional: preserve existing code
+ *   "existing_pairing_code": "ABC123", // Optional: preserve existing code
+ *   "provision_token": "token-string" // Optional: token for auto-approval
  * }
  *
  * Response:
@@ -36,6 +37,7 @@ interface ProvisionRequest {
   firmware_version?: string;
   ip_address?: string;
   existing_pairing_code?: string; // For migration: preserve pairing code from old firmware
+  provision_token?: string; // Optional: token for auto-approval
 }
 
 function generatePairingCode(): string {
@@ -87,6 +89,7 @@ serve(async (req: Request) => {
       firmware_version,
       ip_address,
       existing_pairing_code,
+      provision_token,
     } = body;
 
     if (!serial_number || !key_hash) {
@@ -114,6 +117,36 @@ serve(async (req: Request) => {
       );
     }
 
+    // Validate provision token if provided
+    let autoApproveUserId: string | null = null;
+    if (provision_token) {
+      const tokenResult = await supabase
+        .schema("display")
+        .from("provision_tokens")
+        .select("id, user_id, expires_at")
+        .eq("token", provision_token)
+        .single();
+
+      if (tokenResult.data && new Date(tokenResult.data.expires_at) > new Date()) {
+        autoApproveUserId = tokenResult.data.user_id;
+
+        // Delete token immediately (single-use)
+        await supabase
+          .schema("display")
+          .from("provision_tokens")
+          .delete()
+          .eq("id", tokenResult.data.id);
+
+        console.log(
+          `[PROVISION] Token validated, auto-approving for user ${autoApproveUserId}`,
+        );
+      } else {
+        console.log(
+          "[PROVISION] Invalid or expired token, continuing with pairing code flow",
+        );
+      }
+    }
+
     // Check if device already exists
     const { data: existingDevice, error: _lookupError } = await supabase
       .schema("display")
@@ -123,8 +156,64 @@ serve(async (req: Request) => {
       .single();
 
     if (existingDevice) {
-      // CHECK: Device must be approved
+      // CHECK: Device must be approved (unless auto-approved via token)
       if (!existingDevice.user_approved_by) {
+        // If we have a valid provision token, auto-approve the device
+        if (autoApproveUserId) {
+          const now = new Date().toISOString();
+          await supabase
+            .schema("display")
+            .from("devices")
+            .update({
+              user_approved_by: autoApproveUserId,
+              approved_at: now,
+              key_hash, // Update key_hash for re-provisioning support
+              last_seen: now,
+              ...(firmware_version && { firmware_version }),
+              ...(ip_address && { ip_address }),
+            })
+            .eq("serial_number", serial_number.toUpperCase());
+
+          // Create user_devices entry
+          const { error: upsertError } = await (supabase as any)
+            .schema("display")
+            .from("user_devices")
+            .upsert(
+              {
+                user_id: autoApproveUserId,
+                serial_number: serial_number.toUpperCase(),
+                device_uuid: existingDevice.id,
+                created_by: autoApproveUserId,
+                provisioning_method: "provision_token",
+                provisioned_at: now,
+              },
+              {
+                onConflict: "user_id,serial_number",
+                ignoreDuplicates: false,
+              },
+            );
+
+          if (upsertError) {
+            console.error("Failed to create user_devices entry:", upsertError);
+            // Don't fail the request - device is already approved
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              device_id: existingDevice.device_id,
+              pairing_code: existingDevice.pairing_code,
+              device_uuid: existingDevice.id,
+              user_uuid: autoApproveUserId,
+              already_provisioned: existingDevice.is_provisioned,
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
+
         // Check if pairing code has expired (more than 4 minutes old)
         if (existingDevice.created_at && isCodeExpired(existingDevice.created_at)) {
           // Generate a new pairing code and update the device
@@ -206,9 +295,8 @@ serve(async (req: Request) => {
         ? existing_pairing_code.toUpperCase()
         : generatePairingCode();
 
-    // Check if device is pre-approved (shouldn't happen for new devices, but check anyway)
-    // For new devices, create with user_approved_by: null
-    const { error: insertError } = await supabase
+    const now = new Date().toISOString();
+    const { data: newDevice, error: insertError } = await supabase
       .schema("display")
       .from("devices")
       .insert({
@@ -219,8 +307,11 @@ serve(async (req: Request) => {
         firmware_version: firmware_version || null,
         ip_address: ip_address || null,
         is_provisioned: false,
-        user_approved_by: null, // Not approved yet
-      });
+        user_approved_by: autoApproveUserId || null,
+        approved_at: autoApproveUserId ? now : null,
+      })
+      .select("id")
+      .single();
 
     if (insertError) {
       console.error("Failed to insert device:", insertError);
@@ -228,6 +319,47 @@ serve(async (req: Request) => {
         JSON.stringify({ error: "Failed to register device" }),
         {
           status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // If auto-approved via token, create user_devices entry
+    if (autoApproveUserId && newDevice) {
+      const { error: upsertError } = await (supabase as any)
+        .schema("display")
+        .from("user_devices")
+        .upsert(
+          {
+            user_id: autoApproveUserId,
+            serial_number: serial_number.toUpperCase(),
+            device_uuid: newDevice.id,
+            created_by: autoApproveUserId,
+            provisioning_method: "provision_token",
+            provisioned_at: now,
+          },
+          {
+            onConflict: "user_id,serial_number",
+            ignoreDuplicates: false,
+          },
+        );
+
+      if (upsertError) {
+        console.error("Failed to create user_devices entry:", upsertError);
+        // Don't fail the request - device is already created
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          device_id: deviceId,
+          pairing_code: pairingCode,
+          device_uuid: newDevice.id,
+          user_uuid: autoApproveUserId,
+          already_provisioned: false,
+        }),
+        {
+          status: 200,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );

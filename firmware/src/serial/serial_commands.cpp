@@ -13,6 +13,7 @@ static String serial_buffer = "";
 static bool wifi_pending = false;
 static String pending_ssid = "";
 static String pending_password = "";
+static String provision_token = "";  // RAM-only, non-persistent
 
 // Forward declarations
 static void handle_wifi_command(const String& command);
@@ -20,6 +21,7 @@ static void handle_scan_command();
 static void handle_status_command();
 static void handle_factory_reset_command();
 static void handle_help_command();
+static void handle_provision_token_command(const String& command);
 
 void serial_commands_begin() {
     serial_buffer = "";
@@ -47,6 +49,8 @@ void serial_commands_loop() {
                 // Process command
                 if (serial_buffer.startsWith("WIFI:")) {
                     handle_wifi_command(serial_buffer);
+                } else if (serial_buffer.startsWith("PROVISION_TOKEN:")) {
+                    handle_provision_token_command(serial_buffer);
                 } else if (serial_buffer == "STATUS") {
                     handle_status_command();
                 } else if (serial_buffer == "SCAN") {
@@ -249,16 +253,78 @@ static void handle_factory_reset_command() {
 }
 
 /**
+ * @brief Handle PROVISION_TOKEN command
+ * Format: PROVISION_TOKEN:<token>
+ * Validates token is exactly 32 alphanumeric characters
+ */
+static void handle_provision_token_command(const String& command) {
+    // Extract token after "PROVISION_TOKEN:" prefix (16 characters)
+    const int prefix_len = 16;  // "PROVISION_TOKEN:"
+    if (command.length() <= prefix_len) {
+        Serial.println("[SERIAL] Error: Invalid provision token length");
+        Serial.println("ACK:PROVISION_TOKEN:error:invalid_length");
+        return;
+    }
+    
+    String token = command.substring(prefix_len);
+    token.trim();  // Remove any whitespace
+    
+    // Validate token length (exactly 32 characters)
+    if (token.length() != 32) {
+        Serial.printf("[SERIAL] Error: Invalid provision token length (%d, expected 32)\n", token.length());
+        Serial.println("ACK:PROVISION_TOKEN:error:invalid_length");
+        return;
+    }
+    
+    // Validate token is alphanumeric only (for security)
+    bool is_valid = true;
+    for (size_t i = 0; i < token.length(); i++) {
+        char c = token.charAt(i);
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))) {
+            is_valid = false;
+            break;
+        }
+    }
+    
+    if (!is_valid) {
+        Serial.println("[SERIAL] Error: Provision token must be alphanumeric only");
+        Serial.println("ACK:PROVISION_TOKEN:error:invalid_format");
+        return;
+    }
+    
+    // Store token in RAM-only variable (non-persistent)
+    provision_token = token;
+    
+    Serial.printf("[SERIAL] Provision token received (32 chars)\n");
+    Serial.println("ACK:PROVISION_TOKEN:success");
+}
+
+/**
  * @brief Handle HELP command - show available commands
  */
 static void handle_help_command() {
     Serial.println();
     Serial.println("=== SERIAL COMMANDS ===");
     Serial.println("  WIFI:<ssid>:<password> - Configure WiFi credentials");
+    Serial.println("  PROVISION_TOKEN:<token> - Set provision token (32 alphanumeric chars)");
     Serial.println("  SCAN                   - List available WiFi networks");
     Serial.println("  STATUS                 - Print device status");
     Serial.println("  FACTORY_RESET          - Clear all settings and reboot");
     Serial.println("  HELP                   - Show this help");
     Serial.println("=======================");
     Serial.println();
+}
+
+// Public API functions for provision token
+
+void set_provision_token(const String& token) {
+    provision_token = token;
+}
+
+String get_provision_token() {
+    return provision_token;
+}
+
+void clear_provision_token() {
+    provision_token = "";
 }

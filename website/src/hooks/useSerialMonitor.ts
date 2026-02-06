@@ -6,6 +6,7 @@ export type AutoApproveStatus = 'idle' | 'monitoring' | 'approving' | 'success' 
 
 interface UseSerialMonitorOptions {
   onPairingCodeFound?: (code: string) => void;
+  onProvisionTokenAck?: (success: boolean, error?: string) => void;
   timeoutMs?: number;
 }
 
@@ -16,6 +17,7 @@ interface UseSerialMonitorReturn {
   extractedPairingCode: string | null;
   startMonitoring: () => Promise<void>;
   stopMonitoring: () => void;
+  sendCommand: (command: string) => Promise<boolean>;
   isMonitoring: boolean;
 }
 
@@ -50,6 +52,7 @@ export function extractPairingCode(text: string): string | null {
  */
 export function useSerialMonitor({
   onPairingCodeFound,
+  onProvisionTokenAck,
   timeoutMs = 60000, // 60 seconds default timeout
 }: UseSerialMonitorOptions = {}): UseSerialMonitorReturn {
   const [serialOutput, setSerialOutput] = useState<string[]>([]);
@@ -62,6 +65,23 @@ export function useSerialMonitor({
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const timeoutRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const sendCommand = useCallback(async (command: string): Promise<boolean> => {
+    if (!portRef.current?.writable) {
+      console.error('[Serial] Port not writable');
+      return false;
+    }
+    try {
+      const writer = portRef.current.writable.getWriter();
+      const encoder = new TextEncoder();
+      await writer.write(encoder.encode(command + '\n'));
+      writer.releaseLock();
+      return true;
+    } catch (error) {
+      console.error('[Serial] Write error:', error);
+      return false;
+    }
+  }, []);
 
   const stopMonitoring = useCallback(() => {
     setIsMonitoring(false);
@@ -187,6 +207,14 @@ export function useSerialMonitor({
                 setAutoApproveStatus('idle');
                 break;
               }
+
+              // Check for provision token ACK
+              const provisionTokenAckMatch = trimmedLine.match(/^ACK:PROVISION_TOKEN:(success|error)(?::(.+))?$/);
+              if (provisionTokenAckMatch && onProvisionTokenAck) {
+                const success = provisionTokenAckMatch[1] === 'success';
+                const errorReason = provisionTokenAckMatch[2];
+                onProvisionTokenAck(success, errorReason);
+              }
             }
           }
         }
@@ -210,7 +238,7 @@ export function useSerialMonitor({
         );
       }
     }
-  }, [onPairingCodeFound, timeoutMs, stopMonitoring]);
+  }, [onPairingCodeFound, onProvisionTokenAck, timeoutMs, stopMonitoring]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -226,6 +254,7 @@ export function useSerialMonitor({
     extractedPairingCode,
     startMonitoring,
     stopMonitoring,
+    sendCommand,
     isMonitoring,
   };
 }
