@@ -8,8 +8,6 @@ import type { StatusButtonConfig } from './types';
  * Application configuration with storage keys, timeouts, and intervals.
  */
 export const CONFIG = {
-  /** LocalStorage key for the pairing code */
-  storageKeyPairingCode: 'led_matrix_pairing_code',
   /** LocalStorage key for debug visibility */
   storageKeyDebugVisible: 'led_matrix_debug_visible',
   /** LocalStorage key for Webex poll interval */

@@ -12,7 +12,9 @@
 #include "../config/config_manager.h"
 #include "../display/matrix_display.h"
 #include "../serial/serial_commands.h"
+#ifndef NATIVE_BUILD
 #include <WiFi.h>
+#endif
 #include <ArduinoJson.h>
 
 #ifndef FIRMWARE_VERSION
@@ -73,9 +75,11 @@ String buildProvisionPayload() {
     payload["key_hash"] = deps.credentials.getKeyHash();
     payload["firmware_version"] = FIRMWARE_VERSION;
     
+#ifndef NATIVE_BUILD
     if (WiFi.isConnected()) {
         payload["ip_address"] = WiFi.localIP().toString();
     }
+#endif
     
     String existing_code = deps.pairing.getCode();
     if (!existing_code.isEmpty()) {

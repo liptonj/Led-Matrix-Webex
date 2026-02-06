@@ -216,7 +216,8 @@ public:
         if (ns_it == _bytesStorage.end()) return 0;
         auto it = ns_it->second.find(key);
         if (it == ns_it->second.end()) return 0;
-        size_t copyLen = std::min(maxLen, it->second.length());
+        // Use parentheses to prevent min macro expansion from HTTPClient.h
+        size_t copyLen = (std::min)(maxLen, it->second.length());
         memcpy(buf, it->second.data(), copyLen);
         return copyLen;
     }

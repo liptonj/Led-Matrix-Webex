@@ -2,7 +2,7 @@
  * Webex User Callback Edge Function
  *
  * Completes OAuth flow, exchanges tokens, creates/updates users.
- * Handles PKCE code verifier validation and user profile creation.
+ * Uses client_secret for token exchange (no PKCE).
  *
  * Called by the Next.js /user/auth-callback page after Webex redirects.
  *
@@ -24,8 +24,8 @@
  * }
  */
 
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
+import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getOAuthConfig } from "../_shared/oauth-config.ts";
 import { updateSecret } from "../_shared/vault.ts";
@@ -69,7 +69,14 @@ serve(async (req: Request) => {
     const code = body.code;
     const state = body.state;
 
+    console.log("[webex-user-callback] Received request", { 
+      hasCode: !!code, 
+      hasState: !!state,
+      codeLength: code?.length 
+    });
+
     if (!code || !state) {
+      console.error("[webex-user-callback] Missing code or state");
       return new Response(
         JSON.stringify({ error: "Missing code or state" }),
         {
@@ -83,51 +90,22 @@ serve(async (req: Request) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Validate state and get PKCE verifier
-    const { data: stateData, error: stateError } = await supabase
-      .schema("display")
-      .from("oauth_state")
-      .select("code_verifier, expires_at")
-      .eq("state_key", state)
-      .single();
-
-    if (stateError || !stateData) {
-      return new Response(
-        JSON.stringify({ error: "Invalid state" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    if (new Date(stateData.expires_at) < new Date()) {
-      return new Response(
-        JSON.stringify({ error: "State expired" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Clean up state
-    await supabase
-      .schema("display")
-      .from("oauth_state")
-      .delete()
-      .eq("state_key", state);
-
-    // Decode state to get redirect URI and redirect_to
+    // Decode state to get redirect_to (no PKCE - state is just for CSRF protection)
     let stateObj;
     let redirectTo = '/user'; // Default fallback
     try {
       stateObj = JSON.parse(fromBase64Url(state));
+      console.log("[webex-user-callback] Decoded state", { 
+        flow: stateObj?.flow,
+        redirect_to: stateObj?.redirect_to,
+        hasRedirect: !!stateObj?.redirect
+      });
       // Extract redirect_to from state, default to '/user' if missing or invalid
       if (stateObj && typeof stateObj.redirect_to === 'string') {
         redirectTo = stateObj.redirect_to;
       }
-    } catch {
+    } catch (decodeErr) {
+      console.error("[webex-user-callback] Failed to decode state:", decodeErr);
       return new Response(
         JSON.stringify({ error: "Invalid state format" }),
         {
@@ -141,8 +119,13 @@ serve(async (req: Request) => {
     let oauthConfig;
     try {
       oauthConfig = await getOAuthConfig("webex", "user");
+      console.log("[webex-user-callback] OAuth config loaded", { 
+        redirectUri: oauthConfig.redirectUri,
+        hasClientId: !!oauthConfig.clientId,
+        hasClientSecret: !!oauthConfig.clientSecret
+      });
     } catch (error) {
-      console.error("Failed to load OAuth config:", error);
+      console.error("[webex-user-callback] Failed to load OAuth config:", error);
       return new Response(
         JSON.stringify({ error: "Webex OAuth not configured" }),
         {
@@ -152,32 +135,44 @@ serve(async (req: Request) => {
       );
     }
 
-    // Exchange code for tokens
+    // Exchange code for tokens (no PKCE - using client_secret)
+    console.log("[webex-user-callback] Exchanging code for tokens", {
+      tokenUrl: WEBEX_TOKEN_URL,
+      redirectUri: oauthConfig.redirectUri
+    });
+
     const tokenResponse = await fetch(WEBEX_TOKEN_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": `Basic ${btoa(`${oauthConfig.clientId}:${oauthConfig.clientSecret}`)}`,
       },
       body: new URLSearchParams({
         grant_type: "authorization_code",
+        client_id: oauthConfig.clientId,
+        client_secret: oauthConfig.clientSecret,
         code: code,
-        redirect_uri: stateObj.redirect,
-        code_verifier: stateData.code_verifier,
+        redirect_uri: oauthConfig.redirectUri,
       }),
     });
 
     if (!tokenResponse.ok) {
       const err = await tokenResponse.text();
-      console.error("Token exchange failed:", err);
+      console.error("[webex-user-callback] Token exchange failed:", {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        error: err,
+        redirectUri: oauthConfig.redirectUri
+      });
       return new Response(
-        JSON.stringify({ error: "Token exchange failed" }),
+        JSON.stringify({ error: "Token exchange failed", details: err }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
     }
+
+    console.log("[webex-user-callback] Token exchange successful");
 
     const tokens = await tokenResponse.json();
 

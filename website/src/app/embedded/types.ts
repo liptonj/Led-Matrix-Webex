@@ -6,21 +6,9 @@ import type { WebexStatus } from '@/hooks/useWebexSDK';
 import type { DeviceConfig as BaseDeviceConfig, DeviceStatus as BaseDeviceStatus } from '@/types';
 
 /**
- * App authentication token returned from the exchange-pairing-code Edge Function.
- */
-export interface AppToken {
-  serial_number: string;
-  device_id: string;
-  device_uuid?: string;
-  user_uuid?: string;
-  token: string;
-  expires_at: string;
-}
-
-/**
  * Tab identifiers for the main navigation.
  */
-export type TabId = 'status' | 'display' | 'mqtt' | 'webex' | 'system';
+export type TabId = 'status' | 'webex' | 'devices';
 
 /**
  * Debug log severity levels.
@@ -56,7 +44,6 @@ export interface DeviceConfig extends Omit<BaseDeviceConfig, 'poll_interval' | '
   time_zone?: string;
   time_format?: string;
   date_format?: string;
-  pairing_code?: string;
   mqtt_broker?: string;
   mqtt_port?: number;
   mqtt_username?: string;
@@ -80,7 +67,6 @@ export interface DeviceStatus extends BaseDeviceStatus {
   camera_on?: boolean;
   mic_muted?: boolean;
   in_call?: boolean;
-  pairing_code?: string;
   humidity?: number;
 }
 

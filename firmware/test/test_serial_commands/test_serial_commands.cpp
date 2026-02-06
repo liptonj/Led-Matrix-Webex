@@ -474,14 +474,14 @@ void test_provision_token_set_multiple_times() {
     String token2 = "22222222222222222222222222222222"; // 32 chars
     set_provision_token(token2);
     TEST_ASSERT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_TRUE(strcmp(token1.c_str(), get_provision_token().c_str()) != 0);
     
     // Set third token
     String token3 = "33333333333333333333333333333333"; // 32 chars
     set_provision_token(token3);
     TEST_ASSERT_EQUAL_STRING(token3.c_str(), get_provision_token().c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_TRUE(strcmp(token1.c_str(), get_provision_token().c_str()) != 0);
+    TEST_ASSERT_TRUE(strcmp(token2.c_str(), get_provision_token().c_str()) != 0);
 }
 
 // Test token lifecycle - set, clear, set again
@@ -502,7 +502,7 @@ void test_provision_token_set_clear_set() {
     String token2 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"; // 32 chars
     set_provision_token(token2);
     TEST_ASSERT_EQUAL_STRING(token2.c_str(), get_provision_token().c_str());
-    TEST_ASSERT_NOT_EQUAL_STRING(token1.c_str(), get_provision_token().c_str());
+    TEST_ASSERT_TRUE(strcmp(token1.c_str(), get_provision_token().c_str()) != 0);
 }
 
 static void run_serial_commands_tests() {

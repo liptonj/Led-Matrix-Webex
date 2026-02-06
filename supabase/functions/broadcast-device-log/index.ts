@@ -13,8 +13,8 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import { corsHeaders } from "../_shared/cors.ts";
 import { sendBroadcast } from "../_shared/broadcast.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 

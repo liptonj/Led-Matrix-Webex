@@ -5,13 +5,12 @@ import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupabaseClient, Session } from '@supabase/supabase-js';
 import { CONFIG } from '../constants';
-import type { AppToken, WebexOAuthStatus } from '../types';
+import type { WebexOAuthStatus } from '../types';
 
 const API_TIMEOUT_MS = 15000;
 const WEBEX_API_TIMEOUT_MS = 10000;
 
 export interface UseWebexStatusOptions {
-  appToken: AppToken | null;
   isPaired: boolean;
   session: Session | null;
   deviceUuid?: string | null;
@@ -36,7 +35,7 @@ export interface UseWebexStatusResult {
   shouldRefreshWebexToken: (expiresAt: string | null) => boolean;
 }
 
-export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supabaseRef, addLog }: UseWebexStatusOptions): UseWebexStatusResult {
+export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog }: UseWebexStatusOptions): UseWebexStatusResult {
   const [apiWebexStatus, setApiWebexStatus] = useState<WebexStatus | null>(null);
   const [webexOauthStatus, setWebexOauthStatus] = useState<WebexOAuthStatus>('idle');
   const [webexNeedsAuth, setWebexNeedsAuth] = useState<boolean>(true); // Default true until we verify
@@ -68,7 +67,7 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
   }, []);
 
   const fetchWebexToken = useCallback(async () => {
-    if (!appToken) return null;
+    if (!session?.access_token) return null;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl) return null;
     try {
@@ -78,7 +77,7 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
           method: 'POST', 
           headers: { 
             'Content-Type': 'application/json', 
-            Authorization: `Bearer ${appToken.token}` 
+            Authorization: `Bearer ${session.access_token}` 
           } 
         },
         API_TIMEOUT_MS
@@ -105,16 +104,16 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
       setWebexTokenExpiresAt(data.expires_at || null);
       return data.access_token as string;
     } catch (err) { addLog(`webex-token error: ${err instanceof Error ? err.message : 'unknown error'}`); return null; }
-  }, [appToken, addLog]);
+  }, [session?.access_token, addLog]);
 
   const ensureWebexToken = useCallback(async () => {
-    if (!appToken) return null;
+    if (!session?.access_token) return null;
     if (webexToken && !shouldRefreshWebexToken(webexTokenExpiresAt)) return webexToken;
     return await fetchWebexToken();
-  }, [appToken, webexToken, webexTokenExpiresAt, shouldRefreshWebexToken, fetchWebexToken]);
+  }, [session?.access_token, webexToken, webexTokenExpiresAt, shouldRefreshWebexToken, fetchWebexToken]);
 
   const pollWebexStatus = useCallback(async () => {
-    if (!appToken || !isPaired) return;
+    if (!session?.access_token || !isPaired) return;
     const token = await ensureWebexToken();
     if (!token) return;
     try {
@@ -128,7 +127,7 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
       const rawStatus = data?.status || data?.presence || data?.availability || data?.state || data?.activity;
       setApiWebexStatus(normalizeWebexStatus(rawStatus));
     } catch (err) { addLog(`Webex API error: ${err instanceof Error ? err.message : 'unknown error'}`); }
-  }, [appToken, isPaired, ensureWebexToken, addLog, normalizeWebexStatus]);
+  }, [session?.access_token, isPaired, ensureWebexToken, addLog, normalizeWebexStatus]);
 
   const startWebexOAuth = useCallback(async () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -227,11 +226,11 @@ export function useWebexStatus({ appToken, isPaired, session, deviceUuid, supaba
 
   // Check auth status once when paired (don't include fetchWebexToken in deps to avoid loops)
   useEffect(() => {
-    if (!appToken || !isPaired) return;
+    if (!session?.access_token || !isPaired) return;
     // Check if we have valid auth
     fetchWebexToken().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appToken, isPaired]);
+  }, [session?.access_token, isPaired]);
 
   // Only poll Webex status if authorized
   useEffect(() => {

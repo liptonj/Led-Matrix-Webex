@@ -45,6 +45,7 @@ export async function updateSecret(
   secretValue: string,
   nameHint: string,
 ): Promise<string> {
+  // If we have a secretId, update directly
   if (secretId) {
     const { error } = await (client as any).schema("display").rpc("vault_update_secret", {
       p_secret_id: secretId,
@@ -55,18 +56,50 @@ export async function updateSecret(
     });
 
     if (error) {
+      console.error("[vault] Failed to update secret:", error);
       throw new Error("Failed to update vault secret");
     }
 
     return secretId;
   }
 
+  // Try to find existing secret by name (upsert pattern)
+  const { data: existingId, error: findError } = await (client as any)
+    .schema("display")
+    .rpc("vault_find_secret_by_name", { p_name: nameHint });
+
+  if (findError) {
+    console.error("[vault] Failed to find secret by name:", findError);
+  }
+
+  if (existingId) {
+    // Update existing secret
+    console.log("[vault] Found existing secret, updating:", nameHint);
+    const { error: updateError } = await (client as any).schema("display").rpc("vault_update_secret", {
+      p_secret_id: existingId,
+      p_secret: secretValue,
+      p_name: null,
+      p_description: null,
+      p_key_id: null,
+    });
+
+    if (updateError) {
+      console.error("[vault] Failed to update existing secret:", updateError);
+      throw new Error("Failed to update vault secret");
+    }
+
+    return existingId as string;
+  }
+
+  // Create new secret
+  console.log("[vault] Creating new secret:", nameHint);
   const { data, error } = await (client as any).schema("display").rpc("vault_create_secret", {
-    p_secret: secretValue,
     p_name: nameHint,
+    p_secret: secretValue,
   });
 
   if (error || !data) {
+    console.error("[vault] Failed to create secret:", error);
     throw new Error("Failed to create vault secret");
   }
 

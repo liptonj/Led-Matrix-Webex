@@ -66,11 +66,21 @@ void ImprovHandler::begin(Stream* serial, ConfigManager* config, AppState* state
     }
     Serial.printf("[IMPROV] Detected chip family: %s\n", getBoardType().c_str());
     
+    // Build device URL for Improv redirect after WiFi provisioning
+    // This redirects users to the website's provision page for auto-approval
+    // {LOCAL_IPV4} is replaced by the library with the device's actual IP
+    #ifdef WEBSITE_URL
+    String deviceUrl = String(WEBSITE_URL) + "/user/install/provision?ip={LOCAL_IPV4}";
+    #else
+    String deviceUrl = "http://{LOCAL_IPV4}";  // Fallback to device's local web interface
+    #endif
+    
     improv->setDeviceInfo(
         chipFamily,
         "LED Matrix Webex Display",
         FIRMWARE_VERSION,
-        device_name.c_str()
+        device_name.c_str(),
+        deviceUrl.c_str()
     );
     
     // Set callbacks - use library's built-in WiFi connection (no custom callback)

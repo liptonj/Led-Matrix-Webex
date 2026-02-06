@@ -6,6 +6,7 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { TextEncoder, TextDecoder } from 'util';
 import { useSerialMonitor, extractPairingCode } from '../useSerialMonitor';
 
 // Mock Web Serial API types

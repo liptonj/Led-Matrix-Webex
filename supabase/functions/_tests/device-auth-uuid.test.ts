@@ -7,14 +7,14 @@
  */
 
 import {
-  assertEquals,
-  assertExists,
+    assertEquals,
+    assertExists,
 } from "jsr:@std/assert";
 import {
-  TEST_DEVICE_UUID,
-  TEST_USER_UUID,
-  mockJwtPayload,
-  mockJwtPayloadUnassigned,
+    TEST_DEVICE_UUID,
+    TEST_USER_UUID,
+    mockJwtPayload,
+    mockJwtPayloadUnassigned,
 } from "./fixtures/uuid-fixtures.ts";
 
 // UUID format: 8-4-4-4-12 = 36 characters

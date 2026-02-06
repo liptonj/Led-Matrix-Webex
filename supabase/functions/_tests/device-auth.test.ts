@@ -8,13 +8,13 @@
  */
 
 import {
-  assertEquals,
-  assertExists,
-  assertNotEquals,
-  assertStringIncludes,
+    assertEquals,
+    assertExists,
+    assertNotEquals,
+    assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
-import { TEST_DEVICE_UUID, TEST_USER_UUID, mockJwtPayload } from "./fixtures/uuid-fixtures.ts";
+import { TEST_DEVICE_UUID, TEST_USER_UUID } from "./fixtures/uuid-fixtures.ts";
 
 // Constants from the Edge Function
 const DEVICE_TOKEN_TTL_SECONDS = 86400; // 24 hours

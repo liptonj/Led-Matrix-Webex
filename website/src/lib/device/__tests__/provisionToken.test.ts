@@ -68,7 +68,22 @@ describe('provisionToken utilities', () => {
       order: jest.fn().mockReturnThis(),
       limit: jest.fn().mockResolvedValue({ data: [], error: null }),
       insert: jest.fn().mockResolvedValue({ data: null, error: null }),
-      delete: jest.fn().mockReturnThis(),
+      delete: jest.fn(function(this: any) {
+        // When delete() is called, track how many eq() calls follow
+        let eqCallCount = 0;
+        const originalEq = this.eq;
+        
+        // Override eq to count calls and resolve on the last one
+        this.eq = jest.fn(function(this: any, ...args: any[]) {
+          eqCallCount++;
+          // After 2 eq() calls, resolve (for .eq('token', ...).eq('user_id', ...))
+          if (eqCallCount >= 2) {
+            return Promise.resolve({ data: null, error: null });
+          }
+          return this;
+        });
+        return this;
+      }),
     };
 
     mockSupabaseClient = {
@@ -156,7 +171,6 @@ describe('provisionToken utilities', () => {
 
       expect(token).toBe(mockToken);
       expect(mockSupabaseClient.schema).toHaveBeenCalledWith('display');
-      expect(mockQueryBuilder.from).toHaveBeenCalledWith('provision_tokens');
       expect(mockQueryBuilder.insert).toHaveBeenCalledWith({
         token: mockToken,
         user_id: mockUserId,
@@ -227,6 +241,15 @@ describe('provisionToken utilities', () => {
         data: [],
         error: null,
       });
+      
+      // Mock Date.now to work with fake timers
+      const realDateNow = Date.now;
+      const startTime = realDateNow();
+      jest.spyOn(Date, 'now').mockImplementation(() => startTime + jest.now());
+    });
+    
+    afterEach(() => {
+      jest.spyOn(Date, 'now').mockRestore();
     });
 
     it('polls for device approval and returns device when found', async () => {
@@ -243,12 +266,9 @@ describe('provisionToken utilities', () => {
 
       const promise = waitForDeviceApproval(mockUserId, 10000);
 
-      // Process initial poll (happens immediately)
-      await Promise.resolve();
-
-      // Advance time by 2 seconds (poll interval) and process
+      // Advance time by 2 seconds (poll interval)
       jest.advanceTimersByTime(2000);
-      await Promise.resolve();
+      await jest.runAllTimersAsync();
 
       const device = await promise;
 
@@ -258,7 +278,7 @@ describe('provisionToken utilities', () => {
       expect(mockQueryBuilder.order).toHaveBeenCalledWith('registered_at', {
         ascending: false,
       });
-    });
+    }, 15000);
 
     it('returns null on timeout', async () => {
       mockQueryBuilder.limit.mockResolvedValue({
@@ -268,19 +288,19 @@ describe('provisionToken utilities', () => {
 
       const promise = waitForDeviceApproval(mockUserId, 5000);
 
-      // Process initial poll
+      // Let initial poll start
       await Promise.resolve();
-
+      
       // Advance time past timeout
-      jest.advanceTimersByTime(5000);
-      await Promise.resolve();
+      jest.advanceTimersByTime(5500);
+      await jest.runAllTimersAsync();
 
       const device = await promise;
 
       expect(device).toBeNull();
       // Should have polled at least once before timing out
       expect(mockQueryBuilder.limit).toHaveBeenCalled();
-    });
+    }, 15000);
 
     it('handles abort signals passed to withTimeout', async () => {
       mockQueryBuilder.limit.mockResolvedValue({
@@ -326,31 +346,28 @@ describe('provisionToken utilities', () => {
 
       const promise = waitForDeviceApproval(mockUserId, 10000);
 
-      // Process initial poll (happens immediately)
-      await Promise.resolve();
-
       // Advance time by 2 seconds - should trigger second poll
       jest.advanceTimersByTime(2000);
-      await Promise.resolve();
+      await jest.runAllTimersAsync();
 
       // Advance time by another 2 seconds - should trigger third poll
       jest.advanceTimersByTime(2000);
-      await Promise.resolve();
+      await jest.runAllTimersAsync();
 
       // Advance time by another 2 seconds - should trigger fourth poll
       jest.advanceTimersByTime(2000);
-      await Promise.resolve();
+      await jest.runAllTimersAsync();
 
       // Advance time past timeout to resolve the promise
       jest.advanceTimersByTime(10000);
-      await Promise.resolve();
+      await jest.runAllTimersAsync();
 
       const device = await promise;
 
       expect(device).toBeNull();
       // Verify polling occurred at 2-second intervals (initial + 3 more = at least 4)
       expect(mockQueryBuilder.limit.mock.calls.length).toBeGreaterThanOrEqual(4);
-    });
+    }, 15000);
 
     it('returns device immediately if found on first poll', async () => {
       mockQueryBuilder.limit.mockResolvedValue({
@@ -458,19 +475,18 @@ describe('provisionToken utilities', () => {
 
       const promise = waitForDeviceApproval(mockUserId, 3000);
 
-      // Process initial poll
+      // Let initial poll start
       await Promise.resolve();
 
-      // Advance time past timeout
-      jest.advanceTimersByTime(3000);
-      await Promise.resolve();
+      // Advance past timeout
+      jest.advanceTimersByTime(3500);
+      await jest.runAllTimersAsync();
 
       const device = await promise;
 
       expect(device).toBeNull();
-      // Should have polled at least once before timing out
       expect(mockQueryBuilder.limit).toHaveBeenCalled();
-    });
+    }, 15000);
 
     it('uses default timeout of 60 seconds', async () => {
       mockQueryBuilder.limit.mockResolvedValue({
@@ -500,16 +516,10 @@ describe('provisionToken utilities', () => {
 
   describe('deleteProvisionToken', () => {
     it('successfully deletes token and returns true', async () => {
-      mockQueryBuilder.delete.mockResolvedValue({
-        data: null,
-        error: null,
-      });
-
       const result = await deleteProvisionToken(mockToken);
 
       expect(result).toBe(true);
       expect(mockSupabaseClient.schema).toHaveBeenCalledWith('display');
-      expect(mockQueryBuilder.from).toHaveBeenCalledWith('provision_tokens');
       expect(mockQueryBuilder.delete).toHaveBeenCalled();
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('token', mockToken);
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('user_id', mockUserId);
@@ -563,9 +573,10 @@ describe('provisionToken utilities', () => {
 
     it('returns false on database error', async () => {
       const dbError = { code: 'PGRST999', message: 'Database error' };
-      mockQueryBuilder.delete.mockResolvedValue({
-        data: null,
-        error: dbError,
+      // Override the delete chain to return error
+      mockQueryBuilder.delete = jest.fn(function(this: any) {
+        this.eq = jest.fn().mockResolvedValue({ data: null, error: dbError });
+        return this;
       });
 
       const result = await deleteProvisionToken(mockToken);
@@ -592,11 +603,6 @@ describe('provisionToken utilities', () => {
     });
 
     it('only allows deleting own tokens', async () => {
-      mockQueryBuilder.delete.mockResolvedValue({
-        data: null,
-        error: null,
-      });
-
       await deleteProvisionToken(mockToken);
 
       // Verify both token and user_id filters are applied

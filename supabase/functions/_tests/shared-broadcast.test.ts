@@ -7,9 +7,9 @@
  */
 
 import {
-  assertEquals,
-  assertExists,
-  assertRejects,
+    assertEquals,
+    assertExists,
+    assertRejects,
 } from "jsr:@std/assert";
 import { sendBroadcast } from "../_shared/broadcast.ts";
 

@@ -345,6 +345,13 @@ extern HardwareSerial Serial;
 // ============================================================================
 // Time functions
 // ============================================================================
+#ifdef UNIT_TEST
+// In unit tests, allow external control of millis() via g_mock_millis
+extern unsigned long g_mock_millis;
+inline unsigned long millis() {
+    return g_mock_millis;
+}
+#else
 inline unsigned long millis() {
     static auto start = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
@@ -352,6 +359,7 @@ inline unsigned long millis() {
         std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count()
     );
 }
+#endif
 
 inline unsigned long micros() {
     static auto start = std::chrono::steady_clock::now();

@@ -1,12 +1,12 @@
 /**
  * Webex User Login Edge Function
  *
- * Initiates OAuth flow for user login with PKCE.
- * Generates authorization URL and stores PKCE code verifier.
+ * Initiates OAuth flow for user login (no PKCE - uses client_secret).
+ * Generates authorization URL with state parameter.
  *
  * Request body (optional):
  * {
- *   "redirect_uri": "https://display.5ls.us/auth/callback"  // Optional, uses default if not provided
+ *   "redirect_to": "/user"  // Where to redirect after login
  * }
  *
  * Response:
@@ -16,14 +16,12 @@
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getOAuthConfig } from "../_shared/oauth-config.ts";
 
 const WEBEX_AUTH_URL = "https://webexapis.com/v1/authorize";
 
 interface LoginRequest {
-  redirect_uri?: string;
   redirect_to?: string;
 }
 
@@ -68,67 +66,28 @@ serve(async (req: Request) => {
     }
 
     const body: LoginRequest = await req.json().catch(() => ({}));
-    const redirectUri = body.redirect_uri || oauthConfig.redirectUri;
     const redirectTo = body.redirect_to || '/user';
 
-    // Generate state with CSRF protection
+    // Generate state with CSRF protection (no PKCE needed - using client_secret)
     const state = toBase64Url(
       JSON.stringify({
         nonce: crypto.randomUUID(),
         ts: Math.floor(Date.now() / 1000),
-        redirect: redirectUri,
         redirect_to: redirectTo,
-        flow: "unified_login", // Distinguish from device pairing
+        flow: "unified_login",
       }),
     );
 
-    // Generate PKCE code verifier and challenge
-    const codeVerifier = crypto.randomUUID() + crypto.randomUUID();
-    const encoder = new TextEncoder();
-    const data = encoder.encode(codeVerifier);
-    const digest = await crypto.subtle.digest("SHA-256", data);
-    const codeChallenge = toBase64Url(
-      String.fromCharCode(...new Uint8Array(digest)),
-    );
-
-    // Store code verifier for callback (in oauth_state table)
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
-
-    // Store PKCE verifier temporarily (5 min expiry)
-    const { error: stateError } = await supabase
-      .schema("display")
-      .from("oauth_state")
-      .upsert({
-        state_key: state,
-        code_verifier: codeVerifier,
-        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      });
-
-    if (stateError) {
-      console.error("Failed to store OAuth state:", stateError);
-      return new Response(
-        JSON.stringify({ error: "Failed to initialize OAuth flow" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Build authorization URL
+    // Build authorization URL (no PKCE - client_secret used in callback)
     const authUrl = new URL(WEBEX_AUTH_URL);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("client_id", oauthConfig.clientId);
-    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("redirect_uri", oauthConfig.redirectUri);
     authUrl.searchParams.set(
       "scope",
       "openid email profile spark:people_read",
     );
     authUrl.searchParams.set("state", state);
-    authUrl.searchParams.set("code_challenge", codeChallenge);
-    authUrl.searchParams.set("code_challenge_method", "S256");
 
     return new Response(
       JSON.stringify({ auth_url: authUrl.toString() }),

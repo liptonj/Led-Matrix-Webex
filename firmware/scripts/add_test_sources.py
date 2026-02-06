@@ -36,6 +36,8 @@ env.Append(  # noqa: F821
         "+<config/config_export.cpp>",
         # Common utilities
         "+<common/nvs_utils.cpp>",
+        # Sync/provision helpers
+        "+<sync/provision_helpers.cpp>",
         # Note: http_utils.cpp and heap_utils.cpp excluded from native tests
         # as they require ESP32-specific headers (WiFiClientSecure, etc.)
         # Mocks

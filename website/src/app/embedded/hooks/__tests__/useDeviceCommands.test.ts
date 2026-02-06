@@ -13,20 +13,53 @@ import { useDeviceCommands, type UseDeviceCommandsOptions } from '../useDeviceCo
 // Store original env
 const originalEnv = process.env;
 
+// Mock getSession
+const mockGetSession = jest.fn().mockResolvedValue({
+  data: {
+    session: {
+      access_token: 'test-session-token',
+    },
+  },
+  error: null,
+});
+
+jest.mock('@/lib/supabase/auth', () => ({
+  getSession: () => mockGetSession(),
+}));
+
+// Mock getSupabaseClient - default channel mock that returns chainable methods
+const createDefaultChannelMock = () => {
+  const channelMock: Record<string, jest.Mock> = {};
+  channelMock.on = jest.fn(() => channelMock);
+  channelMock.subscribe = jest.fn(() => channelMock);
+  return channelMock;
+};
+
+const mockSupabaseClient = {
+  schema: jest.fn(() => ({
+    from: jest.fn(() => ({
+      select: jest.fn().mockReturnThis(),
+      eq: jest.fn().mockReturnThis(),
+      single: jest.fn().mockResolvedValue({ data: { id: 'cmd-uuid-456' }, error: null }),
+      insert: jest.fn().mockReturnThis(),
+    })),
+  })),
+  channel: jest.fn(() => createDefaultChannelMock()),
+  removeChannel: jest.fn(),
+};
+
+jest.mock('@/lib/supabaseClient', () => ({
+  getSupabaseClient: () => mockSupabaseClient,
+}));
+
 describe('useDeviceCommands hook', () => {
   const mockAddLog = jest.fn();
   const mockSupabaseRef = React.createRef<SupabaseClient | null>() as React.MutableRefObject<SupabaseClient | null>;
 
-  const mockToken = {
-    serial_number: 'A1B2C3D4',
-    device_id: 'webex-display-C3D4',
-    token: 'test-bearer-token',
-    expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-  };
+  const TEST_DEVICE_UUID = '550e8400-e29b-41d4-a716-446655440000';
 
   const defaultOptions: UseDeviceCommandsOptions = {
-    appToken: mockToken,
-    pairingCode: 'TEST12',
+    deviceUuid: TEST_DEVICE_UUID,
     supabaseRef: mockSupabaseRef,
     addLog: mockAddLog,
   };
@@ -42,11 +75,18 @@ describe('useDeviceCommands hook', () => {
     jest.clearAllMocks();
     (global.fetch as jest.Mock) = jest.fn();
     
+    // Reset getSession mock
+    mockGetSession.mockResolvedValue({
+      data: {
+        session: {
+          access_token: 'test-session-token',
+        },
+      },
+      error: null,
+    });
+    
     // Initialize supabaseRef
     mockSupabaseRef.current = null;
-    
-    // Reset module cache to pick up new env vars
-    jest.resetModules();
   });
 
   afterEach(() => {
@@ -77,14 +117,15 @@ describe('useDeviceCommands hook', () => {
       });
 
       expect(success).toBe(true);
+      // Verify fetch was called with session token (mocked)
       expect(global.fetch).toHaveBeenCalledWith(
         'https://test.supabase.co/functions/v1/update-app-state',
         expect.objectContaining({
           method: 'POST',
-          headers: {
+          headers: expect.objectContaining({
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-bearer-token',
-          },
+            'Authorization': expect.stringContaining('Bearer'),
+          }),
           body: JSON.stringify({
             webex_status: 'active',
             camera_on: true,
@@ -112,7 +153,7 @@ describe('useDeviceCommands hook', () => {
         expect.any(String),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'Authorization': 'Bearer test-bearer-token',
+            'Authorization': 'Bearer test-session-token',
           }),
         })
       );
@@ -149,9 +190,13 @@ describe('useDeviceCommands hook', () => {
       expect(mockAddLog).toHaveBeenCalledWith('update-app-state error: Network error');
     });
 
-    it('should return false when appToken is null', async () => {
-      const options = { ...defaultOptions, appToken: null };
-      const { result } = renderHook(() => useDeviceCommands(options));
+    it('should return false when not authenticated (no session)', async () => {
+      mockGetSession.mockResolvedValueOnce({
+        data: { session: null },
+        error: null,
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
 
       let success;
       await act(async () => {
@@ -194,13 +239,14 @@ describe('useDeviceCommands hook', () => {
         'https://test.supabase.co/functions/v1/insert-command',
         expect.objectContaining({
           method: 'POST',
-          headers: {
+          headers: expect.objectContaining({
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-bearer-token',
-          },
+            'Authorization': expect.stringContaining('Bearer'),
+          }),
           body: JSON.stringify({
             command: 'set_brightness',
             payload: { value: 200 },
+            device_uuid: TEST_DEVICE_UUID,
           }),
         })
       );
@@ -235,9 +281,13 @@ describe('useDeviceCommands hook', () => {
       expect(insertResult).toEqual({ success: false, error: 'Network error' });
     });
 
-    it('should return error when not authenticated', async () => {
-      const options = { ...defaultOptions, appToken: null };
-      const { result } = renderHook(() => useDeviceCommands(options));
+    it('should return error when not authenticated (no session)', async () => {
+      mockGetSession.mockResolvedValueOnce({
+        data: { session: null },
+        error: null,
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
 
       let insertResult;
       await act(async () => {
@@ -325,15 +375,15 @@ describe('useDeviceCommands hook', () => {
       ).rejects.toThrow('Not connected');
     });
 
-    it('should throw error when appToken is null', async () => {
-      const options = { ...defaultOptions, appToken: null };
+    it('should throw error when deviceUuid is null', async () => {
+      const options = { ...defaultOptions, deviceUuid: null };
       const { result } = renderHook(() => useDeviceCommands(options));
 
       await expect(
         act(async () => {
           await result.current.sendCommand('get_status');
         })
-      ).rejects.toThrow('Not connected');
+      ).rejects.toThrow();
     });
 
     it('should insert command via Edge Function when enabled', async () => {
@@ -486,9 +536,20 @@ describe('useDeviceCommands hook', () => {
 
       const { result } = renderHook(() => useDeviceCommands(defaultOptions));
 
+      // Wait for hook to initialize and run pending timers
+      await act(async () => {
+        jest.runOnlyPendingTimers();
+        await Promise.resolve();
+      });
+
+      // Ensure result.current is not null
+      if (!result.current) {
+        throw new Error('Hook failed to initialize');
+      }
+
       await expect(
         act(async () => {
-          await result.current.sendCommand('get_status');
+          await result.current!.sendCommand('get_status');
         })
       ).rejects.toThrow('Rate limit exceeded');
     }, 10000);

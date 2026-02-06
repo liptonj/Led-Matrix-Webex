@@ -1,5 +1,10 @@
 'use client';
 
+/**
+ * @deprecated This component will be incorporated into DevicesTab.
+ * Do not add new features to this component.
+ */
+
 import { Button, Card } from '@/components/ui';
 import { memo } from 'react';
 import type { DeviceStatus } from '../types';
@@ -29,14 +34,13 @@ export interface DisplayTabProps {
   metricColor: string;
   onMetricColorChange: (value: string) => void;
   deviceStatus: DeviceStatus;
-  pairingCode: string;
   isPeerConnected: boolean;
   isSaving: boolean;
   onSaveSettings: () => void;
   onDisconnect: () => void;
 }
 
-export const DisplayTab = memo(function DisplayTab({ deviceName, onDeviceNameChange, manualDisplayName, onDisplayNameChange, onDisplayNameBlur, brightness, onBrightnessChange, scrollSpeedMs, onScrollSpeedChange, pageIntervalMs, onPageIntervalChange, displayPages, onDisplayPagesChange, statusLayout, onStatusLayoutChange, dateColor, onDateColorChange, timeColor, onTimeColorChange, nameColor, onNameColorChange, metricColor, onMetricColorChange, deviceStatus, pairingCode, isPeerConnected, isSaving, onSaveSettings, onDisconnect }: DisplayTabProps) {
+export const DisplayTab = memo(function DisplayTab({ deviceName, onDeviceNameChange, manualDisplayName, onDisplayNameChange, onDisplayNameBlur, brightness, onBrightnessChange, scrollSpeedMs, onScrollSpeedChange, pageIntervalMs, onPageIntervalChange, displayPages, onDisplayPagesChange, statusLayout, onStatusLayoutChange, dateColor, onDateColorChange, timeColor, onTimeColorChange, nameColor, onNameColorChange, metricColor, onMetricColorChange, deviceStatus, isPeerConnected, isSaving, onSaveSettings, onDisconnect }: DisplayTabProps) {
   return (
     <Card>
       <h2 className="text-lg font-semibold mb-4">Display Settings</h2>
@@ -53,7 +57,7 @@ export const DisplayTab = memo(function DisplayTab({ deviceName, onDeviceNameCha
       </div>
       <hr className="my-6 border-[var(--color-border)]" />
       <h3 className="font-medium mb-4">Connected Display</h3>
-      <div className="grid grid-cols-2 gap-4 text-sm"><div><span className="text-[var(--color-text-muted)]">Serial:</span><span className="ml-2 font-mono">{deviceStatus.serial_number || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">Pairing:</span><span className="ml-2 font-mono">{pairingCode}</span></div><div><span className="text-[var(--color-text-muted)]">IP:</span><span className="ml-2">{deviceStatus.ip_address || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">Firmware:</span><span className="ml-2">{deviceStatus.firmware_version || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">WiFi:</span><span className="ml-2">{deviceStatus.rssi ? `${deviceStatus.rssi} dBm` : 'Unknown'}</span></div></div>
+      <div className="grid grid-cols-2 gap-4 text-sm"><div><span className="text-[var(--color-text-muted)]">Serial:</span><span className="ml-2 font-mono">{deviceStatus.serial_number || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">IP:</span><span className="ml-2">{deviceStatus.ip_address || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">Firmware:</span><span className="ml-2">{deviceStatus.firmware_version || 'Unknown'}</span></div><div><span className="text-[var(--color-text-muted)]">WiFi:</span><span className="ml-2">{deviceStatus.rssi ? `${deviceStatus.rssi} dBm` : 'Unknown'}</span></div></div>
       <Button variant="warning" className="mt-4" onClick={onDisconnect}>Disconnect Display</Button>
     </Card>
   );

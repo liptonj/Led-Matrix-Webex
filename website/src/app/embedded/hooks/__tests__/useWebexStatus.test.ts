@@ -6,7 +6,6 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useWebexStatus, type UseWebexStatusOptions } from '../useWebexStatus';
-import type { AppToken } from '../../types';
 
 // UUID test fixtures
 const TEST_DEVICE_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -32,9 +31,8 @@ describe('useWebexStatus hook - UUID support', () => {
   };
 
   const defaultOptions: UseWebexStatusOptions = {
-    appToken: { token: 'test-token', expires_at: new Date(Date.now() + 3600000).toISOString() } as AppToken,
     isPaired: true,
-    session: { user: { id: TEST_USER_UUID } } as any,
+    session: { user: { id: TEST_USER_UUID }, access_token: 'test-access-token' } as any,
     deviceUuid: TEST_DEVICE_UUID,
     supabaseRef: mockSupabaseRef,
     addLog: mockAddLog,
