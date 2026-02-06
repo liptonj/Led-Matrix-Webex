@@ -109,6 +109,10 @@ module.exports = {
         "<rootDir>/src/components/**/*.test.ts",
         "<rootDir>/src/components/**/*.test.tsx",
       ],
+      testPathIgnorePatterns: [
+        // Embedded hooks are tested by the "hooks" project
+        "<rootDir>/src/app/embedded/hooks/",
+      ],
       transform: {
         "^.+\\.tsx?$": [
           "ts-jest",

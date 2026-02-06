@@ -8,13 +8,28 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import type { Session } from '@supabase/supabase-js';
 import { usePairing, type UsePairingOptions } from '../usePairing';
 
-// Mock Supabase client
+// Mock Supabase client with auth support
+const mockUnsubscribe = jest.fn();
 const mockSupabaseClient = {
   channel: jest.fn(() => ({
     on: jest.fn().mockReturnThis(),
     subscribe: jest.fn().mockReturnThis(),
   })),
   removeChannel: jest.fn(),
+  auth: {
+    getSession: jest.fn().mockResolvedValue({ data: { session: null }, error: null }),
+    onAuthStateChange: jest.fn().mockReturnValue({
+      data: { subscription: { unsubscribe: mockUnsubscribe } },
+    }),
+  },
+  schema: jest.fn(() => ({
+    from: jest.fn(() => {
+      const builder: Record<string, jest.Mock> = {};
+      builder.select = jest.fn(() => builder);
+      builder.eq = jest.fn(() => Promise.resolve({ data: null, error: null }));
+      return builder;
+    }),
+  })),
 };
 
 jest.mock('@/lib/supabaseClient', () => ({

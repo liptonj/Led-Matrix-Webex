@@ -30,6 +30,12 @@ CONTENT_TYPES = {
 # Files/patterns to skip
 SKIP_FILES = {".bootstrap_ui", ".gitkeep", ".DS_Store"}
 
+# File extensions to skip (documentation, configs, etc.)
+SKIP_EXTENSIONS = {".md", ".txt", ".pdf", ".doc", ".docx"}
+
+# Directories to skip (development/test/build artifacts)
+SKIP_DIRS = {"node_modules", "__tests__", "coverage", ".git", ".pio"}
+
 
 def get_content_type(filename: str) -> str:
     """Get the content type for a file based on extension."""
@@ -77,7 +83,10 @@ def find_web_files(data_dir: str) -> list:
     if not os.path.exists(data_dir):
         return files
     
-    for root, _, filenames in os.walk(data_dir):
+    for root, dirs, filenames in os.walk(data_dir):
+        # Skip development/test directories
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.startswith(".")]
+        
         for filename in filenames:
             # Skip hidden and special files
             if filename in SKIP_FILES or filename.startswith("."):
@@ -85,6 +94,10 @@ def find_web_files(data_dir: str) -> list:
             
             filepath = os.path.join(root, filename)
             ext = Path(filename).suffix.lower()
+            
+            # Skip documentation and config files
+            if ext in SKIP_EXTENSIONS:
+                continue
             
             # Only embed files with known content types
             if ext in CONTENT_TYPES:

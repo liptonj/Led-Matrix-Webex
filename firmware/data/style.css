@@ -1,6 +1,41 @@
 /* Webex Display Configuration UI Styles */
 /* Page-specific styles - base styles in base.css */
 
+/* Pin Configuration Grid */
+.pin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.pin-input {
+    display: flex;
+    flex-direction: column;
+}
+
+.pin-input label {
+    font-weight: 500;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.pin-input input[type="number"] {
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 1rem;
+}
+
+.pin-input input[type="number"]:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
 /* Update Section (specific to main UI) */
 .update-section {
     margin-bottom: 20px;

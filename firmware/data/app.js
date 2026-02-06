@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadStatus();
     loadConfig();
+    loadPinConfig();
     initEventListeners();
     initPasswordToggle('wifi-password', 'wifi-show-password', isPortal); // from common.js
 
@@ -583,6 +584,12 @@ function initEventListeners() {
     document.getElementById('factory-reset-btn').addEventListener('click', () => {
         factoryReset({ endpoint: API.factoryReset }); // from common.js
     });
+    
+    // Pin configuration form
+    const pinConfigForm = document.getElementById('pin-config-form');
+    if (pinConfigForm) {
+        pinConfigForm.addEventListener('submit', savePinConfig);
+    }
 }
 
 // WiFi Functions (use common.js)
@@ -688,6 +695,112 @@ async function bootToBootstrap() {
         alert('Device is rebooting to bootstrap firmware...');
     } catch (error) {
         alert('Failed to reboot to bootstrap');
+    }
+}
+
+// Pin Configuration Functions
+async function loadPinConfig() {
+    try {
+        const response = await fetch('/api/config/pins');
+        if (!response.ok) {
+            console.warn('Pin config not available');
+            return;
+        }
+        const data = await response.json();
+        
+        // Update board info
+        const boardTypeEl = document.getElementById('board-type');
+        const presetNameEl = document.getElementById('pin-preset-name');
+        if (boardTypeEl) boardTypeEl.textContent = data.chip_description || data.board_type;
+        if (presetNameEl) presetNameEl.textContent = data.preset_name;
+        
+        // Populate preset dropdown
+        const presetSelect = document.getElementById('pin-preset');
+        if (presetSelect && data.available_presets) {
+            presetSelect.innerHTML = data.available_presets.map(p => 
+                `<option value="${p.id}" ${p.id === data.preset ? 'selected' : ''}>${p.name}</option>`
+            ).join('');
+            
+            // Show/hide custom pins section
+            presetSelect.addEventListener('change', () => {
+                const customSection = document.getElementById('custom-pins-section');
+                customSection.style.display = presetSelect.value === '3' ? 'block' : 'none';
+            });
+            
+            // Trigger initial state
+            const customSection = document.getElementById('custom-pins-section');
+            if (customSection) {
+                customSection.style.display = data.preset === 3 ? 'block' : 'none';
+            }
+        }
+        
+        // Populate current pin values
+        if (data.pins) {
+            const pinFields = ['r1', 'g1', 'b1', 'r2', 'g2', 'b2', 'a', 'b', 'c', 'd', 'e', 'clk', 'lat', 'oe'];
+            pinFields.forEach(pin => {
+                const el = document.getElementById(`pin-${pin}`);
+                if (el) el.value = data.pins[pin];
+            });
+        }
+        
+        console.log('Pin configuration loaded');
+    } catch (error) {
+        console.error('Failed to load pin config:', error);
+    }
+}
+
+async function savePinConfig(event) {
+    event.preventDefault();
+    
+    const presetSelect = document.getElementById('pin-preset');
+    const preset = parseInt(presetSelect.value, 10);
+    
+    const payload = { preset };
+    
+    // If custom preset, include pin values
+    if (preset === 3) {
+        payload.pins = {
+            r1: parseInt(document.getElementById('pin-r1').value, 10),
+            g1: parseInt(document.getElementById('pin-g1').value, 10),
+            b1: parseInt(document.getElementById('pin-b1').value, 10),
+            r2: parseInt(document.getElementById('pin-r2').value, 10),
+            g2: parseInt(document.getElementById('pin-g2').value, 10),
+            b2: parseInt(document.getElementById('pin-b2').value, 10),
+            a: parseInt(document.getElementById('pin-a').value, 10),
+            b: parseInt(document.getElementById('pin-b').value, 10),
+            c: parseInt(document.getElementById('pin-c').value, 10),
+            d: parseInt(document.getElementById('pin-d').value, 10),
+            e: parseInt(document.getElementById('pin-e').value, 10),
+            clk: parseInt(document.getElementById('pin-clk').value, 10),
+            lat: parseInt(document.getElementById('pin-lat').value, 10),
+            oe: parseInt(document.getElementById('pin-oe').value, 10)
+        };
+    }
+    
+    try {
+        const response = await fetch('/api/config/pins', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to save pin config');
+        }
+        
+        const result = await response.json();
+        alert(result.message || 'Pin configuration saved');
+        
+        if (result.reboot_required || result.message?.includes('reboot')) {
+            if (confirm('Pin configuration saved. Reboot now to apply changes?')) {
+                await fetch(API.reboot, { method: 'POST' });
+                alert('Device rebooting...');
+            }
+        }
+    } catch (error) {
+        alert(`Failed to save pin config: ${error.message}`);
+        console.error('Pin config save error:', error);
     }
 }
 

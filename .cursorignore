@@ -11,3 +11,8 @@ archive/
 # Large binary files
 *.bin
 *.elf
+archive/
+webex-bridge/
+firmware_bootstrap/
+firnware_display_test/
+bridge/

@@ -23,7 +23,13 @@ LittleFSFS LittleFS;
 // These functions are used by provision_helpers.cpp but serial_commands.cpp
 // is not included in test builds, so we provide mock implementations here.
 
-#ifdef NATIVE_BUILD
+#if defined(NATIVE_BUILD) || defined(UNIT_TEST)
+// ============================================================================
+// Mock serial_commands functions for native tests
+// ============================================================================
+// These functions are used by provision_helpers.cpp but serial_commands.cpp
+// is not included in test builds, so we provide mock implementations here.
+
 // Static storage for provision token (matches serial_commands.cpp implementation)
 static String g_mock_provision_token = "";
 
@@ -39,7 +45,16 @@ void clear_provision_token() {
     g_mock_provision_token = "";
 }
 
-// Mock millis for native tests
+// Mock serial_commands_begin for native tests
+void serial_commands_begin() {
+    // Mock implementation - no-op for tests
+}
+
+#endif // NATIVE_BUILD || UNIT_TEST
+
+#ifdef UNIT_TEST
+// Mock millis() control variable for unit tests
+// This is declared as extern in Arduino.h when UNIT_TEST is defined
 unsigned long g_mock_millis = 0;
 
-#endif // NATIVE_BUILD
+#endif // UNIT_TEST

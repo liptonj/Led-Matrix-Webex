@@ -20,7 +20,7 @@ export interface StatusTabProps {
   isPeerConnected: boolean;
   isPaired: boolean;
   lastDeviceSeenMs: number | null;
-  deviceStatus: DeviceStatus;
+  deviceStatus: DeviceStatus | null;
   activityLog: ActivityLogEntry[];
   onStatusChange: (status: WebexStatus) => void;
   onToggleCamera: () => void;
@@ -80,7 +80,7 @@ export const StatusTab = memo(function StatusTab({ displayName, statusToDisplay,
           <div><div className="text-[var(--color-text-muted)]">Display connected</div><div>{isPeerConnected ? 'Yes' : 'No'}</div></div>
           <div><div className="text-[var(--color-text-muted)]">Webex</div><div className={webexNeedsAuth ? 'text-yellow-600' : 'text-green-600'}>{webexNeedsAuth ? 'Not connected' : 'Connected'}</div></div>
           <div><div className="text-[var(--color-text-muted)]">Last seen</div><div>{formatRelativeTime(lastDeviceSeenMs)}</div></div>
-          <div><div className="text-[var(--color-text-muted)]">IP address</div><div>{deviceStatus.ip_address || 'Unknown'}</div></div>
+          <div><div className="text-[var(--color-text-muted)]">IP address</div><div>{deviceStatus?.ip_address || 'Unknown'}</div></div>
         </div>
       </Card>
       <Card>

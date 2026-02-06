@@ -1,6 +1,6 @@
 /**
  * Shared utilities for Webex Display Configuration UI
- * Used by both main UI (app.js) and embedded app (embedded/app.js)
+ * Used by main UI (app.js)
  */
 
 // ============================================================

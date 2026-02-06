@@ -22,6 +22,7 @@
             <button class="tab-btn" data-tab="sensors">Sensors</button>
             <button class="tab-btn" data-tab="display">Display</button>
             <button class="tab-btn" data-tab="time">Time</button>
+            <button class="tab-btn" data-tab="hardware">Hardware</button>
             <button class="tab-btn" data-tab="system">System</button>
         </nav>
 
@@ -396,6 +397,103 @@
                         <p class="help-text">Default: pool.ntp.org</p>
                     </div>
                     <button type="submit" class="btn btn-primary">Save Time Settings</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Hardware Tab -->
+        <section id="hardware" class="tab-content">
+            <div class="card">
+                <h2>Display Pin Configuration</h2>
+                <p class="help-text">Configure HUB75 display adapter pin mappings. Changes require reboot.</p>
+                
+                <!-- Board Info -->
+                <div class="status-grid" style="margin-bottom: 1rem;">
+                    <div class="status-item">
+                        <span class="label">Board Type:</span>
+                        <span id="board-type" class="value">--</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">Current Preset:</span>
+                        <span id="pin-preset-name" class="value">--</span>
+                    </div>
+                </div>
+                
+                <!-- Pin Configuration Form -->
+                <form id="pin-config-form">
+                    <div class="form-group">
+                        <label for="pin-preset">Pin Preset:</label>
+                        <select id="pin-preset">
+                            <!-- Populated by JavaScript -->
+                        </select>
+                        <p class="help-text">Select the adapter board connected to your display.</p>
+                    </div>
+                    
+                    <!-- Custom Pins Section (shown when Custom preset selected) -->
+                    <div id="custom-pins-section" style="display: none;">
+                        <h3>Custom Pin Configuration</h3>
+                        <p class="help-text">Enter GPIO pin numbers. Use -1 for E pin if your panel is 1/16 scan (64x32).</p>
+                        <div class="pin-grid">
+                            <div class="form-group pin-input">
+                                <label for="pin-r1">R1:</label>
+                                <input type="number" id="pin-r1" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-g1">G1:</label>
+                                <input type="number" id="pin-g1" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-b1">B1:</label>
+                                <input type="number" id="pin-b1" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-r2">R2:</label>
+                                <input type="number" id="pin-r2" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-g2">G2:</label>
+                                <input type="number" id="pin-g2" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-b2">B2:</label>
+                                <input type="number" id="pin-b2" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-a">A:</label>
+                                <input type="number" id="pin-a" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-b">B:</label>
+                                <input type="number" id="pin-b" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-c">C:</label>
+                                <input type="number" id="pin-c" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-d">D:</label>
+                                <input type="number" id="pin-d" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-e">E:</label>
+                                <input type="number" id="pin-e" min="-1" max="48" value="-1">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-clk">CLK:</label>
+                                <input type="number" id="pin-clk" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-lat">LAT:</label>
+                                <input type="number" id="pin-lat" min="-1" max="48" value="0">
+                            </div>
+                            <div class="form-group pin-input">
+                                <label for="pin-oe">OE:</label>
+                                <input type="number" id="pin-oe" min="-1" max="48" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Save Pin Configuration</button>
                 </form>
             </div>
         </section>
