@@ -1,32 +1,46 @@
 'use client';
 
 import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const DEFAULT_REDIRECT = 'https://display.5ls.us/callback';
 const API_TIMEOUT_MS = 15000;
 
-function getParam(name: string): string {
-  if (typeof window === 'undefined') return '';
-  return new URLSearchParams(window.location.search).get(name) ?? '';
+interface AuthParams {
+  pairing_code: string;
+  serial: string;
+  ts: string;
+  sig: string;
+  token: string;
 }
+
+const EMPTY_PARAMS: AuthParams = {
+  pairing_code: '',
+  serial: '',
+  ts: '',
+  sig: '',
+  token: '',
+};
 
 export default function WebexAuthPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [params, setParams] = useState<AuthParams>(EMPTY_PARAMS);
 
-  const params = useMemo(() => {
-    return {
-      pairing_code: getParam('pairing_code'),
-      serial: getParam('serial'),
-      ts: getParam('ts'),
-      sig: getParam('sig'),
-      token: getParam('token'),
-    };
+  // Read URL params only on the client after mount to avoid SSR/hydration mismatch
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    setParams({
+      pairing_code: sp.get('pairing_code') ?? '',
+      serial: sp.get('serial') ?? '',
+      ts: sp.get('ts') ?? '',
+      sig: sp.get('sig') ?? '',
+      token: sp.get('token') ?? '',
+    });
   }, []);
 
   const missing = useMemo(() => {
-    return ['pairing_code', 'serial', 'ts', 'sig', 'token'].filter((key) => !(params as Record<string, string>)[key]);
+    return (['pairing_code', 'serial', 'ts', 'sig', 'token'] as (keyof AuthParams)[]).filter((key) => !params[key]);
   }, [params]);
 
   const handleAuthorize = async () => {

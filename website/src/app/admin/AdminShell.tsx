@@ -4,6 +4,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Spinner } from '@/components/ui/Spinner';
 import { getCachedSession, getCurrentUserProfile, getSession, isAdmin, isSupabaseConfigured, onAuthStateChange, signOut } from '@/lib/supabase';
 import { checkSupabaseHealth } from '@/lib/supabase/health';
+import { getActiveSessions, subscribeToSessionChanges } from '@/lib/supabase/supportSessions';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -42,6 +43,7 @@ export default function AdminShell({
     const [admin, setAdmin] = useState<boolean | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [activeSessionCount, setActiveSessionCount] = useState(0);
 
     // Close mobile menu when route changes
     useEffect(() => {
@@ -291,20 +293,60 @@ export default function AdminShell({
         router.replace('/login');
     };
 
+    // Fetch active session count for Support badge
+    useEffect(() => {
+        if (!authenticated || admin === false) {
+            return;
+        }
+
+        let unsubscribe: (() => void) | null = null;
+
+        async function fetchCount() {
+            try {
+                const sessions = await getActiveSessions();
+                setActiveSessionCount(sessions.length);
+            } catch (err) {
+                // Silently fail - badge will just show 0
+                setActiveSessionCount(0);
+            }
+        }
+
+        fetchCount();
+
+        subscribeToSessionChanges(
+            () => {
+                fetchCount();
+            },
+            undefined,
+            () => {
+                // Ignore errors for badge count
+            },
+        ).then((unsub) => {
+            unsubscribe = unsub;
+        });
+
+        return () => {
+            unsubscribe?.();
+        };
+    }, [authenticated, admin]);
+
     const navItems = useMemo(() => {
         if (admin === false) {
             return [{ href: '/admin/devices', label: 'Devices' }];
         }
 
-        return [
+        const items: { href: string; label: string; badge?: string }[] = [
             { href: '/admin', label: 'Dashboard' },
             { href: '/admin/devices', label: 'Devices' },
             { href: '/admin/releases', label: 'Releases' },
             { href: '/admin/oauth', label: 'OAuth' },
             { href: '/admin/users', label: 'Users' },
+            { href: '/admin/support', label: 'Support', badge: activeSessionCount > 0 ? activeSessionCount.toString() : undefined },
             { href: '/user', label: 'User Portal', badge: 'Admin' },
         ];
-    }, [admin]);
+
+        return items;
+    }, [admin, activeSessionCount]);
 
     // Login page doesn't need the admin layout - render it immediately
     if (isLoginPage) {
@@ -380,14 +422,18 @@ export default function AdminShell({
                                         key={item.href}
                                         href={item.href}
                                         className={`px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${
-                                            pathname === item.href
+                                            pathname === item.href || (item.href === '/admin/support' && pathname?.startsWith('/admin/support'))
                                                 ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200'
                                                 : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                         }`}
                                     >
                                         {item.label}
                                         {'badge' in item && (
-                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                                item.href === '/admin/support'
+                                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                                    : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                                            }`}>
                                                 {item.badge}
                                             </span>
                                         )}
@@ -446,7 +492,7 @@ export default function AdminShell({
                             key={item.href}
                             href={item.href}
                             className={`px-4 py-3 rounded-lg text-base font-medium flex items-center justify-between touch-manipulation active:scale-[0.98] transition-all ${
-                                pathname === item.href
+                                pathname === item.href || (item.href === '/admin/support' && pathname?.startsWith('/admin/support'))
                                     ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-200'
                                     : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-gray-200 dark:active:bg-gray-600'
                             }`}
@@ -454,7 +500,11 @@ export default function AdminShell({
                         >
                             <span>{item.label}</span>
                             {'badge' in item && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    item.href === '/admin/support'
+                                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200'
+                                        : 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                                }`}>
                                     {item.badge}
                                 </span>
                             )}

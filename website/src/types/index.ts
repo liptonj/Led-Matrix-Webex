@@ -172,5 +172,28 @@ export interface Release {
   checksum: string;
 }
 
+// Support session types
+export type {
+  SupportSession,
+  SupportSessionStatus,
+  SerialOutputEvent,
+  FlashProgressEvent,
+  DeviceInfoEvent,
+  ActionResultEvent,
+  HeartbeatEvent,
+  SerialInputEvent,
+  ActionType,
+  ActionEvent,
+  SessionEndEvent,
+  UserToAdminEvent,
+  AdminToUserEvent,
+  TerminalLineSource,
+  TerminalLineLevel,
+  TerminalLine,
+  SerialPortStatus,
+  FlashStatus,
+  BridgeHealth,
+} from './support';
+
 export { };
 

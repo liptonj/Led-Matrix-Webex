@@ -1,7 +1,7 @@
 import {
-  SUPABASE_REQUEST_TIMEOUT_MS,
-  getSupabase,
-  withTimeout,
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    getSupabase,
+    withTimeout,
 } from "./core";
 import type { Device, DeviceChangeEvent, DeviceLog, Pairing } from "./types";
 

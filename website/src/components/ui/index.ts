@@ -11,4 +11,6 @@ export { StatusBadge } from './StatusBadge';
 export type { StatusVariant } from './StatusBadge';
 export { StatusIndicator } from './StatusIndicator';
 export { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './Table';
+export { TerminalDisplay } from './TerminalDisplay';
+export type { TerminalLine } from './TerminalDisplay';
 

@@ -151,6 +151,16 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
                 >
                   Approve Device
                 </Link>
+                <Link 
+                  href="/user/support" 
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    pathname === '/user/support' || pathname?.startsWith('/user/support')
+                      ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30' 
+                      : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Support
+                </Link>
               </div>
             </div>
 
@@ -257,6 +267,17 @@ export default function UserShell({ children }: { children: React.ReactNode }) {
               }`}
             >
               Approve Device
+            </Link>
+            <Link 
+              href="/user/support" 
+              onClick={() => setMobileMenuOpen(false)}
+              className={`block px-4 py-3 rounded-lg text-base font-medium touch-manipulation active:scale-[0.98] transition-all ${
+                pathname === '/user/support' || pathname?.startsWith('/user/support')
+                  ? 'bg-blue-50 dark:bg-blue-900/50 text-blue-600 dark:text-blue-200' 
+                  : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 active:bg-gray-100 dark:active:bg-gray-600'
+              }`}
+            >
+              Support
             </Link>
             
             {/* Mobile - Additional Links */}

@@ -1,8 +1,7 @@
 'use client';
 
-import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
 import { getSupabaseClient } from '@/lib/supabaseClient';
-import { type SupabaseClient, type Session } from '@supabase/supabase-js';
+import { type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG } from '../constants';
 import type { RealtimeStatus, WebexStatusBroadcast } from '../types';

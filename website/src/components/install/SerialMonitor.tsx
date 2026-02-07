@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { AutoApproveStatus } from '@/hooks/useSerialMonitor';
+import type { AutoApproveStatus } from '@/hooks/useSerialMonitor';
+import { TerminalDisplay } from '@/components/ui/TerminalDisplay';
 
 interface SerialMonitorProps {
   serialOutput: string[];
@@ -12,7 +12,8 @@ interface SerialMonitorProps {
 }
 
 /**
- * Terminal-like display component for Serial output.
+ * Terminal-like display component for Serial output during device installation.
+ * Wraps TerminalDisplay with pairing code extraction UI.
  */
 export function SerialMonitor({
   serialOutput,
@@ -21,15 +22,6 @@ export function SerialMonitor({
   extractedPairingCode,
   isMonitoring,
 }: SerialMonitorProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll to bottom when new output arrives
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [serialOutput]);
-
   const getStatusColor = () => {
     switch (autoApproveStatus) {
       case 'monitoring':
@@ -60,6 +52,13 @@ export function SerialMonitor({
     }
   };
 
+  const monitoringIndicator = isMonitoring ? (
+    <span className="text-xs text-blue-400 flex items-center gap-1">
+      <span className="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+      Monitoring...
+    </span>
+  ) : undefined;
+
   return (
     <div className="space-y-4">
       {/* Status Message */}
@@ -89,48 +88,13 @@ export function SerialMonitor({
         </div>
       )}
 
-      {/* Serial Output Terminal */}
-      <div className="bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden">
-        {/* Terminal Header */}
-        <div className="bg-gray-800 dark:bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700 dark:border-gray-800">
-          <div className="flex gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-500" />
-            <div className="w-3 h-3 rounded-full bg-yellow-500" />
-            <div className="w-3 h-3 rounded-full bg-green-500" />
-          </div>
-          <span className="text-xs text-gray-400 ml-2">Serial Monitor</span>
-          {isMonitoring && (
-            <span className="ml-auto text-xs text-blue-400 flex items-center gap-1">
-              <span className="inline-block w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
-              Monitoring...
-            </span>
-          )}
-        </div>
-
-        {/* Terminal Content */}
-        <div
-          ref={scrollRef}
-          className="p-4 font-mono text-sm text-green-400 dark:text-green-300 h-64 overflow-y-auto"
-          style={{
-            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-          }}
-        >
-          {serialOutput.length === 0 ? (
-            <div className="text-gray-500 dark:text-gray-600">
-              Waiting for Serial output...
-            </div>
-          ) : (
-            serialOutput.map((line, index) => (
-              <div key={index} className="mb-1">
-                <span className="text-gray-500 dark:text-gray-600 mr-2">
-                  {String(index + 1).padStart(4, '0')}
-                </span>
-                <span>{line}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      {/* Terminal Display */}
+      <TerminalDisplay
+        lines={serialOutput}
+        title="Serial Monitor"
+        statusSlot={monitoringIndicator}
+        emptyText="Waiting for Serial output..."
+      />
 
       {/* Instructions */}
       {autoApproveStatus === 'error' && extractedPairingCode && (

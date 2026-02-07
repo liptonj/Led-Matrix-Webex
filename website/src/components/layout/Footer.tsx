@@ -86,7 +86,7 @@ export function Footer() {
         
         {/* Copyright */}
         <div className="text-center pt-6 border-t border-[var(--color-border)]">
-          <p className="text-sm text-[var(--color-text-muted)]">
+          <p className="text-sm text-[var(--color-text-muted)]" suppressHydrationWarning>
             © {currentYear} LED Matrix Webex Display Project
           </p>
         </div>

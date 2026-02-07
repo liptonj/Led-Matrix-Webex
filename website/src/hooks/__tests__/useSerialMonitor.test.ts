@@ -75,6 +75,9 @@ class MockSerialPort implements MockSerialPort {
   writable: MockWritableStream | null = null;
   open = jest.fn().mockResolvedValue(undefined);
   close = jest.fn().mockResolvedValue(undefined);
+  setSignals = jest.fn().mockResolvedValue(undefined);
+  addEventListener = jest.fn();
+  removeEventListener = jest.fn();
 
   // Test helpers
   simulateRead(data: Uint8Array, done = false): void {
@@ -122,7 +125,7 @@ const mockSerial = {
 };
 
 beforeEach(() => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ advanceTimers: true });
   jest.clearAllMocks();
   
   // Mock navigator.serial using Object.defineProperty (reliable in jsdom)
@@ -220,6 +223,7 @@ describe('useSerialMonitor', () => {
 
       await waitFor(() => {
         expect(mockPort.open).toHaveBeenCalled();
+        expect(result.current.isMonitoring || result.current.autoApproveStatus === 'monitoring').toBeTruthy();
       });
 
       let sendResult: boolean;
@@ -247,6 +251,11 @@ describe('useSerialMonitor', () => {
 
       await waitFor(() => {
         expect(mockPort.open).toHaveBeenCalled();
+      });
+
+      // Wait for connection to be established
+      await waitFor(() => {
+        expect(result.current.isMonitoring || result.current.autoApproveStatus === 'monitoring').toBeTruthy();
       });
 
       let sendResult: boolean;
@@ -283,6 +292,11 @@ describe('useSerialMonitor', () => {
         expect(mockPort.open).toHaveBeenCalled();
       });
 
+      // Wait for connection to be established
+      await waitFor(() => {
+        expect(result.current.isMonitoring || result.current.autoApproveStatus === 'monitoring').toBeTruthy();
+      });
+
       let sendResult: boolean;
       await act(async () => {
         sendResult = await result.current.sendCommand('get_status');
@@ -310,6 +324,11 @@ describe('useSerialMonitor', () => {
         expect(mockPort.open).toHaveBeenCalled();
       });
 
+      // Wait for connection to be established
+      await waitFor(() => {
+        expect(result.current.isMonitoring || result.current.autoApproveStatus === 'monitoring').toBeTruthy();
+      });
+
       // Make writer.write throw an error
       const writer = mockPort.writable.getMockWriter();
       writer!.write.mockRejectedValueOnce(new Error('Write failed'));
@@ -323,7 +342,7 @@ describe('useSerialMonitor', () => {
 
       expect(sendResult!).toBe(false);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Serial] Write error:'),
+        expect.stringContaining('[SerialPort] Write error:'),
         expect.any(Error)
       );
 
@@ -645,8 +664,8 @@ describe('useSerialMonitor', () => {
   describe('error handling', () => {
     it('should handle Web Serial API not available', async () => {
       // Delete the property so 'serial' in navigator returns false
-      // @ts-expect-error -- deleting a property for test purposes
-      delete navigator.serial;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      delete (navigator as any).serial;
 
       const { result } = renderHook(() => useSerialMonitor());
 
@@ -654,8 +673,11 @@ describe('useSerialMonitor', () => {
         await result.current.startMonitoring();
       });
 
-      expect(result.current.autoApproveStatus).toBe('error');
-      expect(result.current.approveMessage).toContain('Web Serial API is not available');
+      // useSerialPort sets status to 'error', which useSerialMonitor picks up
+      await waitFor(() => {
+        expect(result.current.autoApproveStatus).toBe('error');
+        expect(result.current.approveMessage).toContain('Web Serial API');
+      });
     });
 
     it('should handle port request cancellation', async () => {
@@ -668,8 +690,12 @@ describe('useSerialMonitor', () => {
         await result.current.startMonitoring();
       });
 
-      expect(result.current.autoApproveStatus).toBe('error');
-      expect(result.current.approveMessage).toContain('No Serial port selected');
+      // NotFoundError puts useSerialPort in 'disconnected' status with error
+      // useSerialMonitor translates disconnected to idle
+      await waitFor(() => {
+        expect(result.current.isMonitoring).toBe(false);
+        expect(result.current.approveMessage).toContain('No serial port selected');
+      });
     });
   });
 

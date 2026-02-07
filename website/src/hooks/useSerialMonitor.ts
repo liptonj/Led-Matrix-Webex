@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useSerialPort } from './useSerialPort';
 
 export type AutoApproveStatus = 'idle' | 'monitoring' | 'approving' | 'success' | 'error';
 
@@ -27,10 +28,6 @@ interface UseSerialMonitorReturn {
  * Returns 6-character uppercase code or null if not found.
  */
 export function extractPairingCode(text: string): string | null {
-  // Match patterns like:
-  // - "PAIRING CODE: ABC123"
-  // - "[SUPABASE] Pairing code: ABC123"
-  // - "Pairing code: ABC123"
   const patterns = [
     /PAIRING CODE:\s*([A-HJ-NP-Z2-9]{6})/i,
     /\[SUPABASE\]\s*Pairing code:\s*([A-HJ-NP-Z2-9]{6})/i,
@@ -49,212 +46,139 @@ export function extractPairingCode(text: string): string | null {
 
 /**
  * Hook for monitoring Serial port output and extracting pairing codes.
+ * Thin wrapper around useSerialPort that adds pairing code extraction
+ * and provision token ACK detection.
  */
 export function useSerialMonitor({
   onPairingCodeFound,
   onProvisionTokenAck,
-  timeoutMs = 60000, // 60 seconds default timeout
+  timeoutMs = 60000,
 }: UseSerialMonitorOptions = {}): UseSerialMonitorReturn {
-  const [serialOutput, setSerialOutput] = useState<string[]>([]);
   const [autoApproveStatus, setAutoApproveStatus] = useState<AutoApproveStatus>('idle');
   const [approveMessage, setApproveMessage] = useState('');
   const [extractedPairingCode, setExtractedPairingCode] = useState<string | null>(null);
   const [isMonitoring, setIsMonitoring] = useState(false);
 
-  const portRef = useRef<SerialPort | null>(null);
-  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const timeoutRef = useRef<number | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const onPairingCodeFoundRef = useRef(onPairingCodeFound);
+  const onProvisionTokenAckRef = useRef(onProvisionTokenAck);
 
-  const sendCommand = useCallback(async (command: string): Promise<boolean> => {
-    if (!portRef.current?.writable) {
-      console.error('[Serial] Port not writable');
-      return false;
+  useEffect(() => { onPairingCodeFoundRef.current = onPairingCodeFound; }, [onPairingCodeFound]);
+  useEffect(() => { onProvisionTokenAckRef.current = onProvisionTokenAck; }, [onProvisionTokenAck]);
+
+  const handleLine = useCallback((line: string) => {
+    // Try to extract pairing code
+    const pairingCode = extractPairingCode(line);
+    if (pairingCode) {
+      setExtractedPairingCode(pairingCode);
+      setApproveMessage(`Pairing code found: ${pairingCode}`);
+
+      // Clear timeout
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+
+      // Notify callback
+      onPairingCodeFoundRef.current?.(pairingCode);
+
+      // Stop monitoring state (port stays open)
+      setIsMonitoring(false);
+      setAutoApproveStatus('idle');
     }
-    try {
-      const writer = portRef.current.writable.getWriter();
-      const encoder = new TextEncoder();
-      await writer.write(encoder.encode(command + '\n'));
-      writer.releaseLock();
-      return true;
-    } catch (error) {
-      console.error('[Serial] Write error:', error);
-      return false;
+
+    // Check for provision token ACK
+    const provisionTokenAckMatch = line.match(/^ACK:PROVISION_TOKEN:(success|error)(?::(.+))?$/);
+    if (provisionTokenAckMatch) {
+      const success = provisionTokenAckMatch[1] === 'success';
+      const errorReason = provisionTokenAckMatch[2];
+      onProvisionTokenAckRef.current?.(success, errorReason);
     }
   }, []);
+
+  const serialPort = useSerialPort({
+    baudRate: 115200,
+    onLine: handleLine,
+  });
 
   const stopMonitoring = useCallback(() => {
     setIsMonitoring(false);
     setAutoApproveStatus('idle');
 
-    // Clear timeout
     if (timeoutRef.current !== null) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
 
-    // Cancel reader
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
+    serialPort.disconnect();
+  }, [serialPort]);
 
-    // Close reader
-    if (readerRef.current) {
-      readerRef.current.cancel().catch(() => {
-        // Ignore cancellation errors
-      });
-      readerRef.current = null;
-    }
+  // Watch for connection status changes
+  useEffect(() => {
+    if (!isMonitoring) return;
 
-    // Close port
-    if (portRef.current) {
-      portRef.current.close().catch(() => {
-        // Ignore close errors
-      });
-      portRef.current = null;
+    if (serialPort.status === 'connected' && !timeoutRef.current) {
+      // Connection succeeded, set up timeout
+      setApproveMessage('Monitoring Serial output for pairing code...');
+      const timeoutSeconds = Math.round(timeoutMs / 1000);
+      timeoutRef.current = window.setTimeout(() => {
+        stopMonitoring();
+        setAutoApproveStatus('error');
+        setApproveMessage(`Timeout: No pairing code found after ${timeoutSeconds} seconds. Please check the device Serial output manually.`);
+      }, timeoutMs);
+    } else if (serialPort.status === 'error' && serialPort.error) {
+      // Connection failed
+      setAutoApproveStatus('error');
+      setApproveMessage(serialPort.error);
+      setIsMonitoring(false);
+    } else if (serialPort.status === 'disconnected' && isMonitoring) {
+      // Connection was cancelled or disconnected
+      setIsMonitoring(false);
+      setAutoApproveStatus('idle');
+      if (serialPort.error) {
+        setApproveMessage(serialPort.error);
+      }
     }
-  }, []);
+  }, [serialPort.status, serialPort.error, isMonitoring, timeoutMs, stopMonitoring]);
 
   const startMonitoring = useCallback(async () => {
-    // Check if Web Serial API is available
-    if (!('serial' in navigator)) {
-      setAutoApproveStatus('error');
-      setApproveMessage('Web Serial API is not available in this browser. Please use Chrome or Edge.');
-      return;
-    }
-
     try {
       setIsMonitoring(true);
       setAutoApproveStatus('monitoring');
       setApproveMessage('Requesting Serial port access...');
-      setSerialOutput([]);
       setExtractedPairingCode(null);
 
-      // Request Serial port
-      const port = await navigator.serial.requestPort();
-      portRef.current = port;
-
-      setApproveMessage('Opening Serial port...');
-
-      // Open port with 115200 baud (standard ESP32 speed)
-      await port.open({ baudRate: 115200 });
-      setApproveMessage('Monitoring Serial output for pairing code...');
-
-      // Set up timeout
-      timeoutRef.current = window.setTimeout(() => {
-        stopMonitoring();
-        setAutoApproveStatus('error');
-        setApproveMessage('Timeout: No pairing code found after 60 seconds. Please check the device Serial output manually.');
-      }, timeoutMs);
-
-      // Set up reader
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
-
-      if (!port.readable) {
-        throw new Error('Serial port is not readable');
-      }
-
-      const reader = port.readable.getReader();
-      readerRef.current = reader;
-
-      // Text decoder for converting bytes to text
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      // Read loop
-      while (!abortController.signal.aborted) {
-        const { value, done } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        if (value) {
-          // Decode bytes to text
-          const text = decoder.decode(value, { stream: true });
-          buffer += text;
-
-          // Process complete lines
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            const trimmedLine = line.trim();
-            if (trimmedLine) {
-              setSerialOutput((prev) => [...prev, trimmedLine]);
-
-              // Try to extract pairing code
-              const pairingCode = extractPairingCode(trimmedLine);
-              if (pairingCode) {
-                setExtractedPairingCode(pairingCode);
-                setApproveMessage(`Pairing code found: ${pairingCode}`);
-                
-                // Clear timeout
-                if (timeoutRef.current !== null) {
-                  clearTimeout(timeoutRef.current);
-                  timeoutRef.current = null;
-                }
-
-                // Notify callback
-                if (onPairingCodeFound) {
-                  onPairingCodeFound(pairingCode);
-                }
-
-                // Stop monitoring (but keep port open for now)
-                setIsMonitoring(false);
-                setAutoApproveStatus('idle');
-                break;
-              }
-
-              // Check for provision token ACK
-              const provisionTokenAckMatch = trimmedLine.match(/^ACK:PROVISION_TOKEN:(success|error)(?::(.+))?$/);
-              if (provisionTokenAckMatch && onProvisionTokenAck) {
-                const success = provisionTokenAckMatch[1] === 'success';
-                const errorReason = provisionTokenAckMatch[2];
-                onProvisionTokenAck(success, errorReason);
-              }
-            }
-          }
-        }
-      }
+      await serialPort.connect();
     } catch (error) {
       console.error('Serial monitoring error:', error);
       stopMonitoring();
-      
-      if (error instanceof DOMException && error.name === 'NotFoundError') {
-        setAutoApproveStatus('error');
-        setApproveMessage('No Serial port selected. Please select your device when prompted.');
-      } else if (error instanceof DOMException && error.name === 'SecurityError') {
-        setAutoApproveStatus('error');
-        setApproveMessage('Permission denied. Please allow Serial port access.');
-      } else {
-        setAutoApproveStatus('error');
-        setApproveMessage(
-          error instanceof Error
-            ? `Serial monitoring failed: ${error.message}`
-            : 'Serial monitoring failed. Please check the device Serial output manually.'
-        );
-      }
+
+      setAutoApproveStatus('error');
+      setApproveMessage(
+        error instanceof Error
+          ? `Serial monitoring failed: ${error.message}`
+          : 'Serial monitoring failed. Please check the device Serial output manually.'
+      );
     }
-  }, [onPairingCodeFound, onProvisionTokenAck, timeoutMs, stopMonitoring]);
+  }, [serialPort, stopMonitoring]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      stopMonitoring();
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
     };
-  }, [stopMonitoring]);
+  }, []);
 
   return {
-    serialOutput,
+    serialOutput: serialPort.lines,
     autoApproveStatus,
     approveMessage,
     extractedPairingCode,
     startMonitoring,
     stopMonitoring,
-    sendCommand,
+    sendCommand: serialPort.write,
     isMonitoring,
   };
 }
