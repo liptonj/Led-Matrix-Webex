@@ -32,13 +32,13 @@ export function EmbeddedAppClient() {
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const { debugVisible, setDebugVisible, debugLogs, clearDebugLogs, activityLog, addLog, handleCopyDebug, formatRelativeTime } = useDebugConsole();
-  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updatePairingState, broadcastToUserChannel, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
+  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updatePairingState, broadcastToUserChannel, lastBroadcastConfig, requestDeviceConfig, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
   
   // Get device UUID from selected device
   const deviceUuid = selectedDeviceUuid || null;
   
   const { sendCommand } = useDeviceCommands({ deviceUuid, supabaseRef, addLog, broadcastToUserChannel });
-  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog });
+  const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog, lastBroadcastConfig, requestDeviceConfig });
   const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth, broadcastStatusUpdate } = useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog, broadcastToUserChannel });
   const { isReady: webexReady, user, status: webexStatus, isVideoOn, isMuted, isInCall, error: webexError, initialize } = useWebexSDK();
 

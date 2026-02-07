@@ -33,6 +33,8 @@ export interface UsePairingResult {
   refreshPairingSnapshot: (deviceUuid: string, reason: string) => Promise<void>;
   updatePairingState: (stateData: { webex_status?: string; camera_on?: boolean; mic_muted?: boolean; in_call?: boolean; display_name?: string }) => Promise<boolean>;
   broadcastToUserChannel: (event: string, payload: Record<string, unknown>) => Promise<boolean>;
+  lastBroadcastConfig: Record<string, unknown> | null;
+  requestDeviceConfig: () => Promise<boolean>;
   // Session-related exports
   session: Session | null;
   userDevices: UserDevice[];
@@ -54,6 +56,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const [userDevices, setUserDevices] = useState<UserDevice[]>([]);
   const [selectedDeviceUuid, setSelectedDeviceUuid] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [lastBroadcastConfig, setLastBroadcastConfig] = useState<Record<string, unknown> | null>(null);
 
   const supabaseRef = useRef<SupabaseClient | null>(null);
   const userChannelRef = useRef<ReturnType<SupabaseClient['channel']> | null>(null);
@@ -110,6 +113,11 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       return false;
     }
   }, [addLog]);
+
+  const requestDeviceConfig = useCallback(async (): Promise<boolean> => {
+    if (!selectedDeviceUuid) return false;
+    return broadcastToUserChannel('request_config', { device_uuid: selectedDeviceUuid });
+  }, [selectedDeviceUuid, broadcastToUserChannel]);
 
   // Initialize Supabase client with session
   useEffect(() => {
@@ -289,6 +297,16 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
         setLastDeviceSeenMs(Date.now());
         setIsPeerConnected(true);
         setLastDeviceSeenAt(new Date().toISOString());
+      }
+    })
+    .on('broadcast', { event: 'device_config' }, (payload: { payload: { device_uuid: string; [key: string]: unknown } }) => {
+      const config = payload.payload;
+      if (config.device_uuid === selectedDeviceUuid) {
+        lastPairingSnapshotRef.current = Date.now();
+        setLastDeviceSeenMs(Date.now());
+        setIsPeerConnected(true);
+        setLastBroadcastConfig(config);
+        addLog('Received device_config broadcast');
       }
     })
     .subscribe((status, err) => {
@@ -547,6 +565,8 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     refreshPairingSnapshot,
     updatePairingState,
     broadcastToUserChannel,
+    lastBroadcastConfig,
+    requestDeviceConfig,
     session,
     userDevices,
     selectedDeviceUuid,

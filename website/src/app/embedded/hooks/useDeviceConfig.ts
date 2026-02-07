@@ -9,6 +9,8 @@ export interface UseDeviceConfigOptions {
   sendCommand: (command: string, payload?: Record<string, unknown>) => Promise<CommandResponse>;
   addLog: (message: string) => void;
   deviceIp?: string | null;
+  lastBroadcastConfig?: Record<string, unknown> | null;
+  requestDeviceConfig?: () => Promise<boolean>;
 }
 
 export interface UseDeviceConfigResult {
@@ -82,7 +84,7 @@ function asDeviceStatus(data: unknown): DeviceStatus {
   return data as DeviceStatus;
 }
 
-export function useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp }: UseDeviceConfigOptions): UseDeviceConfigResult {
+export function useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp, lastBroadcastConfig, requestDeviceConfig }: UseDeviceConfigOptions): UseDeviceConfigResult {
   const [deviceConfig, setDeviceConfig] = useState<DeviceConfig | null>(null);
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>(defaultDeviceStatus);
   const [isLoading, setIsLoading] = useState(false);
@@ -199,6 +201,15 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp
     if (config.display_metric !== undefined) setDisplayMetric(config.display_metric || 'tvoc');
   }, [setBrightness, setScrollSpeedMs, setPageIntervalMs, setDisplayPages, setStatusLayout, setDeviceName, setManualDisplayName, setDateColor, setTimeColor, setNameColor, setMetricColor, setMqttBroker, setMqttPort, setMqttUsername, setHasMqttPassword, setMqttTopic, setDisplaySensorMac, setDisplayMetric]);
 
+  // Sync config from realtime broadcast
+  useEffect(() => {
+    if (lastBroadcastConfig) {
+      const config = asDeviceConfig(lastBroadcastConfig);
+      setDeviceConfig(config);
+      syncConfigToState(config);
+    }
+  }, [lastBroadcastConfig, syncConfigToState]);
+
   // Fetch device config via HTTP API or command
   const fetchDeviceConfig = useCallback(async () => {
     if (!isPeerConnected) return;
@@ -208,6 +219,11 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp
     
     try {
       addLog('Fetching device config...');
+      
+      // Try requesting config via realtime first (result arrives via lastBroadcastConfig effect)
+      if (requestDeviceConfig) {
+        requestDeviceConfig().catch(() => {});
+      }
       
       // Try HTTP API first if deviceIp is available
       if (deviceIp) {
@@ -251,7 +267,7 @@ export function useDeviceConfig({ isPeerConnected, sendCommand, addLog, deviceIp
     } finally {
       setIsLoading(false);
     }
-  }, [isPeerConnected, sendCommand, addLog, deviceIp, syncConfigToState]);
+  }, [isPeerConnected, sendCommand, addLog, deviceIp, syncConfigToState, requestDeviceConfig]);
 
   // Update device config via HTTP API PATCH
   const updateDeviceConfig = useCallback(async (updates: Partial<DeviceConfig>): Promise<boolean> => {
