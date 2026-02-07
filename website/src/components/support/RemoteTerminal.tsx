@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { TerminalDisplay } from '@/components/ui/TerminalDisplay';
 import type { TerminalLine, ActionType, BridgeHealth, FlashProgressEvent } from '@/types/support';
 
@@ -57,12 +57,19 @@ export function RemoteTerminal({
 
   const isFlashing = flashProgress !== null && flashProgress.percent < 100;
 
+  // Auto-focus the input when the component mounts
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim()) return;
     onCommand(input);
     setInput('');
     setHistoryIndex(-1);
+    // Keep focus in the terminal input after submit
+    inputRef.current?.focus();
   }, [input, onCommand]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -169,28 +176,29 @@ export function RemoteTerminal({
         />
       </div>
 
-      {/* Command Input -- shrink-0 keeps this pinned at the bottom */}
-      <form onSubmit={handleSubmit} className="shrink-0 flex border-t border-gray-700 dark:border-gray-800">
-        <span className="flex items-center px-3 text-green-400 font-mono text-sm bg-gray-900 dark:bg-black">
-          $
-        </span>
+      {/* Inline command prompt -- behaves like a real terminal */}
+      <form
+        onSubmit={handleSubmit}
+        className="shrink-0 flex items-center bg-gray-900 dark:bg-black border-t border-gray-700/50 dark:border-gray-800/50"
+      >
+        <span className="pl-4 text-green-400 font-mono text-sm select-none">$</span>
         <input
           ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a command and press Enter..."
-          className="flex-1 px-3 py-2.5 bg-gray-900 dark:bg-black text-green-400 font-mono text-sm outline-none placeholder-gray-600"
+          placeholder="type a command…"
+          aria-label="Terminal command input"
+          className="flex-1 px-2 py-2 bg-transparent text-green-400 font-mono text-sm outline-none placeholder-gray-600 caret-green-400"
+          style={{
+            fontFamily:
+              'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+          }}
           autoComplete="off"
           spellCheck={false}
+          autoFocus
         />
-        <button
-          type="submit"
-          className="px-4 bg-gray-800 dark:bg-gray-900 text-gray-400 hover:text-white text-sm font-medium transition-colors border-l border-gray-700"
-        >
-          Send
-        </button>
       </form>
     </div>
   );

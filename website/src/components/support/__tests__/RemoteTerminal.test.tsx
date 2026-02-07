@@ -38,8 +38,7 @@ describe('RemoteTerminal', () => {
 
     it('renders command input', () => {
       render(<RemoteTerminal {...defaultProps} />);
-      expect(screen.getByPlaceholderText('Type a command and press Enter...')).toBeInTheDocument();
-      expect(screen.getByText('Send')).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /terminal command input/i })).toBeInTheDocument();
     });
 
     it('renders bridge health indicator', () => {
@@ -57,36 +56,35 @@ describe('RemoteTerminal', () => {
   });
 
   describe('command input', () => {
-    it('calls onCommand when form is submitted', async () => {
-      const user = userEvent.setup();
-      const onCommand = jest.fn();
-      render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
-
-      const input = screen.getByPlaceholderText('Type a command and press Enter...');
-      await user.type(input, 'test command');
-      await user.click(screen.getByText('Send'));
-
-      expect(onCommand).toHaveBeenCalledWith('test command');
-    });
-
     it('calls onCommand when Enter is pressed', async () => {
       const user = userEvent.setup();
       const onCommand = jest.fn();
       render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...');
+      const input = screen.getByRole('textbox', { name: /terminal command input/i });
+      await user.type(input, 'test command{Enter}');
+
+      expect(onCommand).toHaveBeenCalledWith('test command');
+    });
+
+    it('submits on Enter like a real terminal', async () => {
+      const user = userEvent.setup();
+      const onCommand = jest.fn();
+      render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
+
+      const input = screen.getByRole('textbox', { name: /terminal command input/i });
       await user.type(input, 'test{Enter}');
 
       expect(onCommand).toHaveBeenCalledWith('test');
     });
 
-    it('does not call onCommand for empty input', async () => {
+    it('does not call onCommand for empty Enter press', async () => {
       const user = userEvent.setup();
       const onCommand = jest.fn();
       render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...');
-      await user.click(screen.getByText('Send'));
+      const input = screen.getByRole('textbox', { name: /terminal command input/i });
+      await user.type(input, '{Enter}');
 
       expect(onCommand).not.toHaveBeenCalled();
     });
@@ -96,9 +94,8 @@ describe('RemoteTerminal', () => {
       const onCommand = jest.fn();
       render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...');
-      await user.type(input, '   ');
-      await user.click(screen.getByText('Send'));
+      const input = screen.getByRole('textbox', { name: /terminal command input/i });
+      await user.type(input, '   {Enter}');
 
       expect(onCommand).not.toHaveBeenCalled();
     });
@@ -108,9 +105,8 @@ describe('RemoteTerminal', () => {
       const onCommand = jest.fn();
       render(<RemoteTerminal {...defaultProps} onCommand={onCommand} />);
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...') as HTMLInputElement;
-      await user.type(input, 'test command');
-      await user.click(screen.getByText('Send'));
+      const input = screen.getByRole('textbox', { name: /terminal command input/i }) as HTMLInputElement;
+      await user.type(input, 'test command{Enter}');
 
       await waitFor(() => {
         expect(input.value).toBe('');
@@ -129,7 +125,7 @@ describe('RemoteTerminal', () => {
         />
       );
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...') as HTMLInputElement;
+      const input = screen.getByRole('textbox', { name: /terminal command input/i }) as HTMLInputElement;
       
       // Navigate up through history
       await user.type(input, '{ArrowUp}');
@@ -329,7 +325,7 @@ describe('RemoteTerminal', () => {
         />
       );
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...') as HTMLInputElement;
+      const input = screen.getByRole('textbox', { name: /terminal command input/i }) as HTMLInputElement;
       
       // Navigate up past beginning
       await user.type(input, '{ArrowUp}{ArrowUp}{ArrowUp}');
@@ -344,7 +340,7 @@ describe('RemoteTerminal', () => {
       const user = userEvent.setup();
       render(<RemoteTerminal {...defaultProps} commandHistory={[]} />);
 
-      const input = screen.getByPlaceholderText('Type a command and press Enter...') as HTMLInputElement;
+      const input = screen.getByRole('textbox', { name: /terminal command input/i }) as HTMLInputElement;
       await user.type(input, '{ArrowUp}');
       expect(input.value).toBe('');
     });
@@ -357,10 +353,11 @@ describe('RemoteTerminal', () => {
       expect(buttons.length).toBeGreaterThan(0);
     });
 
-    it('has proper input label', () => {
+    it('has proper input with aria-label', () => {
       render(<RemoteTerminal {...defaultProps} />);
-      const input = screen.getByPlaceholderText('Type a command and press Enter...');
+      const input = screen.getByRole('textbox', { name: /terminal command input/i });
       expect(input).toBeInTheDocument();
+      expect(input).toHaveAttribute('aria-label');
     });
 
     it('has proper form structure', () => {
