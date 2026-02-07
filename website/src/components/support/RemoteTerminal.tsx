@@ -86,9 +86,9 @@ export function RemoteTerminal({
   }, [historyIndex, commandHistory]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Action Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 rounded-t-lg">
         <button
           onClick={() => onAction('reset')}
           disabled={isFlashing}
@@ -143,7 +143,7 @@ export function RemoteTerminal({
 
       {/* Flash Progress Bar (overlay) */}
       {isFlashing && flashProgress && (
-        <div className="px-3 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
+        <div className="shrink-0 px-3 py-2 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800">
           <div className="flex justify-between text-xs text-yellow-700 dark:text-yellow-400 mb-1">
             <span>{flashProgress.phase}: {flashProgress.message}</span>
             <span>{flashProgress.percent}%</span>
@@ -158,7 +158,7 @@ export function RemoteTerminal({
       )}
 
       {/* Terminal Display */}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <TerminalDisplay
           lines={lines}
           title="Remote Console"
@@ -169,8 +169,8 @@ export function RemoteTerminal({
         />
       </div>
 
-      {/* Command Input */}
-      <form onSubmit={handleSubmit} className="flex border-t border-gray-700 dark:border-gray-800">
+      {/* Command Input -- shrink-0 keeps this pinned at the bottom */}
+      <form onSubmit={handleSubmit} className="shrink-0 flex border-t border-gray-700 dark:border-gray-800">
         <span className="flex items-center px-3 text-green-400 font-mono text-sm bg-gray-900 dark:bg-black">
           $
         </span>

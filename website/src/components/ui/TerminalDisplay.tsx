@@ -127,7 +127,7 @@ export function TerminalDisplay({
   return (
     <div className={`bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden flex flex-col${className ? ` ${className}` : ''}`}>
       {/* Terminal Header */}
-      <div className="bg-gray-800 dark:bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700 dark:border-gray-800">
+      <div className="shrink-0 bg-gray-800 dark:bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700 dark:border-gray-800">
         <div className="flex gap-2">
           <div className="w-3 h-3 rounded-full bg-red-500" />
           <div className="w-3 h-3 rounded-full bg-yellow-500" />
@@ -153,38 +153,38 @@ export function TerminalDisplay({
         {statusSlot && <div className="ml-auto">{statusSlot}</div>}
       </div>
 
-      {/* Terminal Content */}
-      <div
-        ref={scrollRef}
-        className={`p-4 font-mono text-sm ${heightClass} overflow-y-auto scroll-smooth`}
-        style={{
-          fontFamily:
-            'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
-        }}
-        onScroll={handleScroll}
-        onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onWheel={handleWheel}
-      >
-        {lines.length === 0 ? (
-          <div className="text-gray-500 dark:text-gray-600">{emptyText}</div>
-        ) : (
-          lines.map((line, index) => (
-            <div key={index} className="mb-1">
-              {showLineNumbers && (
-                <span className="text-gray-500 dark:text-gray-600 mr-2">
-                  {String(index + 1).padStart(4, '0')}
-                </span>
-              )}
-              <span className={getLineColor(line)}>{getLineText(line)}</span>
-            </div>
-          ))
-        )}
-      </div>
+      {/* Terminal Content -- relative wrapper for the scroll-to-bottom FAB */}
+      <div className={`${heightClass} relative`}>
+        <div
+          ref={scrollRef}
+          className="absolute inset-0 p-4 font-mono text-sm overflow-y-auto"
+          style={{
+            fontFamily:
+              'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+          }}
+          onScroll={handleScroll}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onWheel={handleWheel}
+        >
+          {lines.length === 0 ? (
+            <div className="text-gray-500 dark:text-gray-600">{emptyText}</div>
+          ) : (
+            lines.map((line, index) => (
+              <div key={index} className="mb-1">
+                {showLineNumbers && (
+                  <span className="text-gray-500 dark:text-gray-600 mr-2">
+                    {String(index + 1).padStart(4, '0')}
+                  </span>
+                )}
+                <span className={getLineColor(line)}>{getLineText(line)}</span>
+              </div>
+            ))
+          )}
+        </div>
 
-      {/* Scroll-to-bottom FAB (shown when auto-scroll is off and there are lines) */}
-      {!autoScroll && lines.length > 0 && (
-        <div className="relative">
+        {/* Scroll-to-bottom FAB (shown when auto-scroll is off and there are lines) */}
+        {!autoScroll && lines.length > 0 && (
           <button
             type="button"
             onClick={scrollToBottom}
@@ -196,8 +196,8 @@ export function TerminalDisplay({
               <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
             </svg>
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
