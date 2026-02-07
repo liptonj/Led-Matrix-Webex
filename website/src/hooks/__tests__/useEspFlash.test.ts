@@ -268,6 +268,17 @@ describe('useEspFlash', () => {
       const mockPort = createMockSerialPort();
       const { result } = renderHook(() => useEspFlash());
 
+      // Clear fetch call history right before so we only count this test's calls
+      (global.fetch as jest.Mock).mockClear();
+      // Re-apply the resolved value after clearing
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          parts: [{ path: 'firmware.bin', offset: 0x1000 }],
+        }),
+        arrayBuffer: async () => new ArrayBuffer(100),
+      });
+
       await act(async () => {
         await result.current.startFlash(mockPort as SerialPort, 'https://example.com/manifest.json');
       });
@@ -276,8 +287,9 @@ describe('useEspFlash', () => {
         expect(global.fetch).toHaveBeenCalledWith('https://example.com/manifest.json');
       });
 
-      // Should fetch firmware parts
-      expect(global.fetch).toHaveBeenCalledTimes(2); // manifest + firmware
+      // Should fetch manifest + firmware part
+      expect(global.fetch).toHaveBeenCalledWith('https://example.com/firmware.bin');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
     it('handles manifest fetch errors', async () => {
