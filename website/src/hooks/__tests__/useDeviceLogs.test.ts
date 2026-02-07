@@ -21,7 +21,6 @@ const createMockLog = (id: string, level: DeviceLog['level'], message: string): 
 
 describe('useDeviceLogs', () => {
   let mockUnsubscribe: jest.Mock;
-  const TEST_USER_UUID = 'test-user-uuid';
   const TEST_DEVICE_UUID = 'device-1';
 
   beforeEach(() => {
@@ -33,7 +32,7 @@ describe('useDeviceLogs', () => {
     mockSubscribeToDeviceLogs.mockResolvedValue(mockUnsubscribe);
     
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     expect(result.current.logs).toEqual([]);
@@ -47,23 +46,22 @@ describe('useDeviceLogs', () => {
     let onStatusChange: ((subscribed: boolean) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_userUuid, _onLog, statusCb) => {
+      async (_deviceUuid, _onLog, statusCb) => {
         onStatusChange = statusCb;
         return mockUnsubscribe;
       }
     );
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
-        TEST_USER_UUID,
+        TEST_DEVICE_UUID,
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),
-        TEST_DEVICE_UUID
       );
     });
 
@@ -84,14 +82,14 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_userUuid, logCb) => {
+      async (_deviceUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
     );
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
@@ -121,14 +119,14 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_userUuid, logCb) => {
+      async (_deviceUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
     );
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID, logLimit: 3 })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID, logLimit: 3 })
     );
 
     await waitFor(() => {
@@ -153,14 +151,14 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_userUuid, logCb) => {
+      async (_deviceUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
     );
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
@@ -194,14 +192,14 @@ describe('useDeviceLogs', () => {
     let onError: ((error: string) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_userUuid, _onLog, _statusCb, errorCb) => {
+      async (_deviceUuid, _onLog, _statusCb, errorCb) => {
         onError = errorCb;
         return mockUnsubscribe;
       }
     );
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
@@ -215,9 +213,9 @@ describe('useDeviceLogs', () => {
     expect(result.current.status).toBe('error');
   });
 
-  it('should handle null user uuid', () => {
+  it('should handle null device uuid', () => {
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: null })
+      useDeviceLogs({ deviceUuid: null })
     );
 
     expect(result.current.loading).toBe(false);
@@ -229,7 +227,7 @@ describe('useDeviceLogs', () => {
     mockSubscribeToDeviceLogs.mockResolvedValue(mockUnsubscribe);
 
     const { unmount } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
@@ -245,17 +243,16 @@ describe('useDeviceLogs', () => {
     mockSubscribeToDeviceLogs.mockResolvedValue(mockUnsubscribe);
 
     const { rerender } = renderHook(
-      (props) => useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: props.deviceUuid }),
+      (props) => useDeviceLogs({ deviceUuid: props.deviceUuid }),
       { initialProps: { deviceUuid: 'ABC123' as string | null | undefined } }
     );
 
     await waitFor(() => {
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
-        TEST_USER_UUID,
+        'ABC123',
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),
-        'ABC123'
       );
     });
 
@@ -267,11 +264,10 @@ describe('useDeviceLogs', () => {
     await waitFor(() => {
       expect(mockUnsubscribe).toHaveBeenCalled();
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
-        TEST_USER_UUID,
+        'XYZ789',
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),
-        'XYZ789'
       );
     });
   });
@@ -280,7 +276,7 @@ describe('useDeviceLogs', () => {
     mockSubscribeToDeviceLogs.mockRejectedValue(new Error('Connection failed'));
 
     const { result } = renderHook(() => 
-      useDeviceLogs({ userUuid: TEST_USER_UUID, deviceUuid: TEST_DEVICE_UUID })
+      useDeviceLogs({ deviceUuid: TEST_DEVICE_UUID })
     );
 
     await waitFor(() => {
