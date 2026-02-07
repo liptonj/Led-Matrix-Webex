@@ -146,10 +146,14 @@ describe('useWebexStatus hook - UUID support', () => {
         await result.current.broadcastStatusUpdate('active');
       });
 
-      expect(mockAddLog).toHaveBeenCalledWith(
-        expect.stringContaining('Cannot broadcast status')
+      // Status is user-scoped, so it should still broadcast even without deviceUuid
+      expect(mockBroadcastToUserChannel).toHaveBeenCalledWith(
+        'webex_status',
+        expect.not.objectContaining({ device_uuid: expect.anything() })
       );
-      expect(mockBroadcastToUserChannel).not.toHaveBeenCalled();
+      expect(mockAddLog).toHaveBeenCalledWith(
+        expect.stringContaining('Broadcasted webex_status')
+      );
     });
   });
 });

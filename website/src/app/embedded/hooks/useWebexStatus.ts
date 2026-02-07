@@ -171,6 +171,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
 
     const payload = {
       webex_status: status,
+      ...(deviceUuid && { device_uuid: deviceUuid }),
       in_call: inCall,
       camera_on: cameraOn,
       mic_muted: micMuted,
@@ -244,7 +245,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
     } catch (err) {
       addLog(`Broadcast error: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
-  }, [session?.user?.id, supabaseRef, addLog, broadcastToUserChannel]);
+  }, [session?.user?.id, deviceUuid, supabaseRef, addLog, broadcastToUserChannel]);
 
   // Check auth status once when paired (don't include fetchWebexToken in deps to avoid loops)
   useEffect(() => {
