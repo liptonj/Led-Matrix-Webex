@@ -198,15 +198,22 @@ export default function DeviceDetailPanel({
                 },
                 (subscribed) => {
                     setLogStatus(subscribed ? 'connected' : 'disconnected');
+                    if (!subscribed) {
+                        setLogsError('Disconnected from log stream');
+                    } else {
+                        setLogsError(null);
+                    }
                 },
-                () => {
+                (errorMessage) => {
                     setLogStatus('error');
+                    setLogsError(errorMessage || 'Failed to subscribe to device logs');
                 },
                 device.id, // device_uuid for filtering
             ).then((unsubscribe) => {
                 logsUnsubscribe = unsubscribe;
-            }).catch(() => {
+            }).catch((err) => {
                 setLogStatus('error');
+                setLogsError(err instanceof Error ? err.message : 'Failed to subscribe to device logs');
             });
         } else {
             setLogStatus('disconnected');
@@ -219,7 +226,7 @@ export default function DeviceDetailPanel({
             if (logsUnsubscribe) logsUnsubscribe();
             if (commandsUnsubscribe) commandsUnsubscribe();
         };
-    }, [device?.serial_number, device?.pairing_code, device?.id, userUuid, commandFilter]);
+    }, [device?.serial_number, device?.pairing_code, device?.id, userUuid]);
 
     const filteredLogs = useMemo(() => {
         if (logFilter === 'all') return logs;

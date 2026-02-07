@@ -149,20 +149,21 @@ describe("createRealtimeSubscription", () => {
   describe("broadcast subscriptions", () => {
     it("should create broadcast subscription", async () => {
       const onMessage = jest.fn();
+      const userUuid = "550e8400-e29b-41d4-a716-446655440000";
 
       await createRealtimeSubscription(
-        "device_logs:serial123",
+        `user:${userUuid}`,
         {
           type: "broadcast",
-          event: "log",
+          event: "debug_log",
         },
         { onMessage }
       );
 
-      expect(mockSupabase.channel).toHaveBeenCalledWith("device_logs:serial123");
+      expect(mockSupabase.channel).toHaveBeenCalledWith(`user:${userUuid}`);
       expect(mockChannel.on).toHaveBeenCalledWith(
         "broadcast",
-        { event: "log" },
+        { event: "debug_log" },
         expect.any(Function)
       );
     });
@@ -170,6 +171,7 @@ describe("createRealtimeSubscription", () => {
     it("should call onMessage when broadcast received", async () => {
       const onMessage = jest.fn();
       let messageHandler: (payload: any) => void;
+      const userUuid = "550e8400-e29b-41d4-a716-446655440000";
 
       mockChannel.on.mockImplementation((_type: string, _config: any, handler: any) => {
         messageHandler = handler;
@@ -177,16 +179,17 @@ describe("createRealtimeSubscription", () => {
       });
 
       await createRealtimeSubscription(
-        "device_logs:serial123",
+        `user:${userUuid}`,
         {
           type: "broadcast",
-          event: "log",
+          event: "debug_log",
         },
         { onMessage }
       );
 
       const mockPayload = {
         payload: {
+          device_uuid: "550e8400-e29b-41d4-a716-446655440001",
           serial_number: "serial123",
           level: "info",
           message: "Test log",
@@ -196,6 +199,7 @@ describe("createRealtimeSubscription", () => {
       messageHandler!(mockPayload);
 
       expect(onMessage).toHaveBeenCalledWith({
+        device_uuid: "550e8400-e29b-41d4-a716-446655440001",
         serial_number: "serial123",
         level: "info",
         message: "Test log",

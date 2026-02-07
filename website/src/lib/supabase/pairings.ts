@@ -123,6 +123,8 @@ const PAIRING_COLUMNS = `
   pairing_code,
   serial_number,
   device_id,
+  device_uuid,
+  user_uuid,
   app_last_seen,
   device_last_seen,
   app_connected,
@@ -140,6 +142,7 @@ const PAIRING_COLUMNS = `
   ssid,
   ota_partition,
   config,
+  status_updated_at,
   created_at,
   updated_at
 `;

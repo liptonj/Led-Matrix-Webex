@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
 
-import { useDeviceCommands, type UseDeviceCommandsOptions } from '../useDeviceCommands';
+import { useDeviceCommands, type UseDeviceCommandsOptions, type CommandResponse } from '../useDeviceCommands';
 
 // Store original env
 const originalEnv = process.env;
@@ -114,130 +114,6 @@ describe('useDeviceCommands hook', () => {
     jest.clearAllMocks();
   });
 
-  describe('updateAppStateViaEdge', () => {
-    it('should call update-app-state Edge Function with correct payload', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ success: true, device_connected: true }),
-      });
-
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      let success;
-      await act(async () => {
-        success = await result.current.updateAppStateViaEdge({
-          webex_status: 'active',
-          camera_on: true,
-          mic_muted: false,
-          in_call: false,
-          display_name: 'John Doe',
-        });
-      });
-
-      expect(success).toBe(true);
-      // Verify fetch was called with session token (mocked)
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://test.supabase.co/functions/v1/update-app-state',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Content-Type': 'application/json',
-            'Authorization': expect.stringContaining('Bearer'),
-          }),
-          body: JSON.stringify({
-            webex_status: 'active',
-            camera_on: true,
-            mic_muted: false,
-            in_call: false,
-            display_name: 'John Doe',
-          }),
-        })
-      );
-    });
-
-    it('should include Bearer token in Authorization header', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ success: true }),
-      });
-
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      await act(async () => {
-        await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-      });
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            'Authorization': 'Bearer test-session-token',
-          }),
-        })
-      );
-    });
-
-    it('should return false when update fails', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        json: () => Promise.resolve({ error: 'Rate limit exceeded' }),
-      });
-
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      let success;
-      await act(async () => {
-        success = await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-      });
-
-      expect(success).toBe(false);
-      expect(mockAddLog).toHaveBeenCalledWith(expect.stringContaining('update-app-state failed'));
-    });
-
-    it('should return false when network error occurs', async () => {
-      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
-
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      let success;
-      await act(async () => {
-        success = await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-      });
-
-      expect(success).toBe(false);
-      expect(mockAddLog).toHaveBeenCalledWith('update-app-state error: Network error');
-    });
-
-    it('should return false when not authenticated (no session)', async () => {
-      mockGetSession.mockResolvedValueOnce({
-        data: { session: null },
-        error: null,
-      });
-
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      let success;
-      await act(async () => {
-        success = await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-      });
-
-      expect(success).toBe(false);
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-
-    it('should return false when Supabase URL is not configured', async () => {
-      process.env.NEXT_PUBLIC_SUPABASE_URL = '';
-      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
-
-      let success;
-      await act(async () => {
-        success = await result.current.updateAppStateViaEdge({ webex_status: 'active' });
-      });
-
-      expect(success).toBe(false);
-    });
-  });
-
   describe('insertCommandViaEdge', () => {
     it('should call insert-command Edge Function with correct payload', async () => {
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -341,10 +217,6 @@ describe('useDeviceCommands hook', () => {
     });
   });
 
-  // TODO: These sendCommand tests have test isolation issues - the hook implementation
-  // was refactored to use getSupabaseClient() instead of supabaseRef, and the tests
-  // need to be updated to match. Skipping for now to unblock CI.
-  // See: https://github.com/your-repo/issues/XXX for tracking
   describe('sendCommand', () => {
     beforeEach(() => {
       // Reset channel callbacks for each test
@@ -353,36 +225,246 @@ describe('useDeviceCommands hook', () => {
       mockSupabaseRef.current = mockSupabaseClient as unknown as SupabaseClient;
     });
 
-    it.skip('should throw error when not connected', async () => {
-      // Test skipped: hook no longer checks supabaseRef, uses getSupabaseClient() instead
+    it('should throw error when deviceUuid is null', async () => {
+      const { result } = renderHook(() => useDeviceCommands({
+        ...defaultOptions,
+        deviceUuid: null,
+      }));
+
+      await expect(
+        act(async () => {
+          await result.current.sendCommand('reboot');
+        })
+      ).rejects.toThrow('Device UUID is required');
+
+      expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it.skip('should throw error when deviceUuid is null', async () => {
-      // Test skipped: needs investigation for test isolation issues
+    it('should throw error when insertCommandViaEdge fails', async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Service unavailable' }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      await expect(
+        act(async () => {
+          await result.current.sendCommand('reboot');
+        })
+      ).rejects.toThrow('Service unavailable');
     });
 
-    it.skip('should insert command via Edge Function when enabled', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should insert command via Edge Function when enabled', async () => {
+      const commandId = 'cmd-uuid-123';
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, command_id: commandId }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      let sendPromise: Promise<CommandResponse>;
+      await act(async () => {
+        sendPromise = result.current.sendCommand('set_brightness', { value: 200 });
+      });
+
+      // Wait for channel to be set up
+      await waitFor(() => {
+        expect(channelUpdateCallback).not.toBeNull();
+      });
+
+      // Verify fetch was called with correct Edge Function URL and payload
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://test.supabase.co/functions/v1/insert-command',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+            'Authorization': expect.stringContaining('Bearer'),
+          }),
+          body: JSON.stringify({
+            command: 'set_brightness',
+            payload: { value: 200 },
+            device_uuid: TEST_DEVICE_UUID,
+          }),
+        })
+      );
+
+      // Simulate channel update with 'acked' status to resolve the promise
+      if (channelUpdateCallback) {
+        act(() => {
+          channelUpdateCallback({
+            new: {
+              id: commandId,
+              status: 'acked',
+              response: { brightness: 200 },
+            },
+          });
+        });
+      }
+
+      const response = await sendPromise!;
+      expect(response).toEqual({ success: true, data: { brightness: 200 } });
     });
 
-    it.skip('should subscribe to command updates channel', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should subscribe to command updates channel', async () => {
+      const commandId = 'cmd-uuid-456';
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, command_id: commandId }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      let sendPromise: Promise<CommandResponse>;
+      await act(async () => {
+        sendPromise = result.current.sendCommand('reboot');
+      });
+
+      // Wait for channel to be set up
+      await waitFor(() => {
+        expect(mockSupabaseClient.channel).toHaveBeenCalledWith(`cmd:${commandId}`);
+      });
+
+      // Verify channel subscription was set up
+      expect(channelUpdateCallback).not.toBeNull();
+
+      // Simulate channel update with 'acked' status to resolve the promise
+      if (channelUpdateCallback) {
+        act(() => {
+          channelUpdateCallback({
+            new: {
+              id: commandId,
+              status: 'acked',
+            },
+          });
+        });
+      }
+
+      await sendPromise!;
     });
 
-    it.skip('should handle command failure response', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should handle command failure response', async () => {
+      const commandId = 'cmd-uuid-789';
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, command_id: commandId }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      let sendPromise: Promise<CommandResponse>;
+      await act(async () => {
+        sendPromise = result.current.sendCommand('reboot');
+      });
+
+      // Wait for channel to be set up
+      await waitFor(() => {
+        expect(channelUpdateCallback).not.toBeNull();
+      });
+
+      // Simulate channel update with 'failed' status
+      if (channelUpdateCallback) {
+        act(() => {
+          channelUpdateCallback({
+            new: {
+              id: commandId,
+              status: 'failed',
+              error: 'Device offline',
+            },
+          });
+        });
+      }
+
+      const response = await sendPromise!;
+      expect(response).toEqual({ success: false, error: 'Device offline' });
     });
 
-    it.skip('should handle command expired status', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should handle command expired status', async () => {
+      const commandId = 'cmd-uuid-expired';
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true, command_id: commandId }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      let sendPromise: Promise<CommandResponse>;
+      await act(async () => {
+        sendPromise = result.current.sendCommand('reboot');
+      });
+
+      // Wait for channel to be set up
+      await waitFor(() => {
+        expect(channelUpdateCallback).not.toBeNull();
+      });
+
+      // Simulate channel update with 'expired' status
+      if (channelUpdateCallback) {
+        act(() => {
+          channelUpdateCallback({
+            new: {
+              id: commandId,
+              status: 'expired',
+              error: null,
+            },
+          });
+        });
+      }
+
+      const response = await sendPromise!;
+      expect(response).toEqual({ success: false, error: 'Command expired' });
     });
 
-    it.skip('should timeout if no ack received within threshold', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should timeout if no ack received within threshold', async () => {
+      jest.useFakeTimers();
+      
+      try {
+        const commandId = 'cmd-uuid-timeout';
+        (global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, command_id: commandId }),
+        });
+
+        const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+        // Start the command but don't await yet
+        let sendPromise: Promise<CommandResponse>;
+        await act(async () => {
+          sendPromise = result.current.sendCommand('reboot');
+        });
+
+        // Wait for channel to be set up (timeout is set up inside sendCommand)
+        await waitFor(() => {
+          expect(channelUpdateCallback).not.toBeNull();
+        });
+
+        // Advance timers by the timeout threshold (15 seconds)
+        act(() => {
+          jest.advanceTimersByTime(15000);
+        });
+
+        // The promise should reject with timeout error
+        await expect(sendPromise!).rejects.toThrow('Command "reboot" timed out');
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
-    it.skip('should throw error when insert-command fails', async () => {
-      // Test skipped: result.current is null due to test isolation issues
+    it('should throw error when insert-command fails', async () => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: false,
+        json: () => Promise.resolve({ error: 'Rate limit exceeded' }),
+      });
+
+      const { result } = renderHook(() => useDeviceCommands(defaultOptions));
+
+      await expect(
+        act(async () => {
+          await result.current.sendCommand('reboot');
+        })
+      ).rejects.toThrow('Rate limit exceeded');
     });
   });
 });

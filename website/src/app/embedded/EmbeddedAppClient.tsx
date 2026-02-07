@@ -32,14 +32,14 @@ export function EmbeddedAppClient() {
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const { debugVisible, setDebugVisible, debugLogs, clearDebugLogs, activityLog, addLog, handleCopyDebug, formatRelativeTime } = useDebugConsole();
-  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updatePairingState, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
+  const { isPaired, isPeerConnected, lastDeviceSeenMs, rtStatus, supabaseRef, handleDisconnect, updatePairingState, broadcastToUserChannel, session, userDevices, selectedDeviceUuid, setSelectedDeviceUuid, isLoggedIn } = usePairing({ addLog });
   
   // Get device UUID from selected device
   const deviceUuid = selectedDeviceUuid || null;
   
   const { sendCommand } = useDeviceCommands({ deviceUuid, supabaseRef, addLog });
   const { deviceStatus, brightness, scrollSpeedMs, setScrollSpeedMs, pageIntervalMs, setPageIntervalMs, displayPages, setDisplayPages, statusLayout, setStatusLayout, deviceName, setDeviceName, manualDisplayName, setManualDisplayName, dateColor, setDateColor, timeColor, setTimeColor, nameColor, setNameColor, metricColor, setMetricColor, mqttBroker, setMqttBroker, mqttPort, setMqttPort, mqttUsername, setMqttUsername, mqttPassword, setMqttPassword, mqttTopic, setMqttTopic, hasMqttPassword, displaySensorMac, setDisplaySensorMac, displayMetric, setDisplayMetric, isSaving, isRebooting, handleSaveSettings, handleReboot, handleBrightnessChange, setDeviceStatus } = useDeviceConfig({ isPeerConnected, sendCommand, addLog });
-  const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth, broadcastStatusUpdate } = useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog });
+  const { apiWebexStatus, webexOauthStatus, webexNeedsAuth, webexPollIntervalMs, setWebexPollIntervalMs, startWebexOAuth, broadcastStatusUpdate } = useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog, broadcastToUserChannel });
   const { isReady: webexReady, user, status: webexStatus, isVideoOn, isMuted, isInCall, error: webexError, initialize } = useWebexSDK();
 
   const prevPeerConnectedRef = useRef(false);
@@ -47,22 +47,20 @@ export function EmbeddedAppClient() {
 
   useEffect(() => { if (sdkLoaded) initialize(); }, [initialize, sdkLoaded]);
   
-  // Show setup screen only when NOT logged in
+  // Show setup screen when NOT logged in or when logged in but no devices
   useEffect(() => {
-    setShowSetup(!isLoggedIn);
-  }, [isLoggedIn]);
+    setShowSetup(!isLoggedIn || userDevices.length === 0);
+  }, [isLoggedIn, userDevices]);
 
-  // Auto-show main app when logged in with devices
+  // Auto-select first device if none selected
   useEffect(() => {
-    if (isLoggedIn && userDevices.length > 0 && showSetup) {
-      setShowSetup(false);
-      // Auto-select first device if none selected
+    if (isLoggedIn && userDevices.length > 0 && !selectedDeviceUuid) {
       const firstDevice = userDevices[0];
-      if (!selectedDeviceUuid && firstDevice) {
+      if (firstDevice) {
         setSelectedDeviceUuid(firstDevice.device_uuid);
       }
     }
-  }, [isLoggedIn, userDevices, selectedDeviceUuid, showSetup, setSelectedDeviceUuid]);
+  }, [isLoggedIn, userDevices, selectedDeviceUuid, setSelectedDeviceUuid]);
 
   useEffect(() => { 
     const OFFLINE_COMMAND_COOLDOWN = 10000; 
@@ -108,7 +106,7 @@ export function EmbeddedAppClient() {
     broadcastStatusUpdate(statusToDisplay, inCall, cameraOn, micMuted, displayName).catch(() => {});
     
     // Update pairing state directly in database
-    updatePairingState({ webex_status: statusToDisplay, camera_on: cameraOn, muted: micMuted, sharing: inCall, display_name: displayName }).catch(() => {}); 
+    updatePairingState({ webex_status: statusToDisplay, camera_on: cameraOn, mic_muted: micMuted, in_call: inCall, display_name: displayName }).catch(() => {}); 
   }, [rtStatus, isPaired, statusToDisplay, cameraOn, micMuted, inCall, displayName, deviceUuid, session, broadcastStatusUpdate, updatePairingState]);
 
   const handleStatusChange = (status: WebexStatus) => { 

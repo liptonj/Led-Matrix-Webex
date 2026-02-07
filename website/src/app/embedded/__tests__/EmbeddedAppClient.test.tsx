@@ -176,6 +176,7 @@ const defaultUsePairingMock = {
   supabaseRef: React.createRef(),
   handleDisconnect: jest.fn(),
   updatePairingState: jest.fn(() => Promise.resolve(true)),
+  broadcastToUserChannel: jest.fn(() => Promise.resolve(true)),
   session: null,
   userDevices: [],
   selectedDeviceUuid: null,
@@ -321,8 +322,7 @@ describe("EmbeddedAppClient", () => {
       expect(screen.getByRole("button", { name: /devices/i })).toBeInTheDocument();
     });
 
-    // TODO: Test has timing issues with tab switching - skip for now
-    it.skip("should switch between tabs when clicked", async () => {
+    it("should switch between tabs when clicked", async () => {
       mockUsePairing.mockReturnValue({
         ...defaultUsePairingMock,
         isLoggedIn: true,
@@ -335,13 +335,17 @@ describe("EmbeddedAppClient", () => {
       const webexTab = screen.getByRole("button", { name: /webex/i });
       await user.click(webexTab);
 
-      // Webex tab should be active (check for active styling or content)
-      expect(webexTab).toHaveAttribute("class", expect.stringContaining("bg-[var(--color-bg-card)]"));
+      await waitFor(() => {
+        // Webex tab should be active (check for active styling or content)
+        expect(webexTab).toHaveAttribute("class", expect.stringContaining("bg-[var(--color-bg-card)]"));
+      });
 
       const devicesTab = screen.getByRole("button", { name: /devices/i });
       await user.click(devicesTab);
 
-      expect(devicesTab).toHaveAttribute("class", expect.stringContaining("bg-[var(--color-bg-card)]"));
+      await waitFor(() => {
+        expect(devicesTab).toHaveAttribute("class", expect.stringContaining("bg-[var(--color-bg-card)]"));
+      });
     });
 
     it("should show setup screen when not logged in", () => {
@@ -392,8 +396,7 @@ describe("EmbeddedAppClient", () => {
       expect(setSelectedDeviceUuid).toHaveBeenCalledWith(TEST_DEVICE_UUID);
     });
 
-    // TODO: Test has timing issues with setup screen detection - skip for now
-    it.skip("should show setup screen when logged in but no devices", () => {
+    it("should show setup screen when logged in but no devices", () => {
       mockUsePairing.mockReturnValue({
         ...defaultUsePairingMock,
         isLoggedIn: true,
@@ -577,36 +580,6 @@ describe("EmbeddedAppClient", () => {
       expect(broadcastStatusUpdate).not.toHaveBeenCalled();
     });
 
-    // TODO: Test has timing issues with Edge Function call - skip for now
-    it.skip("should call updateAppStateViaEdge for backward compatibility", async () => {
-      const updateAppStateViaEdge = jest.fn(() => Promise.resolve(true));
-      mockUsePairing.mockReturnValue({
-        ...defaultUsePairingMock,
-        isLoggedIn: true,
-        isPaired: true,
-        rtStatus: "connected",
-        session: TEST_SESSION,
-        userDevices: [{ device_uuid: TEST_DEVICE_UUID, serial_number: "A1B2C3D4" }],
-        selectedDeviceUuid: TEST_DEVICE_UUID,
-        updateAppStateViaEdge,
-      });
-      mockUseWebexSDK.mockReturnValue({
-        ...defaultWebexSDKMock,
-        isReady: true,
-        user: { id: TEST_USER_UUID, displayName: "Test User" },
-        status: "active",
-      });
-
-      render(<EmbeddedAppClient />);
-
-      await waitFor(() => {
-        expect(updateAppStateViaEdge).toHaveBeenCalledWith(
-          expect.objectContaining({
-            webex_status: "active",
-          })
-        );
-      });
-    });
   });
 
   describe("Manual Status Mode", () => {

@@ -16,6 +16,7 @@ export interface UseWebexStatusOptions {
   deviceUuid?: string | null;
   supabaseRef: React.MutableRefObject<SupabaseClient | null>;
   addLog: (message: string) => void;
+  broadcastToUserChannel?: (event: string, payload: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface UseWebexStatusResult {
@@ -35,7 +36,7 @@ export interface UseWebexStatusResult {
   shouldRefreshWebexToken: (expiresAt: string | null) => boolean;
 }
 
-export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog }: UseWebexStatusOptions): UseWebexStatusResult {
+export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, addLog, broadcastToUserChannel }: UseWebexStatusOptions): UseWebexStatusResult {
   const [apiWebexStatus, setApiWebexStatus] = useState<WebexStatus | null>(null);
   const [webexOauthStatus, setWebexOauthStatus] = useState<WebexOAuthStatus>('idle');
   const [webexNeedsAuth, setWebexNeedsAuth] = useState<boolean>(true); // Default true until we verify
@@ -153,8 +154,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
     } catch (err) { setWebexOauthStatus('error'); addLog(`Webex OAuth start failed: ${err instanceof Error ? err.message : 'unknown error'}`); }
   }, [addLog]);
 
-  // Broadcast status update to user channel
-  // Note: For production, consider using an Edge Function for more reliable broadcasting
+  // Broadcast status update to user channel using persistent channel from usePairing
   const broadcastStatusUpdate = useCallback(async (
     status: WebexStatus,
     inCall?: boolean,
@@ -162,8 +162,38 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
     micMuted?: boolean,
     displayName?: string
   ): Promise<void> => {
-    if (!session?.user?.id || !deviceUuid || !supabaseRef.current) {
-      addLog('Cannot broadcast status: missing session, deviceUuid, or Supabase client');
+    if (!session?.user?.id || !deviceUuid) {
+      addLog('Cannot broadcast status: missing session or deviceUuid');
+      return;
+    }
+
+    // Use broadcastToUserChannel if available (from usePairing)
+    if (broadcastToUserChannel) {
+      try {
+        const payload = {
+          device_uuid: deviceUuid,
+          webex_status: status,
+          in_call: inCall,
+          camera_on: cameraOn,
+          mic_muted: micMuted,
+          display_name: displayName,
+          updated_at: new Date().toISOString(),
+        };
+
+        const success = await broadcastToUserChannel('webex_status', payload);
+        if (success) {
+          addLog(`Broadcasted webex_status to user channel for device ${deviceUuid}`);
+        }
+      } catch (err) {
+        addLog(`Broadcast error: ${err instanceof Error ? err.message : 'unknown error'}`);
+      }
+      return;
+    }
+
+    // Fallback: create temporary channel if broadcastToUserChannel is not available
+    // This should rarely happen, but provides backward compatibility
+    if (!supabaseRef.current) {
+      addLog('Cannot broadcast status: missing Supabase client and broadcastToUserChannel');
       return;
     }
 
@@ -187,6 +217,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
       let channel = supabase.channel(channelName, {
         config: {
           broadcast: { self: true },
+          private: true
         },
       });
 
@@ -214,7 +245,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
       if (sendResult !== 'ok') {
         addLog(`Failed to broadcast status: ${sendResult}`);
       } else {
-        addLog(`Broadcasted webex_status to ${channelName} for device ${deviceUuid}`);
+        addLog(`Broadcasted webex_status to ${channelName} for device ${deviceUuid} (fallback mode)`);
       }
 
       // Clean up channel after broadcast
@@ -222,7 +253,7 @@ export function useWebexStatus({ isPaired, session, deviceUuid, supabaseRef, add
     } catch (err) {
       addLog(`Broadcast error: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
-  }, [session?.user?.id, deviceUuid, supabaseRef, addLog]);
+  }, [session?.user?.id, deviceUuid, supabaseRef, addLog, broadcastToUserChannel]);
 
   // Check auth status once when paired (don't include fetchWebexToken in deps to avoid loops)
   useEffect(() => {

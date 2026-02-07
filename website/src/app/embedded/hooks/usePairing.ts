@@ -31,7 +31,8 @@ export interface UsePairingResult {
   handleConnect: () => Promise<void>;
   handleDisconnect: () => void;
   refreshPairingSnapshot: (deviceUuid: string, reason: string) => Promise<void>;
-  updatePairingState: (stateData: { webex_status?: string; camera_on?: boolean; muted?: boolean; sharing?: boolean; display_name?: string }) => Promise<boolean>;
+  updatePairingState: (stateData: { webex_status?: string; camera_on?: boolean; mic_muted?: boolean; in_call?: boolean; display_name?: string }) => Promise<boolean>;
+  broadcastToUserChannel: (event: string, payload: Record<string, unknown>) => Promise<boolean>;
   // Session-related exports
   session: Session | null;
   userDevices: UserDevice[];
@@ -71,8 +72,8 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const updatePairingState = useCallback(async (stateData: { 
     webex_status?: string;
     camera_on?: boolean;
-    muted?: boolean;
-    sharing?: boolean;
+    mic_muted?: boolean;
+    in_call?: boolean;
     display_name?: string;
   }): Promise<boolean> => {
     if (!session || !selectedDeviceUuid || !supabaseRef.current) return false;
@@ -86,6 +87,29 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       return true;
     } catch (err) { addLog(`Pairing update error: ${err instanceof Error ? err.message : 'unknown'}`); return false; }
   }, [session, selectedDeviceUuid, supabaseRef, addLog]);
+
+  const broadcastToUserChannel = useCallback(async (event: string, payload: Record<string, unknown>): Promise<boolean> => {
+    const channel = userChannelRef.current;
+    if (!channel) {
+      console.warn('[usePairing] No active user channel for broadcast');
+      return false;
+    }
+    try {
+      const sendResult = await channel.send({
+        type: 'broadcast',
+        event,
+        payload,
+      });
+      if (sendResult !== 'ok') {
+        addLog(`[usePairing] Broadcast failed: ${sendResult}`);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      addLog(`[usePairing] Broadcast error: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return false;
+    }
+  }, [addLog]);
 
   // Initialize Supabase client with session
   useEffect(() => {
@@ -212,7 +236,8 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     const channel = supabase.channel(channelName, {
       config: {
         broadcast: { self: true },
-        presence: { key: 'app' }
+        presence: { key: 'app' },
+        private: true
       }
     })
     .on('broadcast', { event: 'webex_status' }, (payload: { payload: WebexStatusBroadcast }) => {
@@ -330,27 +355,17 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       setRtStatus('connected');
       addLog(`Connected to user channel`);
       
-      // Start heartbeat interval - write to pairings table
+      // Start heartbeat interval - write to connection_heartbeats table
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = setInterval(async () => {
         if (!supabaseRef.current || !selectedDeviceUuid) return;
         try {
-          // Get pairing_code from device
-          const { data: device } = await supabaseRef.current
-            .schema('display')
-            .from('devices')
-            .select('pairing_code')
-            .eq('id', selectedDeviceUuid)
-            .maybeSingle();
-          
-          if (device?.pairing_code) {
-            await supabaseRef.current.schema('display').from('pairings')
-              .update({ 
-                app_last_seen: new Date().toISOString(), 
-                app_connected: true 
-              })
-              .eq('pairing_code', device.pairing_code);
-          }
+          await supabaseRef.current.schema('display').from('connection_heartbeats')
+            .upsert({
+              device_uuid: selectedDeviceUuid,
+              app_last_seen: new Date().toISOString(),
+              app_connected: true
+            }, { onConflict: 'device_uuid' });
         } catch (error) {
           // Silently fail heartbeat update
         }
@@ -522,6 +537,7 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     handleDisconnect,
     refreshPairingSnapshot,
     updatePairingState,
+    broadcastToUserChannel,
     session,
     userDevices,
     selectedDeviceUuid,

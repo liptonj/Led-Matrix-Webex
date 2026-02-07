@@ -3,12 +3,12 @@
 import { Alert } from '@/components/ui/Alert';
 import { Spinner } from '@/components/ui/Spinner';
 import {
-    ConnectionHeartbeat,
     deleteDevice,
     Device,
     DeviceChangeEvent,
-    getConnectionHeartbeats,
     getDevices,
+    getPairingsForDevices,
+    Pairing,
     setDeviceApprovalRequired,
     setDeviceBlacklisted,
     setDeviceDebugMode,
@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export default function DevicesPage() {
     const router = useRouter();
     const [devices, setDevices] = useState<Device[]>([]);
-    const [heartbeats, setHeartbeats] = useState<Record<string, ConnectionHeartbeat>>({});
+    const [pairings, setPairings] = useState<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
@@ -30,25 +30,25 @@ export default function DevicesPage() {
     const [actionSerial, setActionSerial] = useState<string | null>(null);
     const devicesRef = useRef<Device[]>([]);
 
-    const refreshHeartbeats = useCallback(async (deviceList?: Device[]) => {
+    const refreshPairings = useCallback(async (deviceList?: Device[]) => {
         const list = deviceList ?? devicesRef.current;
         if (!list.length) {
-            setHeartbeats({});
+            setPairings({});
             return;
         }
 
         try {
-            const rows = await getConnectionHeartbeats(
+            const rows = await getPairingsForDevices(
                 list.map((device) => device.pairing_code),
             );
-            const map = rows.reduce<Record<string, ConnectionHeartbeat>>((acc, row) => {
+            const map = rows.reduce<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>((acc, row) => {
                 acc[row.pairing_code] = row;
                 return acc;
             }, {});
-            setHeartbeats(map);
+            setPairings(map);
         } catch (err) {
             setError(
-                err instanceof Error ? err.message : 'Failed to load connection heartbeats',
+                err instanceof Error ? err.message : 'Failed to load pairings',
             );
         }
     }, []);
@@ -57,12 +57,12 @@ export default function DevicesPage() {
         try {
             const data = await getDevices();
             setDevices(data);
-            await refreshHeartbeats(data);
+            await refreshPairings(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load devices');
         }
         setLoading(false);
-    }, [refreshHeartbeats]);
+    }, [refreshPairings]);
 
     useEffect(() => {
         loadDevices();
@@ -71,10 +71,10 @@ export default function DevicesPage() {
     useEffect(() => {
         const interval = setInterval(() => {
             setNow(Date.now());
-            refreshHeartbeats();
+            refreshPairings();
         }, 30_000);
         return () => clearInterval(interval);
-    }, [refreshHeartbeats]);
+    }, [refreshPairings]);
 
     async function toggleDebug(device: Device) {
         try {
@@ -225,19 +225,19 @@ export default function DevicesPage() {
     }, []);
 
     const sortedDevices = useMemo(
-        () => sortDevices(devices, heartbeats),
-        [devices, heartbeats],
+        () => sortDevices(devices, pairings),
+        [devices, pairings],
     );
 
     const filteredDevices = sortedDevices.filter((device) => {
-        const isOnline = isDeviceOnline(device, heartbeats, now);
+        const isOnline = isDeviceOnline(device, pairings, now);
         if (filter === 'online') return isOnline;
         if (filter === 'offline') return !isOnline;
         return true;
     });
 
     const onlineCount = sortedDevices.filter((device) =>
-        isDeviceOnline(device, heartbeats, now),
+        isDeviceOnline(device, pairings, now),
     ).length;
 
     if (loading) {
@@ -291,11 +291,11 @@ export default function DevicesPage() {
                     </div>
                 ) : (
                     filteredDevices.map((device) => {
-                        const lastSeen = getLastSeenValue(device, heartbeats);
+                        const lastSeen = getLastSeenValue(device, pairings);
                         const lastSeenLabel = lastSeen
                             ? new Date(lastSeen).toLocaleString()
                             : 'Unknown';
-                        const isOnline = isDeviceOnline(device, heartbeats, now);
+                        const isOnline = isDeviceOnline(device, pairings, now);
                         return (
                             <div
                                 key={device.id}
@@ -462,11 +462,11 @@ export default function DevicesPage() {
                                 </tr>
                             ) : (
                                 filteredDevices.map((device) => {
-                                    const lastSeen = getLastSeenValue(device, heartbeats);
+                                    const lastSeen = getLastSeenValue(device, pairings);
                                     const lastSeenLabel = lastSeen
                                         ? new Date(lastSeen).toLocaleString()
                                         : 'Unknown';
-                                    const isOnline = isDeviceOnline(device, heartbeats, now);
+                                    const isOnline = isDeviceOnline(device, pairings, now);
                                     return (
                                         <tr key={device.id}>
                                             <td className="px-6 py-4 whitespace-nowrap">
@@ -614,33 +614,33 @@ export default function DevicesPage() {
 
 function getLastSeenValue(
     device: Device,
-    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ): string | null {
-    return heartbeatMap[device.pairing_code]?.device_last_seen ?? device.last_seen ?? null;
+    return pairingMap[device.pairing_code]?.device_last_seen ?? device.last_seen ?? null;
 }
 
 function getLastSeenMs(
     device: Device,
-    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ): number {
-    const lastSeen = getLastSeenValue(device, heartbeatMap);
+    const lastSeen = getLastSeenValue(device, pairingMap);
     return lastSeen ? new Date(lastSeen).getTime() : 0;
 }
 
 function isDeviceOnline(
     device: Device,
-    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
     nowMs: number,
 ): boolean {
-    const lastSeenMs = getLastSeenMs(device, heartbeatMap);
+    const lastSeenMs = getLastSeenMs(device, pairingMap);
     return lastSeenMs > nowMs - 5 * 60 * 1000;
 }
 
 function sortDevices(
     list: Device[],
-    heartbeatMap: Record<string, ConnectionHeartbeat>,
+    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ) {
     return [...list].sort(
-        (a, b) => getLastSeenMs(b, heartbeatMap) - getLastSeenMs(a, heartbeatMap),
+        (a, b) => getLastSeenMs(b, pairingMap) - getLastSeenMs(a, pairingMap),
     );
 }

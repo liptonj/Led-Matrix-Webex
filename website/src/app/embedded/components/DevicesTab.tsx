@@ -383,7 +383,7 @@ export const DevicesTab = memo(function DevicesTab({
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-[var(--color-text-muted)]">Serial:</span>
-            <span className="ml-2 font-mono">{deviceStatus.serial_number || 'Unknown'}</span>
+            <span className="ml-2 font-mono">{deviceStatus?.serial_number || 'Unknown'}</span>
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">App Version:</span>
@@ -399,32 +399,32 @@ export const DevicesTab = memo(function DevicesTab({
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Firmware:</span>
-            <span className="ml-2">{deviceStatus.firmware_version || 'Unknown'}</span>
+            <span className="ml-2">{deviceStatus?.firmware_version || 'Unknown'}</span>
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Free Memory:</span>
             <span className="ml-2">
-              {deviceStatus.free_heap ? `${Math.round(deviceStatus.free_heap / 1024)} KB` : 'Unknown'}
+              {deviceStatus?.free_heap ? `${Math.round(deviceStatus.free_heap / 1024)} KB` : 'Unknown'}
             </span>
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">IP:</span>
-            <span className="ml-2">{deviceStatus.ip_address || 'Unknown'}</span>
+            <span className="ml-2">{deviceStatus?.ip_address || 'Unknown'}</span>
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">WiFi:</span>
-            <span className="ml-2">{deviceStatus.rssi ? `${deviceStatus.rssi} dBm` : 'Unknown'}</span>
+            <span className="ml-2">{deviceStatus?.rssi ? `${deviceStatus.rssi} dBm` : 'Unknown'}</span>
           </div>
           <div>
             <span className="text-[var(--color-text-muted)]">Uptime:</span>
             <span className="ml-2">
-              {deviceStatus.uptime
+              {deviceStatus?.uptime
                 ? `${Math.floor(deviceStatus.uptime / 3600)}h ${Math.floor((deviceStatus.uptime % 3600) / 60)}m`
                 : 'Unknown'}
             </span>
           </div>
         </div>
-        {deviceStatus.temperature !== undefined && deviceStatus.temperature > 0 && (
+        {deviceStatus?.temperature !== undefined && deviceStatus.temperature > 0 && (
           <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
             <h3 className="font-medium mb-2">Sensor Data</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
@@ -432,7 +432,7 @@ export const DevicesTab = memo(function DevicesTab({
                 <span className="text-[var(--color-text-muted)]">Temperature:</span>
                 <span className="ml-2">{deviceStatus.temperature}°C</span>
               </div>
-              {deviceStatus.humidity !== undefined && deviceStatus.humidity > 0 && (
+              {deviceStatus?.humidity !== undefined && deviceStatus.humidity > 0 && (
                 <div>
                   <span className="text-[var(--color-text-muted)]">Humidity:</span>
                   <span className="ml-2">{deviceStatus.humidity}%</span>

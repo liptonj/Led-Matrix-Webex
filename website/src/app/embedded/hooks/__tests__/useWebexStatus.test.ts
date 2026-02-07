@@ -44,7 +44,71 @@ describe('useWebexStatus hook - UUID support', () => {
   });
 
   describe('broadcastStatusUpdate', () => {
-    it('should broadcast to user:{userId} channel', async () => {
+    it('should use broadcastToUserChannel when provided', async () => {
+      const mockBroadcastToUserChannel = jest.fn().mockResolvedValue(true);
+      const options = { ...defaultOptions, broadcastToUserChannel: mockBroadcastToUserChannel };
+      const { result } = renderHook(() => useWebexStatus(options));
+
+      await act(async () => {
+        await result.current.broadcastStatusUpdate('active', false, false, false, 'Test User');
+      });
+
+      expect(mockBroadcastToUserChannel).toHaveBeenCalledWith(
+        'webex_status',
+        expect.objectContaining({
+          device_uuid: TEST_DEVICE_UUID,
+          webex_status: 'active',
+          in_call: false,
+          camera_on: false,
+          mic_muted: false,
+          display_name: 'Test User',
+        })
+      );
+      // Should not create a temporary channel when broadcastToUserChannel is provided
+      expect(mockSupabaseRef.current.channel).not.toHaveBeenCalled();
+    });
+
+    it('should broadcast payload includes device_uuid via broadcastToUserChannel', async () => {
+      const mockBroadcastToUserChannel = jest.fn().mockResolvedValue(true);
+      const options = { ...defaultOptions, broadcastToUserChannel: mockBroadcastToUserChannel };
+      const { result } = renderHook(() => useWebexStatus(options));
+
+      await act(async () => {
+        await result.current.broadcastStatusUpdate('active');
+      });
+
+      expect(mockBroadcastToUserChannel).toHaveBeenCalledWith(
+        'webex_status',
+        expect.objectContaining({
+          device_uuid: TEST_DEVICE_UUID,
+          webex_status: 'active',
+        })
+      );
+    });
+
+    it('should broadcast with all status fields via broadcastToUserChannel', async () => {
+      const mockBroadcastToUserChannel = jest.fn().mockResolvedValue(true);
+      const options = { ...defaultOptions, broadcastToUserChannel: mockBroadcastToUserChannel };
+      const { result } = renderHook(() => useWebexStatus(options));
+
+      await act(async () => {
+        await result.current.broadcastStatusUpdate('meeting', true, true, false, 'John Doe');
+      });
+
+      expect(mockBroadcastToUserChannel).toHaveBeenCalledWith(
+        'webex_status',
+        expect.objectContaining({
+          device_uuid: TEST_DEVICE_UUID,
+          webex_status: 'meeting',
+          in_call: true,
+          camera_on: true,
+          mic_muted: false,
+          display_name: 'John Doe',
+        })
+      );
+    });
+
+    it('should fall back to temporary channel when broadcastToUserChannel is not provided', async () => {
       const { result } = renderHook(() => useWebexStatus(defaultOptions));
 
       await act(async () => {
@@ -57,49 +121,9 @@ describe('useWebexStatus hook - UUID support', () => {
       );
     });
 
-    it('should broadcast payload includes device_uuid', async () => {
-      const { result } = renderHook(() => useWebexStatus(defaultOptions));
-
-      await act(async () => {
-        await result.current.broadcastStatusUpdate('active');
-      });
-
-      const channelCall = mockSupabaseRef.current.channel.mock.results[0].value;
-      expect(channelCall.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'broadcast',
-          event: 'webex_status',
-          payload: expect.objectContaining({
-            device_uuid: TEST_DEVICE_UUID,
-          }),
-        })
-      );
-    });
-
-    it('should broadcast with all status fields', async () => {
-      const { result } = renderHook(() => useWebexStatus(defaultOptions));
-
-      await act(async () => {
-        await result.current.broadcastStatusUpdate('meeting', true, true, false, 'John Doe');
-      });
-
-      const channelCall = mockSupabaseRef.current.channel.mock.results[0].value;
-      expect(channelCall.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            device_uuid: TEST_DEVICE_UUID,
-            webex_status: 'meeting',
-            in_call: true,
-            camera_on: true,
-            mic_muted: false,
-            display_name: 'John Doe',
-          }),
-        })
-      );
-    });
-
     it('should handle missing session gracefully', async () => {
-      const options = { ...defaultOptions, session: null };
+      const mockBroadcastToUserChannel = jest.fn().mockResolvedValue(true);
+      const options = { ...defaultOptions, session: null, broadcastToUserChannel: mockBroadcastToUserChannel };
       const { result } = renderHook(() => useWebexStatus(options));
 
       await act(async () => {
@@ -109,11 +133,13 @@ describe('useWebexStatus hook - UUID support', () => {
       expect(mockAddLog).toHaveBeenCalledWith(
         expect.stringContaining('Cannot broadcast status')
       );
+      expect(mockBroadcastToUserChannel).not.toHaveBeenCalled();
       expect(mockSupabaseRef.current.channel).not.toHaveBeenCalled();
     });
 
     it('should handle missing deviceUuid gracefully', async () => {
-      const options = { ...defaultOptions, deviceUuid: null };
+      const mockBroadcastToUserChannel = jest.fn().mockResolvedValue(true);
+      const options = { ...defaultOptions, deviceUuid: null, broadcastToUserChannel: mockBroadcastToUserChannel };
       const { result } = renderHook(() => useWebexStatus(options));
 
       await act(async () => {
@@ -123,6 +149,7 @@ describe('useWebexStatus hook - UUID support', () => {
       expect(mockAddLog).toHaveBeenCalledWith(
         expect.stringContaining('Cannot broadcast status')
       );
+      expect(mockBroadcastToUserChannel).not.toHaveBeenCalled();
     });
   });
 });

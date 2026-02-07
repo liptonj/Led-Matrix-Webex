@@ -36,13 +36,6 @@ export interface InsertCommandResult {
 
 export interface UseDeviceCommandsReturn {
   sendCommand: (command: string, payload?: Record<string, unknown>) => Promise<CommandResponse>;
-  updateAppStateViaEdge: (stateData: {
-    webex_status?: string;
-    camera_on?: boolean;
-    mic_muted?: boolean;
-    in_call?: boolean;
-    display_name?: string;
-  }) => Promise<boolean>;
   insertCommandViaEdge: (
     command: string,
     payload?: Record<string, unknown>
@@ -50,55 +43,7 @@ export interface UseDeviceCommandsReturn {
 }
 
 export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceCommandsReturn {
-  const { deviceUuid, addLog } = options;
-
-  // Update app state via Edge Function (more secure than direct DB update)
-  const updateAppStateViaEdge = useCallback(async (stateData: {
-    webex_status?: string;
-    camera_on?: boolean;
-    mic_muted?: boolean;
-    in_call?: boolean;
-    display_name?: string;
-  }): Promise<boolean> => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) {
-      return false;
-    }
-
-    try {
-      // Get user session token
-      const sessionResult = await getSession();
-      const token = sessionResult.data.session?.access_token;
-      if (!token) {
-        addLog('update-app-state failed: Not authenticated');
-        return false;
-      }
-
-      const response = await fetchWithTimeout(
-        `${supabaseUrl}/functions/v1/update-app-state`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(stateData),
-        },
-        API_TIMEOUT_MS
-      );
-
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-        addLog(`update-app-state failed: ${error.error || response.status}`);
-        return false;
-      }
-
-      return true;
-    } catch (err) {
-      addLog(`update-app-state error: ${err instanceof Error ? err.message : 'unknown error'}`);
-      return false;
-    }
-  }, [addLog]);
+  const { deviceUuid } = options;
 
   // Insert command via Edge Function (more secure than direct DB insert)
   const insertCommandViaEdge = useCallback(async (
@@ -203,11 +148,10 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
           }
         });
     });
-  }, [addLog, deviceUuid, insertCommandViaEdge]);
+  }, [deviceUuid, insertCommandViaEdge]);
 
   return {
     sendCommand,
-    updateAppStateViaEdge,
     insertCommandViaEdge,
   };
 }

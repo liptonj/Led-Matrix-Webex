@@ -89,6 +89,8 @@ export interface Pairing {
   pairing_code: string;
   serial_number: string;
   device_id: string | null;
+  device_uuid: string | null;
+  user_uuid: string | null;
   app_last_seen: string | null;
   device_last_seen: string | null;
   app_connected: boolean;
@@ -106,6 +108,7 @@ export interface Pairing {
   ssid: string | null;
   ota_partition: string | null;
   config: Record<string, unknown>;
+  status_updated_at: string | null;
   created_at: string;
   updated_at: string;
 }

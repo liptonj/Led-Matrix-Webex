@@ -3,7 +3,7 @@ import {
   getSupabase,
   withTimeout,
 } from "./core";
-import type { Device, DeviceChangeEvent, DeviceLog } from "./types";
+import type { Device, DeviceChangeEvent, DeviceLog, Pairing } from "./types";
 
 // Explicit column list for devices - NEVER include key_hash for security
 const DEVICE_COLUMNS = `
@@ -44,30 +44,22 @@ export async function getDevices(): Promise<Device[]> {
   return data || [];
 }
 
-// Helper to get connection heartbeats for a set of pairing codes
-// DEPRECATED: This function uses the deprecated connection_heartbeats table.
-// Use pairings table directly instead.
-export async function getConnectionHeartbeats(
+
+// Helper to get pairings for a set of pairing codes
+export async function getPairingsForDevices(
   pairingCodes: string[],
-): Promise<Array<{
-  pairing_code: string;
-  device_uuid: string | null;
-  app_last_seen: string | null;
-  device_last_seen: string | null;
-  app_connected: boolean;
-  device_connected: boolean;
-}>> {
+): Promise<Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>[]> {
   if (!pairingCodes.length) return [];
 
   const supabase = await getSupabase();
   const { data, error } = await withTimeout(
     supabase
       .schema("display")
-      .from("connection_heartbeats")
-      .select("pairing_code, device_uuid, app_last_seen, device_last_seen, app_connected, device_connected")
+      .from("pairings")
+      .select("pairing_code, app_last_seen, device_last_seen, app_connected, device_connected")
       .in("pairing_code", pairingCodes),
     SUPABASE_REQUEST_TIMEOUT_MS,
-    "Timed out while loading connection heartbeats.",
+    "Timed out while loading pairings.",
   );
 
   if (error) throw error;
@@ -243,7 +235,12 @@ export async function subscribeToDeviceLogs(
   const channelName = `user:${userUuid}`;
 
   const channel = supabase
-    .channel(channelName)
+    .channel(channelName, {
+      config: {
+        broadcast: { self: true },
+        private: true
+      }
+    })
     .on(
       "broadcast",
       { event: "debug_log" },

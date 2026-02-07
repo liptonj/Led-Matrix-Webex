@@ -30,39 +30,41 @@ interface MockWritableStreamWriter {
 
 // Mock ReadableStream
 class MockReadableStream {
-  private reader: MockReadableStreamReader | null = null;
+  private reader: MockReadableStreamReader;
+
+  constructor() {
+    this.reader = {
+      read: jest.fn().mockResolvedValue({ value: undefined, done: true }),
+      cancel: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+  }
 
   getReader(): MockReadableStreamReader {
-    if (!this.reader) {
-      this.reader = {
-        read: jest.fn(),
-        cancel: jest.fn().mockResolvedValue(undefined),
-        releaseLock: jest.fn(),
-      };
-    }
     return this.reader;
   }
 
-  getMockReader(): MockReadableStreamReader | null {
+  getMockReader(): MockReadableStreamReader {
     return this.reader;
   }
 }
 
 // Mock WritableStream
 class MockWritableStream {
-  private writer: MockWritableStreamWriter | null = null;
+  private writer: MockWritableStreamWriter;
+
+  constructor() {
+    this.writer = {
+      write: jest.fn().mockResolvedValue(undefined),
+      releaseLock: jest.fn(),
+    };
+  }
 
   getWriter(): MockWritableStreamWriter {
-    if (!this.writer) {
-      this.writer = {
-        write: jest.fn().mockResolvedValue(undefined),
-        releaseLock: jest.fn(),
-      };
-    }
     return this.writer;
   }
 
-  getMockWriter(): MockWritableStreamWriter | null {
+  getMockWriter(): MockWritableStreamWriter {
     return this.writer;
   }
 }
@@ -119,18 +121,16 @@ const mockSerial = {
   requestPort: jest.fn(),
 };
 
-// Store original navigator
-const originalNavigator = global.navigator;
-
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   
-  // Mock navigator.serial
-  (global.navigator as any) = {
-    ...originalNavigator,
-    serial: mockSerial,
-  };
+  // Mock navigator.serial using Object.defineProperty (reliable in jsdom)
+  Object.defineProperty(navigator, 'serial', {
+    value: mockSerial,
+    writable: true,
+    configurable: true,
+  });
 
   // Mock TextEncoder/TextDecoder
   global.TextEncoder = TextEncoder;
@@ -140,17 +140,19 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   jest.clearAllMocks();
-  global.navigator = originalNavigator;
+  // Clean up navigator.serial
+  Object.defineProperty(navigator, 'serial', {
+    value: undefined,
+    writable: true,
+    configurable: true,
+  });
 });
 
-// TODO: These tests have Web Serial API mock issues that need to be fixed.
-// The mock reader is not being properly initialized before use.
-// Skipping to unblock CI. See tracking issue for details.
-describe.skip('useSerialMonitor', () => {
+describe('useSerialMonitor', () => {
   describe('extractPairingCode', () => {
-    it('should extract pairing code from "PAIRING CODE: ABC123"', () => {
-      const code = extractPairingCode('PAIRING CODE: ABC123');
-      expect(code).toBe('ABC123');
+    it('should extract pairing code from "PAIRING CODE: AB2345"', () => {
+      const code = extractPairingCode('PAIRING CODE: AB2345');
+      expect(code).toBe('AB2345');
     });
 
     it('should extract pairing code from "[SUPABASE] Pairing code: XYZ789"', () => {
@@ -169,8 +171,8 @@ describe.skip('useSerialMonitor', () => {
     });
 
     it('should convert lowercase codes to uppercase', () => {
-      const code = extractPairingCode('PAIRING CODE: abc123');
-      expect(code).toBe('ABC123');
+      const code = extractPairingCode('PAIRING CODE: abc234');
+      expect(code).toBe('ABC234');
     });
   });
 
@@ -544,7 +546,7 @@ describe.skip('useSerialMonitor', () => {
       
       reader!.read
         .mockResolvedValueOnce({
-          value: encoder.encode('PAIRING CODE: ABC123\n'),
+          value: encoder.encode('PAIRING CODE: AB2345\n'),
           done: false,
         })
         .mockResolvedValueOnce({ value: undefined, done: true });
@@ -558,10 +560,10 @@ describe.skip('useSerialMonitor', () => {
       });
 
       await waitFor(() => {
-        expect(onPairingCodeFound).toHaveBeenCalledWith('ABC123');
+        expect(onPairingCodeFound).toHaveBeenCalledWith('AB2345');
       });
 
-      expect(result.current.extractedPairingCode).toBe('ABC123');
+      expect(result.current.extractedPairingCode).toBe('AB2345');
       
       // sendCommand should still be available
       expect(typeof result.current.sendCommand).toBe('function');
@@ -642,7 +644,9 @@ describe.skip('useSerialMonitor', () => {
 
   describe('error handling', () => {
     it('should handle Web Serial API not available', async () => {
-      (global.navigator as any).serial = undefined;
+      // Delete the property so 'serial' in navigator returns false
+      // @ts-expect-error -- deleting a property for test purposes
+      delete navigator.serial;
 
       const { result } = renderHook(() => useSerialMonitor());
 

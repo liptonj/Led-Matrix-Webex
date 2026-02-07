@@ -78,19 +78,26 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
       (subscribed) => {
         if (isMounted) {
           setStatus(subscribed ? 'connected' : 'disconnected');
+          if (!subscribed) {
+            setError('Disconnected from log stream');
+          } else {
+            setError(null);
+          }
         }
       },
-      () => {
+      (errorMessage) => {
         if (isMounted) {
           setStatus('error');
+          setError(errorMessage || 'Failed to subscribe to device logs');
         }
       },
       deviceUuid ?? undefined,
     ).then((unsub) => {
       unsubscribe = unsub;
-    }).catch(() => {
+    }).catch((err) => {
       if (isMounted) {
         setStatus('error');
+        setError(err instanceof Error ? err.message : 'Failed to subscribe to device logs');
       }
     });
 

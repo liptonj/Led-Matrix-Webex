@@ -84,10 +84,10 @@ export interface SubscriptionCallbacks<T> {
  * @example
  * // Subscribe to broadcast events
  * const unsubscribe = await createRealtimeSubscription<DeviceLog>(
- *   `device_logs:${serialNumber}`,
+ *   `user:${userUuid}`,
  *   {
  *     type: "broadcast",
- *     event: "log"
+ *     event: "debug_log"
  *   },
  *   {
  *     onMessage: (log) => {
