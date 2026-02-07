@@ -137,8 +137,9 @@ public:
     }
     
     // Scanning
-    int16_t scanNetworks(bool async = false) {
-        printf("[WiFi] Scanning networks... (simulated)\n");
+    int16_t scanNetworks(bool async = false, bool show_hidden = false) {
+        (void)show_hidden;  // Unused parameter
+        printf("[WiFi] Scanning networks... (simulated, async=%s)\n", async ? "true" : "false");
         return 3;  // Return simulated network count
     }
     

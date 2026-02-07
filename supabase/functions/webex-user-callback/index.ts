@@ -298,7 +298,7 @@ serve(async (req: Request) => {
     }
 
     // Store OAuth tokens in oauth_tokens table
-    await supabase.schema("display").from("oauth_tokens").upsert({
+    const { error: upsertError } = await supabase.schema("display").from("oauth_tokens").upsert({
       provider: "webex",
       user_id: userId,
       token_scope: "user",
@@ -308,6 +308,19 @@ serve(async (req: Request) => {
       refresh_token_id: refreshTokenId,
       expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
     }, { onConflict: "provider,user_id", ignoreDuplicates: false });
+
+    if (upsertError) {
+      console.error("[webex-user-callback] Failed to store OAuth tokens:", upsertError);
+      return new Response(
+        JSON.stringify({ error: "Failed to store OAuth tokens" }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    console.log("[webex-user-callback] OAuth tokens stored for user:", userId);
 
     // Generate Supabase session for the user
     const { data: sessionData, error: sessionError } = await supabase.auth.admin

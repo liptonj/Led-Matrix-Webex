@@ -8,8 +8,8 @@
  * Response: { access_token, expires_at }
  */
 
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
+import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
 import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
@@ -86,6 +86,7 @@ serve(async (req: Request) => {
         .maybeSingle();
         
       if (error || !data) {
+        console.warn("[webex-token] No token found for user:", user.id, error ? `(error: ${error.message})` : "");
         return new Response(JSON.stringify({ error: "Webex token not found" }), {
           status: 404,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -104,29 +105,53 @@ serve(async (req: Request) => {
         });
       }
 
-      pairingCode = tokenPayload.pairing_code ?? null;
+      const deviceUuid = tokenPayload.device_uuid ?? null;
       serialNumber = tokenPayload.serial_number ?? null;
 
-      if (!serialNumber && !pairingCode) {
+      if (!deviceUuid && !serialNumber) {
         return new Response(JSON.stringify({ error: "Missing device selector" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      let tokenQuery = supabase
+      // Resolve user_uuid from pairings table
+      let userUuid: string | null = null;
+      if (deviceUuid) {
+        const { data: pairing } = await supabase
+          .schema("display")
+          .from("pairings")
+          .select("user_uuid")
+          .eq("device_uuid", deviceUuid)
+          .maybeSingle();
+        userUuid = pairing?.user_uuid ?? null;
+      } else if (serialNumber) {
+        const { data: pairing } = await supabase
+          .schema("display")
+          .from("pairings")
+          .select("user_uuid")
+          .eq("serial_number", serialNumber)
+          .maybeSingle();
+        userUuid = pairing?.user_uuid ?? null;
+      }
+
+      if (!userUuid) {
+        return new Response(JSON.stringify({ error: "Device not paired to a user" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Look up token by user_id (same pattern as user path)
+      const { data, error: tokenErr } = await supabase
         .schema("display")
         .from("oauth_tokens")
         .select("id, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at")
-        .eq("provider", "webex");
+        .eq("provider", "webex")
+        .eq("user_id", userUuid)
+        .eq("token_scope", "user")
+        .maybeSingle();
 
-      if (serialNumber) {
-        tokenQuery = tokenQuery.eq("serial_number", serialNumber);
-      } else if (pairingCode) {
-        tokenQuery = tokenQuery.eq("pairing_code", pairingCode);
-      }
-
-      const { data, error: tokenErr } = await tokenQuery.maybeSingle();
       if (tokenErr || !data) {
         return new Response(JSON.stringify({ error: "Webex token not found" }), {
           status: 404,

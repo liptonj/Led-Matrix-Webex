@@ -39,10 +39,10 @@ void ConfigManager::setUserUuid(const String& uuid) {
     Serial.printf("[CONFIG] User UUID set to: %s\n", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
 }
 
-CONFIG_CACHED_STRING_GETTER(LastWebexStatus, "last_webex_status", cached_last_webex_status, "")
+CONFIG_CACHED_STRING_GETTER(LastWebexStatus, "lst_webex_st", cached_last_webex_status, "")
 
 void ConfigManager::setLastWebexStatus(const String& status) {
-    saveString("last_webex_status", status);
+    saveString("lst_webex_st", status);
     cached_last_webex_status = status;
 }
 

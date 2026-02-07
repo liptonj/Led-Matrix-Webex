@@ -466,11 +466,16 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
 }
 
 void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
+    Serial.println("[WEB] GET /api/config/pins requested");
+    
     JsonDocument doc;
     
     // Board info
-    doc["board_type"] = getBoardType();
-    doc["chip_description"] = getChipDescription();
+    String boardType = getBoardType();
+    String chipDesc = getChipDescription();
+    doc["board_type"] = boardType;
+    doc["chip_description"] = chipDesc;
+    Serial.printf("[WEB] Board: %s, Chip: %s\n", boardType.c_str(), chipDesc.c_str());
     
     // Current preset
     PinPreset preset = config_manager->getPinPreset();
@@ -478,6 +483,7 @@ void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
     doc["preset_name"] = getPresetName(preset);
     doc["default_preset"] = static_cast<uint8_t>(getDefaultPresetForBoard());
     doc["default_preset_name"] = getPresetName(getDefaultPresetForBoard());
+    Serial.printf("[WEB] Preset: %d (%s)\n", static_cast<int>(preset), getPresetName(preset));
     
     // Current effective pins
     PinConfig pins = config_manager->getPinConfig();
@@ -505,6 +511,8 @@ void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
         p["name"] = getPresetName(static_cast<PinPreset>(i));
     }
     
+    Serial.printf("[WEB] Pin config response: %d presets, heap=%lu\n", 
+                  static_cast<int>(PinPreset::PRESET_COUNT), (unsigned long)ESP.getFreeHeap());
     sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 

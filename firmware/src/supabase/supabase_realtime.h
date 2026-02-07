@@ -91,7 +91,7 @@ public:
      * @brief Subscribe to a single table channel
      * @param schema Database schema
      * @param table Table name
-     * @param filter Optional filter (e.g., "pairing_code=eq.ABC123")
+     * @param filter Optional filter (e.g., "device_uuid=eq.ABC123")
      * @return true if subscription request sent
      */
     bool subscribe(const String& schema, const String& table, 
@@ -108,7 +108,7 @@ public:
      * @param schema Database schema
      * @param tables Array of table names
      * @param tableCount Number of tables
-     * @param filter Filter to apply to all tables (e.g., "pairing_code=eq.ABC123")
+     * @param filter Filter to apply to all tables (e.g., "device_uuid=eq.ABC123")
      * @param includePostgresChanges Whether to include postgres_changes config
      * @return true if subscription request sent
      */
@@ -134,6 +134,8 @@ public:
      * @param event Event name (e.g., "command_ack", "debug_log")
      * @param data JSON payload to broadcast
      * @return true if broadcast sent successfully
+     * @note This method does NOT implement HTTP fallback. If the WebSocket
+     *       connection is not available, the broadcast will fail silently.
      */
     bool sendBroadcast(const String& event, const JsonDocument& data);
 
@@ -179,8 +181,13 @@ private:
     esp_websocket_client_handle_t _client = nullptr;
     portMUX_TYPE _rxMux = portMUX_INITIALIZER_UNLOCKED;
     String _rxBuffer;
-    String _pendingMessage;
-    bool _pendingMessageAvailable = false;
+
+    // Circular message queue (replaces single _pendingMessage buffer to prevent
+    // message loss when multiple WebSocket frames arrive between loop() calls)
+    static constexpr size_t MSG_QUEUE_SIZE = 8;
+    String _msgQueue[MSG_QUEUE_SIZE];
+    size_t _msgQueueHead = 0;  // Read index  (loop() consumes from here)
+    size_t _msgQueueTail = 0;  // Write index (ISR/event handler writes here)
     String _supabaseUrl;
     String _anonKey;
     String _accessToken;

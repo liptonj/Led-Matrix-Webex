@@ -8,6 +8,7 @@
 #include "../supabase/supabase_realtime.h"
 #include "../supabase/supabase_client.h"
 #include "../core/dependencies.h"
+#include "../debug/remote_logger.h"
 
 namespace {
 constexpr unsigned long WATCHDOG_INTERVAL = 30000;    // 30 seconds
@@ -28,6 +29,10 @@ bool checkReconnection(unsigned long current_time, unsigned long& lastInitAttemp
         return false;
     }
 
+    // Use isSocketConnected() (not isConnected()) because the subscription
+    // confirmation (_subscribed flag) may be delayed due to message queuing.
+    // Heartbeat timeout handles actual dead connections; we only need to
+    // reconnect when the socket itself is down.
     if (deps.realtime.isSocketConnected() || deps.realtime.isConnecting()) {
         return false;
     }
@@ -40,7 +45,7 @@ bool checkReconnection(unsigned long current_time, unsigned long& lastInitAttemp
     if (current_time - lastInitAttempt > interval) {
         if (!deps.supabase.isRequestInFlight()) {
             lastInitAttempt = current_time;
-            Serial.println("[REALTIME] Attempting to reconnect...");
+            RLOG_WARN("realtime", "Attempting to reconnect...");
             return true;  // Signal that reconnection should be attempted
         }
     }
@@ -67,15 +72,14 @@ void updateWatchdogTimer(unsigned long current_time,
         lastSubscribedTime = current_time;
     }
 
-    // Update watchdog timer if socket is connected (not just subscribed)
-    // This prevents false positives when messages are flowing but subscription flag is unclear
-    if (deps.realtime.isSocketConnected()) {
+    // Update watchdog timer if fully connected (socket + channel subscribed)
+    if (deps.realtime.isConnected()) {
         lastSubscribedTime = current_time;
     } else if (deps.app_state.wifi_connected && deps.app_state.supabase_connected) {
         if (current_time - lastSubscribedTime > 60000UL &&
             current_time - lastWatchdogLog > WATCHDOG_INTERVAL) {
             lastWatchdogLog = current_time;
-            Serial.println("[REALTIME] Watchdog: socket disconnected for 60s");
+            RLOG_WARN("realtime", "Watchdog: not fully connected for 60s");
         }
     }
 }

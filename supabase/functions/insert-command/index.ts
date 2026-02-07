@@ -21,9 +21,9 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { sendBroadcast } from "../_shared/broadcast.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { verifyDeviceToken } from "../_shared/jwt.ts";
-import { sendBroadcast } from "../_shared/broadcast.ts";
 
 // Command expiry (5 minutes)
 const COMMAND_EXPIRY_SECONDS = 300;
@@ -31,7 +31,7 @@ const COMMAND_EXPIRY_SECONDS = 300;
 interface InsertCommandRequest {
   command: string;
   payload?: Record<string, unknown>;
-  device_uuid?: string; // Optional device UUID (preferred over serial_number)
+  device_uuid?: string; // Required for user session auth, optional for app tokens
 }
 
 interface InsertCommandResponse {
@@ -40,7 +40,7 @@ interface InsertCommandResponse {
   expires_at: string;
 }
 
-interface TokenPayload {
+interface AppTokenPayload {
   sub: string;
   pairing_code: string;
   serial_number: string;
@@ -48,6 +48,17 @@ interface TokenPayload {
   exp: number;
   device_uuid?: string;
   user_uuid?: string | null;
+}
+
+/**
+ * Authenticated caller info - unified across both auth paths
+ */
+interface CallerInfo {
+  auth_type: "app" | "user";
+  user_uuid: string | null;
+  pairing_code?: string;
+  serial_number?: string;
+  device_uuid?: string;
 }
 
 // Valid command names (whitelist for security)
@@ -69,31 +80,60 @@ const VALID_COMMANDS = [
 ];
 
 /**
- * Validate bearer token and return app info
+ * Validate bearer token - supports both app tokens and Supabase user session tokens
  */
-async function validateAppToken(
+async function validateToken(
   authHeader: string | null,
   tokenSecret: string,
-): Promise<{ valid: boolean; error?: string; token?: TokenPayload }> {
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+): Promise<{ valid: boolean; error?: string; caller?: CallerInfo }> {
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return { valid: false, error: "Missing or invalid Authorization header" };
   }
 
   const token = authHeader.substring(7);
 
+  // Path 1: Try app token validation (from exchange-pairing-code)
   try {
-    const payload = await verifyDeviceToken(token, tokenSecret);
+    const payload = await verifyDeviceToken(token, tokenSecret) as AppTokenPayload;
+    if (payload.token_type === "app") {
+      return {
+        valid: true,
+        caller: {
+          auth_type: "app",
+          user_uuid: payload.user_uuid || null,
+          pairing_code: payload.pairing_code,
+          serial_number: payload.serial_number,
+          device_uuid: payload.device_uuid,
+        },
+      };
+    }
+    // Token verified but not an app token - fall through to user session check
+  } catch {
+    // Not a valid app token - fall through to user session check
+  }
 
-    // Verify token type - app tokens have type "app_auth"
-    if (payload.token_type !== "app") {
-      return { valid: false, error: "Invalid token type" };
+  // Path 2: Try Supabase user session token
+  try {
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      return { valid: false, error: "Invalid or expired token" };
     }
 
-    return { valid: true, token: payload };
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("expired")) {
-      return { valid: false, error: "Token expired" };
-    }
+    return {
+      valid: true,
+      caller: {
+        auth_type: "user",
+        user_uuid: user.id,
+      },
+    };
+  } catch {
     return { valid: false, error: "Invalid token" };
   }
 }
@@ -116,8 +156,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
+    // Get Supabase config
     const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
     if (!tokenSecret) {
       console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
       return new Response(
@@ -129,13 +172,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate app token
+    // Validate token (supports both app tokens and user session tokens)
     const authHeader = req.headers.get("Authorization");
-    const tokenResult = await validateAppToken(authHeader, tokenSecret);
+    const authResult = await validateToken(authHeader, tokenSecret, supabaseUrl, supabaseKey);
 
-    if (!tokenResult.valid || !tokenResult.token) {
+    if (!authResult.valid || !authResult.caller) {
       return new Response(
-        JSON.stringify({ success: false, error: tokenResult.error }),
+        JSON.stringify({ success: false, error: authResult.error }),
         {
           status: 401,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -143,12 +186,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    const appInfo = tokenResult.token;
+    const caller = authResult.caller;
+    console.log(`Command request from ${caller.auth_type} auth (user: ${caller.user_uuid || "none"})`);
 
-    // Create Supabase client with service role (needed before first use)
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
+    // Create Supabase client with service role
     const supabase = createClient(supabaseUrl, supabaseKey, {
       auth: {
         autoRefreshToken: false,
@@ -170,19 +211,57 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Determine device_uuid: prefer from request body, then from token, then look up from pairing_code
-    let deviceUuid: string | undefined = commandData.device_uuid || appInfo.device_uuid;
+    // Determine device_uuid based on auth type
+    let deviceUuid: string | undefined;
 
-    // If device_uuid not available, look it up from pairing_code
-    if (!deviceUuid) {
-      const { data: pairingRecord } = await supabase
+    if (caller.auth_type === "user") {
+      // User session auth: device_uuid MUST come from request body
+      deviceUuid = commandData.device_uuid;
+      if (!deviceUuid) {
+        return new Response(
+          JSON.stringify({ success: false, error: "device_uuid is required" }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      // Verify the device belongs to this user
+      const { data: userDevice, error: deviceError } = await supabase
         .schema("display")
-        .from("pairings")
+        .from("user_devices")
         .select("device_uuid")
-        .eq("pairing_code", appInfo.pairing_code)
+        .eq("user_id", caller.user_uuid!)
+        .eq("device_uuid", deviceUuid)
         .maybeSingle();
 
-      deviceUuid = pairingRecord?.device_uuid;
+      if (deviceError || !userDevice) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Device not found or not assigned to your account",
+          }),
+          {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+    } else {
+      // App token auth: prefer request body, then token, then look up from pairing_code
+      deviceUuid = commandData.device_uuid || caller.device_uuid;
+
+      if (!deviceUuid && caller.pairing_code) {
+        const { data: pairingRecord } = await supabase
+          .schema("display")
+          .from("pairings")
+          .select("device_uuid")
+          .eq("pairing_code", caller.pairing_code)
+          .maybeSingle();
+
+        deviceUuid = pairingRecord?.device_uuid;
+      }
     }
 
     if (!deviceUuid) {
@@ -237,13 +316,28 @@ Deno.serve(async (req) => {
     // Calculate expiry
     const expiresAt = new Date(Date.now() + COMMAND_EXPIRY_SECONDS * 1000);
 
+    // Look up pairing_code for the device (needed for DB insert)
+    let pairingCode = caller.pairing_code;
+    let serialNumber = caller.serial_number;
+    if (!pairingCode || !serialNumber) {
+      const { data: device } = await supabase
+        .schema("display")
+        .from("devices")
+        .select("pairing_code, serial_number")
+        .eq("id", deviceUuid)
+        .maybeSingle();
+
+      pairingCode = pairingCode || device?.pairing_code;
+      serialNumber = serialNumber || device?.serial_number;
+    }
+
     // Insert command with device_uuid
     const { data: command, error: insertError } = await supabase
       .schema("display")
       .from("commands")
       .insert({
-        pairing_code: appInfo.pairing_code,
-        serial_number: appInfo.serial_number, // Keep for backward compatibility
+        pairing_code: pairingCode || "unknown",
+        serial_number: serialNumber || "unknown",
         device_uuid: deviceUuid,
         command: commandData.command,
         payload: commandData.payload || {},
@@ -279,27 +373,47 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Determine user_uuid for broadcast
+    const userUuid = caller.user_uuid;
+
+    // If we don't have user_uuid yet, look it up from user_devices
+    let broadcastUserUuid = userUuid;
+    if (!broadcastUserUuid) {
+      const { data: userDevice } = await supabase
+        .schema("display")
+        .from("user_devices")
+        .select("user_id")
+        .eq("device_uuid", deviceUuid)
+        .maybeSingle();
+
+      broadcastUserUuid = userDevice?.user_id || null;
+    }
+
     console.log(
-      `Command ${commandData.command} queued for device ${deviceUuid} (pairing: ${appInfo.pairing_code}, id: ${command.id})`,
+      `Command ${commandData.command} queued for device ${deviceUuid} (id: ${command.id}, auth: ${caller.auth_type})`,
     );
 
     // Broadcast to user channel if user_uuid is available
-    if (appInfo.user_uuid) {
+    if (broadcastUserUuid) {
       try {
-        await sendBroadcast(`user:${appInfo.user_uuid}`, "command", {
+        await sendBroadcast(`user:${broadcastUserUuid}`, "command", {
           device_uuid: deviceUuid,
           command: {
             id: command.id,
             command: commandData.command,
             payload: commandData.payload || {},
             status: "pending",
+            created_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
           },
         });
+        console.log(`Command broadcast to user:${broadcastUserUuid}`);
       } catch (broadcastError) {
         console.error("Failed to broadcast to user channel:", broadcastError);
         // Don't fail the request - command is already queued
       }
+    } else {
+      console.warn(`No user_uuid found for device ${deviceUuid} - command not broadcast`);
     }
 
     const response: InsertCommandResponse = {

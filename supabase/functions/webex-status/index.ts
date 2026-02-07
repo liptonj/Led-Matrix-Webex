@@ -93,11 +93,12 @@ serve(async (req: Request) => {
       body = {};
     }
 
+    const deviceUuid = tokenPayload.device_uuid || body.device_uuid || null;
     const pairingCode = body.pairing_code || tokenPayload.pairing_code || null;
     const serialNumber = body.serial_number || tokenPayload.serial_number || null;
     const deviceId = body.device_id || tokenPayload.device_id || null;
 
-    if (!serialNumber && !pairingCode) {
+    if (!deviceUuid && !serialNumber && !pairingCode) {
       return new Response(JSON.stringify({ error: "Missing device selector" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -110,25 +111,62 @@ serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
+    // Resolve user_uuid from pairings table
+    let userUuid: string | null = null;
+    let resolvedDeviceUuid: string | null = deviceUuid;
+    
+    if (deviceUuid) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid, device_uuid")
+        .eq("device_uuid", deviceUuid)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid ?? null;
+      resolvedDeviceUuid = pairing?.device_uuid ?? deviceUuid;
+    } else if (serialNumber) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid, device_uuid")
+        .eq("serial_number", serialNumber)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid ?? null;
+      resolvedDeviceUuid = pairing?.device_uuid ?? null;
+    } else if (pairingCode) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid, device_uuid")
+        .eq("pairing_code", pairingCode)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid ?? null;
+      resolvedDeviceUuid = pairing?.device_uuid ?? null;
+    }
+
     const hasLocalStatus = typeof body.webex_status === "string" && body.webex_status.trim().length > 0;
     let webexStatus: string;
 
     if (hasLocalStatus) {
       webexStatus = normalizeWebexStatus(body.webex_status);
     } else {
-      let tokenQuery = supabase
+      if (!userUuid) {
+        return new Response(JSON.stringify({ error: "Device not paired to a user" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Look up token by user_id (same pattern as webex-token)
+      const { data: tokenRow, error: tokenError } = await supabase
         .schema("display")
         .from("oauth_tokens")
         .select("id, provider, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at")
-        .eq("provider", "webex");
+        .eq("provider", "webex")
+        .eq("user_id", userUuid)
+        .eq("token_scope", "user")
+        .maybeSingle();
 
-      if (serialNumber) {
-        tokenQuery = tokenQuery.eq("serial_number", serialNumber);
-      } else if (pairingCode) {
-        tokenQuery = tokenQuery.eq("pairing_code", pairingCode);
-      }
-
-      const { data: tokenRow, error: tokenError } = await tokenQuery.maybeSingle();
       if (tokenError || !tokenRow) {
         return new Response(JSON.stringify({ error: "Webex token not found" }), {
           status: 404,
@@ -142,6 +180,8 @@ serve(async (req: Request) => {
         .select("client_id, client_secret_id, active")
         .eq("provider", "webex")
         .eq("active", true)
+        .order("updated_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (clientError || !clientRow) {
@@ -151,7 +191,7 @@ serve(async (req: Request) => {
         });
       }
 
-      const secretKey = serialNumber || pairingCode || "token";
+      const secretKey = userUuid || serialNumber || pairingCode || "token";
       let accessToken = await fetchDecryptedSecret(supabase, tokenRow.access_token_id);
       const refreshTokenId = tokenRow.refresh_token_id as string | null;
       const refreshToken = refreshTokenId
@@ -230,7 +270,7 @@ serve(async (req: Request) => {
       }
     }
 
-    if (pairingCode) {
+    if (resolvedDeviceUuid) {
       const updateData: Record<string, unknown> = {
         webex_status: webexStatus,
       };
@@ -257,7 +297,14 @@ serve(async (req: Request) => {
         .schema("display")
         .from("pairings")
         .update(updateData)
-        .eq("pairing_code", pairingCode);
+        .eq("device_uuid", resolvedDeviceUuid);
+    } else {
+      // All devices now get device_uuid from device-auth, so this should not happen
+      console.warn("Skipping pairings update: device_uuid not available", {
+        pairing_code: pairingCode,
+        serial_number: serialNumber,
+        device_id: deviceId,
+      });
     }
 
     return new Response(

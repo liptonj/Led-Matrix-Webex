@@ -17,12 +17,14 @@ export interface BroadcastMessage {
  * @param topic - Channel topic (e.g., "device:{deviceUuid}" or "user:{userUuid}")
  * @param event - Event name (e.g., "user_assigned", "webex_status")
  * @param payload - Event payload data
+ * @param isPrivate - Whether the broadcast is private (default: true)
  * @returns Promise that resolves if broadcast succeeds, rejects on error
  */
 export async function sendBroadcast(
   topic: string,
   event: string,
   payload: Record<string, unknown>,
+  isPrivate: boolean = true,
 ): Promise<void> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -38,6 +40,7 @@ export async function sendBroadcast(
         topic,
         event,
         payload,
+        private: isPrivate,
       },
     ],
   };

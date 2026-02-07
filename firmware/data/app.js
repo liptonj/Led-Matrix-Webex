@@ -703,7 +703,7 @@ async function loadPinConfig() {
     try {
         const response = await fetch('/api/config/pins');
         if (!response.ok) {
-            console.warn('Pin config not available');
+            console.warn('Pin config API returned', response.status);
             return;
         }
         const data = await response.json();
@@ -711,8 +711,8 @@ async function loadPinConfig() {
         // Update board info
         const boardTypeEl = document.getElementById('board-type');
         const presetNameEl = document.getElementById('pin-preset-name');
-        if (boardTypeEl) boardTypeEl.textContent = data.chip_description || data.board_type;
-        if (presetNameEl) presetNameEl.textContent = data.preset_name;
+        if (boardTypeEl) boardTypeEl.textContent = data.chip_description || data.board_type || '--';
+        if (presetNameEl) presetNameEl.textContent = data.preset_name || '--';
         
         // Populate preset dropdown
         const presetSelect = document.getElementById('pin-preset');
@@ -724,7 +724,9 @@ async function loadPinConfig() {
             // Show/hide custom pins section
             presetSelect.addEventListener('change', () => {
                 const customSection = document.getElementById('custom-pins-section');
-                customSection.style.display = presetSelect.value === '3' ? 'block' : 'none';
+                if (customSection) {
+                    customSection.style.display = presetSelect.value === '3' ? 'block' : 'none';
+                }
             });
             
             // Trigger initial state
@@ -739,7 +741,7 @@ async function loadPinConfig() {
             const pinFields = ['r1', 'g1', 'b1', 'r2', 'g2', 'b2', 'a', 'b', 'c', 'd', 'e', 'clk', 'lat', 'oe'];
             pinFields.forEach(pin => {
                 const el = document.getElementById(`pin-${pin}`);
-                if (el) el.value = data.pins[pin];
+                if (el && data.pins[pin] !== undefined) el.value = data.pins[pin];
             });
         }
         

@@ -140,6 +140,8 @@ serve(async (req: Request) => {
       .select("client_id, client_secret_id, redirect_uri, active")
       .eq("provider", "webex")
       .eq("active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (clientError || !clientRow) {
@@ -176,21 +178,50 @@ serve(async (req: Request) => {
     const expiresIn = typeof tokenData.expires_in === "number" ? tokenData.expires_in : 3600;
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
+    // Resolve user_uuid and device_uuid from pairings table (via pairing_code from OAuth state)
+    let userUuid: string | null = null;
+    let deviceUuid: string | null = null;
+    
+    if (pairingCode) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid, device_uuid")
+        .eq("pairing_code", pairingCode)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid ?? null;
+      deviceUuid = pairing?.device_uuid ?? null;
+    } else if (serialNumber) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid, device_uuid")
+        .eq("serial_number", serialNumber)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid ?? null;
+      deviceUuid = pairing?.device_uuid ?? null;
+    }
+
     let existingQuery = supabase
       .schema("display")
       .from("oauth_tokens")
       .select("id, access_token_id, refresh_token_id")
       .eq("provider", "webex");
 
-    if (serialNumber) {
+    // Query by user_id as primary lookup (Webex tokens are user-owned)
+    if (userUuid) {
+      existingQuery = existingQuery.eq("user_id", userUuid).eq("token_scope", "user");
+    } else if (serialNumber) {
+      // Fallback to serial_number for backward compatibility
       existingQuery = existingQuery.eq("serial_number", serialNumber);
     } else if (pairingCode) {
+      // Fallback to pairing_code for backward compatibility
       existingQuery = existingQuery.eq("pairing_code", pairingCode);
     }
 
     const { data: existing } = await existingQuery.maybeSingle();
 
-    const secretKey = serialNumber || pairingCode || "token";
+    const secretKey = userUuid || serialNumber || pairingCode || "token";
 
     const accessTokenId = await updateSecret(
       supabase,
@@ -209,30 +240,51 @@ serve(async (req: Request) => {
       : existing?.refresh_token_id ?? null;
 
     if (existing?.id) {
+      const updatePayload: Record<string, unknown> = {
+        access_token_id: accessTokenId,
+        refresh_token_id: refreshTokenId,
+        expires_at: expiresAt,
+        pairing_code: pairingCode,
+        serial_number: serialNumber,
+        updated_at: new Date().toISOString(),
+      };
+      
+      // Add user_id and device_uuid if resolved (for migration)
+      if (userUuid) {
+        updatePayload.user_id = userUuid;
+      }
+      if (deviceUuid) {
+        updatePayload.device_uuid = deviceUuid;
+      }
+      
       await supabase
         .schema("display")
         .from("oauth_tokens")
-        .update({
-          access_token_id: accessTokenId,
-          refresh_token_id: refreshTokenId,
-          expires_at: expiresAt,
-          pairing_code: pairingCode,
-          serial_number: serialNumber,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq("id", existing.id);
     } else {
+      const insertPayload: Record<string, unknown> = {
+        provider: "webex",
+        serial_number: serialNumber,
+        pairing_code: pairingCode,
+        access_token_id: accessTokenId,
+        refresh_token_id: refreshTokenId,
+        expires_at: expiresAt,
+        token_scope: "user", // Webex tokens belong to users
+      };
+      
+      // Add user_id and device_uuid if resolved
+      if (userUuid) {
+        insertPayload.user_id = userUuid;
+      }
+      if (deviceUuid) {
+        insertPayload.device_uuid = deviceUuid;
+      }
+      
       await supabase
         .schema("display")
         .from("oauth_tokens")
-        .insert({
-          provider: "webex",
-          serial_number: serialNumber,
-          pairing_code: pairingCode,
-          access_token_id: accessTokenId,
-          refresh_token_id: refreshTokenId,
-          expires_at: expiresAt,
-        });
+        .insert(insertPayload);
     }
 
     return new Response(JSON.stringify({ success: true }), {

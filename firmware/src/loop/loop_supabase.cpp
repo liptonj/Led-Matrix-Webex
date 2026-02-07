@@ -34,7 +34,6 @@ void handleSupabase(LoopContext& ctx) {
     // Phase A: State sync via Edge Functions (replaces bridge for pairing)
     if (ctx.app_state->wifi_connected && deps.supabase.isInitialized()) {
         deps.sync.loop(ctx.current_time);
-        deps.realtime_manager.loop(ctx.current_time);
         deps.command_processor.processPendingAcks();
         deps.command_processor.processPendingActions();
         // Keep remote logger in sync with server-side debug toggle

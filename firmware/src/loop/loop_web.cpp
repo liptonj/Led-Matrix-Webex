@@ -46,7 +46,6 @@ bool handleWebServer(LoopContext& ctx) {
         bool auth_ok = ctx.webex_client->handleOAuthCallback(code, redirect_uri);
         ctx.app_state->webex_authenticated = auth_ok;
         ctx.web_server->clearPendingOAuth();
-        Serial.printf("[WEBEX] OAuth exchange %s\n", auth_ok ? "successful" : "failed");
         if (auth_ok) {
             RLOG_INFO("Webex", "OAuth authentication successful");
         } else {

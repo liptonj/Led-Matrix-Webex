@@ -20,6 +20,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
+#include <esp_ota_ops.h>
+#include "../debug/remote_logger.h"
 
 // Firmware version from build
 #ifndef FIRMWARE_VERSION
@@ -35,12 +37,14 @@ SyncManager syncManager;
 #include "../display/matrix_display.h"
 
 namespace {
-constexpr unsigned long HEARTBEAT_INTERVAL = 30000;  // 30 seconds
-constexpr unsigned long SYNC_INTERVAL = 300000;      // 5 minutes
+constexpr unsigned long SYNC_INTERVAL = 300000;                  // 5 minutes
+constexpr unsigned long TELEMETRY_BROADCAST_INTERVAL = 30000;    // 30 seconds
+constexpr unsigned long POLL_COMMANDS_MIN_INTERVAL = 10000;      // 10 seconds
 }  // namespace
 
 SyncManager::SyncManager()
-    : _lastHeartbeat(0), _lastFullSync(0), _lastRealtimeSocketSeen(0) {
+    : _lastHeartbeat(0), _lastFullSync(0), _lastRealtimeSocketSeen(0),
+      _lastTelemetryBroadcast(0), _lastPollCommands(0) {
 }
 
 SyncManager::~SyncManager() {
@@ -50,6 +54,8 @@ void SyncManager::begin() {
     _lastHeartbeat = 0;
     _lastFullSync = 0;
     _lastRealtimeSocketSeen = 0;
+    _lastTelemetryBroadcast = 0;
+    _lastPollCommands = 0;
 }
 
 void SyncManager::loop(unsigned long current_time) {
@@ -59,7 +65,7 @@ void SyncManager::loop(unsigned long current_time) {
         return;
     }
 
-    const bool commandsSocketActive = deps.realtime.isSocketConnected();
+    const bool commandsSocketActive = deps.realtime.isConnected();
     const bool commandsConnecting = deps.realtime.isConnecting();
     const bool realtime_connecting = commandsConnecting;
 
@@ -72,6 +78,23 @@ void SyncManager::loop(unsigned long current_time) {
     const bool realtimeStale = commandsRealtimeEnabled &&
                                (_lastRealtimeSocketSeen > 0) &&
                                (current_time - _lastRealtimeSocketSeen > 120000UL);
+
+    // --- Telemetry broadcast (independent 30s timer, lightweight WebSocket-only) ---
+    if (deps.realtime.isConnected()) {
+        if (current_time - _lastTelemetryBroadcast >= TELEMETRY_BROADCAST_INTERVAL) {
+            broadcastTelemetry();
+            _lastTelemetryBroadcast = current_time;
+        }
+        // Reset telemetry timer on reconnect transition
+        if (_lastTelemetryBroadcast == 0) {
+            _lastTelemetryBroadcast = current_time;
+        }
+    } else {
+        // Mark disconnected so we reset on next connect
+        _lastTelemetryBroadcast = 0;
+    }
+
+    // --- Below here: HTTP sync logic (gated by shouldSync) ---
 
     // Determine sync intervals
     bool isHeartbeat = false;
@@ -101,33 +124,31 @@ void SyncManager::loop(unsigned long current_time) {
         return;
     }
 
-    // Skip if realtime is connecting or heap is low
-    if (realtime_connecting || !hasSafeTlsHeap(65000, 40000)) {
-        return;
-    }
-
-    performSync(isHeartbeat);
-
-    if (isHeartbeat) {
+    // Sync (blocked during realtime connecting AND needs heap)
+    if (!realtime_connecting && hasSafeTlsHeap(65000, 40000)) {
+        performSync(isHeartbeat);
         _lastHeartbeat = current_time;
+        if (!isHeartbeat) {
+            _lastFullSync = current_time;
+        }
     } else {
+        // Still advance timestamps to prevent rapid-fire retries
         _lastHeartbeat = current_time;
-        _lastFullSync = current_time;
     }
 
-    // Poll for commands if not using realtime
-    if (!realtimeWorking) {
-        pollCommands();
+    // Poll for commands (NOT blocked during connecting, rate-limited independently)
+    if (!realtimeWorking && hasSafeTlsHeap(65000, 40000)) {
+        if (current_time - _lastPollCommands >= POLL_COMMANDS_MIN_INTERVAL) {
+            pollCommands();
+            _lastPollCommands = current_time;
+        }
     }
 }
 
 void SyncManager::forceSyncNow() {
     _lastHeartbeat = 0;
     _lastFullSync = 0;
-}
-
-bool SyncManager::isSyncDue(unsigned long current_time) const {
-    return (current_time - _lastHeartbeat >= HEARTBEAT_INTERVAL);
+    _lastTelemetryBroadcast = 0;
 }
 
 void SyncManager::performSync(bool isHeartbeat) {
@@ -196,9 +217,81 @@ void SyncManager::pollCommands() {
             continue;
         }
         
-        Serial.printf("[SYNC] Processing command: id=%s cmd=%s\n", 
-                     commands[i].id.c_str(), commands[i].command.c_str());
+        RLOG_INFO("sync", "Polled command: id=%s cmd=%s",
+                  commands[i].id.c_str(), commands[i].command.c_str());
         handleSupabaseCommand(commands[i]);
+    }
+}
+
+void SyncManager::broadcastTelemetry() {
+    auto& deps = getDependencies();
+    static unsigned long broadcastCount = 0;
+
+    int rssi = WiFi.RSSI();
+    uint32_t freeHeap = ESP.getFreeHeap();
+    uint32_t uptime = millis() / 1000;
+    float temperature = deps.app_state.temperature;
+    String firmwareVersion = FIRMWARE_VERSION;
+
+    JsonDocument telemetry;
+    telemetry["device_uuid"] = deps.config.getDeviceUuid();
+    telemetry["rssi"] = rssi;
+    telemetry["free_heap"] = freeHeap;
+    telemetry["uptime"] = uptime;
+    telemetry["firmware_version"] = firmwareVersion;
+    telemetry["temperature"] = temperature;
+    telemetry["ssid"] = WiFi.SSID();
+    telemetry["timestamp"] = (unsigned long)time(nullptr);
+
+    // Add OTA partition info if available
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        telemetry["ota_partition"] = running->label;
+    }
+
+    bool sent = deps.realtime.sendBroadcast("device_telemetry", telemetry);
+    broadcastCount++;
+
+    // Only log on failure or every 10th success to avoid serial spam
+    if (!sent) {
+        RLOG_WARN("telemetry", "Broadcast failed (heap=%u, rssi=%d)", freeHeap, rssi);
+    } else if (broadcastCount % 10 == 0) {
+        Serial.printf("[SYNC] Telemetry broadcast #%lu (heap=%u, rssi=%d)\n",
+                      broadcastCount, freeHeap, rssi);
+    }
+    // Always log to remote when enabled (even if suppressed in Serial)
+    if (sent) {
+        RLOG_DEBUG("telemetry", "Sent #%lu: heap=%u rssi=%d uptime=%lu temp=%.1f fw=%s",
+                   broadcastCount, freeHeap, rssi, uptime, temperature, firmwareVersion.c_str());
+    }
+}
+
+void SyncManager::broadcastDeviceConfig() {
+    auto& deps = getDependencies();
+
+    if (!deps.realtime.isConnected()) {
+        RLOG_DEBUG("config", "Skipping config broadcast - not connected");
+        return;
+    }
+
+    String configStr = DeviceInfo::buildConfigJson();
+    
+    JsonDocument configDoc;
+    DeserializationError err = deserializeJson(configDoc, configStr);
+    if (err) {
+        RLOG_WARN("config", "Failed to parse config JSON: %s", err.c_str());
+        return;
+    }
+
+    // Add device identity and timestamp
+    configDoc["device_uuid"] = deps.config.getDeviceUuid();
+    configDoc["timestamp"] = (unsigned long)time(nullptr);
+
+    bool sent = deps.realtime.sendBroadcast("device_config", configDoc);
+    if (!sent) {
+        RLOG_WARN("config", "Config broadcast failed (heap=%u)", ESP.getFreeHeap());
+    } else {
+        RLOG_DEBUG("config", "Config broadcast sent");
     }
 }
 
@@ -256,7 +349,7 @@ bool provisionDeviceWithSupabase() {
     }
     String endpoint = supabase_url + "/functions/v1/provision-device";
 
-    Serial.printf("[SUPABASE] Provisioning device via %s\n", endpoint.c_str());
+    RLOG_INFO("provision", "Provisioning device via %s", endpoint.c_str());
 
     // HTTP request setup (kept local as requested)
     WiFiClientSecure client;
@@ -278,6 +371,7 @@ bool provisionDeviceWithSupabase() {
     if (http_code < 200 || http_code >= 300) {
         Serial.printf("[SUPABASE] Provision failed: HTTP %d\n", http_code);
         Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
+        RLOG_WARN("provision", "Failed: HTTP %d", http_code);
         
         if (http_code == 409 && response.indexOf("approval_required") >= 0) {
             deps.app_state.supabase_approval_pending = true;
@@ -339,7 +433,7 @@ bool provisionDeviceWithSupabase() {
     deps.app_state.supabase_disabled = false;
     deps.app_state.supabase_blacklisted = false;
     deps.app_state.supabase_deleted = false;
-    Serial.println("[SUPABASE] Device provisioned successfully");
+    RLOG_INFO("provision", "Device provisioned successfully");
 
     // Immediately authenticate after provisioning so realtime can initialize
     if (deps.supabase.authenticate()) {
@@ -364,10 +458,10 @@ bool provisionDeviceWithSupabase() {
         }
         
         deps.app_state.realtime_defer_until = millis() + 8000UL;
-        Serial.println("[SUPABASE] Authenticated after provisioning");
+        RLOG_INFO("provision", "Authenticated after provisioning");
     } else {
         deps.app_state.supabase_connected = false;
-        Serial.println("[SUPABASE] Authentication failed after provisioning");
+        RLOG_WARN("provision", "Authentication failed after provisioning");
     }
     return true;
 }

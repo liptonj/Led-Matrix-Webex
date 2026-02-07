@@ -112,6 +112,7 @@ verify_jwt = false
 [functions.provision-device]
 verify_jwt = false
 
+# @deprecated - This Edge Function is no longer called by any clients
 [functions.update-app-state]
 verify_jwt = false
 

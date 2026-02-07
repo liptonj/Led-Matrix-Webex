@@ -33,11 +33,29 @@ void WebServerManager::setupRoutes() {
 }
 
 void WebServerManager::setupApiRoutes() {
-    // API endpoints - Status and Config
+    // IMPORTANT: Register more-specific routes BEFORE less-specific ones.
+    // ESPAsyncWebServer uses prefix matching (startsWith(uri+"/")) so
+    // "/api/config" would swallow "/api/config/pins" if registered first.
+
+    // API endpoints - Status
     server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleStatus(request);
     });
 
+    // Pin configuration endpoints (must be before /api/config)
+    server->on("/api/config/pins", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetPinConfig(request);
+    });
+    
+    server->on("/api/config/pins", HTTP_POST,
+        [](AsyncWebServerRequest* request) {},
+        nullptr,
+        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+            handleSavePinConfig(request, data, len);
+        }
+    );
+
+    // General config endpoints (after more-specific /api/config/* routes)
     server->on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleConfig(request);
     });
@@ -88,19 +106,6 @@ void WebServerManager::setupApiRoutes() {
     server->on("/api/mdns/restart", HTTP_POST, [this](AsyncWebServerRequest* request) {
         handleMdnsRestart(request);
     });
-
-    // Pin configuration endpoints
-    server->on("/api/config/pins", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        handleGetPinConfig(request);
-    });
-    
-    server->on("/api/config/pins", HTTP_POST,
-        [](AsyncWebServerRequest* request) {},
-        nullptr,
-        [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-            handleSavePinConfig(request, data, len);
-        }
-    );
 
     // OTA upload endpoints - use completion handlers from api_ota_upload.cpp
     server->on("/api/ota/upload", HTTP_POST,
@@ -180,10 +185,7 @@ void WebServerManager::setupApiRoutes() {
     );
 
     // Module management API endpoints
-    server->on("/api/modules", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        handleGetModules(request);
-    });
-
+    // Register more-specific /api/modules/* routes before /api/modules
     server->on("/api/modules/variants", HTTP_GET, [this](AsyncWebServerRequest* request) {
         handleGetVariants(request);
     });
@@ -203,6 +205,10 @@ void WebServerManager::setupApiRoutes() {
             handleInstallVariant(request, data, len);
         }
     );
+
+    server->on("/api/modules", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        handleGetModules(request);
+    });
 }
 
 void WebServerManager::setupCaptivePortalRoutes() {

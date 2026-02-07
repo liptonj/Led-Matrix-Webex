@@ -8,6 +8,7 @@
 #include "../supabase/supabase_realtime.h"
 #include "realtime_watchdog.h"
 #include "../core/dependencies.h"
+#include "../debug/remote_logger.h"
 
 // Global instance
 RealtimeManager realtimeManager;
@@ -42,6 +43,11 @@ void RealtimeManager::loop(unsigned long current_time) {
     // Auto-reconnect if needed
     if (checkReconnection(current_time, _lastInitAttempt)) {
         if (current_time >= deps.app_state.realtime_defer_until) {
+            // Disconnect stale socket before reconnecting (prevents WebSocket handle leak)
+            if (deps.realtime.isSocketConnected() && !deps.realtime.isConnected()) {
+                RLOG_WARN("realtime", "Disconnecting stale socket before reconnect");
+                deps.realtime.disconnect();
+            }
             initConnection();
         }
     }

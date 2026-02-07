@@ -138,6 +138,14 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Look up pairing record to get device_uuid and user_uuid
+    const { data: pairing } = await supabase
+      .schema("display")
+      .from("pairings")
+      .select("device_uuid, user_uuid")
+      .eq("pairing_code", normalizedCode)
+      .maybeSingle();
+
     // Calculate expiration
     const now = Math.floor(Date.now() / 1000);
     const expiresAt = now + TOKEN_TTL_SECONDS;
@@ -151,6 +159,9 @@ Deno.serve(async (req) => {
       pairing_code: device.pairing_code,
       serial_number: device.serial_number,
       device_id: device.device_id,
+      // Include device_uuid and user_uuid from pairing record if available
+      ...(pairing?.device_uuid && { device_uuid: pairing.device_uuid }),
+      ...(pairing?.user_uuid && { user_uuid: pairing.user_uuid }),
       // "token_type" is used by RLS policies (must be "app")
       token_type: "app",
       // "type" field is used by bridge for token validation (must be "app_auth")

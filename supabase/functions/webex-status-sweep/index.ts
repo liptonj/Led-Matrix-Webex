@@ -12,13 +12,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
 import {
   fetchWebexStatus,
-  normalizeWebexStatus,
   refreshWebexToken,
-  CANONICAL_STATUSES,
-  STATUS_ALIASES,
 } from "../_shared/webex.ts";
-
-const COLLISION_WINDOW_MS = 15_000; // skip only if embedded app updated very recently
+import { sendBroadcast } from "../_shared/broadcast.ts";
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -55,172 +51,56 @@ serve(async (req: Request) => {
       });
     }
 
-    const { data: tokenRows, error: tokenError } = await supabase
-      .schema("display")
-      .from("oauth_tokens")
-      .select(
-        "id, provider, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at",
-      )
-      .eq("provider", "webex");
-
-    if (tokenError || !tokenRows) {
-      return new Response(JSON.stringify({ error: "Failed to load tokens" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const now = Date.now();
     let updated = 0;
     let skipped = 0;
     let failed = 0;
 
-    for (const tokenRow of tokenRows) {
-      try {
-        const pairingCode = tokenRow.pairing_code as string | null;
-        if (!pairingCode) {
-          skipped++;
-          continue;
-        }
+    // Backfill user_id for legacy tokens (migration support)
+    // Query tokens without user_id and try to resolve from pairings
+    const { data: legacyTokens } = await supabase
+      .schema("display")
+      .from("oauth_tokens")
+      .select("id, pairing_code, serial_number")
+      .eq("provider", "webex")
+      .is("user_id", null)
+      .limit(100); // Process in batches
 
-        const { data: pairingRow } = await supabase
-          .schema("display")
-          .from("pairings")
-          .select("pairing_code, app_last_seen, app_connected, webex_status")
-          .eq("pairing_code", pairingCode)
-          .maybeSingle();
-
-        if (pairingRow?.app_last_seen && pairingRow?.app_connected === true) {
-          const lastSeen = new Date(pairingRow.app_last_seen as string).getTime();
-          if (!Number.isNaN(lastSeen) && now - lastSeen < COLLISION_WINDOW_MS) {
-            skipped++;
-            continue;
-          }
-        }
-
-        let accessToken = await fetchDecryptedSecret(supabase, tokenRow.access_token_id as string);
-        const refreshTokenId = tokenRow.refresh_token_id as string | null;
-        const refreshToken = refreshTokenId
-          ? await fetchDecryptedSecret(supabase, refreshTokenId)
-          : null;
-
-        const expiresAt = tokenRow.expires_at ? new Date(tokenRow.expires_at as string) : null;
-        const shouldRefresh = !expiresAt || expiresAt.getTime() - now < 60_000;
-
-        if (shouldRefresh && refreshToken) {
-          const clientSecret = await fetchDecryptedSecret(
-            supabase,
-            clientRow.client_secret_id as string,
-          );
-          const refreshed = await refreshWebexToken({
-            clientId: clientRow.client_id as string,
-            clientSecret,
-            refreshToken,
-          });
-
-          accessToken = refreshed.access_token;
-          const accessTokenId = await updateSecret(
-            supabase,
-            tokenRow.access_token_id as string,
-            accessToken,
-            `webex_access_${pairingCode}`,
-          );
-
-          let refreshTokenIdUpdated = refreshTokenId;
-          if (refreshed.refresh_token) {
-            refreshTokenIdUpdated = await updateSecret(
-              supabase,
-              refreshTokenId,
-              refreshed.refresh_token,
-              `webex_refresh_${pairingCode}`,
-            );
+    if (legacyTokens?.length) {
+      for (const token of legacyTokens) {
+        try {
+          let userUuid: string | null = null;
+          
+          if (token.pairing_code) {
+            const { data: pairing } = await supabase
+              .schema("display")
+              .from("pairings")
+              .select("user_uuid")
+              .eq("pairing_code", token.pairing_code)
+              .maybeSingle();
+            userUuid = pairing?.user_uuid ?? null;
+          } else if (token.serial_number) {
+            const { data: pairing } = await supabase
+              .schema("display")
+              .from("pairings")
+              .select("user_uuid")
+              .eq("serial_number", token.serial_number)
+              .maybeSingle();
+            userUuid = pairing?.user_uuid ?? null;
           }
 
-          const newExpiresAt = refreshed.expires_in
-            ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
-            : null;
-
-          await supabase
-            .schema("display")
-            .from("oauth_tokens")
-            .update({
-              access_token_id: accessTokenId,
-              refresh_token_id: refreshTokenIdUpdated,
-              expires_at: newExpiresAt,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", tokenRow.id);
-        }
-
-        const webexStatus = await fetchWebexStatus(accessToken);
-        const inCall = ["meeting", "call", "presenting", "busy"].includes(webexStatus);
-
-        // Check if status actually changed before updating
-        // This prevents triggering realtime notifications for unchanged status
-        const currentStatus = pairingRow?.webex_status as string | null;
-        if (currentStatus === webexStatus) {
-          // Status unchanged - skip the update to avoid unnecessary realtime notifications
-          skipped++;
-          continue;
-        }
-
-        // Get device_uuid and user_uuid for broadcast
-        const { data: pairingWithUuids } = await supabase
-          .schema("display")
-          .from("pairings")
-          .select("device_uuid, user_uuid")
-          .eq("pairing_code", pairingCode)
-          .maybeSingle();
-
-        await supabase
-          .schema("display")
-          .from("pairings")
-          .update({
-            webex_status: webexStatus,
-            in_call: inCall,
-          })
-          .eq("pairing_code", pairingCode);
-
-        // Broadcast to device channel if device_uuid is available
-        if (pairingWithUuids?.device_uuid) {
-          try {
-            await sendBroadcast(
-              `device:${pairingWithUuids.device_uuid}`,
-              "webex_status",
-              {
-                webex_status: webexStatus,
-                in_call: inCall,
-                device_uuid: pairingWithUuids.device_uuid,
-              },
-            );
-          } catch (broadcastError) {
-            console.error("Failed to broadcast webex_status to device channel:", broadcastError);
-            // Don't fail the request - status is already updated
+          if (userUuid) {
+            // Backfill the token with user_id
+            await supabase
+              .schema("display")
+              .from("oauth_tokens")
+              .update({ user_id: userUuid, token_scope: "user" })
+              .eq("id", token.id);
           }
+        } catch (err) {
+          console.error("Backfill token failed:", err);
+          // Continue processing other tokens
         }
-
-        // Broadcast to user channel if user_uuid is available
-        if (pairingWithUuids?.user_uuid) {
-          try {
-            await sendBroadcast(
-              `user:${pairingWithUuids.user_uuid}`,
-              "webex_status",
-              {
-                webex_status: webexStatus,
-                in_call: inCall,
-                user_uuid: pairingWithUuids.user_uuid,
-              },
-            );
-          } catch (broadcastError) {
-            console.error("Failed to broadcast webex_status to user channel:", broadcastError);
-            // Don't fail the request - status is already updated
-          }
-        }
-
-        updated++;
-      } catch (err) {
-        console.error("Sweep token failed:", err);
-        failed++;
       }
     }
 
@@ -246,7 +126,7 @@ serve(async (req: Request) => {
           const { data: userToken } = await supabase
             .schema("display")
             .from("oauth_tokens")
-            .select("id, access_token_id, refresh_token_id, expires_at")
+            .select("id, access_token_id, refresh_token_id, expires_at, user_id")
             .eq("user_id", userId)
             .eq("token_scope", "user")
             .eq("provider", "webex")
@@ -325,7 +205,7 @@ serve(async (req: Request) => {
                 .schema("display")
                 .from("pairings")
                 .update({ webex_status: webexStatus, in_call: inCall })
-                .eq("pairing_code", pairing.pairing_code);
+                .eq("device_uuid", pairing.device_uuid);
 
               // Broadcast to device channel if device_uuid is available
               if (pairing.device_uuid) {

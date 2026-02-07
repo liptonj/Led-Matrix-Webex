@@ -4,6 +4,7 @@
  */
 
 #include "mqtt_client.h"
+#include "../debug/remote_logger.h"
 #include <ArduinoJson.h>
 #include <cctype>
 
@@ -94,12 +95,12 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
     bool use_tls = config_manager->getMQTTUseTLS();
 
     if (cached_broker.isEmpty()) {
-        Serial.println("[MQTT] No broker configured - MQTT module disabled");
+        RLOG_DEBUG("mqtt", "No broker configured - MQTT module disabled");
         return;
     }
 
-    Serial.printf("[MQTT] Connecting to %s:%d (TLS: %s)\n", 
-                  cached_broker.c_str(), port, use_tls ? "enabled" : "disabled");
+    RLOG_INFO("mqtt", "Connecting to %s:%d (TLS: %s)",
+              cached_broker.c_str(), port, use_tls ? "enabled" : "disabled");
 
     // Configure TLS client if needed
     if (use_tls) {
@@ -130,7 +131,7 @@ void MerakiMQTTClient::loop() {
 
     // Detect disconnection and log it
     if (last_connected_state && !currently_connected) {
-        Serial.printf("[MQTT] Disconnected (state=%d)\n", mqtt_client.state());
+        RLOG_WARN("mqtt", "Disconnected (state=%d)", mqtt_client.state());
         last_connected_state = false;
     } else if (!last_connected_state && currently_connected) {
         last_connected_state = true;
@@ -214,13 +215,13 @@ void MerakiMQTTClient::reconnect() {
     }
 
     if (connected) {
-        Serial.println("[MQTT] Connected!");
+        RLOG_INFO("mqtt", "Connected to %s:%d", cached_broker.c_str(), cached_port);
 
         // Subscribe to Meraki MT topics using cached topic
         mqtt_client.subscribe(cached_topic.c_str());
-        Serial.printf("[MQTT] Subscribed to: %s\n", cached_topic.c_str());
+        RLOG_INFO("mqtt", "Subscribed to: %s", cached_topic.c_str());
     } else {
-        Serial.printf("[MQTT] Connection failed, rc=%d\n", mqtt_client.state());
+        RLOG_WARN("mqtt", "Connection failed, rc=%d", mqtt_client.state());
     }
 }
 
@@ -233,7 +234,7 @@ void MerakiMQTTClient::invalidateConfig() {
     cached_broker = "";
     cached_topic = "";
     cached_port = 1883;
-    Serial.println("[MQTT] Config invalidated - will reload on next reconnect");
+    RLOG_INFO("mqtt", "Config invalidated - will reload on next reconnect");
 }
 
 void MerakiMQTTClient::onMessage(char* topic, byte* payload, unsigned int length) {
@@ -255,7 +256,7 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
     DeserializationError error = deserializeJson(doc, payload);
 
     if (error) {
-        Serial.printf("[MQTT] Failed to parse message: %s\n", error.c_str());
+        RLOG_WARN("mqtt", "Failed to parse message: %s", error.c_str());
         return;
     }
 
@@ -267,7 +268,7 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
 
     SensorEntry* entry = getOrCreateSensor(topic_sensor);
     if (!entry) {
-        Serial.println("[MQTT] Sensor list full - ignoring update");
+        RLOG_WARN("mqtt", "Sensor list full - ignoring update for %s", topic_sensor.c_str());
         return;
     }
     MerakiSensorData& sensor = entry->data;
@@ -375,6 +376,8 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         sensor.valid = true;
         sensor_data = sensor;
         latest_sensor_id = topic_sensor;
+        RLOG_DEBUG("mqtt", "Sensor %s updated: temp=%.1f hum=%.1f",
+                   topic_sensor.c_str(), sensor.temperature, sensor.humidity);
     }
 }
 

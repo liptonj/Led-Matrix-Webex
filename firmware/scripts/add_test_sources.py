@@ -8,6 +8,7 @@ the 'Import' function and 'env' object at runtime.
 # pyright: reportUndefinedVariable=false, reportUnboundVariable=false
 # mypy: disable-error-code="name-defined"
 from typing import TYPE_CHECKING, Any
+import os
 
 if TYPE_CHECKING:
     from SCons.Script import Environment  # type: ignore[import-not-found]
@@ -17,6 +18,16 @@ Import: Any  # noqa: F821
 env: "Environment"  # noqa: F821
 
 Import("env")  # noqa: F821
+
+# Try to detect which test is being built by checking environment variables
+# PlatformIO may set PIO_TEST_NAME or we can check the current working directory
+test_name = os.environ.get("PIO_TEST_NAME", "")
+if not test_name:
+    # Try to infer from test source files being compiled
+    # This is a fallback - PlatformIO doesn't always expose test name easily
+    cwd = os.getcwd()
+    if "test_serial_commands" in cwd:
+        test_name = "test_serial_commands"
 
 # Add config manager (split into domain files), nvs utils, and mock globals to the build
 src_filter = [
@@ -31,6 +42,10 @@ src_filter = [
     "+<config/config_export.cpp>",
     # Common utilities
     "+<common/nvs_utils.cpp>",
+    # Serial commands - include for all tests that need it
+    # The mocks in globals.cpp use weak linkage, so they'll only be used
+    # if serial_commands.cpp is not linked. This allows both approaches to work.
+    "+<serial/serial_commands.cpp>",
     # Note: provision_helpers.cpp excluded from global test sources
     # It requires the Dependencies framework with 23 mock manager objects
     # that only test_provision_helpers provides. The test file directly includes
@@ -42,5 +57,12 @@ src_filter = [
 ]
 
 env.Append(SRC_FILTER=src_filter)  # noqa: F821
+
+# Note: We do NOT define SERIAL_COMMANDS_INCLUDED globally anymore.
+# Instead, the mocks in globals.cpp use weak linkage (__attribute__((weak)))
+# so they're only used if serial_commands.cpp is not linked. If serial_commands.cpp
+# is linked, its symbols will take precedence over the weak mocks.
+# This allows tests that include serial_commands.cpp to use the real implementation,
+# while tests that don't include it will use the weak mocks.
 
 print("[TEST] Added config domain files, utilities and mocks to test build")

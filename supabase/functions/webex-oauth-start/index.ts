@@ -114,6 +114,8 @@ serve(async (req: Request) => {
       .select("client_id, redirect_uri, active")
       .eq("provider", "webex")
       .eq("active", true)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (clientError || !clientRow) {

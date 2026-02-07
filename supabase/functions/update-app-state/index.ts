@@ -1,7 +1,7 @@
 /**
- * @deprecated This Edge Function is deprecated and will be removed.
- * Status updates now use direct client-to-DB writes with a Postgres trigger for presence tracking.
- * See migration: pairings_presence_trigger.sql
+ * @deprecated This Edge Function is no longer called by any clients.
+ * Status updates are now handled via direct database writes and Supabase Realtime broadcasts.
+ * Kept for reference only -- will be removed in a future cleanup.
  *
  * Update App State Edge Function
  *
@@ -426,7 +426,7 @@ Deno.serve(async (req) => {
 
     const now = new Date().toISOString();
 
-    // Get pairing_code for heartbeat update
+    // Get pairing_code for validation
     const pairingCode = currentPairing?.pairing_code || (authResult.type === "app" ? authResult.pairingCode : null);
     
     if (!pairingCode) {
@@ -439,23 +439,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ALWAYS update heartbeat table (does NOT trigger realtime to device)
-    // Include device_uuid for UUID-based queries
-    const heartbeatDeviceUuid = targetDeviceUuid || currentPairing?.device_uuid;
-    await supabase
-      .schema("display")
-      .from("connection_heartbeats")
-      .upsert({
-        pairing_code: pairingCode,
-        device_uuid: heartbeatDeviceUuid || null,
-        app_last_seen: now,
-        app_connected: true,
-      }, { onConflict: "pairing_code" });
-
-    // Get device connection state from heartbeat table
+    // Get device connection state from pairings table (heartbeat tracking now handled by DB trigger)
     const { data: heartbeat } = await supabase
       .schema("display")
-      .from("connection_heartbeats")
+      .from("pairings")
       .select("device_connected, device_last_seen")
       .eq("pairing_code", pairingCode)
       .maybeSingle();
@@ -553,17 +540,6 @@ Deno.serve(async (req) => {
           if (insertError) {
             console.error("Failed to create pairing:", insertError);
           }
-
-          // Also create heartbeat record with device_uuid
-          await supabase
-            .schema("display")
-            .from("connection_heartbeats")
-            .upsert({
-              pairing_code: authResult.pairingCode,
-              device_uuid: device.id,
-              app_last_seen: now,
-              app_connected: true,
-            }, { onConflict: "pairing_code" });
         }
 
         // Return default response for new pairing

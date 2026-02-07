@@ -137,6 +137,19 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
         _appConnected = state.app_connected;
         _lastAppState = state;
     }
+
+    // Check for user_uuid assignment (device may get user after approval)
+    String newUserUuid = respDoc["user_uuid"] | "";
+    if (!newUserUuid.isEmpty()) {
+        auto& deps = getDependencies();
+        String currentUserUuid = deps.config.getUserUuid();
+        if (currentUserUuid.isEmpty() || currentUserUuid != newUserUuid) {
+            deps.config.setUserUuid(newUserUuid);
+            Serial.printf("[SUPABASE] User UUID updated from post-device-state: %s\n",
+                          newUserUuid.substring(0, 8).c_str());
+            deps.realtime.disconnect(); // Reconnect to user channel with new user_uuid
+        }
+    }
     
     return state;
 }

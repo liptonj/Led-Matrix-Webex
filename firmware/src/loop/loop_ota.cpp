@@ -63,7 +63,6 @@ void check_for_updates() {
                 deps.config.clearFailedOTAVersion();
                 ESP.restart();
             } else {
-                Serial.println("[OTA] Update failed!");
                 RLOG_ERROR("loop", "OTA update failed");
                 deps.display.unlockFromOTA();  // Unlock display on failure
                 // Record this version as failed to prevent retry loop

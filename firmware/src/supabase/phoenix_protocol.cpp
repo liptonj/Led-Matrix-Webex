@@ -158,10 +158,15 @@ bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
     }
     
     // Set channel topic to realtime:user:{user_uuid}
+    // The "realtime:" prefix is REQUIRED by the Supabase Realtime Phoenix protocol.
+    // The JS SDK does the same: supabase.channel('user:UUID') internally creates
+    // the channel with topic "realtime:user:UUID" and sends it in the join message.
+    // The server only routes topics starting with "realtime:".
+    // RLS helper realtime.topic() strips this prefix, returning just "user:UUID".
     String channelTopic = "realtime:user:" + user_uuid;
     setChannelTopic(channelTopic);
     
-    Serial.printf("[REALTIME] Subscribing to user channel: %s\n", channelTopic.c_str());
+    RLOG_INFO("realtime", "Subscribing to user channel: %s", channelTopic.c_str());
     
     // Subscribe as private broadcast channel (no postgres_changes)
     _privateChannel = true;
@@ -373,7 +378,7 @@ void SupabaseRealtime::unsubscribe() {
     
     _subscribed = false;
     
-    Serial.println("[REALTIME] Unsubscribed from channel");
+    RLOG_INFO("realtime", "Unsubscribed from channel");
 }
 
 bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& data) {
@@ -382,6 +387,12 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
     }
     
     if (!_client || !esp_websocket_client_is_connected(_client)) {
+        return false;
+    }
+    
+    // Check heap before JSON allocation
+    if (ESP.getFreeHeap() < 20000) {
+        RLOG_WARN("realtime", "Insufficient heap for broadcast: %d bytes free", ESP.getFreeHeap());
         return false;
     }
     
@@ -397,7 +408,7 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
     String message = buildPhoenixMessage(_channelTopic, "broadcast", broadcastPayload, _msgRef);
     
     if (message.isEmpty()) {
-        Serial.println("[REALTIME] Failed to build broadcast message");
+        RLOG_WARN("realtime", "Failed to build broadcast message");
         return false;
     }
     
@@ -405,7 +416,7 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
                                               message.length(), portMAX_DELAY);
     
     if (sent < 0) {
-        Serial.printf("[REALTIME] Failed to send broadcast: %d\n", sent);
+        RLOG_WARN("realtime", "Failed to send broadcast: %d", sent);
         return false;
     }
     
@@ -428,7 +439,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
         String status = payload["status"] | "error";
         if (status == "ok") {
             _subscribed = true;
-            Serial.println("[REALTIME] Successfully joined channel");
+            RLOG_INFO("realtime", "Successfully joined channel");
             auto& deps = getDependencies();
             if (deps.config.getPairingRealtimeDebug()) {
                 String responseStr;
@@ -445,7 +456,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             // Try to extract error details
             if (payload["response"].is<JsonObject>()) {
                 String reason = payload["response"]["reason"] | "unknown";
-                Serial.printf("[REALTIME] Reason: %s\n", reason.c_str());
+                RLOG_ERROR("realtime", "Join failed reason: %s", reason.c_str());
                 
                 // Log full response for debugging
                 String responseStr;
@@ -455,12 +466,23 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
                 // Log entire payload if response structure is unexpected
                 String payloadStr;
                 serializeJson(payload, payloadStr);
-                Serial.printf("[REALTIME] Join error payload: %s\n", payloadStr.c_str());
+                RLOG_ERROR("realtime", "Join error payload: %s", payloadStr.c_str());
             }
         }
         return;
     }
     
+    // Handle presence events - server only sends these after a successful join.
+    // This acts as a fallback subscription confirmation in case the join reply
+    // (phx_reply with status "ok") was lost due to the message queue race condition.
+    if ((event == "presence_state" || event == "presence_diff") && topic == _channelTopic) {
+        if (!_subscribed) {
+            _subscribed = true;
+            RLOG_INFO("realtime", "Subscribed (confirmed via presence event)");
+        }
+        return;
+    }
+
     // Handle postgres_changes events
     if (event == "postgres_changes") {
         auto& deps = getDependencies();
@@ -494,17 +516,17 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             _lastMessage.payload = payload;
             _messagePending = true;
             
-            Serial.printf("[REALTIME] %s on %s.%s\n", 
-                          _lastMessage.event.c_str(),
-                          _lastMessage.schema.c_str(),
-                          _lastMessage.table.c_str());
+            RLOG_DEBUG("realtime", "%s on %s.%s",
+                       _lastMessage.event.c_str(),
+                       _lastMessage.schema.c_str(),
+                       _lastMessage.table.c_str());
             
             // Call handler if set
             if (_messageHandler) {
                 _messageHandler(_lastMessage);
             }
         } else {
-            Serial.println("[REALTIME] Invalid postgres_changes data format");
+            RLOG_WARN("realtime", "Invalid postgres_changes data format");
             String payloadStr;
             serializeJson(payload, payloadStr);
             Serial.printf("[REALTIME] postgres_changes payload: %s\n", payloadStr.c_str());
@@ -529,6 +551,6 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     
     // Log other events for debugging
     if (event != "phx_reply") {
-        Serial.printf("[REALTIME] Event: %s on %s\n", event.c_str(), topic.c_str());
+        RLOG_DEBUG("realtime", "Event: %s on %s", event.c_str(), topic.c_str());
     }
 }

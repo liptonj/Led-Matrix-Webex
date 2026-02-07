@@ -13,7 +13,7 @@ import {
     assertNotEquals,
     assertStringIncludes,
 } from "https://deno.land/std@0.208.0/assert/mod.ts";
-import { TEST_USER_UUID, TEST_DEVICE_UUID } from "./fixtures/uuid-fixtures.ts";
+import { TEST_DEVICE_UUID, TEST_USER_UUID } from "./fixtures/uuid-fixtures.ts";
 
 // Valid pairing code charset (excludes confusing characters I, O, 0, 1)
 const VALID_PAIRING_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -609,7 +609,7 @@ Deno.test("provision-device: malformed token is handled gracefully", () => {
   
   for (const token of malformedTokens) {
     // Should not match database constraint (32 chars)
-    const isValidFormat = token && typeof token === "string" && token.length === 32;
+    const isValidFormat = !!(token && typeof token === "string" && token.length === 32);
     assertEquals(isValidFormat, false, `${token} should be invalid`);
   }
   

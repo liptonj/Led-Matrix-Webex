@@ -5,6 +5,7 @@
 
 #include "remote_logger.h"
 #include "../supabase/supabase_client.h"
+#include "../supabase/supabase_realtime.h"
 #include "../core/dependencies.h"
 #include "../config/config_manager.h"
 #include "../auth/device_credentials.h"

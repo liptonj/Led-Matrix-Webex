@@ -13,6 +13,9 @@
 #include "config/config_manager.h"
 #include "display/matrix_display.h"
 #include "../core/dependencies.h"
+#include "../supabase/supabase_realtime.h"
+#include <ArduinoJson.h>
+#include <time.h>
 
 // =============================================================================
 // MQTT HANDLER
@@ -60,6 +63,23 @@ void handleMQTT(LoopContext& ctx) {
             last_display_sensor = latest.sensor_mac;
             ctx.app_state->sensor_data_valid = latest.valid;
             ctx.app_state->last_sensor_update = millis();
+            
+            // Broadcast sensor data via realtime
+            if (deps.realtime.isConnected()) {
+                JsonDocument sensorDoc;
+                sensorDoc["device_uuid"] = deps.config.getDeviceUuid();
+                sensorDoc["temperature"] = latest.temperature;
+                sensorDoc["humidity"] = latest.humidity;
+                sensorDoc["door_status"] = latest.door_status;
+                sensorDoc["air_quality_index"] = latest.air_quality_index;
+                sensorDoc["tvoc"] = latest.tvoc;
+                sensorDoc["co2_ppm"] = latest.co2_ppm;
+                sensorDoc["pm2_5"] = latest.pm2_5;
+                sensorDoc["ambient_noise"] = latest.ambient_noise;
+                sensorDoc["sensor_mac"] = latest.sensor_mac;
+                sensorDoc["timestamp"] = (unsigned long)time(nullptr);
+                deps.realtime.sendBroadcast("sensor_data", sensorDoc);
+            }
         }
     }
 
@@ -79,6 +99,23 @@ void handleMQTT(LoopContext& ctx) {
             last_display_sensor = configured_display_sensor;
             ctx.app_state->sensor_data_valid = selected.valid;
             ctx.app_state->last_sensor_update = millis();
+            
+            // Broadcast sensor data via realtime
+            if (deps.realtime.isConnected()) {
+                JsonDocument sensorDoc;
+                sensorDoc["device_uuid"] = deps.config.getDeviceUuid();
+                sensorDoc["temperature"] = selected.temperature;
+                sensorDoc["humidity"] = selected.humidity;
+                sensorDoc["door_status"] = selected.door_status;
+                sensorDoc["air_quality_index"] = selected.air_quality_index;
+                sensorDoc["tvoc"] = selected.tvoc;
+                sensorDoc["co2_ppm"] = selected.co2_ppm;
+                sensorDoc["pm2_5"] = selected.pm2_5;
+                sensorDoc["ambient_noise"] = selected.ambient_noise;
+                sensorDoc["sensor_mac"] = selected.sensor_mac;
+                sensorDoc["timestamp"] = (unsigned long)time(nullptr);
+                deps.realtime.sendBroadcast("sensor_data", sensorDoc);
+            }
         }
     }
 }

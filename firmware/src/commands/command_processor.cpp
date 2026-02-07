@@ -16,6 +16,8 @@
 #include "../meraki/mqtt_client.h"
 #include "../debug/remote_logger.h"
 #include "../core/dependencies.h"
+#include "../ota/ota_manager.h"
+#include "../sync/sync_manager.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
@@ -83,7 +85,7 @@ void CommandProcessor::queuePendingAction(PendingCommandAction action, const Str
         if (_pendingActionId == id) {
             return;
         }
-        Serial.println("[SUPABASE] Another command action already pending; ignoring");
+        RLOG_WARN("command", "Another action already pending; ignoring id=%s", id.c_str());
         return;
     }
 
@@ -97,8 +99,9 @@ void CommandProcessor::queuePendingAction(PendingCommandAction action, const Str
     deps.realtime.disconnect();
     deps.app_state.realtime_defer_until = millis() + 60000UL;
 
-    Serial.printf("[SUPABASE] %s queued - waiting for safe heap to ack\n",
-                  action == PendingCommandAction::FactoryReset ? "Factory reset" : "Reboot");
+    RLOG_WARN("command", "%s queued (id=%s) - waiting for safe heap",
+              action == PendingCommandAction::FactoryReset ? "Factory reset" : "Reboot",
+              id.c_str());
 }
 
 void CommandProcessor::processPendingActions() {
@@ -147,7 +150,7 @@ void CommandProcessor::processPendingActions() {
 bool CommandProcessor::enqueuePendingAck(const String& id, bool success,
                                           const String& response, const String& error) {
     if (_pendingAckCount >= MAX_PENDING_ACKS) {
-        Serial.println("[SUPABASE] Ack queue full; dropping command ack");
+        RLOG_WARN("command", "Ack queue full; dropping ack");
         return false;
     }
 
@@ -206,7 +209,7 @@ bool CommandProcessor::sendOrQueueAck(const String& id, bool success,
 
 void handleSupabaseCommand(const SupabaseCommand& cmd) {
     auto& deps = getDependencies();
-    Serial.printf("[CMD-SB] Processing command: %s\n", cmd.command.c_str());
+    RLOG_INFO("command", "Processing: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     
     bool success = true;
     String response = "";
@@ -240,6 +243,7 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
 
     } else if (cmd.command == "get_config") {
         response = DeviceInfo::buildConfigJson();
+        syncManager.broadcastDeviceConfig();
         
     } else if (cmd.command == "set_config") {
         JsonDocument doc;
@@ -346,6 +350,8 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
             
             response = DeviceInfo::buildConfigJson();
             Serial.println("[CMD-SB] Config updated");
+            RLOG_INFO("command", "Config updated via set_config");
+            syncManager.broadcastDeviceConfig();
         }
         
     } else if (cmd.command == "set_brightness") {
@@ -369,9 +375,109 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         bool enabled = doc["enabled"] | false;
         deps.supabase.setRemoteDebugEnabled(enabled);
         deps.remote_logger.setRemoteEnabled(enabled);
+        RLOG_INFO("command", "Remote debug %s", enabled ? "ENABLED" : "DISABLED");
         JsonDocument resp;
         resp["enabled"] = enabled;
         serializeJson(resp, response);
+        
+    } else if (cmd.command == "ota_update") {
+        RLOG_INFO("command", "OTA update requested");
+        
+        // Check if update is already available (from previous check)
+        bool update_available = deps.ota.isUpdateAvailable();
+        String latest_version = deps.ota.getLatestVersion();
+        
+        // If not already checked, check for updates now
+        if (!update_available || latest_version.isEmpty()) {
+            bool realtime_was_active = deps.realtime.isConnected() || deps.realtime.isConnecting();
+            if (realtime_was_active) {
+                RLOG_INFO("command", "Pausing realtime during OTA check");
+                deps.realtime.disconnect();
+            }
+            deps.app_state.realtime_defer_until = millis() + 30000UL;
+            
+            if (deps.ota.checkForUpdate()) {
+                update_available = deps.ota.isUpdateAvailable();
+                latest_version = deps.ota.getLatestVersion();
+            } else {
+                success = false;
+                error = "Failed to check for updates";
+                RLOG_WARN("command", "OTA check failed");
+            }
+            
+            if (realtime_was_active) {
+                deps.app_state.supabase_realtime_resubscribe = true;
+            }
+        }
+        
+        // Build response JSON
+        JsonDocument resp;
+        resp["current_version"] = FIRMWARE_VERSION;
+        resp["latest_version"] = latest_version.isEmpty() ? FIRMWARE_VERSION : latest_version;
+        resp["update_available"] = update_available;
+        
+        if (!success) {
+            // Check failed
+            resp["status"] = "check_failed";
+            resp["error"] = error;
+        } else if (update_available && !latest_version.isEmpty()) {
+            String download_url = deps.ota.getDownloadUrl();
+            if (!download_url.isEmpty()) {
+                resp["download_url"] = download_url;
+            }
+            resp["status"] = "update_starting";
+            RLOG_INFO("command", "Update available: %s -> %s", FIRMWARE_VERSION, latest_version.c_str());
+        } else {
+            resp["status"] = "already_latest";
+            RLOG_INFO("command", "Already on latest version: %s", latest_version.isEmpty() ? FIRMWARE_VERSION : latest_version.c_str());
+        }
+        
+        serializeJson(resp, response);
+        
+        // If update is available, start the update process
+        // Note: We send the ack first since the device will reboot on success
+        if (update_available && !latest_version.isEmpty() && success) {
+            // Clear any previous failed version marker since this is a manual update request
+            deps.config.clearFailedOTAVersion();
+            
+            // Show updating screen
+            deps.display.showUpdating(latest_version);
+            
+            // Disconnect realtime and defer for 10 minutes to cover the entire download
+            if (deps.realtime.isConnected() || deps.realtime.isConnecting()) {
+                RLOG_INFO("command", "Disconnecting realtime for OTA update");
+                deps.realtime.disconnect();
+            }
+            deps.app_state.realtime_defer_until = millis() + 600000UL;  // 10 minutes
+            
+            // Send ack before starting update (device will reboot on success)
+            const bool ackQueued = commandProcessor.sendOrQueueAck(cmd.id, success, response, error);
+            if (ackQueued) {
+                commandProcessor.markProcessed(cmd.id);
+            }
+            
+            // Small delay to ensure ack is sent
+            delay(500);
+            
+            // Start the update (will reboot on success)
+            if (deps.ota.performUpdate()) {
+                RLOG_INFO("command", "OTA update successful, rebooting...");
+                // ESP.restart() is called inside performUpdate() on success
+            } else {
+                RLOG_ERROR("command", "OTA update failed");
+                deps.display.unlockFromOTA();
+                // Record this version as failed to prevent retry loop
+                deps.config.setFailedOTAVersion(latest_version);
+                RLOG_WARN("command", "Marked version %s as failed", latest_version.c_str());
+                
+                // Update response with failure status
+                resp["status"] = "update_failed";
+                serializeJson(resp, response);
+                commandProcessor.sendOrQueueAck(cmd.id, false, response, "Update installation failed");
+                return;
+            }
+            return;  // Device will reboot, so we won't reach the normal ack code below
+        }
         
     } else if (cmd.command == "reboot") {
         commandProcessor.queuePendingAction(PendingCommandAction::Reboot, cmd.id);
@@ -388,9 +494,21 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         error = "Unknown command: " + cmd.command;
     }
     
+    // Log result
+    if (success) {
+        RLOG_INFO("command", "Completed: %s (id=%s) response_len=%d",
+                  cmd.command.c_str(), cmd.id.c_str(), response.length());
+    } else {
+        RLOG_WARN("command", "Failed: %s (id=%s) error=%s",
+                  cmd.command.c_str(), cmd.id.c_str(), error.c_str());
+    }
+
     // Send acknowledgment
     const bool ackQueued = commandProcessor.sendOrQueueAck(cmd.id, success, response, error);
     if (ackQueued) {
+        RLOG_DEBUG("command", "Ack queued for %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
         commandProcessor.markProcessed(cmd.id);
+    } else {
+        RLOG_WARN("command", "Ack failed for %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     }
 }

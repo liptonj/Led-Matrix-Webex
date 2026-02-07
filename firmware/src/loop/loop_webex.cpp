@@ -111,6 +111,12 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
                 ctx.app_state->webex_status = cloud_status;
                 ctx.app_state->webex_status_received = true;
                 ctx.app_state->webex_status_source = "cloud";
+                // Cloud successfully fetched Webex status using server-side OAuth tokens
+                // Mark as authenticated so the UI reflects the connection
+                if (!ctx.app_state->webex_authenticated) {
+                    ctx.app_state->webex_authenticated = true;
+                    Serial.println("[WEBEX] Authenticated via cloud (Supabase OAuth)");
+                }
                 Serial.printf("[WEBEX] Cloud status: %s\n", cloud_status.c_str());
             }
         }
@@ -133,7 +139,6 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             }
             return true;
         }
-        Serial.println("[WEBEX] Cloud status failed, polling local API");
         RLOG_WARN("loop", "Cloud status failed, falling back to local API");
         WebexPresence presence;
         if (ctx.webex_client->getPresence(presence)) {

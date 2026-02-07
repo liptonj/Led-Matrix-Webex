@@ -10,6 +10,7 @@
 #include "../config/config_manager.h"
 #include "../common/pairing_manager.h"
 #include "../core/dependencies.h"
+#include "../debug/remote_logger.h"
 #include <ArduinoJson.h>
 
 namespace {
@@ -29,12 +30,14 @@ bool RealtimeManager::attemptInit() {
     if (anonKey.isEmpty()) {
         deps.app_state.realtime_error = "anon_key_missing";
         deps.app_state.last_realtime_error = millis();
+        RLOG_WARN("realtime", "Init blocked: anon_key_missing");
         return false;
     }
 
     if (!deps.app_state.time_synced) {
         deps.app_state.realtime_error = "time_not_synced";
         deps.app_state.last_realtime_error = millis();
+        RLOG_WARN("realtime", "Init blocked: time_not_synced");
         return false;
     }
 
@@ -42,6 +45,8 @@ bool RealtimeManager::attemptInit() {
     if (ESP.getFreeHeap() < min_heap) {
         deps.app_state.realtime_error = "low_heap";
         deps.app_state.last_realtime_error = millis();
+        RLOG_WARN("realtime", "Init blocked: low_heap (free=%lu, need=%lu)",
+                  ESP.getFreeHeap(), (unsigned long)min_heap);
         return false;
     }
 
@@ -51,11 +56,12 @@ bool RealtimeManager::attemptInit() {
     if (supabaseUrl.isEmpty() || accessToken.isEmpty()) {
         deps.app_state.realtime_error = "missing_url_or_token";
         deps.app_state.last_realtime_error = millis();
+        RLOG_WARN("realtime", "Init blocked: missing_url_or_token");
         return false;
     }
 
     // Setup connection
-    Serial.println("[REALTIME] Initializing Phase B realtime connection...");
+    RLOG_INFO("realtime", "Initializing Phase B realtime connection...");
 
     // Set message handler
     deps.realtime.setMessageHandler(handleRealtimeMessage);
@@ -71,16 +77,17 @@ bool RealtimeManager::attemptInit() {
         queued = deps.realtime.subscribeToUserChannel(userUuid);
     } else {
         Serial.println("[REALTIME] No user_uuid -- deferred until paired via post-device-state");
+        RLOG_WARN("realtime", "Init blocked: no user_uuid");
         return false;
     }
 
     if (queued) {
-        Serial.println("[REALTIME] Subscription requested");
+        RLOG_INFO("realtime", "Subscription requested");
         deps.app_state.realtime_error = "";
         return true;
     }
 
-    Serial.println("[REALTIME] Connection timeout - will retry");
+    RLOG_WARN("realtime", "Connection timeout - will retry");
     deps.app_state.realtime_error = "connection_timeout";
     deps.app_state.last_realtime_error = millis();
 
@@ -96,5 +103,5 @@ bool RealtimeManager::attemptInit() {
         deps.supabase.insertDeviceLog("warn", "realtime_connect_failed", metaStr);
     }
 
-    return deps.realtime.isSocketConnected();
+    return deps.realtime.isConnected();
 }

@@ -115,10 +115,15 @@ public:
 class MockDeviceCredentials {
 public:
     String serialNumber = "TEST1234";
+    String keyHash = "test_key_hash_1234567890abcdef";
     bool provisioned = true;
     
     String getSerialNumber() const {
         return serialNumber;
+    }
+    
+    String getKeyHash() const {
+        return keyHash;
     }
     
     bool isProvisioned() const {
@@ -127,6 +132,7 @@ public:
     
     void reset() {
         serialNumber = "TEST1234";
+        keyHash = "test_key_hash_1234567890abcdef";
         provisioned = true;
     }
 };

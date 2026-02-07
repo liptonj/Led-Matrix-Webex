@@ -63,7 +63,8 @@ SupabaseRealtime::SupabaseRealtime()
       _hasConnected(false),
       _minHeapFirstConnect(REALTIME_MIN_HEAP_FIRST),
       _minHeapSteady(REALTIME_MIN_HEAP_STEADY),
-      _minHeapFloor(REALTIME_MIN_HEAP_FLOOR) {
+      _minHeapFloor(REALTIME_MIN_HEAP_FLOOR),
+      _msgQueueHead(0), _msgQueueTail(0) {
     _lastMessage.valid = false;
     _privateChannel = false;
 }
@@ -91,8 +92,8 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
-            Serial.printf("[REALTIME] Skipping connect - low heap (%lu < %lu)\n",
-                          ESP.getFreeHeap(), (unsigned long)minHeap);
+            RLOG_WARN("realtime", "Skipping connect - low heap (%lu < %lu)",
+                      ESP.getFreeHeap(), (unsigned long)minHeap);
         }
         return;
     }
@@ -167,19 +168,25 @@ void SupabaseRealtime::setAccessToken(const String& access_token) {
     
     // If connected, re-authenticate
     if (_connected) {
-        Serial.println("[REALTIME] Token updated - reconnecting to re-authenticate");
+        RLOG_INFO("realtime", "Token updated - reconnecting to re-authenticate");
         disconnect();
         // Will reconnect on next loop iteration
     }
 }
 
 void SupabaseRealtime::loop() {
-    if (_pendingMessageAvailable) {
+    // Drain all queued messages (fixes race where rapid messages overwrote
+    // a single-slot buffer, losing the join reply before loop() ran)
+    while (true) {
         String message;
         portENTER_CRITICAL(&_rxMux);
-        message = _pendingMessage;
-        _pendingMessage = "";
-        _pendingMessageAvailable = false;
+        if (_msgQueueHead == _msgQueueTail) {
+            portEXIT_CRITICAL(&_rxMux);
+            break;
+        }
+        message = _msgQueue[_msgQueueHead];
+        _msgQueue[_msgQueueHead] = "";  // Free String memory
+        _msgQueueHead = (_msgQueueHead + 1) % MSG_QUEUE_SIZE;
         portEXIT_CRITICAL(&_rxMux);
         handleIncomingMessage(message);
     }
@@ -194,7 +201,7 @@ void SupabaseRealtime::loop() {
     // Check for heartbeat timeout
     if (_connected && _lastHeartbeatResponse > 0 &&
         now - _lastHeartbeatResponse > (PHOENIX_HEARTBEAT_TIMEOUT_MS)) {
-        Serial.println("[REALTIME] Heartbeat timeout - disconnecting");
+        RLOG_WARN("realtime", "Heartbeat timeout - disconnecting");
         disconnect();
     }
     
@@ -233,6 +240,16 @@ void SupabaseRealtime::disconnect() {
     _subscribed = false;
     _connecting = false;
     _lastHeartbeatResponse = 0;
+
+    // Flush message queue
+    portENTER_CRITICAL(&_rxMux);
+    for (size_t i = 0; i < MSG_QUEUE_SIZE; i++) {
+        _msgQueue[i] = "";
+    }
+    _msgQueueHead = 0;
+    _msgQueueTail = 0;
+    _rxBuffer = "";
+    portEXIT_CRITICAL(&_rxMux);
 }
 
 RealtimeMessage SupabaseRealtime::getMessage() {
@@ -258,7 +275,6 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
     }
 
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
-        Serial.println("[REALTIME] Connected");
         RLOG_INFO("Realtime", "WebSocket connected to Supabase");
         instance->_connected = true;
         instance->_connecting = false;
@@ -279,7 +295,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
             if (sent < 0) {
                 RLOG_WARN("realtime", "Failed to send queued subscription: %d", sent);
             } else {
-                Serial.printf("[REALTIME] Sent queued subscription (%d bytes)\n", sent);
+                RLOG_INFO("realtime", "Sent queued subscription (%d bytes)", sent);
                 instance->_pendingJoin = false;
                 instance->_pendingJoinMessage = "";
                 if (instance->_privateChannel) {
@@ -323,8 +339,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
 
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_CLOSED) {
         if (instance->_connected) {
-            Serial.println("[REALTIME] Disconnected (was connected)");
-            RLOG_WARN("Realtime", "WebSocket disconnected");
+            RLOG_WARN("Realtime", "WebSocket disconnected (was connected)");
         } else {
             Serial.println("[REALTIME] Disconnected (was not connected)");
         }
@@ -364,9 +379,9 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                         closeReason = String(data->data_ptr + 2, data->data_len - 2);
                     }
                 }
-                Serial.printf("[REALTIME] WebSocket close frame (code=%u len=%d reason=%s)\n",
-                              static_cast<unsigned int>(closeCode), data->data_len,
-                              closeReason.isEmpty() ? "none" : closeReason.c_str());
+                RLOG_WARN("realtime", "WebSocket close frame (code=%u len=%d reason=%s)",
+                          static_cast<unsigned int>(closeCode), data->data_len,
+                          closeReason.isEmpty() ? "none" : closeReason.c_str());
                 instance->_loggedCloseFrame = true;
             }
             return;
@@ -389,23 +404,33 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         
         instance->_rxBuffer.concat(String(data->data_ptr, data->data_len));
         if (data->payload_offset + data->data_len >= data->payload_len) {
-            instance->_pendingMessage = instance->_rxBuffer;
+            String completeMessage = instance->_rxBuffer;
             instance->_rxBuffer = "";
-            instance->_pendingMessageAvailable = true;
+
+            // Log first message for diagnostics
             if (!instance->_loggedFirstMessage) {
-                String snippet = instance->_pendingMessage.substring(0, 200);
+                String snippet = completeMessage.substring(0, 200);
                 Serial.printf("[REALTIME] First WS message (%d bytes): %s\n",
-                              instance->_pendingMessage.length(), snippet.c_str());
+                              completeMessage.length(), snippet.c_str());
                 instance->_loggedFirstMessage = true;
             }
             auto& deps = getDependencies();
             if (deps.config.getPairingRealtimeDebug()) {
                 const int maxLen = 1024;
-                String raw = instance->_pendingMessage;
+                String raw = completeMessage;
                 if (raw.length() > maxLen) {
                     raw = raw.substring(0, maxLen) + "...";
                 }
                 Serial.printf("[REALTIME][RAW] %s\n", raw.c_str());
+            }
+
+            // Push to circular queue
+            size_t nextTail = (instance->_msgQueueTail + 1) % SupabaseRealtime::MSG_QUEUE_SIZE;
+            if (nextTail != instance->_msgQueueHead) {
+                instance->_msgQueue[instance->_msgQueueTail] = completeMessage;
+                instance->_msgQueueTail = nextTail;
+            } else {
+                RLOG_WARN("realtime", "Message queue full - dropped message");
             }
         }
         portEXIT_CRITICAL(&instance->_rxMux);

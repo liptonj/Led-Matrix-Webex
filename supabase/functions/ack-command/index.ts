@@ -214,11 +214,11 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch command
+    // Fetch command with device_uuid directly from commands table
     const { data: command, error: fetchError } = await supabase
       .schema("display")
       .from("commands")
-      .select("id, pairing_code, status")
+      .select("id, device_uuid, status, command")
       .eq("id", ackData.command_id)
       .single();
 
@@ -233,29 +233,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch pairing to get device_uuid for ownership verification
-    const { data: pairing, error: pairingError } = await supabase
-      .schema("display")
-      .from("pairings")
-      .select("device_uuid")
-      .eq("pairing_code", command.pairing_code)
-      .single();
-
-    if (pairingError || !pairing) {
-      console.log(`Pairing not found for command ${ackData.command_id}`);
-      return new Response(
-        JSON.stringify({ success: false, error: "Command not found" }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Verify ownership using device_uuid
-    if (pairing.device_uuid !== deviceInfo.device_uuid) {
+    // Verify ownership using device_uuid directly from command
+    if (!command.device_uuid || command.device_uuid !== deviceInfo.device_uuid) {
       console.log(
-        `Command ${ackData.command_id} belongs to device ${pairing.device_uuid}, not ${deviceInfo.device_uuid}`,
+        `Command ${ackData.command_id} belongs to device ${command.device_uuid || "unknown"}, not ${deviceInfo.device_uuid}`,
       );
       return new Response(
         JSON.stringify({ success: false, error: "Command not found" }),
@@ -310,6 +291,26 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
+    }
+
+    // Persist config snapshot for config-related commands
+    if (
+      (command.command === 'get_config' || command.command === 'set_config') &&
+      ackData.success &&
+      ackData.response
+    ) {
+      const { error: configError } = await supabase
+        .schema('display')
+        .from('pairings')
+        .update({ config: ackData.response })
+        .eq('device_uuid', command.device_uuid);
+
+      if (configError) {
+        console.warn(
+          `Failed to persist config for ${command.device_uuid}:`,
+          configError.message,
+        );
+      }
     }
 
     console.log(

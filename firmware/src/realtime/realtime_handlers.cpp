@@ -10,6 +10,8 @@
 #include "../supabase/supabase_client.h"
 #include "../supabase/supabase_realtime.h"
 #include "../core/dependencies.h"
+#include "../debug/remote_logger.h"
+#include "../sync/sync_manager.h"
 #include <ArduinoJson.h>
 
 // Forward declarations
@@ -109,8 +111,7 @@ void handleBroadcastCommand(const JsonObject& record) {
         return;
     }
 
-    Serial.printf("[REALTIME] Processing command via broadcast: %s (id=%s)\n",
-                  cmd.command.c_str(), cmd.id.c_str());
+    RLOG_INFO("realtime", "Processing command via broadcast: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     handleSupabaseCommand(cmd);
 }
 
@@ -178,14 +179,21 @@ void handleBroadcastPairing(const JsonObject& record) {
     }
 
     deps.app_state.last_supabase_sync = millis();
-    Serial.printf("[REALTIME] Pairing status changed (broadcast) - app=%s, status=%s\n",
-                  newAppConnected ? "connected" : "disconnected",
-                  newWebexStatus.c_str());
+    RLOG_INFO("realtime", "Pairing status changed (broadcast) - app=%s, status=%s",
+              newAppConnected ? "connected" : "disconnected",
+              newWebexStatus.c_str());
 }
 
+#if 0
 /**
- * @brief Handle broadcast message events
+ * @brief Handle broadcast message events (LEGACY - DEAD CODE)
  * @param payload JSON document containing broadcast payload
+ * 
+ * LEGACY: This function handled broadcast messages for the old pairing-based
+ * channel subscription. Since we switched to user-based channels, this handler
+ * is unreachable. User channels use handleUserChannelBroadcast() instead.
+ * 
+ * This code is kept for reference but is never executed.
  */
 void handleBroadcastMessage(JsonDocument& payload) {
     JsonObject broadcast = payload["payload"];
@@ -218,6 +226,7 @@ void handleBroadcastMessage(JsonDocument& payload) {
         handleBroadcastPairing(record);
     }
 }
+#endif
 
 /**
  * @brief Handle command INSERT event from postgres_changes
@@ -250,8 +259,7 @@ void handleCommandInsert(const JsonObject& data) {
         return;
     }
 
-    Serial.printf("[REALTIME] Processing command via realtime: %s (id=%s)\n",
-                  cmd.command.c_str(), cmd.id.c_str());
+    RLOG_INFO("realtime", "Processing command via realtime: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
 
     // Handle the command (same handler as polling)
     handleSupabaseCommand(cmd);
@@ -335,12 +343,12 @@ void handlePairingUpdate(const JsonObject& data) {
     }
 
     deps.app_state.last_supabase_sync = millis();
-    Serial.printf("[REALTIME] Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s\n",
-                  newAppConnected ? "connected" : "disconnected",
-                  newWebexStatus.c_str(),
-                  newCameraOn ? "on" : "off",
-                  newMicMuted ? "muted" : "unmuted",
-                  newInCall ? "yes" : "no");
+    RLOG_INFO("realtime", "Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s",
+              newAppConnected ? "connected" : "disconnected",
+              newWebexStatus.c_str(),
+              newCameraOn ? "on" : "off",
+              newMicMuted ? "muted" : "unmuted",
+              newInCall ? "yes" : "no");
 
     if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
         JsonDocument debugDoc;
@@ -365,8 +373,7 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         return;
     }
 
-    Serial.printf("[REALTIME] Received %s on %s.%s\n",
-                  msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
+    RLOG_DEBUG("realtime", "Received %s on %s.%s", msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
 
     // Handle broadcast events
     if (msg.event == "broadcast") {
@@ -374,17 +381,27 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         
         // Check if this is a user channel broadcast by examining the event type in payload
         String broadcastEvent = payload["event"] | "";  // TOP level, not nested
-        // User channel events: user_assigned, webex_status, command
-        if (broadcastEvent == "user_assigned" || broadcastEvent == "webex_status" || broadcastEvent == "command") {
+        // User channel events: user_assigned, webex_status, command, request_config
+        if (broadcastEvent == "user_assigned" || broadcastEvent == "webex_status" || broadcastEvent == "command" || broadcastEvent == "request_config") {
             handleUserChannelBroadcast(payload);
             return;
         }
         
-        // Legacy pairing channel broadcast
-        handleBroadcastMessage(payload);
+        // Legacy pairing channel broadcast (DEAD CODE - no longer subscribed to pairing channels)
+        // handleBroadcastMessage(payload);  // Removed - unreachable code path
+        Serial.printf("[REALTIME] Unknown broadcast event: %s\n", broadcastEvent.c_str());
         return;
     }
 
+#if 0
+    // DEAD CODE: postgres_changes handlers for user channels
+    // These handlers were for postgres_changes events on user channels, but user channels
+    // only use broadcast events now (user_assigned, webex_status, command). These handlers
+    // are unreachable because subscribeToUserChannel() subscribes with includePostgresChanges=false.
+    //
+    // User channels handle commands via handleUserChannelCommand() (broadcast event)
+    // User channels handle status via handleWebexStatusUpdate() (broadcast event)
+    
     // Handle command insertions (immediate command delivery)
     if (msg.table == "commands" && msg.event == "INSERT") {
         JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
@@ -400,6 +417,7 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         handlePairingUpdate(data);
         return;
     }
+#endif
 
     // Handle device updates (admin debug toggle)
     // Device realtime handler removed - using single connection now
@@ -434,15 +452,15 @@ void handleUserAssigned(JsonObject& payload) {
         return;
     }
     
-    Serial.printf("[REALTIME] User assigned: %s -> %s\n", 
-                  currentUserUuid.isEmpty() ? "(none)" : currentUserUuid.c_str(),
-                  newUserUuid.c_str());
+    RLOG_INFO("realtime", "User assigned: %s -> %s",
+              currentUserUuid.isEmpty() ? "(none)" : currentUserUuid.c_str(),
+              newUserUuid.c_str());
     
     // Store new user_uuid to NVS
     deps.config.setUserUuid(newUserUuid);
     
     // Disconnect and reconnect to new user channel
-    Serial.println("[REALTIME] Reconnecting to new user channel...");
+    RLOG_INFO("realtime", "Reconnecting to new user channel");
     deps.realtime.disconnect();
     // Reconnection will happen automatically on next loop iteration
     // The realtime manager will call subscribeToUserChannel() when user_uuid is available
@@ -460,23 +478,14 @@ void handleWebexStatusUpdate(JsonObject& payload) {
         return;
     }
     
-    // Filter by device_uuid - only process if this event is for this device
-    String eventDeviceUuid = payload["device_uuid"] | "";
-    String currentDeviceUuid = deps.config.getDeviceUuid();
+    // Always log incoming payload for debugging
+    String payloadStr;
+    serializeJson(payload, payloadStr);
+    RLOG_DEBUG("realtime", "webex_status payload: %s", payloadStr.c_str());
     
-    if (eventDeviceUuid.isEmpty()) {
-        Serial.println("[REALTIME] webex_status event missing device_uuid");
-        return;
-    }
-    
-    if (eventDeviceUuid != currentDeviceUuid) {
-        // This event is for a different device - ignore
-        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
-            Serial.printf("[REALTIME] webex_status event ignored - device_uuid mismatch: %s != %s\n",
-                          eventDeviceUuid.c_str(), currentDeviceUuid.c_str());
-        }
-        return;
-    }
+    // webex_status is USER-SCOPED - all devices on this user channel should update.
+    // No device_uuid filtering here. The device dropdown in the embedded app
+    // is only for device-specific settings, not for status broadcasts.
     
     // Extract webex status fields
     String webexStatus = payload["webex_status"] | "offline";
@@ -545,12 +554,12 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     
     deps.app_state.last_supabase_sync = millis();
     
-    Serial.printf("[REALTIME] Webex status updated: status=%s, in_call=%s, camera=%s, mic=%s, name=%s\n",
-                  webexStatus.c_str(),
-                  inCall ? "true" : "false",
-                  cameraOn ? "on" : "off",
-                  micMuted ? "muted" : "unmuted",
-                  displayName.isEmpty() ? "(none)" : displayName.c_str());
+    RLOG_INFO("realtime", "Webex status updated: status=%s, in_call=%s, camera=%s, mic=%s, name=%s",
+              webexStatus.c_str(),
+              inCall ? "true" : "false",
+              cameraOn ? "on" : "off",
+              micMuted ? "muted" : "unmuted",
+              displayName.isEmpty() ? "(none)" : displayName.c_str());
     
     // Display will be updated automatically by loop handler reading from app_state
 }
@@ -567,9 +576,18 @@ void handleUserChannelCommand(JsonObject& payload) {
         return;
     }
     
-    // Filter by device_uuid - only process if this command is for this device
+    // Always log incoming command payload for debugging
+    String payloadStr;
+    serializeJson(payload, payloadStr);
+    RLOG_DEBUG("realtime", "command payload: %s", payloadStr.c_str());
+    
+    // Filter by device_uuid - commands ARE device-specific (unlike webex_status)
     String eventDeviceUuid = payload["device_uuid"] | "";
     String currentDeviceUuid = deps.config.getDeviceUuid();
+    
+    Serial.printf("[REALTIME] command device filter: event=%s, this_device=%s\n",
+                  eventDeviceUuid.isEmpty() ? "(empty)" : eventDeviceUuid.c_str(),
+                  currentDeviceUuid.isEmpty() ? "(empty)" : currentDeviceUuid.c_str());
     
     if (eventDeviceUuid.isEmpty()) {
         Serial.println("[REALTIME] command event missing device_uuid");
@@ -577,11 +595,8 @@ void handleUserChannelCommand(JsonObject& payload) {
     }
     
     if (eventDeviceUuid != currentDeviceUuid) {
-        // This command is for a different device - ignore
-        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
-            Serial.printf("[REALTIME] command event ignored - device_uuid mismatch: %s != %s\n",
-                          eventDeviceUuid.c_str(), currentDeviceUuid.c_str());
-        }
+        Serial.printf("[REALTIME] command IGNORED - device_uuid mismatch: %s != %s\n",
+                      eventDeviceUuid.c_str(), currentDeviceUuid.c_str());
         return;
     }
     
@@ -611,11 +626,32 @@ void handleUserChannelCommand(JsonObject& payload) {
         return;
     }
     
-    Serial.printf("[REALTIME] Processing command via user channel: %s (id=%s)\n",
-                  cmd.command.c_str(), cmd.id.c_str());
+    RLOG_INFO("realtime", "Processing command via user channel: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     
     // Handle the command (same handler as polling)
     handleSupabaseCommand(cmd);
+}
+
+/**
+ * @brief Handle request_config event from user channel
+ * @param payload JSON object containing request_config event data
+ */
+void handleRequestConfig(JsonObject& payload) {
+    auto& deps = getDependencies();
+    
+    // Filter by device_uuid - only respond if this device is targeted
+    String eventDeviceUuid = payload["device_uuid"] | "";
+    String currentDeviceUuid = deps.config.getDeviceUuid();
+    
+    if (eventDeviceUuid.isEmpty()) {
+        RLOG_DEBUG("realtime", "request_config missing device_uuid - broadcasting anyway");
+    } else if (eventDeviceUuid != currentDeviceUuid) {
+        // Not for this device
+        return;
+    }
+    
+    RLOG_INFO("realtime", "Config requested via realtime");
+    syncManager.broadcastDeviceConfig();
 }
 
 /**
@@ -632,7 +668,8 @@ void handleUserChannelBroadcast(JsonDocument& payload) {
         return;
     }
     
-    Serial.printf("[REALTIME] User channel event: %s\n", event.c_str());
+    RLOG_INFO("realtime", "User channel event: %s (has nested payload: %s)", 
+              event.c_str(), inner.is<JsonObject>() ? "yes" : "no");
     
     if (event == "user_assigned") {
         handleUserAssigned(data);
@@ -640,6 +677,8 @@ void handleUserChannelBroadcast(JsonDocument& payload) {
         handleWebexStatusUpdate(data);
     } else if (event == "command") {
         handleUserChannelCommand(data);
+    } else if (event == "request_config") {
+        handleRequestConfig(data);
     } else {
         Serial.printf("[REALTIME] Unknown event: %s\n", event.c_str());
     }

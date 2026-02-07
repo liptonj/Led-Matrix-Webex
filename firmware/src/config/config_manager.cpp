@@ -103,7 +103,7 @@ void ConfigManager::loadCache() const {
     cached_display_name = loadString("display_name");
     cached_device_uuid = loadString("device_uuid");
     cached_user_uuid = loadString("user_uuid");
-    cached_last_webex_status = loadString("last_webex_status");
+    cached_last_webex_status = loadString("lst_webex_st");
     cached_client_id = loadString("webex_client");
     cached_client_secret = loadString("webex_secret");
     cached_access_token = loadString("webex_access");

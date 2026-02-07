@@ -29,9 +29,14 @@ extern void setup_time();
 // =============================================================================
 
 void handleSerialAndImprov(LoopContext& ctx) {
-    // Process Improv Wi-Fi commands (for ESP Web Tools WiFi provisioning)
-    // This must be called frequently to respond to Improv requests
-    improv_handler.loop();
+    // Process Improv Wi-Fi commands ONLY when WiFi is not connected.
+    // The Improv library's handleSerial() reads bytes from the Serial
+    // buffer looking for protocol headers, discarding non-matching bytes.
+    // This steals the first character of every serial command if left
+    // running during normal operation (e.g., "help" becomes "elp").
+    if (!ctx.app_state->wifi_connected) {
+        improv_handler.loop();
+    }
 
     // Process serial commands (for web installer WiFi setup)
     serial_commands_loop();
@@ -71,7 +76,6 @@ void handleSerialAndImprov(LoopContext& ctx) {
 
             ctx.matrix_display->showUnconfigured(WiFi.localIP().toString(), ctx.mdns_manager->getHostname());
         } else {
-            Serial.println("[WIFI] Connection failed!");
             RLOG_ERROR("loop", "WiFi connection failed");
             ctx.app_state->wifi_connected = false;
         }

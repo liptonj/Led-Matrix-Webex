@@ -35,16 +35,16 @@ public:
     void forceSyncNow();
 
     /**
-     * @brief Check if sync is due
-     * @param current_time Current millis()
-     * @return true if sync should run
+     * @brief Broadcast device config via realtime WebSocket
      */
-    bool isSyncDue(unsigned long current_time) const;
+    void broadcastDeviceConfig();
 
 private:
     unsigned long _lastHeartbeat;
     unsigned long _lastFullSync;
     unsigned long _lastRealtimeSocketSeen;
+    unsigned long _lastTelemetryBroadcast;
+    unsigned long _lastPollCommands;
 
     /**
      * @brief Perform device state sync with Supabase
@@ -55,6 +55,11 @@ private:
      * @brief Poll for pending commands
      */
     void pollCommands();
+
+    /**
+     * @brief Broadcast lightweight telemetry via realtime WebSocket
+     */
+    void broadcastTelemetry();
 };
 
 // Global instance

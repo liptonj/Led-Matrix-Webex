@@ -5,7 +5,10 @@
  * Used across Edge Functions for secure storage of OAuth tokens and credentials.
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { type SupabaseClient } from "@supabase/supabase-js";
+
+// deno-lint-ignore no-explicit-any
+type AnySupabaseClient = SupabaseClient<any, any, any>;
 
 /**
  * Fetches and decrypts a secret from the vault
@@ -16,7 +19,7 @@ import { createClient } from "@supabase/supabase-js";
  * @throws Error if secret cannot be read
  */
 export async function fetchDecryptedSecret(
-  client: ReturnType<typeof createClient>,
+  client: AnySupabaseClient,
   secretId: string,
 ): Promise<string> {
   const { data, error } = await (client as any).schema("display").rpc("vault_read_secret", {
@@ -40,7 +43,7 @@ export async function fetchDecryptedSecret(
  * @throws Error if operation fails
  */
 export async function updateSecret(
-  client: ReturnType<typeof createClient>,
+  client: AnySupabaseClient,
   secretId: string | null,
   secretValue: string,
   nameHint: string,

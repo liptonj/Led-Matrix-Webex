@@ -230,6 +230,110 @@ void test_sync_intervals_do_not_drift() {
 }
 
 // ============================================================================
+// Test Telemetry Broadcast Timing
+// ============================================================================
+
+void test_telemetry_broadcast_interval_30s() {
+    const unsigned long TELEMETRY_INTERVAL = 30000;
+    unsigned long lastBroadcast = 0;
+    
+    // Not due at 29 seconds
+    TEST_ASSERT_FALSE(isSyncDue(lastBroadcast, 29000, TELEMETRY_INTERVAL));
+    
+    // Due at 30 seconds
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 30000, TELEMETRY_INTERVAL));
+    
+    // Due after 30 seconds
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 35000, TELEMETRY_INTERVAL));
+}
+
+void test_telemetry_broadcast_independent_of_http_sync() {
+    // Telemetry at 30s, HTTP sync at 300s (5min) -- they run on separate timers
+    const unsigned long TELEMETRY_INTERVAL = 30000;
+    const unsigned long SYNC_INTERVAL = 300000;
+    
+    unsigned long lastTelemetry = 0;
+    unsigned long lastSync = 0;
+    
+    // At 30s: telemetry due, sync NOT due
+    TEST_ASSERT_TRUE(isSyncDue(lastTelemetry, 30000, TELEMETRY_INTERVAL));
+    TEST_ASSERT_FALSE(isSyncDue(lastSync, 30000, SYNC_INTERVAL));
+    
+    // Update telemetry timer
+    lastTelemetry = 30000;
+    
+    // At 60s: telemetry due again, sync still NOT due
+    TEST_ASSERT_TRUE(isSyncDue(lastTelemetry, 60000, TELEMETRY_INTERVAL));
+    TEST_ASSERT_FALSE(isSyncDue(lastSync, 60000, SYNC_INTERVAL));
+}
+
+void test_telemetry_broadcast_requires_realtime() {
+    // Telemetry should only fire when realtime is connected
+    // This test verifies the timing logic -- the actual realtime check
+    // is in SyncManager::loop(), so we just verify the interval here
+    const unsigned long TELEMETRY_INTERVAL = 30000;
+    unsigned long lastBroadcast = 0;
+    
+    // If realtime is not connected, lastBroadcast stays at 0
+    // Once connected and timer fires, it should be due immediately
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 30000, TELEMETRY_INTERVAL));
+    
+    // After first broadcast, next one is 30s later
+    lastBroadcast = 30000;
+    TEST_ASSERT_FALSE(isSyncDue(lastBroadcast, 59999, TELEMETRY_INTERVAL));
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 60000, TELEMETRY_INTERVAL));
+}
+
+void test_force_sync_resets_telemetry_broadcast() {
+    // forceSyncNow() should reset _lastTelemetryBroadcast to 0
+    // Simulate: broadcast happened at 100s, force sync resets it
+    const unsigned long TELEMETRY_INTERVAL = 30000;
+    unsigned long lastBroadcast = 100000;
+    
+    // Not due at 129s
+    TEST_ASSERT_FALSE(isSyncDue(lastBroadcast, 129000, TELEMETRY_INTERVAL));
+    
+    // After reset to 0, should be due at any time >= 30s
+    lastBroadcast = 0;
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 30000, TELEMETRY_INTERVAL));
+}
+
+void test_telemetry_broadcast_on_reconnect() {
+    // When realtime reconnects, timer resets to 0
+    // First broadcast should happen after TELEMETRY_INTERVAL from reconnect
+    const unsigned long TELEMETRY_INTERVAL = 30000;
+    
+    // Simulate: was broadcasting at 60s intervals, disconnected at 120s
+    unsigned long lastBroadcast = 90000;
+    
+    // At 119s, not due yet
+    TEST_ASSERT_FALSE(isSyncDue(lastBroadcast, 119000, TELEMETRY_INTERVAL));
+    
+    // Reconnect happens -- timer reset to 0
+    lastBroadcast = 0;
+    
+    // Now due at current time (because elapsed from 0 is huge)
+    TEST_ASSERT_TRUE(isSyncDue(lastBroadcast, 120000, TELEMETRY_INTERVAL));
+}
+
+void test_poll_commands_rate_limiting() {
+    // Poll commands should be rate-limited to 10s intervals
+    const unsigned long POLL_MIN_INTERVAL = 10000;
+    unsigned long lastPoll = 0;
+    
+    // Not due at 9 seconds
+    TEST_ASSERT_FALSE(isSyncDue(lastPoll, 9000, POLL_MIN_INTERVAL));
+    
+    // Due at 10 seconds
+    TEST_ASSERT_TRUE(isSyncDue(lastPoll, 10000, POLL_MIN_INTERVAL));
+    
+    // After poll, next one at 20s
+    lastPoll = 10000;
+    TEST_ASSERT_FALSE(isSyncDue(lastPoll, 19999, POLL_MIN_INTERVAL));
+    TEST_ASSERT_TRUE(isSyncDue(lastPoll, 20000, POLL_MIN_INTERVAL));
+}
+
+// ============================================================================
 // Test Runner
 // ============================================================================
 
@@ -260,6 +364,14 @@ static void run_sync_manager_tests() {
     // Precision Tests
     RUN_TEST(test_sync_boundary_conditions);
     RUN_TEST(test_sync_intervals_do_not_drift);
+    
+    // Telemetry Broadcast Tests
+    RUN_TEST(test_telemetry_broadcast_interval_30s);
+    RUN_TEST(test_telemetry_broadcast_independent_of_http_sync);
+    RUN_TEST(test_telemetry_broadcast_requires_realtime);
+    RUN_TEST(test_force_sync_resets_telemetry_broadcast);
+    RUN_TEST(test_telemetry_broadcast_on_reconnect);
+    RUN_TEST(test_poll_commands_rate_limiting);
     
     UNITY_END();
 }

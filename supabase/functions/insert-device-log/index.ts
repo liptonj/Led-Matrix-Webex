@@ -104,6 +104,10 @@ Deno.serve(async (req) => {
         });
       }
       serialNumber = tokenResult.device.serial_number;
+      // Extract device_uuid from JWT if present
+      if (tokenResult.device.device_uuid) {
+        deviceUuid = tokenResult.device.device_uuid;
+      }
     } else {
       const hmacResult = await validateHmacRequest(req, supabase, bodyText);
       if (!hmacResult.valid || !hmacResult.device) {
@@ -117,8 +121,8 @@ Deno.serve(async (req) => {
       isDebugEnabled = hmacResult.device.debug_enabled;
     }
 
-    // If we used a bearer token, fetch device_id, device_uuid (id), and debug_enabled (service role, cheap query).
-    if (!deviceId || !deviceUuid || !isDebugEnabled) {
+    // Only query devices table if device_uuid is not already in JWT (optimization)
+    if (!deviceUuid || !deviceId || !isDebugEnabled) {
       const { data: dev } = await supabase
         .schema("display")
         .from("devices")
@@ -130,6 +134,14 @@ Deno.serve(async (req) => {
         if (!deviceUuid) deviceUuid = dev.id;
         if (!isDebugEnabled) isDebugEnabled = dev.debug_enabled === true;
       }
+    }
+
+    // Validate that device_uuid exists
+    if (!deviceUuid) {
+      return new Response(JSON.stringify({ success: false, error: "Device UUID not found" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // Fetch user_uuid from pairings table
