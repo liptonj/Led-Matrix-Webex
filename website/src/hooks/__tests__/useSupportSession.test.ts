@@ -16,6 +16,18 @@ const mockUpdateSessionDeviceInfo = jest.fn();
 const mockCleanupStaleSessions = jest.fn();
 const mockGetSession = jest.fn();
 
+// Mock channel for the realtime subscription
+const mockChannel = {
+  on: jest.fn().mockReturnThis(),
+  subscribe: jest.fn().mockReturnThis(),
+};
+const mockRemoveChannel = jest.fn();
+const mockSupabaseClient = {
+  channel: jest.fn().mockReturnValue(mockChannel),
+  removeChannel: mockRemoveChannel,
+};
+const mockGetSupabase = jest.fn();
+
 jest.mock('@/lib/supabase/supportSessions', () => ({
   createSupportSession: (...args: unknown[]) => mockCreateSupportSession(...args),
   closeSupportSession: (...args: unknown[]) => mockCloseSupportSession(...args),
@@ -26,6 +38,10 @@ jest.mock('@/lib/supabase/supportSessions', () => ({
 
 jest.mock('@/lib/supabase/auth', () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+}));
+
+jest.mock('@/lib/supabase/core', () => ({
+  getSupabase: (...args: unknown[]) => mockGetSupabase(...args),
 }));
 
 const mockSession = {
@@ -62,6 +78,12 @@ beforeEach(() => {
   mockUpdateSessionDeviceInfo.mockResolvedValue(undefined);
   mockCleanupStaleSessions.mockResolvedValue(0);
   mockGetSession.mockResolvedValue(mockAuthSession);
+
+  // Reset channel mock chain for realtime subscription
+  mockChannel.on.mockReturnThis();
+  mockChannel.subscribe.mockReturnThis();
+  mockSupabaseClient.channel.mockReturnValue(mockChannel);
+  mockGetSupabase.mockResolvedValue(mockSupabaseClient);
 });
 
 describe('useSupportSession', () => {

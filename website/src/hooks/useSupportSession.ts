@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { getSession } from '@/lib/supabase/auth';
+import { getSupabase } from '@/lib/supabase/core';
 import {
   createSupportSession,
   closeSupportSession,
@@ -10,6 +11,7 @@ import {
   cleanupStaleSessions,
 } from '@/lib/supabase/supportSessions';
 import type { SupportSession, SupportSessionStatus } from '@/types/support';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface UseSupportSessionReturn {
   /** Current session object (null if no active session) */
@@ -98,6 +100,54 @@ export function useSupportSession(): UseSupportSessionReturn {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
+
+  // Subscribe to realtime changes on the current session record.
+  // This lets the user side detect when the admin joins (status → active)
+  // or ends the session (status → closed) without polling.
+  useEffect(() => {
+    if (!session?.id) return;
+
+    let channel: RealtimeChannel | null = null;
+    let mounted = true;
+
+    async function subscribe() {
+      const supabase = await getSupabase();
+      const sessionId = session!.id;
+
+      channel = supabase
+        .channel(`user-session-${sessionId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'display',
+            table: 'support_sessions',
+            filter: `id=eq.${sessionId}`,
+          },
+          (payload) => {
+            if (!mounted) return;
+            const updated = payload.new as SupportSession;
+            if (updated) {
+              setSession(updated);
+            }
+          },
+        )
+        .subscribe();
+    }
+
+    subscribe();
+
+    return () => {
+      mounted = false;
+      if (channel) {
+        getSupabase().then((supabase) => {
+          if (channel) supabase.removeChannel(channel);
+        });
+      }
+    };
+  // Only re-subscribe when session ID changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
 
   const create = useCallback(async (): Promise<SupportSession | null> => {
     try {

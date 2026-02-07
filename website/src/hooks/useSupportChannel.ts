@@ -85,12 +85,16 @@ export function useSupportChannel({
         },
       });
 
-      // Register all event handlers
+      // Register broadcast listeners for all known event types.
+      // IMPORTANT: we read the handler from eventHandlersRef at invocation
+      // time (not capture time) so that updated callbacks are always used.
       const handlerEntries = Object.entries(eventHandlersRef.current || {});
-      for (const [event, handler] of handlerEntries) {
+      for (const [event] of handlerEntries) {
         channel.on('broadcast', { event }, (msg) => {
-          if (mounted) {
-            handler(msg.payload as Record<string, unknown>);
+          if (!mounted) return;
+          const currentHandler = eventHandlersRef.current?.[event];
+          if (currentHandler) {
+            currentHandler(msg.payload as Record<string, unknown>);
           }
         });
       }
