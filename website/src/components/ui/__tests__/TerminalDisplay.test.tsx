@@ -5,7 +5,7 @@
  * line numbers, and various display options.
  */
 
-import { render, screen } from '@/test-utils';
+import { render, screen, fireEvent } from '@/test-utils';
 import { TerminalDisplay } from '../TerminalDisplay';
 import type { TerminalLine } from '../TerminalDisplay';
 
@@ -204,6 +204,73 @@ describe('TerminalDisplay', () => {
     });
   });
 
+  describe('auto-scroll', () => {
+    it('renders auto-scroll toggle button', () => {
+      render(<TerminalDisplay lines={['Line 1']} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+      expect(toggle).toBeInTheDocument();
+      expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('shows enabled state by default', () => {
+      render(<TerminalDisplay lines={['Line 1']} />);
+      expect(screen.getByText(/auto-scroll/i)).toBeInTheDocument();
+    });
+
+    it('toggles to paused when clicked', () => {
+      render(<TerminalDisplay lines={['Line 1']} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+
+      fireEvent.click(toggle);
+
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByText(/paused/i)).toBeInTheDocument();
+    });
+
+    it('re-enables when paused toggle is clicked', () => {
+      render(<TerminalDisplay lines={['Line 1']} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+
+      // Pause
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+      // Resume
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('respects defaultAutoScroll=false', () => {
+      render(<TerminalDisplay lines={['Line 1']} defaultAutoScroll={false} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll|paused/i });
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('shows scroll-to-bottom button when auto-scroll is paused', () => {
+      render(<TerminalDisplay lines={['Line 1', 'Line 2']} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+
+      fireEvent.click(toggle);
+
+      const scrollBtn = screen.getByRole('button', { name: /scroll to bottom/i });
+      expect(scrollBtn).toBeInTheDocument();
+    });
+
+    it('does not show scroll-to-bottom button when auto-scroll is on', () => {
+      render(<TerminalDisplay lines={['Line 1', 'Line 2']} />);
+      expect(screen.queryByRole('button', { name: /scroll to bottom/i })).not.toBeInTheDocument();
+    });
+
+    it('does not show scroll-to-bottom button when there are no lines', () => {
+      render(<TerminalDisplay lines={[]} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+
+      fireEvent.click(toggle);
+
+      expect(screen.queryByRole('button', { name: /scroll to bottom/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe('accessibility', () => {
     it('has proper semantic structure', () => {
       const { container } = render(<TerminalDisplay lines={[]} />);
@@ -219,6 +286,12 @@ describe('TerminalDisplay', () => {
       const { container } = render(<TerminalDisplay lines={['Test']} />);
       const content = container.querySelector('.font-mono');
       expect(content).toBeInTheDocument();
+    });
+
+    it('auto-scroll toggle has aria-pressed attribute', () => {
+      render(<TerminalDisplay lines={[]} />);
+      const toggle = screen.getByRole('button', { name: /auto-scroll/i });
+      expect(toggle).toHaveAttribute('aria-pressed');
     });
   });
 });
