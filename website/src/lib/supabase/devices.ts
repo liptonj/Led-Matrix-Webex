@@ -271,6 +271,38 @@ export async function subscribeToDeviceLogs(
         });
       },
     )
+    .on(
+      "broadcast",
+      { event: "device_telemetry" },
+      (payload) => {
+        const record = payload.payload as {
+          device_uuid?: string;
+          rssi?: number;
+          free_heap?: number;
+          uptime?: number;
+          firmware_version?: string;
+          temperature?: number;
+          ssid?: string;
+          timestamp?: number;
+        };
+
+        // Filter by deviceUuid if provided
+        if (deviceUuid && record.device_uuid !== deviceUuid) {
+          return;
+        }
+
+        // Emit as a special "telemetry" log entry for display in admin panel
+        onLog({
+          id: `telemetry-${record.device_uuid ?? 'unknown'}-${record.timestamp ?? Date.now()}`,
+          device_id: record.device_uuid ?? '',
+          serial_number: null,
+          level: 'info',
+          message: `Telemetry: RSSI=${record.rssi}, Heap=${record.free_heap}, Uptime=${record.uptime}s`,
+          metadata: record as Record<string, unknown>,
+          created_at: new Date(record.timestamp ? record.timestamp * 1000 : Date.now()).toISOString(),
+        });
+      },
+    )
     .subscribe((status) => {
       if (status === "SUBSCRIBED") {
         onStatusChange?.(true);

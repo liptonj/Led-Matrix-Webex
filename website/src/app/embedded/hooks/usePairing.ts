@@ -282,6 +282,15 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
         addLog(`Error handling command_ack: ${err instanceof Error ? err.message : 'unknown error'}`);
       }
     })
+    .on('broadcast', { event: 'device_telemetry' }, (payload: { payload: { device_uuid: string; rssi?: number; free_heap?: number; uptime?: number; firmware_version?: string; temperature?: number; ssid?: string; timestamp?: number } }) => {
+      const telemetry = payload.payload;
+      if (telemetry.device_uuid === selectedDeviceUuid) {
+        lastPairingSnapshotRef.current = Date.now();
+        setLastDeviceSeenMs(Date.now());
+        setIsPeerConnected(true);
+        setLastDeviceSeenAt(new Date().toISOString());
+      }
+    })
     .subscribe((status, err) => {
       if (status === 'SUBSCRIBED') { 
         setRtStatus('connected'); 

@@ -20,6 +20,7 @@ export interface UseDeviceCommandsOptions {
   deviceUuid: string | null;
   supabaseRef: React.MutableRefObject<SupabaseClient | null>;
   addLog: (message: string) => void;
+  broadcastToUserChannel?: (event: string, payload: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface CommandResponse {
@@ -43,7 +44,7 @@ export interface UseDeviceCommandsReturn {
 }
 
 export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceCommandsReturn {
-  const { deviceUuid } = options;
+  const { deviceUuid, broadcastToUserChannel } = options;
 
   // Insert command via Edge Function (more secure than direct DB insert)
   const insertCommandViaEdge = useCallback(async (
@@ -118,6 +119,18 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
     }
     commandId = result.command_id;
 
+    // Broadcast command via WebSocket for instant delivery (edge function HTTP broadcast is backup)
+    if (broadcastToUserChannel) {
+      broadcastToUserChannel('new_command', {
+        command_id: commandId,
+        command,
+        payload,
+        device_uuid: deviceUuid,
+      }).catch(() => {
+        // Silently fail - edge function broadcast is the backup
+      });
+    }
+
     // Subscribe to command updates
     return await new Promise<CommandResponse>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error(`Command "${command}" timed out`)), CONFIG.commandTimeoutMs);
@@ -148,7 +161,7 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
           }
         });
     });
-  }, [deviceUuid, insertCommandViaEdge]);
+  }, [deviceUuid, insertCommandViaEdge, broadcastToUserChannel]);
 
   return {
     sendCommand,
