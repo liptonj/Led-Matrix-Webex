@@ -6,6 +6,8 @@
 #include "xapi_websocket.h"
 #include <ArduinoJson.h>
 
+static const char* TAG = "XAPI_WS";
+
 // Global instance for callback
 XAPIWebSocket* g_xapi_instance = nullptr;
 
@@ -23,7 +25,7 @@ XAPIWebSocket::~XAPIWebSocket() {
 
 void XAPIWebSocket::begin(ConfigManager* config) {
     if (!config) {
-        Serial.println("[XAPI] ERROR: Cannot initialize with null config");
+        ESP_LOGE(TAG, "Cannot initialize with null config");
         return;
     }
     
@@ -32,7 +34,7 @@ void XAPIWebSocket::begin(ConfigManager* config) {
     
     String device_id = config_manager->getXAPIDeviceId();
     if (device_id.isEmpty()) {
-        Serial.println("[XAPI] No device ID configured, skipping WebSocket connection");
+        ESP_LOGI(TAG, "No device ID configured, skipping WebSocket connection");
         return;
     }
     
@@ -41,7 +43,7 @@ void XAPIWebSocket::begin(ConfigManager* config) {
     // 2. Use the access token for authentication
     // For now, this is a simplified implementation
     
-    Serial.printf("[XAPI] Configuring for device: %s\n", device_id.c_str());
+    ESP_LOGI(TAG, "Configuring for device: %s", device_id.c_str());
     
     // Configure WebSocket client
     // The actual implementation would connect to the device's specific endpoint
@@ -58,7 +60,7 @@ void XAPIWebSocket::begin(ConfigManager* config) {
     // Response includes: { "websocketUrl": "wss://..." }
     // Then: ws_client.beginSSL(host, port, path);
     
-    Serial.println("[XAPI] WebSocket client configured (connection deferred until URL available)");
+    ESP_LOGI(TAG, "WebSocket client configured (connection deferred until URL available)");
 }
 
 void XAPIWebSocket::loop() {
@@ -88,17 +90,17 @@ void XAPIWebSocket::disconnect() {
 
 void XAPIWebSocket::reconnect() {
     if (!config_manager) {
-        Serial.println("[XAPI] Cannot reconnect - not initialized");
+        ESP_LOGE(TAG, "Cannot reconnect - not initialized");
         return;
     }
     
     String device_id = config_manager->getXAPIDeviceId();
     if (device_id.isEmpty()) {
-        Serial.println("[XAPI] Cannot reconnect - no device ID");
+        ESP_LOGE(TAG, "Cannot reconnect - no device ID");
         return;
     }
     
-    Serial.println("[XAPI] Attempting to reconnect...");
+    ESP_LOGI(TAG, "Attempting to reconnect...");
     
     // FIXED: Add proper implementation notes and error handling
     // In production implementation, this would:
@@ -109,32 +111,32 @@ void XAPIWebSocket::reconnect() {
     // 5. Wait for connection confirmation
     
     // For now, log what's needed
-    Serial.printf("[XAPI] TODO: Implement full connection for device: %s\n", device_id.c_str());
-    Serial.println("[XAPI] Required: OAuth token, device WebSocket URL lookup");
+    ESP_LOGI(TAG, "TODO: Implement full connection for device: %s", device_id.c_str());
+    ESP_LOGI(TAG, "Required: OAuth token, device WebSocket URL lookup");
 }
 
 void XAPIWebSocket::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     switch (type) {
         case WStype_DISCONNECTED:
-            Serial.println("[XAPI] WebSocket disconnected");
+            ESP_LOGI(TAG, "WebSocket disconnected");
             connected = false;
             break;
             
         case WStype_CONNECTED:
-            Serial.println("[XAPI] WebSocket connected");
+            ESP_LOGI(TAG, "WebSocket connected");
             connected = true;
             subscribeToEvents();
             break;
             
         case WStype_TEXT: {
             String message = String((char*)payload);
-            Serial.printf("[XAPI] Received: %s\n", message.substring(0, 100).c_str());
+            ESP_LOGD(TAG, "Received: %s", message.substring(0, 100).c_str());
             parseStatusUpdate(message);
             break;
         }
             
         case WStype_ERROR:
-            Serial.println("[XAPI] WebSocket error");
+            ESP_LOGE(TAG, "WebSocket error");
             break;
             
         default:
@@ -170,7 +172,7 @@ void XAPIWebSocket::subscribeToEvents() {
     serializeJson(doc, message);
     ws_client.sendTXT(message);
     
-    Serial.println("[XAPI] Subscribed to status events");
+    ESP_LOGI(TAG, "Subscribed to status events");
 }
 
 void XAPIWebSocket::parseStatusUpdate(const String& message) {
@@ -218,7 +220,7 @@ void XAPIWebSocket::parseStatusUpdate(const String& message) {
     
     if (update_pending) {
         current_state.valid = true;
-        Serial.printf("[XAPI] Status update: Camera=%s, Mic=%s, InCall=%s\n",
+        ESP_LOGI(TAG, "Status update: Camera=%s, Mic=%s, InCall=%s",
                       current_state.camera_on ? "On" : "Off",
                       current_state.mic_muted ? "Muted" : "Unmuted",
                       current_state.in_call ? "Yes" : "No");

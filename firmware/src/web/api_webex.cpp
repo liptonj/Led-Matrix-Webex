@@ -10,7 +10,10 @@
 #include "../supabase/supabase_client.h"
 #include "../common/url_utils.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "API_WEBEX";
 
 // Note: urlEncode() removed from anonymous namespace - now using common/url_utils.h
 
@@ -80,5 +83,5 @@ void WebServerManager::handleOAuthCallback(AsyncWebServerRequest* request) {
 
     request->send(200, "text/html", html);
 
-    Serial.printf("[WEB] OAuth callback received, code: %s\n", code.substring(0, 10).c_str());
+    ESP_LOGI(TAG, "OAuth callback received, code: %s", code.substring(0, 10).c_str());
 }

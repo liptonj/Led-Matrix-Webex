@@ -11,11 +11,13 @@
 #include "web_server.h"
 #include "web_helpers.h"
 #include "ota_bundle.h"
+#include "../debug/log_system.h"
 #include <Update.h>
 #include <LittleFS.h>
 #include <esp_ota_ops.h>
 #include <ArduinoJson.h>
-#include "../debug/remote_logger.h"
+
+static const char* TAG = "API_OTA_UP";
 
 void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                                             const String& filename,
@@ -41,9 +43,9 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
         ota_bundle_fs_started = false;
         last_web_progress = -1;  // Reset on new upload
 
-        Serial.printf("[WEB] OTA upload start: %s (%u bytes)\n",
+        ESP_LOGI(TAG, "OTA upload start: %s (%u bytes)",
                       filename.c_str(), static_cast<unsigned>(ota_upload_size));
-        Serial.printf("[WEB] Starting heap: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
+        ESP_LOGI(TAG, "Starting heap: %lu bytes", (unsigned long)ESP.getFreeHeap());
     }
 
     if (ota_upload_error.isEmpty()) {
@@ -62,21 +64,21 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                     ota_bundle_mode = true;
                     OTABundle::parse_header(ota_bundle_header, ota_bundle_app_size, ota_bundle_fs_size);
 
-                    Serial.printf("[WEB] OTA bundle detected: app=%u fs=%u\n",
+                    ESP_LOGI(TAG, "OTA bundle detected: app=%u fs=%u",
                                   static_cast<unsigned>(ota_bundle_app_size),
                                   static_cast<unsigned>(ota_bundle_fs_size));
 
                     // Get current running partition for logging
                     const esp_partition_t* running = esp_ota_get_running_partition();
                     if (running) {
-                        Serial.printf("[WEB] Currently running from: %s\n", running->label);
+                        ESP_LOGI(TAG, "Currently running from: %s", running->label);
                     }
                     
                     ota_upload_target = esp_ota_get_next_update_partition(nullptr);
                     if (!ota_upload_target) {
                         ota_upload_error = "No OTA partition available";
                     } else {
-                        Serial.printf("[WEB] OTA target partition: %s (addr=0x%06x, size=%u bytes)\n",
+                        ESP_LOGI(TAG, "OTA target partition: %s (addr=0x%06x, size=%u bytes)",
                                       ota_upload_target->label,
                                       static_cast<unsigned>(ota_upload_target->address),
                                       static_cast<unsigned>(ota_upload_target->size));
@@ -87,7 +89,7 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                         const char* ota_label = ota_upload_target->label;
                     if (!Update.begin(ota_bundle_app_size, U_FLASH, -1, LOW, ota_label)) {
                         ota_upload_error = Update.errorString();
-                        RLOG_ERROR("ota-web", "Update.begin app failed: %s", ota_upload_error.c_str());
+                        ESP_LOGE(TAG, "Update.begin app failed: %s", ota_upload_error.c_str());
                     }
                     }
                 } else {
@@ -99,14 +101,14 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                         // Get current running partition for logging
                         const esp_partition_t* running = esp_ota_get_running_partition();
                         if (running) {
-                            Serial.printf("[WEB] Currently running from: %s\n", running->label);
+                            ESP_LOGI(TAG, "Currently running from: %s", running->label);
                         }
                         
                         ota_upload_target = esp_ota_get_next_update_partition(nullptr);
                         if (!ota_upload_target) {
                             ota_upload_error = "No OTA partition available";
                         } else {
-                            Serial.printf("[WEB] OTA target partition: %s (addr=0x%06x, size=%u bytes)\n",
+                            ESP_LOGI(TAG, "OTA target partition: %s (addr=0x%06x, size=%u bytes)",
                                           ota_upload_target->label,
                                           static_cast<unsigned>(ota_upload_target->address),
                                           static_cast<unsigned>(ota_upload_target->size));
@@ -117,7 +119,7 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                         const char* ota_label = ota_upload_target->label;
                     if (!Update.begin(firmware_total, U_FLASH, -1, LOW, ota_label)) {
                         ota_upload_error = Update.errorString();
-                        RLOG_ERROR("ota-web", "Update.begin firmware failed: %s", ota_upload_error.c_str());
+                        ESP_LOGE(TAG, "Update.begin firmware failed: %s", ota_upload_error.c_str());
                     }
                     }
                 }
@@ -155,28 +157,28 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                             break;
                         }
                         if (ota_upload_target) {
-                        Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
+                        ESP_LOGI(TAG, "Setting boot partition to: %s", ota_upload_target->label);
                         esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
                         if (err != ESP_OK) {
-                            RLOG_ERROR("ota-web", "Failed to set boot partition: %s", esp_err_to_name(err));
+                            ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
                             ota_upload_error = "Failed to set boot partition";
                             break;
                             } else {
                                 // Verify boot partition was set correctly
                                 const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
                                 if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                                    Serial.printf("[WEB] Boot partition verified: %s\n", boot_partition->label);
+                                    ESP_LOGI(TAG, "Boot partition verified: %s", boot_partition->label);
                                 } else {
-                                    Serial.printf("[WEB] WARNING: Boot partition verification failed!\n");
+                                    ESP_LOGW(TAG, "WARNING: Boot partition verification failed!");
                                 }
                             }
                         }
-                        Serial.println("[WEB] OTA bundle app complete, starting FS");
+                        ESP_LOGI(TAG, "OTA bundle app complete, starting FS");
 
                         LittleFS.end();
                         if (!Update.begin(ota_bundle_fs_size, U_SPIFFS)) {
                             ota_upload_error = Update.errorString();
-                            RLOG_ERROR("ota-web", "Update.begin FS failed: %s", ota_upload_error.c_str());
+                            ESP_LOGE(TAG, "Update.begin FS failed: %s", ota_upload_error.c_str());
                             break;
                         }
                         ota_bundle_fs_started = true;
@@ -223,12 +225,12 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
             if (progress / 10 > last_web_progress / 10) {
                 last_web_progress = progress;
                 uint32_t freeHeap = ESP.getFreeHeap();
-                Serial.printf("[WEB] Upload: %d%% (heap: %u bytes)\n", progress, freeHeap);
+                ESP_LOGI(TAG, "Upload: %d%% (heap: %u bytes)", progress, freeHeap);
                 
                 // Abort if heap critically low
                 if (freeHeap < 50000 && ota_upload_error.isEmpty()) {
                     ota_upload_error = "Heap too low during upload";
-                    RLOG_ERROR("ota-web", "Heap critically low: %u bytes at %d%%", freeHeap, progress);
+                    ESP_LOGE(TAG, "Heap critically low: %u bytes at %d%%", freeHeap, progress);
                 }
             }
         }
@@ -248,18 +250,18 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                 if (ota_upload_error.isEmpty() && ota_upload_target) {
                     const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
                     if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                        Serial.printf("[WEB] Boot partition verified for bundle: %s\n", boot_partition->label);
+                        ESP_LOGI(TAG, "Boot partition verified for bundle: %s", boot_partition->label);
                     } else {
-                        Serial.printf("[WEB] WARNING: Boot partition not set correctly! Expected: %s, Got: %s\n",
-                                      ota_upload_target ? ota_upload_target->label : "NULL",
-                                      boot_partition ? boot_partition->label : "NULL");
+                        ESP_LOGW(TAG, "WARNING: Boot partition not set correctly! Expected: %s, Got: %s",
+                                 ota_upload_target ? ota_upload_target->label : "NULL",
+                                 boot_partition ? boot_partition->label : "NULL");
                         // Try to set it again
                         esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
                         if (err != ESP_OK) {
-                            Serial.printf("[WEB] ERROR: Failed to set boot partition: %s\n", esp_err_to_name(err));
+                            ESP_LOGE(TAG, "ERROR: Failed to set boot partition: %s", esp_err_to_name(err));
                             ota_upload_error = "Failed to set boot partition";
                         } else {
-                            Serial.printf("[WEB] Boot partition set successfully: %s\n", ota_upload_target->label);
+                            ESP_LOGI(TAG, "Boot partition set successfully: %s", ota_upload_target->label);
                         }
                     }
                 }
@@ -269,18 +271,18 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
                     ota_upload_error = Update.errorString();
                 }
                 if (ota_upload_error.isEmpty() && ota_upload_target) {
-                    Serial.printf("[WEB] Setting boot partition to: %s\n", ota_upload_target->label);
+                    ESP_LOGI(TAG, "Setting boot partition to: %s", ota_upload_target->label);
                     esp_err_t err = esp_ota_set_boot_partition(ota_upload_target);
                     if (err != ESP_OK) {
-                        RLOG_ERROR("ota-web", "Failed to set boot partition: %s", esp_err_to_name(err));
+                        ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
                         ota_upload_error = "Failed to set boot partition";
                     } else {
                         // Verify boot partition was set correctly
                         const esp_partition_t* boot_partition = esp_ota_get_boot_partition();
                         if (boot_partition && strcmp(boot_partition->label, ota_upload_target->label) == 0) {
-                            Serial.printf("[WEB] Boot partition verified: %s\n", boot_partition->label);
+                            ESP_LOGI(TAG, "Boot partition verified: %s", boot_partition->label);
                         } else {
-                            Serial.printf("[WEB] WARNING: Boot partition verification failed!\n");
+                            ESP_LOGW(TAG, "WARNING: Boot partition verification failed!");
                         }
                     }
                 }
@@ -290,14 +292,14 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
         }
 
         ota_upload_in_progress = false;
-        Serial.printf("[WEB] OTA upload %s (%u bytes)\n",
+        ESP_LOGI(TAG, "OTA upload %s (%u bytes)",
                       ota_upload_error.isEmpty() ? "complete" : "failed",
                       static_cast<unsigned>(ota_upload_size));
         if (!ota_upload_error.isEmpty()) {
-            RLOG_ERROR("ota-web", "OTA error: %s", ota_upload_error.c_str());
+            ESP_LOGE(TAG, "OTA error: %s", ota_upload_error.c_str());
         } else {
             // OTA successful - schedule reboot
-            Serial.println("[WEB] OTA successful! Scheduling reboot...");
+            ESP_LOGI(TAG, "OTA successful! Scheduling reboot...");
             pending_reboot = true;
             pending_reboot_time = millis() + 1000;
             pending_boot_partition = nullptr;
@@ -329,12 +331,12 @@ void WebServerManager::handleOTAFilesystemUploadChunk(AsyncWebServerRequest* req
     if (index == 0) {
         ota_upload_in_progress = true;
         ota_upload_error = "";
-        Serial.printf("[WEB] Filesystem upload start: %s\n", filename.c_str());
+        ESP_LOGI(TAG, "Filesystem upload start: %s", filename.c_str());
         
         LittleFS.end();
         if (!Update.begin(request->contentLength(), U_SPIFFS)) {
             ota_upload_error = Update.errorString();
-            RLOG_ERROR("ota-web", "FS Update.begin failed: %s", ota_upload_error.c_str());
+            ESP_LOGE(TAG, "FS Update.begin failed: %s", ota_upload_error.c_str());
         }
     }
 
@@ -354,10 +356,10 @@ void WebServerManager::handleOTAFilesystemUploadChunk(AsyncWebServerRequest* req
         }
 
         ota_upload_in_progress = false;
-        Serial.printf("[WEB] Filesystem upload %s\n",
+        ESP_LOGI(TAG, "Filesystem upload %s",
                       ota_upload_error.isEmpty() ? "complete" : "failed");
         if (!ota_upload_error.isEmpty()) {
-            RLOG_ERROR("ota-web", "FS error: %s", ota_upload_error.c_str());
+            ESP_LOGE(TAG, "FS error: %s", ota_upload_error.c_str());
         }
     }
 }

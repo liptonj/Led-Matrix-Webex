@@ -6,7 +6,9 @@
  */
 
 #include "supabase_client.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "SUPABASE";
 
 int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& method,
                                          const String& body, String& response) {
@@ -28,9 +30,9 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
             uint32_t maxBlock = ESP.getMaxAllocHeap();
             
             if (freeHeap < MIN_HEAP_FOR_TLS || maxBlock < MIN_BLOCK_FOR_TLS) {
-                Serial.printf("[SUPABASE] Retry %d/%d skipped - low heap: %lu free, %lu block\n",
-                             retryCount + 1, SUPABASE_MAX_RETRIES, 
-                             (unsigned long)freeHeap, (unsigned long)maxBlock);
+                ESP_LOGW(TAG, "Retry %d/%d skipped - low heap: %lu free, %lu block",
+                         retryCount + 1, SUPABASE_MAX_RETRIES, 
+                         (unsigned long)freeHeap, (unsigned long)maxBlock);
                 // Wait and let memory stabilize
                 delay(retryDelayMs);
                 retryDelayMs = min(retryDelayMs * 2, 10000UL);  // Cap at 10 seconds
@@ -38,9 +40,9 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
                 continue;
             }
             
-            Serial.printf("[SUPABASE] Retry %d/%d after %lums delay (heap=%lu)\n",
-                         retryCount + 1, SUPABASE_MAX_RETRIES, 
-                         retryDelayMs, (unsigned long)freeHeap);
+            ESP_LOGI(TAG, "Retry %d/%d after %lums delay (heap=%lu)",
+                     retryCount + 1, SUPABASE_MAX_RETRIES, 
+                     retryDelayMs, (unsigned long)freeHeap);
         }
         
         httpCode = makeRequest(endpoint, method, body, response, false);
@@ -57,7 +59,7 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
         
         // Handle 401 by re-authenticating
         if (httpCode == 401) {
-            Serial.println("[SUPABASE] Token expired, re-authenticating...");
+            ESP_LOGI(TAG, "Token expired, re-authenticating...");
             invalidateToken();
             if (ensureAuthenticated()) {
                 // Retry with new token
@@ -87,9 +89,9 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
                 case -11: errorDesc = "read_timeout"; break;
             }
             
-            Serial.printf("[SUPABASE] %s failed: HTTP %d (%s) on attempt %d/%d\n",
-                         endpoint.c_str(), httpCode, errorDesc, 
-                         retryCount + 1, SUPABASE_MAX_RETRIES);
+            ESP_LOGW(TAG, "%s failed: HTTP %d (%s) on attempt %d/%d",
+                     endpoint.c_str(), httpCode, errorDesc, 
+                     retryCount + 1, SUPABASE_MAX_RETRIES);
             
             // For low RAM error, wait longer
             if (httpCode == -8) {
@@ -105,8 +107,8 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
         
         // Handle 5xx server errors with retry
         if (httpCode >= 500) {
-            Serial.printf("[SUPABASE] %s server error: HTTP %d on attempt %d/%d\n",
-                         endpoint.c_str(), httpCode, retryCount + 1, SUPABASE_MAX_RETRIES);
+            ESP_LOGW(TAG, "%s server error: HTTP %d on attempt %d/%d",
+                     endpoint.c_str(), httpCode, retryCount + 1, SUPABASE_MAX_RETRIES);
             
             if (retryCount + 1 < SUPABASE_MAX_RETRIES) {
                 delay(retryDelayMs);
@@ -119,8 +121,8 @@ int SupabaseClient::makeRequestWithRetry(const String& endpoint, const String& m
     
     // All retries exhausted
     if (httpCode < 0 || httpCode >= 500) {
-        Serial.printf("[SUPABASE] %s failed after %d retries: HTTP %d\n",
-                     endpoint.c_str(), SUPABASE_MAX_RETRIES, httpCode);
+        ESP_LOGW(TAG, "%s failed after %d retries: HTTP %d",
+                 endpoint.c_str(), SUPABASE_MAX_RETRIES, httpCode);
     }
     
     return httpCode;

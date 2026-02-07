@@ -11,9 +11,11 @@
 #include "../common/ca_certs.h"
 #include "../common/url_utils.h"
 #include "../config/config_manager.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
 #include "../app_state.h"
+
+static const char* TAG = "REALTIME";
 
 // Global instance
 SupabaseRealtime supabaseRealtime;
@@ -64,7 +66,8 @@ SupabaseRealtime::SupabaseRealtime()
       _minHeapFirstConnect(REALTIME_MIN_HEAP_FIRST),
       _minHeapSteady(REALTIME_MIN_HEAP_STEADY),
       _minHeapFloor(REALTIME_MIN_HEAP_FLOOR),
-      _msgQueueHead(0), _msgQueueTail(0) {
+      _msgQueueHead(0), _msgQueueTail(0),
+      _channelCount(0) {
     _lastMessage.valid = false;
     _privateChannel = false;
 }
@@ -92,8 +95,8 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
-            RLOG_WARN("realtime", "Skipping connect - low heap (%lu < %lu)",
-                      ESP.getFreeHeap(), (unsigned long)minHeap);
+            ESP_LOGW(TAG, "Skipping connect - low heap (%lu < %lu)",
+                     ESP.getFreeHeap(), (unsigned long)minHeap);
         }
         return;
     }
@@ -119,10 +122,10 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
     String wsPath = "/realtime/v1/websocket?apikey=" + encodedAnonKey + "&vsn=1.0.0";
     
     String redactedWsPath = redactKeyInUrl(wsPath, "apikey");
-    Serial.printf("[REALTIME] Connecting to %s%s\n", host.c_str(), redactedWsPath.c_str());
-    Serial.printf("[REALTIME] TLS context: time=%lu heap=%lu\n",
-                  (unsigned long)time(nullptr), ESP.getFreeHeap());
-    Serial.println("[REALTIME] WS headers: (default)");
+    ESP_LOGI(TAG, "Connecting to %s%s", host.c_str(), redactedWsPath.c_str());
+    ESP_LOGI(TAG, "TLS context: time=%lu heap=%lu",
+             (unsigned long)time(nullptr), ESP.getFreeHeap());
+    ESP_LOGI(TAG, "WS headers: (default)");
 
     String uri = "wss://" + host + wsPath;
     esp_websocket_client_config_t config = {};
@@ -158,7 +161,7 @@ void SupabaseRealtime::begin(const String& supabase_url, const String& anon_key,
         esp_websocket_client_start(_client);
     } else {
         _connecting = false;
-        RLOG_ERROR("realtime", "Failed to initialize websocket client");
+        ESP_LOGE(TAG, "Failed to initialize websocket client");
     }
 }
 
@@ -168,7 +171,7 @@ void SupabaseRealtime::setAccessToken(const String& access_token) {
     
     // If connected, re-authenticate
     if (_connected) {
-        RLOG_INFO("realtime", "Token updated - reconnecting to re-authenticate");
+        ESP_LOGI(TAG, "Token updated - reconnecting to re-authenticate");
         disconnect();
         // Will reconnect on next loop iteration
     }
@@ -201,7 +204,7 @@ void SupabaseRealtime::loop() {
     // Check for heartbeat timeout
     if (_connected && _lastHeartbeatResponse > 0 &&
         now - _lastHeartbeatResponse > (PHOENIX_HEARTBEAT_TIMEOUT_MS)) {
-        RLOG_WARN("realtime", "Heartbeat timeout - disconnecting");
+        ESP_LOGW(TAG, "Heartbeat timeout - disconnecting");
         disconnect();
     }
     
@@ -223,7 +226,7 @@ void SupabaseRealtime::loop() {
             uint32_t freeHeap = ESP.getFreeHeap();
             uint32_t minFreeHeap = ESP.getMinFreeHeap();
             if (minFreeHeap < 50000) {
-                RLOG_WARN("realtime", "Low heap during WebSocket: free=%lu min=%lu", freeHeap, minFreeHeap);
+                ESP_LOGW(TAG, "Low heap during WebSocket: free=%lu min=%lu", freeHeap, minFreeHeap);
             }
         }
     }
@@ -240,6 +243,15 @@ void SupabaseRealtime::disconnect() {
     _subscribed = false;
     _connecting = false;
     _lastHeartbeatResponse = 0;
+
+    // Clear all channel states
+    for (size_t i = 0; i < _channelCount; i++) {
+        _channels[i].subscribed = false;
+        _channels[i].pendingJoin = false;
+        _channels[i].pendingJoinMessage = "";
+        _channels[i].lastJoinPayload = "";
+    }
+    _channelCount = 0;
 
     // Flush message queue
     portENTER_CRITICAL(&_rxMux);
@@ -275,7 +287,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
     }
 
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
-        RLOG_INFO("Realtime", "WebSocket connected to Supabase");
+        ESP_LOGI(TAG, "WebSocket connected to Supabase");
         instance->_connected = true;
         instance->_connecting = false;
         instance->_loggedFirstMessage = false;
@@ -283,55 +295,105 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         instance->_hasConnected = true;
         instance->_lastHeartbeatResponse = millis();
         instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
-        if (instance->_pendingJoin && instance->_client &&
-            esp_websocket_client_is_connected(instance->_client)) {
-            Serial.printf("[REALTIME] Sending queued join message (%zu bytes)\n",
-                          instance->_pendingJoinMessage.length());
-            int sent = esp_websocket_client_send_text(
-                instance->_client,
-                instance->_pendingJoinMessage.c_str(),
-                instance->_pendingJoinMessage.length(),
-                portMAX_DELAY);
-            if (sent < 0) {
-                RLOG_WARN("realtime", "Failed to send queued subscription: %d", sent);
-            } else {
-                RLOG_INFO("realtime", "Sent queued subscription (%d bytes)", sent);
-                instance->_pendingJoin = false;
-                instance->_pendingJoinMessage = "";
-                if (instance->_privateChannel) {
-                    instance->sendAccessToken();
+        
+        // Rejoin all channels that have join payloads
+        if (instance->_client && esp_websocket_client_is_connected(instance->_client)) {
+            bool rejoinedAny = false;
+            for (size_t i = 0; i < instance->_channelCount; i++) {
+                ChannelState& channel = instance->_channels[i];
+                
+                // Check for pending join message first
+                if (channel.pendingJoin && !channel.pendingJoinMessage.isEmpty()) {
+                    ESP_LOGI(TAG, "Sending queued join for channel %s (%zu bytes)",
+                             channel.topic.c_str(), channel.pendingJoinMessage.length());
+                    int sent = esp_websocket_client_send_text(
+                        instance->_client,
+                        channel.pendingJoinMessage.c_str(),
+                        channel.pendingJoinMessage.length(),
+                        portMAX_DELAY);
+                    if (sent < 0) {
+                        ESP_LOGW(TAG, "Failed to send queued join for %s: %d", 
+                                channel.topic.c_str(), sent);
+                    } else {
+                        ESP_LOGI(TAG, "Sent queued join for %s (%d bytes)", 
+                                channel.topic.c_str(), sent);
+                        channel.pendingJoin = false;
+                        channel.pendingJoinMessage = "";
+                        rejoinedAny = true;
+                        if (channel.privateChannel) {
+                            instance->sendAccessToken();
+                        }
+                    }
+                } else if (!channel.lastJoinPayload.isEmpty() && !channel.topic.isEmpty()) {
+                    // Rejoin using cached payload
+                    JsonDocument payloadDoc;
+                    if (!deserializeJson(payloadDoc, channel.lastJoinPayload)) {
+                        channel.joinRef = ++instance->_joinRef;
+                        instance->_msgRef++;
+                        String msg = instance->buildPhoenixMessage(channel.topic, "phx_join",
+                                                                   payloadDoc, channel.joinRef);
+                        int sent = esp_websocket_client_send_text(
+                            instance->_client,
+                            msg.c_str(),
+                            msg.length(),
+                            portMAX_DELAY);
+                        if (sent < 0) {
+                            ESP_LOGW(TAG, "Failed to rejoin channel %s: %d", 
+                                    channel.topic.c_str(), sent);
+                        } else {
+                            ESP_LOGI(TAG, "Rejoined channel %s (%d bytes)", 
+                                    channel.topic.c_str(), sent);
+                            rejoinedAny = true;
+                            if (channel.privateChannel) {
+                                instance->sendAccessToken();
+                            }
+                        }
+                    }
                 }
             }
-        } else if (!instance->_lastJoinPayload.isEmpty() &&
-                   !instance->_channelTopic.isEmpty() &&
-                   instance->_client && esp_websocket_client_is_connected(instance->_client)) {
-            JsonDocument payloadDoc;
-            if (!deserializeJson(payloadDoc, instance->_lastJoinPayload)) {
-                instance->_joinRef++;
-                instance->_msgRef++;
-                String msg = instance->buildPhoenixMessage(instance->_channelTopic, "phx_join",
-                                                           payloadDoc, instance->_joinRef);
+            
+            // Legacy single-channel fallback (for backward compatibility)
+            if (!rejoinedAny && instance->_pendingJoin && 
+                !instance->_pendingJoinMessage.isEmpty()) {
+                ESP_LOGI(TAG, "Sending legacy queued join message (%zu bytes)",
+                         instance->_pendingJoinMessage.length());
                 int sent = esp_websocket_client_send_text(
                     instance->_client,
-                    msg.c_str(),
-                    msg.length(),
+                    instance->_pendingJoinMessage.c_str(),
+                    instance->_pendingJoinMessage.length(),
                     portMAX_DELAY);
                 if (sent < 0) {
-                    Serial.printf("[REALTIME] Failed to resend join (ret=%d)\n", sent);
+                    ESP_LOGW(TAG, "Failed to send legacy queued subscription: %d", sent);
                 } else {
-                    Serial.printf("[REALTIME] Resent join (%d bytes)\n", sent);
+                    ESP_LOGI(TAG, "Sent legacy queued subscription (%d bytes)", sent);
+                    instance->_pendingJoin = false;
+                    instance->_pendingJoinMessage = "";
                     if (instance->_privateChannel) {
                         instance->sendAccessToken();
                     }
                 }
-            }
-        } else {
-            if (instance->_channelTopic.isEmpty()) {
-                Serial.println("[REALTIME] No channel topic set - cannot join");
-            } else if (instance->_lastJoinPayload.isEmpty()) {
-                Serial.println("[REALTIME] No cached join payload - cannot join");
-            } else {
-                Serial.println("[REALTIME] Join not sent (no pending join)");
+            } else if (!rejoinedAny && !instance->_lastJoinPayload.isEmpty() &&
+                       !instance->_channelTopic.isEmpty()) {
+                JsonDocument payloadDoc;
+                if (!deserializeJson(payloadDoc, instance->_lastJoinPayload)) {
+                    instance->_joinRef++;
+                    instance->_msgRef++;
+                    String msg = instance->buildPhoenixMessage(instance->_channelTopic, "phx_join",
+                                                               payloadDoc, instance->_joinRef);
+                    int sent = esp_websocket_client_send_text(
+                        instance->_client,
+                        msg.c_str(),
+                        msg.length(),
+                        portMAX_DELAY);
+                    if (sent < 0) {
+                        ESP_LOGW(TAG, "Failed to resend legacy join (ret=%d)", sent);
+                    } else {
+                        ESP_LOGI(TAG, "Resent legacy join (%d bytes)", sent);
+                        if (instance->_privateChannel) {
+                            instance->sendAccessToken();
+                        }
+                    }
+                }
             }
         }
         return;
@@ -339,26 +401,34 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
 
     if (event_id == WEBSOCKET_EVENT_DISCONNECTED || event_id == WEBSOCKET_EVENT_CLOSED) {
         if (instance->_connected) {
-            RLOG_WARN("Realtime", "WebSocket disconnected (was connected)");
+            ESP_LOGW(TAG, "WebSocket disconnected (was connected)");
         } else {
-            Serial.println("[REALTIME] Disconnected (was not connected)");
+            ESP_LOGI(TAG, "Disconnected (was not connected)");
         }
         instance->_connected = false;
         instance->_subscribed = false;
         instance->_connecting = false;
+        // Mark all channels as unsubscribed (will rejoin on reconnect)
+        for (size_t i = 0; i < instance->_channelCount; i++) {
+            instance->_channels[i].subscribed = false;
+        }
         return;
     }
 
     if (event_id == WEBSOCKET_EVENT_ERROR) {
         auto* error_data = static_cast<esp_websocket_event_id_t*>(event_data);
-        RLOG_ERROR("realtime", "WebSocket error event: %ld", (long)event_id);
+        ESP_LOGE(TAG, "WebSocket error event: %ld", (long)event_id);
         // Log additional error details if available
         if (error_data) {
-            Serial.printf("[REALTIME] Error data pointer: %p\n", error_data);
+            ESP_LOGD(TAG, "Error data pointer: %p", error_data);
         }
         instance->_connected = false;
         instance->_subscribed = false;
         instance->_connecting = false;
+        // Mark all channels as unsubscribed
+        for (size_t i = 0; i < instance->_channelCount; i++) {
+            instance->_channels[i].subscribed = false;
+        }
         return;
     }
 
@@ -379,9 +449,9 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                         closeReason = String(data->data_ptr + 2, data->data_len - 2);
                     }
                 }
-                RLOG_WARN("realtime", "WebSocket close frame (code=%u len=%d reason=%s)",
-                          static_cast<unsigned int>(closeCode), data->data_len,
-                          closeReason.isEmpty() ? "none" : closeReason.c_str());
+                ESP_LOGW(TAG, "WebSocket close frame (code=%u len=%d reason=%s)",
+                         static_cast<unsigned int>(closeCode), data->data_len,
+                         closeReason.isEmpty() ? "none" : closeReason.c_str());
                 instance->_loggedCloseFrame = true;
             }
             return;
@@ -395,8 +465,8 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         
         // Check buffer size limit before appending
         if (instance->_rxBuffer.length() + data->data_len > REALTIME_RX_BUFFER_MAX) {
-            Serial.printf("[REALTIME] RX buffer overflow prevented: %zu + %d > %d\n",
-                          instance->_rxBuffer.length(), data->data_len, REALTIME_RX_BUFFER_MAX);
+            ESP_LOGW(TAG, "RX buffer overflow prevented: %zu + %d > %d",
+                     instance->_rxBuffer.length(), data->data_len, REALTIME_RX_BUFFER_MAX);
             instance->_rxBuffer = "";  // Reset buffer on overflow
             portEXIT_CRITICAL(&instance->_rxMux);
             return;
@@ -410,8 +480,8 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
             // Log first message for diagnostics
             if (!instance->_loggedFirstMessage) {
                 String snippet = completeMessage.substring(0, 200);
-                Serial.printf("[REALTIME] First WS message (%d bytes): %s\n",
-                              completeMessage.length(), snippet.c_str());
+                ESP_LOGI(TAG, "First WS message (%d bytes): %s",
+                         completeMessage.length(), snippet.c_str());
                 instance->_loggedFirstMessage = true;
             }
             auto& deps = getDependencies();
@@ -421,7 +491,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                 if (raw.length() > maxLen) {
                     raw = raw.substring(0, maxLen) + "...";
                 }
-                Serial.printf("[REALTIME][RAW] %s\n", raw.c_str());
+                ESP_LOGD(TAG, "[RAW] %s", raw.c_str());
             }
 
             // Push to circular queue
@@ -430,7 +500,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                 instance->_msgQueue[instance->_msgQueueTail] = completeMessage;
                 instance->_msgQueueTail = nextTail;
             } else {
-                RLOG_WARN("realtime", "Message queue full - dropped message");
+                ESP_LOGW(TAG, "Message queue full - dropped message");
             }
         }
         portEXIT_CRITICAL(&instance->_rxMux);
@@ -447,4 +517,138 @@ uint32_t SupabaseRealtime::connectingDurationMs() const {
         return (ULONG_MAX - _connectStartMs) + now;
     }
     return now - _connectStartMs;
+}
+
+bool SupabaseRealtime::isConnected() const {
+    if (!_connected) {
+        return false;
+    }
+    // Check if at least one channel is subscribed
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].subscribed) {
+            return true;
+        }
+    }
+    // Fallback to legacy _subscribed flag for backward compatibility
+    return _subscribed;
+}
+
+ChannelState* SupabaseRealtime::findChannel(const String& topic) {
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].topic == topic) {
+            return &_channels[i];
+        }
+    }
+    return nullptr;
+}
+
+const ChannelState* SupabaseRealtime::findChannel(const String& topic) const {
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].topic == topic) {
+            return &_channels[i];
+        }
+    }
+    return nullptr;
+}
+
+int SupabaseRealtime::findChannelIndex(const String& topic) const {
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].topic == topic) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+bool SupabaseRealtime::isChannelSubscribed(const String& topic) const {
+    const ChannelState* channel = findChannel(topic);
+    return channel != nullptr && channel->subscribed;
+}
+
+bool SupabaseRealtime::subscribeToDeviceChannel(const String& device_uuid) {
+    if (device_uuid.isEmpty()) {
+        ESP_LOGW(TAG, "Cannot subscribe to device channel - device_uuid is empty");
+        return false;
+    }
+    
+    if (_channelCount >= MAX_CHANNELS) {
+        ESP_LOGW(TAG, "Cannot subscribe to device channel - max channels reached");
+        return false;
+    }
+    
+    // Check if channel already exists
+    String channelTopic = "realtime:device:" + device_uuid;
+    if (findChannel(channelTopic) != nullptr) {
+        ESP_LOGD(TAG, "Device channel already subscribed: %s", channelTopic.c_str());
+        return true;
+    }
+    
+    // Set up device channel state
+    ChannelState& channel = _channels[CHANNEL_DEVICE];
+    channel.topic = channelTopic;
+    channel.privateChannel = true;
+    
+    ESP_LOGI(TAG, "Subscribing to device channel: %s", channelTopic.c_str());
+    
+    // Build join payload for device channel (broadcast-only, no postgres_changes)
+    JsonDocument payload;
+    payload.to<JsonObject>();
+    JsonObject config = payload["config"].to<JsonObject>();
+    config["broadcast"]["self"] = false;
+    config["presence"]["key"] = "";
+    config["private"] = true;
+    payload["access_token"] = _accessToken;
+    
+    String payloadFull;
+    serializeJson(payload, payloadFull);
+    channel.lastJoinPayload = payloadFull;
+    
+    // Build Phoenix join message
+    channel.joinRef = ++_joinRef;
+    _msgRef++;
+    String message = buildPhoenixMessage(channelTopic, "phx_join", payload, channel.joinRef);
+    
+    if (message.isEmpty()) {
+        ESP_LOGE(TAG, "Failed to build device channel join message");
+        return false;
+    }
+    
+    // Send join message if connected, otherwise queue it
+    if (!_connected) {
+        if (_client) {
+            channel.pendingJoinMessage = message;
+            channel.pendingJoin = true;
+            _channelCount++;
+            ESP_LOGI(TAG, "Device channel subscription queued (not connected)");
+            return true;
+        } else {
+            ESP_LOGW(TAG, "Cannot subscribe to device channel - not connected");
+            return false;
+        }
+    }
+    
+    if (!esp_websocket_client_is_connected(_client)) {
+        channel.pendingJoinMessage = message;
+        channel.pendingJoin = true;
+        _channelCount++;
+        ESP_LOGI(TAG, "Device channel subscription queued (socket not ready)");
+        return true;
+    }
+    
+    int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    if (sent < 0) {
+        ESP_LOGE(TAG, "Failed to send device channel subscription: %d", sent);
+        channel.pendingJoinMessage = message;
+        channel.pendingJoin = true;
+        _channelCount++;
+        return false;
+    }
+    
+    _channelCount++;
+    ESP_LOGI(TAG, "Device channel subscription sent (%d bytes)", sent);
+    
+    // Send access token for private channel
+    sendAccessToken();
+    
+    return true;
 }

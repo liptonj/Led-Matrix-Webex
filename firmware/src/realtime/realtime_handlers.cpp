@@ -10,9 +10,11 @@
 #include "../supabase/supabase_client.h"
 #include "../supabase/supabase_realtime.h"
 #include "../core/dependencies.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../sync/sync_manager.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "RT_HANDLER";
 
 // Forward declarations
 void handleSupabaseCommand(const SupabaseCommand& cmd);
@@ -27,7 +29,7 @@ bool validateCommandId(const String& cmdId) {
     String trimmed = cmdId;
     trimmed.trim();
     if (trimmed.isEmpty() || trimmed.length() < 8) {
-        Serial.printf("[REALTIME] Command has invalid ID: '%s'\n", trimmed.c_str());
+        ESP_LOGW(TAG, "Command has invalid ID: '%s'", trimmed.c_str());
         return false;
     }
     return true;
@@ -43,7 +45,7 @@ bool validateCommandName(const String& cmdName, const String& cmdId) {
     String trimmed = cmdName;
     trimmed.trim();
     if (trimmed.isEmpty()) {
-        Serial.printf("[REALTIME] Command %s has empty command name\n", cmdId.c_str());
+        ESP_LOGW(TAG, "Command %s has empty command name", cmdId.c_str());
         return false;
     }
     return true;
@@ -90,7 +92,7 @@ void handleBroadcastCommand(const JsonObject& record) {
     auto& deps = getDependencies();
     
     if (record.isNull()) {
-        Serial.println("[REALTIME] Broadcast command missing record");
+        ESP_LOGW(TAG, "Broadcast command missing record");
         return;
     }
 
@@ -100,18 +102,18 @@ void handleBroadcastCommand(const JsonObject& record) {
     }
 
     if (deps.command_processor.wasRecentlyProcessed(cmd.id)) {
-        Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
+        ESP_LOGD(TAG, "Duplicate command ignored: %s", cmd.id.c_str());
         return;
     }
 
     String status = record["status"].as<String>();
     if (status != "pending") {
-        Serial.printf("[REALTIME] Command %s already %s, skipping\n",
-                      cmd.id.c_str(), status.c_str());
+        ESP_LOGD(TAG, "Command %s already %s, skipping",
+                 cmd.id.c_str(), status.c_str());
         return;
     }
 
-    RLOG_INFO("realtime", "Processing command via broadcast: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
+    ESP_LOGI(TAG, "Processing command via broadcast: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     handleSupabaseCommand(cmd);
 }
 
@@ -123,7 +125,7 @@ void handleBroadcastPairing(const JsonObject& record) {
     auto& deps = getDependencies();
     
     if (record.isNull()) {
-        Serial.println("[REALTIME] Broadcast pairing missing record");
+        ESP_LOGW(TAG, "Broadcast pairing missing record");
         return;
     }
 
@@ -155,8 +157,8 @@ void handleBroadcastPairing(const JsonObject& record) {
     // Ignore heartbeat-only updates
     if (!statusChanged) {
         deps.app_state.last_supabase_sync = millis();
-        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
-            Serial.println("[REALTIME] Broadcast pairing update ignored (no status change)");
+        if (deps.config.getPairingRealtimeDebug()) {
+            ESP_LOGD(TAG, "Broadcast pairing update ignored (no status change)");
         }
         return;
     }
@@ -179,9 +181,9 @@ void handleBroadcastPairing(const JsonObject& record) {
     }
 
     deps.app_state.last_supabase_sync = millis();
-    RLOG_INFO("realtime", "Pairing status changed (broadcast) - app=%s, status=%s",
-              newAppConnected ? "connected" : "disconnected",
-              newWebexStatus.c_str());
+    ESP_LOGI(TAG, "Pairing status changed (broadcast) - app=%s, status=%s",
+             newAppConnected ? "connected" : "disconnected",
+             newWebexStatus.c_str());
 }
 
 #if 0
@@ -198,7 +200,7 @@ void handleBroadcastPairing(const JsonObject& record) {
 void handleBroadcastMessage(JsonDocument& payload) {
     JsonObject broadcast = payload["payload"];
     if (broadcast.isNull()) {
-        Serial.println("[REALTIME] Broadcast payload missing");
+        ESP_LOGW(TAG, "Broadcast payload missing");
         return;
     }
 
@@ -207,7 +209,7 @@ void handleBroadcastMessage(JsonDocument& payload) {
     JsonObject data = inner.is<JsonObject>() ? inner.as<JsonObject>() : broadcast;
 
     if (data.isNull()) {
-        Serial.println("[REALTIME] Broadcast data missing");
+        ESP_LOGW(TAG, "Broadcast data missing");
         return;
     }
 
@@ -215,10 +217,10 @@ void handleBroadcastMessage(JsonDocument& payload) {
     String operation = data["operation"] | "";
     JsonObject record = data["record"];
 
-    Serial.printf("[REALTIME] Broadcast %s table=%s op=%s\n",
-                  broadcastEvent.c_str(),
-                  table.c_str(),
-                  operation.c_str());
+    ESP_LOGD(TAG, "Broadcast %s table=%s op=%s",
+             broadcastEvent.c_str(),
+             table.c_str(),
+             operation.c_str());
 
     if (table == "commands" && operation == "INSERT") {
         handleBroadcastCommand(record);
@@ -236,7 +238,7 @@ void handleCommandInsert(const JsonObject& data) {
     auto& deps = getDependencies();
     
     if (data.isNull()) {
-        Serial.println("[REALTIME] No record in command payload");
+        ESP_LOGW(TAG, "No record in command payload");
         return;
     }
 
@@ -247,19 +249,19 @@ void handleCommandInsert(const JsonObject& data) {
     }
 
     if (deps.command_processor.wasRecentlyProcessed(cmd.id)) {
-        Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
+        ESP_LOGD(TAG, "Duplicate command ignored: %s", cmd.id.c_str());
         return;
     }
 
     // Verify this command is pending (not already processed via polling)
     String status = data["status"].as<String>();
     if (status != "pending") {
-        Serial.printf("[REALTIME] Command %s already %s, skipping\n",
-                      cmd.id.c_str(), status.c_str());
+        ESP_LOGD(TAG, "Command %s already %s, skipping",
+                 cmd.id.c_str(), status.c_str());
         return;
     }
 
-    RLOG_INFO("realtime", "Processing command via realtime: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
+    ESP_LOGI(TAG, "Processing command via realtime: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
 
     // Handle the command (same handler as polling)
     handleSupabaseCommand(cmd);
@@ -316,8 +318,8 @@ void handlePairingUpdate(const JsonObject& data) {
     if (!statusChanged) {
         deps.app_state.last_supabase_sync = millis();
         // Heartbeat-only update - silently ignore
-        if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
-            Serial.println("[REALTIME] Pairing update ignored (no status change - likely heartbeat)");
+        if (deps.config.getPairingRealtimeDebug()) {
+            ESP_LOGD(TAG, "Pairing update ignored (no status change - likely heartbeat)");
         }
         return;
     }
@@ -343,14 +345,14 @@ void handlePairingUpdate(const JsonObject& data) {
     }
 
     deps.app_state.last_supabase_sync = millis();
-    RLOG_INFO("realtime", "Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s",
-              newAppConnected ? "connected" : "disconnected",
-              newWebexStatus.c_str(),
-              newCameraOn ? "on" : "off",
-              newMicMuted ? "muted" : "unmuted",
-              newInCall ? "yes" : "no");
+    ESP_LOGI(TAG, "Pairing status changed - app=%s, status=%s, camera=%s, mic=%s, inCall=%s",
+             newAppConnected ? "connected" : "disconnected",
+             newWebexStatus.c_str(),
+             newCameraOn ? "on" : "off",
+             newMicMuted ? "muted" : "unmuted",
+             newInCall ? "yes" : "no");
 
-    if (deps.debug_mode && deps.config.getPairingRealtimeDebug()) {
+    if (deps.config.getPairingRealtimeDebug()) {
         JsonDocument debugDoc;
         debugDoc["app_connected"] = newAppConnected;
         debugDoc["webex_status"] = newWebexStatus;
@@ -360,7 +362,7 @@ void handlePairingUpdate(const JsonObject& data) {
         debugDoc["in_call"] = newInCall;
         String debugJson;
         serializeJson(debugDoc, debugJson);
-        Serial.printf("[REALTIME][DEBUG] Pairing payload: %s\n", debugJson.c_str());
+        ESP_LOGD(TAG, "[DEBUG] Pairing payload: %s", debugJson.c_str());
     }
 }
 
@@ -373,7 +375,7 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         return;
     }
 
-    RLOG_DEBUG("realtime", "Received %s on %s.%s", msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
+    ESP_LOGD(TAG, "Received %s on %s.%s", msg.event.c_str(), msg.schema.c_str(), msg.table.c_str());
 
     // Handle broadcast events
     if (msg.event == "broadcast") {
@@ -389,7 +391,7 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         
         // Legacy pairing channel broadcast (DEAD CODE - no longer subscribed to pairing channels)
         // handleBroadcastMessage(payload);  // Removed - unreachable code path
-        Serial.printf("[REALTIME] Unknown broadcast event: %s\n", broadcastEvent.c_str());
+        ESP_LOGW(TAG, "Unknown broadcast event: %s", broadcastEvent.c_str());
         return;
     }
 
@@ -435,32 +437,32 @@ void handleUserAssigned(JsonObject& payload) {
     auto& deps = getDependencies();
     
     if (payload.isNull()) {
-        Serial.println("[REALTIME] user_assigned event missing payload");
+        ESP_LOGW(TAG, "user_assigned event missing payload");
         return;
     }
     
     String newUserUuid = payload["user_uuid"] | "";
     if (newUserUuid.isEmpty()) {
-        Serial.println("[REALTIME] user_assigned event missing user_uuid");
+        ESP_LOGW(TAG, "user_assigned event missing user_uuid");
         return;
     }
     
     String currentUserUuid = deps.config.getUserUuid();
     if (newUserUuid == currentUserUuid) {
-        Serial.printf("[REALTIME] user_assigned event - user_uuid unchanged: %s\n", 
-                      newUserUuid.c_str());
+        ESP_LOGD(TAG, "user_assigned event - user_uuid unchanged: %s", 
+                 newUserUuid.c_str());
         return;
     }
     
-    RLOG_INFO("realtime", "User assigned: %s -> %s",
-              currentUserUuid.isEmpty() ? "(none)" : currentUserUuid.c_str(),
-              newUserUuid.c_str());
+    ESP_LOGI(TAG, "User assigned: %s -> %s",
+             currentUserUuid.isEmpty() ? "(none)" : currentUserUuid.c_str(),
+             newUserUuid.c_str());
     
     // Store new user_uuid to NVS
     deps.config.setUserUuid(newUserUuid);
     
     // Disconnect and reconnect to new user channel
-    RLOG_INFO("realtime", "Reconnecting to new user channel");
+    ESP_LOGI(TAG, "Reconnecting to new user channel");
     deps.realtime.disconnect();
     // Reconnection will happen automatically on next loop iteration
     // The realtime manager will call subscribeToUserChannel() when user_uuid is available
@@ -474,14 +476,14 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     auto& deps = getDependencies();
     
     if (payload.isNull()) {
-        Serial.println("[REALTIME] webex_status event missing payload");
+        ESP_LOGW(TAG, "webex_status event missing payload");
         return;
     }
     
     // Always log incoming payload for debugging
     String payloadStr;
     serializeJson(payload, payloadStr);
-    RLOG_DEBUG("realtime", "webex_status payload: %s", payloadStr.c_str());
+    ESP_LOGD(TAG, "webex_status payload: %s", payloadStr.c_str());
     
     // webex_status is USER-SCOPED - all devices on this user channel should update.
     // No device_uuid filtering here. The device dropdown in the embedded app
@@ -498,36 +500,36 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     bool statusChanged = false;
     if (webexStatus != deps.app_state.webex_status) {
         statusChanged = true;
-        Serial.printf("[REALTIME] Webex status changed: %s -> %s\n",
-                      deps.app_state.webex_status.c_str(), webexStatus.c_str());
+        ESP_LOGI(TAG, "Webex status changed: %s -> %s",
+                 deps.app_state.webex_status.c_str(), webexStatus.c_str());
     }
     
     if (inCall != deps.app_state.in_call) {
         statusChanged = true;
-        Serial.printf("[REALTIME] In-call status changed: %s -> %s\n",
-                      deps.app_state.in_call ? "true" : "false",
-                      inCall ? "true" : "false");
+        ESP_LOGI(TAG, "In-call status changed: %s -> %s",
+                 deps.app_state.in_call ? "true" : "false",
+                 inCall ? "true" : "false");
     }
     
     if (cameraOn != deps.app_state.camera_on) {
         statusChanged = true;
-        Serial.printf("[REALTIME] Camera status changed: %s -> %s\n",
-                      deps.app_state.camera_on ? "on" : "off",
-                      cameraOn ? "on" : "off");
+        ESP_LOGI(TAG, "Camera status changed: %s -> %s",
+                 deps.app_state.camera_on ? "on" : "off",
+                 cameraOn ? "on" : "off");
     }
     
     if (micMuted != deps.app_state.mic_muted) {
         statusChanged = true;
-        Serial.printf("[REALTIME] Mic status changed: %s -> %s\n",
-                      deps.app_state.mic_muted ? "muted" : "unmuted",
-                      micMuted ? "muted" : "unmuted");
+        ESP_LOGI(TAG, "Mic status changed: %s -> %s",
+                 deps.app_state.mic_muted ? "muted" : "unmuted",
+                 micMuted ? "muted" : "unmuted");
     }
     
     if (!displayName.isEmpty() && displayName != deps.app_state.embedded_app_display_name) {
         statusChanged = true;
-        Serial.printf("[REALTIME] Display name changed: %s -> %s\n",
-                      deps.app_state.embedded_app_display_name.c_str(),
-                      displayName.c_str());
+        ESP_LOGI(TAG, "Display name changed: %s -> %s",
+                 deps.app_state.embedded_app_display_name.c_str(),
+                 displayName.c_str());
     }
     
     if (!statusChanged) {
@@ -554,12 +556,12 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     
     deps.app_state.last_supabase_sync = millis();
     
-    RLOG_INFO("realtime", "Webex status updated: status=%s, in_call=%s, camera=%s, mic=%s, name=%s",
-              webexStatus.c_str(),
-              inCall ? "true" : "false",
-              cameraOn ? "on" : "off",
-              micMuted ? "muted" : "unmuted",
-              displayName.isEmpty() ? "(none)" : displayName.c_str());
+    ESP_LOGI(TAG, "Webex status updated: status=%s, in_call=%s, camera=%s, mic=%s, name=%s",
+             webexStatus.c_str(),
+             inCall ? "true" : "false",
+             cameraOn ? "on" : "off",
+             micMuted ? "muted" : "unmuted",
+             displayName.isEmpty() ? "(none)" : displayName.c_str());
     
     // Display will be updated automatically by loop handler reading from app_state
 }
@@ -572,61 +574,61 @@ void handleUserChannelCommand(JsonObject& payload) {
     auto& deps = getDependencies();
     
     if (payload.isNull()) {
-        Serial.println("[REALTIME] command event missing payload");
+        ESP_LOGW(TAG, "command event missing payload");
         return;
     }
     
     // Always log incoming command payload for debugging
     String payloadStr;
     serializeJson(payload, payloadStr);
-    RLOG_DEBUG("realtime", "command payload: %s", payloadStr.c_str());
+    ESP_LOGD(TAG, "command payload: %s", payloadStr.c_str());
     
     // Filter by device_uuid - commands ARE device-specific (unlike webex_status)
     String eventDeviceUuid = payload["device_uuid"] | "";
     String currentDeviceUuid = deps.config.getDeviceUuid();
     
-    Serial.printf("[REALTIME] command device filter: event=%s, this_device=%s\n",
-                  eventDeviceUuid.isEmpty() ? "(empty)" : eventDeviceUuid.c_str(),
-                  currentDeviceUuid.isEmpty() ? "(empty)" : currentDeviceUuid.c_str());
+    ESP_LOGD(TAG, "command device filter: event=%s, this_device=%s",
+             eventDeviceUuid.isEmpty() ? "(empty)" : eventDeviceUuid.c_str(),
+             currentDeviceUuid.isEmpty() ? "(empty)" : currentDeviceUuid.c_str());
     
     if (eventDeviceUuid.isEmpty()) {
-        Serial.println("[REALTIME] command event missing device_uuid");
+        ESP_LOGW(TAG, "command event missing device_uuid");
         return;
     }
     
     if (eventDeviceUuid != currentDeviceUuid) {
-        Serial.printf("[REALTIME] command IGNORED - device_uuid mismatch: %s != %s\n",
-                      eventDeviceUuid.c_str(), currentDeviceUuid.c_str());
+        ESP_LOGD(TAG, "command IGNORED - device_uuid mismatch: %s != %s",
+                 eventDeviceUuid.c_str(), currentDeviceUuid.c_str());
         return;
     }
     
     // Extract command data
     JsonObject cmdData = payload["command"];
     if (cmdData.isNull()) {
-        Serial.println("[REALTIME] command event missing command data");
+        ESP_LOGW(TAG, "command event missing command data");
         return;
     }
     
     // Build SupabaseCommand from event data
     SupabaseCommand cmd;
     if (!buildCommandFromJson(cmdData, cmd)) {
-        Serial.println("[REALTIME] Failed to build command from user channel event");
+        ESP_LOGW(TAG, "Failed to build command from user channel event");
         return;
     }
     
     if (deps.command_processor.wasRecentlyProcessed(cmd.id)) {
-        Serial.printf("[REALTIME] Duplicate command ignored: %s\n", cmd.id.c_str());
+        ESP_LOGD(TAG, "Duplicate command ignored: %s", cmd.id.c_str());
         return;
     }
     
     String status = cmdData["status"] | "";
     if (status != "pending") {
-        Serial.printf("[REALTIME] Command %s already %s, skipping\n",
-                      cmd.id.c_str(), status.c_str());
+        ESP_LOGD(TAG, "Command %s already %s, skipping",
+                 cmd.id.c_str(), status.c_str());
         return;
     }
     
-    RLOG_INFO("realtime", "Processing command via user channel: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
+    ESP_LOGI(TAG, "Processing command via user channel: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     
     // Handle the command (same handler as polling)
     handleSupabaseCommand(cmd);
@@ -644,13 +646,13 @@ void handleRequestConfig(JsonObject& payload) {
     String currentDeviceUuid = deps.config.getDeviceUuid();
     
     if (eventDeviceUuid.isEmpty()) {
-        RLOG_DEBUG("realtime", "request_config missing device_uuid - broadcasting anyway");
+        ESP_LOGD(TAG, "request_config missing device_uuid - broadcasting anyway");
     } else if (eventDeviceUuid != currentDeviceUuid) {
         // Not for this device
         return;
     }
     
-    RLOG_INFO("realtime", "Config requested via realtime");
+    ESP_LOGI(TAG, "Config requested via realtime");
     syncManager.broadcastDeviceConfig();
 }
 
@@ -664,12 +666,12 @@ void handleUserChannelBroadcast(JsonDocument& payload) {
     JsonObject data = inner.is<JsonObject>() ? inner.as<JsonObject>() : payload.as<JsonObject>();
     
     if (data.isNull()) {
-        Serial.println("[REALTIME] User channel broadcast missing data");
+        ESP_LOGW(TAG, "User channel broadcast missing data");
         return;
     }
     
-    RLOG_INFO("realtime", "User channel event: %s (has nested payload: %s)", 
-              event.c_str(), inner.is<JsonObject>() ? "yes" : "no");
+    ESP_LOGI(TAG, "User channel event: %s (has nested payload: %s)", 
+             event.c_str(), inner.is<JsonObject>() ? "yes" : "no");
     
     if (event == "user_assigned") {
         handleUserAssigned(data);
@@ -680,6 +682,6 @@ void handleUserChannelBroadcast(JsonDocument& payload) {
     } else if (event == "request_config") {
         handleRequestConfig(data);
     } else {
-        Serial.printf("[REALTIME] Unknown event: %s\n", event.c_str());
+        ESP_LOGW(TAG, "Unknown event: %s", event.c_str());
     }
 }

@@ -14,6 +14,9 @@
 #include "common/pairing_manager.h"
 #include "common/board_utils.h"
 #include "config/config_manager.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "DIAG";
 
 // =============================================================================
 // CONNECTION STATUS LOGGING HANDLER
@@ -43,27 +46,27 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
     String user_uuid = ctx.config_manager ? ctx.config_manager->getUserUuid() : "";
     bool has_user = !user_uuid.isEmpty();
     
-    Serial.println();
-    Serial.println("=== WEBEX STATUS DISPLAY ===");
-    Serial.printf("Hardware: %s | Board: %s\n",
-                  getChipDescription().c_str(),
-                  getBoardType().c_str());
-    Serial.printf("IP: %s | mDNS: %s.local\n",
-                  WiFi.localIP().toString().c_str(),
-                  ctx.mdns_manager->getHostname().c_str());
-    Serial.printf("Status: %s (via %s) | MQTT: %s\n",
-                  ctx.app_state->webex_status.c_str(),
-                  status_source,
-                  ctx.app_state->mqtt_connected ? "Yes" : "No");
-    Serial.printf("Supabase: %s | App: %s | Webex Source: %s\n",
-                  ctx.app_state->supabase_connected ? "Yes" : "No",
-                  ctx.app_state->embedded_app_connected ? "Yes" : "No",
-                  status_source);
-    Serial.printf("User: %s\n", has_user ? "Yes" : "No");
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "=== WEBEX STATUS DISPLAY ===");
+    ESP_LOGI(TAG, "Hardware: %s | Board: %s",
+             getChipDescription().c_str(),
+             getBoardType().c_str());
+    ESP_LOGI(TAG, "IP: %s | mDNS: %s.local",
+             WiFi.localIP().toString().c_str(),
+             ctx.mdns_manager->getHostname().c_str());
+    ESP_LOGI(TAG, "Status: %s (via %s) | MQTT: %s",
+             ctx.app_state->webex_status.c_str(),
+             status_source,
+             ctx.app_state->mqtt_connected ? "Yes" : "No");
+    ESP_LOGI(TAG, "Supabase: %s | App: %s | Webex Source: %s",
+             ctx.app_state->supabase_connected ? "Yes" : "No",
+             ctx.app_state->embedded_app_connected ? "Yes" : "No",
+             status_source);
+    ESP_LOGI(TAG, "User: %s", has_user ? "Yes" : "No");
     if (!pairing_code.isEmpty()) {
-        Serial.printf("PAIRING CODE: %s\n", pairing_code.c_str());
+        ESP_LOGI(TAG, "PAIRING CODE: %s", pairing_code.c_str());
     }
-    Serial.println("============================");
+    ESP_LOGI(TAG, "============================");
 }
 
 #endif // !NATIVE_BUILD

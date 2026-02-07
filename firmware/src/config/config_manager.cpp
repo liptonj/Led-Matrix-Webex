@@ -18,7 +18,9 @@
 #include <esp_ota_ops.h>
 #endif
 
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CONFIG";
 
 ConfigManager::ConfigManager()
     : initialized(false), cached_token_expiry(0), cached_poll_interval(DEFAULT_POLL_INTERVAL),
@@ -35,7 +37,7 @@ ConfigManager::~ConfigManager() {
 
 bool ConfigManager::begin() {
     if (!preferences.begin(CONFIG_NAMESPACE, false)) {
-        RLOG_ERROR("config", "Failed to initialize NVS");
+        ESP_LOGE(TAG, "Failed to initialize NVS");
         return false;
     }
 
@@ -47,7 +49,7 @@ bool ConfigManager::begin() {
     if (cached_client_id.isEmpty() || cached_client_secret.isEmpty()) {
         if (std::strlen(WEBEX_CLIENT_ID) > 0 && std::strlen(WEBEX_CLIENT_SECRET) > 0) {
             setWebexCredentials(String(WEBEX_CLIENT_ID), String(WEBEX_CLIENT_SECRET));
-            Serial.println("[CONFIG] Loaded Webex credentials from build environment");
+            ESP_LOGI(TAG, "Loaded Webex credentials from build environment");
         }
     }
 #endif
@@ -63,12 +65,12 @@ bool ConfigManager::begin() {
                 String(MQTT_PASSWORD),
                 topic
             );
-            Serial.println("[CONFIG] Loaded MQTT config from build environment");
+            ESP_LOGI(TAG, "Loaded MQTT config from build environment");
         }
     }
 #endif
 
-    Serial.println("[CONFIG] Configuration loaded successfully");
+    ESP_LOGI(TAG, "Configuration loaded successfully");
     return true;
 }
 
@@ -92,7 +94,7 @@ void ConfigManager::migrateLegacyOtaUrl() {
     }
 
     saveString("ota_url", default_url);
-    Serial.printf("[CONFIG] OTA URL migrated to %s\n", default_url.c_str());
+    ESP_LOGI(TAG, "OTA URL migrated to %s", default_url.c_str());
 #endif
 }
 
@@ -154,19 +156,19 @@ void ConfigManager::loadCache() const {
 }
 
 void ConfigManager::factoryReset() {
-    Serial.println("[CONFIG] =========================================");
-    Serial.println("[CONFIG] PERFORMING FULL FACTORY RESET");
-    Serial.println("[CONFIG] =========================================");
-    Serial.println("[CONFIG] Note: Device credentials are preserved");
+    ESP_LOGI(TAG, "=========================================");
+    ESP_LOGI(TAG, "PERFORMING FULL FACTORY RESET");
+    ESP_LOGI(TAG, "=========================================");
+    ESP_LOGI(TAG, "Note: Device credentials are preserved");
 
     // Step 1: Clear main configuration namespace (webex-display)
     // This clears: WiFi, Webex tokens, MQTT, display settings, etc.
     // This preserves: device_auth (device secret/serial for Supabase auth)
-    Serial.println("[CONFIG] Step 1: Clearing configuration...");
+    ESP_LOGI(TAG, "Step 1: Clearing configuration...");
     preferences.clear();
     cache_loaded = false;
     loadCache();
-    Serial.println("[CONFIG] ✓ Configuration cleared");
+    ESP_LOGI(TAG, "✓ Configuration cleared");
     
     // Step 1b: Clear other namespaces (but NOT device_auth)
     {
@@ -175,19 +177,19 @@ void ConfigManager::factoryReset() {
         if (prefs.begin("pairing", false)) {
             prefs.clear();
             prefs.end();
-            Serial.println("[CONFIG] ✓ Pairing code cleared");
+            ESP_LOGI(TAG, "✓ Pairing code cleared");
         }
         // Clear boot counter
         if (prefs.begin("boot", false)) {
             prefs.clear();
             prefs.end();
-            Serial.println("[CONFIG] ✓ Boot counter cleared");
+            ESP_LOGI(TAG, "✓ Boot counter cleared");
         }
         // Clear module preferences
         if (prefs.begin("modules", false)) {
             prefs.clear();
             prefs.end();
-            Serial.println("[CONFIG] ✓ Module preferences cleared");
+            ESP_LOGI(TAG, "✓ Module preferences cleared");
         }
         // Note: "device_auth" namespace is intentionally NOT cleared
         // to preserve device credentials for Supabase authentication
@@ -197,7 +199,7 @@ void ConfigManager::factoryReset() {
     // ESP32-specific partition operations (not available in simulation)
 
     // Step 2: Erase OTA data partition (forces boot to factory partition)
-    Serial.println("[CONFIG] Step 2: Erasing OTA data partition...");
+    ESP_LOGI(TAG, "Step 2: Erasing OTA data partition...");
     const esp_partition_t* otadata_partition = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA,
         ESP_PARTITION_SUBTYPE_DATA_OTA,
@@ -207,14 +209,14 @@ void ConfigManager::factoryReset() {
     if (otadata_partition != NULL) {
         esp_err_t err = esp_partition_erase_range(otadata_partition, 0, otadata_partition->size);
         if (err == ESP_OK) {
-            Serial.println("[CONFIG] ✓ OTA data erased - will boot to factory partition");
+            ESP_LOGI(TAG, "✓ OTA data erased - will boot to factory partition");
         } else {
-            Serial.printf("[CONFIG] ⚠ Failed to erase OTA data: %s\n", esp_err_to_name(err));
+            ESP_LOGW(TAG, "⚠ Failed to erase OTA data: %s", esp_err_to_name(err));
         }
     }
 
     // Step 3: Erase filesystem partition
-    Serial.println("[CONFIG] Step 3: Erasing filesystem partition...");
+    ESP_LOGI(TAG, "Step 3: Erasing filesystem partition...");
     const esp_partition_t* spiffs_partition = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA,
         ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
@@ -224,14 +226,14 @@ void ConfigManager::factoryReset() {
     if (spiffs_partition != NULL) {
         esp_err_t err = esp_partition_erase_range(spiffs_partition, 0, spiffs_partition->size);
         if (err == ESP_OK) {
-            Serial.println("[CONFIG] ✓ Filesystem erased");
+            ESP_LOGI(TAG, "✓ Filesystem erased");
         } else {
-            Serial.printf("[CONFIG] ⚠ Failed to erase filesystem: %s\n", esp_err_to_name(err));
+            ESP_LOGW(TAG, "⚠ Failed to erase filesystem: %s", esp_err_to_name(err));
         }
     }
 
     // Step 4: Optionally erase OTA partitions (free up space)
-    Serial.println("[CONFIG] Step 4: Erasing OTA partitions...");
+    ESP_LOGI(TAG, "Step 4: Erasing OTA partitions...");
 
     const esp_partition_t* ota_0 = esp_partition_find_first(
         ESP_PARTITION_TYPE_APP,
@@ -242,9 +244,9 @@ void ConfigManager::factoryReset() {
     if (ota_0 != NULL) {
         esp_err_t err = esp_partition_erase_range(ota_0, 0, ota_0->size);
         if (err == ESP_OK) {
-            Serial.println("[CONFIG] ✓ OTA_0 partition erased");
+            ESP_LOGI(TAG, "✓ OTA_0 partition erased");
         } else {
-            Serial.printf("[CONFIG] ⚠ Failed to erase OTA_0: %s\n", esp_err_to_name(err));
+            ESP_LOGW(TAG, "⚠ Failed to erase OTA_0: %s", esp_err_to_name(err));
         }
     }
 
@@ -257,19 +259,19 @@ void ConfigManager::factoryReset() {
     if (ota_1 != NULL) {
         esp_err_t err = esp_partition_erase_range(ota_1, 0, ota_1->size);
         if (err == ESP_OK) {
-            Serial.println("[CONFIG] ✓ OTA_1 partition erased");
+            ESP_LOGI(TAG, "✓ OTA_1 partition erased");
         } else {
-            Serial.printf("[CONFIG] ⚠ Failed to erase OTA_1: %s\n", esp_err_to_name(err));
+            ESP_LOGW(TAG, "⚠ Failed to erase OTA_1: %s", esp_err_to_name(err));
         }
     }
 #else
-    Serial.println("[CONFIG] Note: Partition erase skipped in simulation build");
+    ESP_LOGI(TAG, "Note: Partition erase skipped in simulation build");
 #endif
 
-    Serial.println("[CONFIG] =========================================");
-    Serial.println("[CONFIG] FACTORY RESET COMPLETE");
-    Serial.println("[CONFIG] Device will reboot to bootstrap firmware");
-    Serial.println("[CONFIG] =========================================");
+    ESP_LOGI(TAG, "=========================================");
+    ESP_LOGI(TAG, "FACTORY RESET COMPLETE");
+    ESP_LOGI(TAG, "Device will reboot to bootstrap firmware");
+    ESP_LOGI(TAG, "=========================================");
 }
 
 // Private helper methods
@@ -317,7 +319,7 @@ String ConfigManager::getPartitionVersion(const String& partition_label) const {
 void ConfigManager::setPartitionVersion(const String& partition_label, const String& version) {
     String key = "part_ver_" + partition_label;
     saveString(key.c_str(), version);
-    Serial.printf("[CONFIG] Partition %s version set to %s\n", partition_label.c_str(), version.c_str());
+    ESP_LOGI(TAG, "Partition %s version set to %s", partition_label.c_str(), version.c_str());
 }
 
 void ConfigManager::clearPartitionVersion(const String& partition_label) {
@@ -331,14 +333,14 @@ CONFIG_UNCACHED_BOOL_GETTER(DebugMode, "debug_mode", false)
 
 void ConfigManager::setDebugMode(bool enabled) {
     saveBool("debug_mode", enabled);
-    Serial.printf("[CONFIG] Debug mode %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Debug mode %s", enabled ? "enabled" : "disabled");
 }
 
 CONFIG_UNCACHED_BOOL_GETTER(PairingRealtimeDebug, "pairing_rt_debug", false)
 
 void ConfigManager::setPairingRealtimeDebug(bool enabled) {
     saveBool("pairing_rt_debug", enabled);
-    Serial.printf("[CONFIG] Pairing realtime debug %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Pairing realtime debug %s", enabled ? "enabled" : "disabled");
 }
 
 CONFIG_CACHED_BOOL_GETTER(DebugDisplay, "debug_display", cached_debug_display, false)
@@ -346,7 +348,7 @@ CONFIG_CACHED_BOOL_GETTER(DebugDisplay, "debug_display", cached_debug_display, f
 void ConfigManager::setDebugDisplay(bool enabled) {
     saveBool("debug_display", enabled);
     cached_debug_display = enabled;
-    Serial.printf("[CONFIG] Display debug %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Display debug %s", enabled ? "enabled" : "disabled");
 }
 
 CONFIG_CACHED_BOOL_GETTER(DebugRealtime, "debug_realtime", cached_debug_realtime, false)
@@ -354,7 +356,7 @@ CONFIG_CACHED_BOOL_GETTER(DebugRealtime, "debug_realtime", cached_debug_realtime
 void ConfigManager::setDebugRealtime(bool enabled) {
     saveBool("debug_realtime", enabled);
     cached_debug_realtime = enabled;
-    Serial.printf("[CONFIG] Realtime debug %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Realtime debug %s", enabled ? "enabled" : "disabled");
 }
 
 // TLS Configuration
@@ -364,7 +366,7 @@ CONFIG_CACHED_BOOL_GETTER(TlsVerify, "tls_verify", cached_tls_verify, true)
 void ConfigManager::setTlsVerify(bool enabled) {
     saveBool("tls_verify", enabled);
     cached_tls_verify = enabled;
-    Serial.printf("[CONFIG] TLS verify %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "TLS verify %s", enabled ? "enabled" : "disabled");
 }
 
 // Pin Configuration
@@ -381,7 +383,7 @@ PinPreset ConfigManager::getPinPreset() const {
 void ConfigManager::setPinPreset(PinPreset preset) {
     saveUInt("pin_preset", static_cast<uint8_t>(preset));
     cached_pin_preset = preset;
-    Serial.printf("[CONFIG] Pin preset set to: %s\n", getPresetName(preset));
+    ESP_LOGI(TAG, "Pin preset set to: %s", getPresetName(preset));
 }
 
 PinConfig ConfigManager::getCustomPins() const {
@@ -434,7 +436,7 @@ void ConfigManager::setCustomPins(const PinConfig& pins) {
     cached_custom_pins = pins;
     cached_has_custom_pins = true;
     
-    Serial.println("[CONFIG] Custom pins saved");
+    ESP_LOGI(TAG, "Custom pins saved");
 }
 
 PinConfig ConfigManager::getPinConfig() const {

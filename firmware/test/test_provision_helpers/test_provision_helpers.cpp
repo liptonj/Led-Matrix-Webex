@@ -219,7 +219,6 @@ class MockMerakiMQTTClient {};
 class MockSyncManager {};
 class MockRealtimeManager {};
 class MockCommandProcessor {};
-class MockRemoteLogger {};
 class ImprovHandler {};
 class MockWebexClient {};
 class MockXAPIWebSocket {};
@@ -244,7 +243,6 @@ static MockMerakiMQTTClient mockMQTT;
 static MockSyncManager mockSync;
 static MockRealtimeManager mockRealtimeManager;
 static MockCommandProcessor mockCommandProcessor;
-static MockRemoteLogger mockRemoteLogger;
 static ImprovHandler mockImprov;
 static MockWebexClient mockWebex;
 static MockXAPIWebSocket mockXAPI;
@@ -278,9 +276,6 @@ Dependencies& getDependencies() {
         static Dependencies test_deps(
             *reinterpret_cast<ConfigManager*>(&mockConfig),
             *reinterpret_cast<AppState*>(&mockAppState),
-            mockDebugMode,
-            mockDebugDisplay,
-            mockDebugRealtime,
             *reinterpret_cast<MatrixDisplay*>(&mockDisplay),
             *reinterpret_cast<WiFiManager*>(&mockWifi),
             *reinterpret_cast<WebServerManager*>(&mockWebServer),
@@ -295,7 +290,6 @@ Dependencies& getDependencies() {
             *reinterpret_cast<SyncManager*>(&mockSync),
             *reinterpret_cast<RealtimeManager*>(&mockRealtimeManager),
             *reinterpret_cast<CommandProcessor*>(&mockCommandProcessor),
-            *reinterpret_cast<RemoteLogger*>(&mockRemoteLogger),
             *reinterpret_cast<ImprovHandler*>(&mockImprov),
             *reinterpret_cast<WebexClient*>(&mockWebex),
             *reinterpret_cast<XAPIWebSocket*>(&mockXAPI)

@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include "config_macros.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CFG_WEBEX";
 
 // Webex Configuration
 
@@ -16,7 +19,7 @@ void ConfigManager::setWebexCredentials(const String& client_id, const String& c
     saveString("webex_secret", client_secret);
     cached_client_id = client_id;
     cached_client_secret = client_secret;
-    Serial.println("[CONFIG] Webex credentials saved");
+    ESP_LOGI(TAG, "Webex credentials saved");
 }
 
 bool ConfigManager::hasWebexCredentials() const {
@@ -34,7 +37,7 @@ void ConfigManager::setWebexTokens(const String& access_token, const String& ref
     cached_access_token = access_token;
     cached_refresh_token = refresh_token;
     cached_token_expiry = expiry;
-    Serial.println("[CONFIG] Webex tokens saved");
+    ESP_LOGI(TAG, "Webex tokens saved");
 }
 
 bool ConfigManager::hasWebexTokens() const {
@@ -48,7 +51,7 @@ void ConfigManager::clearWebexTokens() {
     cached_access_token = "";
     cached_refresh_token = "";
     cached_token_expiry = 0;
-    Serial.println("[CONFIG] Webex tokens cleared");
+    ESP_LOGI(TAG, "Webex tokens cleared");
 }
 
 CONFIG_CACHED_UINT16_GETTER(WebexPollInterval, "poll_interval", cached_poll_interval, DEFAULT_POLL_INTERVAL)
@@ -57,7 +60,7 @@ void ConfigManager::setWebexPollInterval(uint16_t seconds) {
     // Enforce minimum interval
     if (seconds < MIN_POLL_INTERVAL) {
         seconds = MIN_POLL_INTERVAL;
-        Serial.printf("[CONFIG] Poll interval clamped to minimum: %d seconds\n", MIN_POLL_INTERVAL);
+        ESP_LOGI(TAG, "Poll interval clamped to minimum: %d seconds", MIN_POLL_INTERVAL);
     }
     if (seconds > MAX_POLL_INTERVAL) {
         seconds = MAX_POLL_INTERVAL;
@@ -65,7 +68,7 @@ void ConfigManager::setWebexPollInterval(uint16_t seconds) {
 
     saveUInt("poll_interval", seconds);
     cached_poll_interval = seconds;
-    Serial.printf("[CONFIG] Poll interval set to %d seconds\n", seconds);
+    ESP_LOGI(TAG, "Poll interval set to %d seconds", seconds);
 }
 
 // xAPI Configuration

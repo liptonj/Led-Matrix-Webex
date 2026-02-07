@@ -12,6 +12,7 @@
  *
  * Query parameters:
  *   format: "esp-web-tools" for installer manifest, "ota" for OTA manifest (default)
+ *   version: (optional) specific firmware version to return (esp-web-tools only)
  *
  * Response (OTA format):
  * {
@@ -168,6 +169,7 @@ serve(async (req: Request) => {
 
     const url = new URL(req.url);
     const format = url.searchParams.get("format") || "ota";
+    const requestedVersion = url.searchParams.get("version");
 
     // Check if request is authenticated
     let authenticated = false;
@@ -220,8 +222,26 @@ serve(async (req: Request) => {
     }
 
     if (format === "esp-web-tools") {
-      // ESP Web Tools installer manifest (uses latest release)
-      const latestRelease = releases?.find((r) => r.is_latest) || releases?.[0];
+      // ESP Web Tools installer manifest
+      // If a specific version is requested, find that release; otherwise use latest
+      let selectedEspRelease: ReleaseRow | undefined;
+      if (requestedVersion) {
+        selectedEspRelease = (releases as ReleaseRow[] | undefined)?.find(
+          (r) => r.version === requestedVersion,
+        );
+        if (!selectedEspRelease) {
+          return new Response(
+            JSON.stringify({ error: `Version ${requestedVersion} not found` }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
+      } else {
+        selectedEspRelease = releases?.find((r: ReleaseRow) => r.is_latest) || releases?.[0];
+      }
+      const latestRelease = selectedEspRelease;
 
       if (!latestRelease) {
         return new Response(JSON.stringify({ error: "No releases found" }), {

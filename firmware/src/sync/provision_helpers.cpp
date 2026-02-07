@@ -12,6 +12,7 @@
 #include "../config/config_manager.h"
 #include "../display/matrix_display.h"
 #include "../serial/serial_commands.h"
+#include "../debug/log_system.h"
 #ifndef NATIVE_BUILD
 #include <WiFi.h>
 #endif
@@ -20,6 +21,8 @@
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"
 #endif
+
+static const char* TAG = "PROVISION";
 
 // Static state variables in anonymous namespace
 namespace {
@@ -90,7 +93,7 @@ String buildProvisionPayload() {
     String token = get_provision_token();
     if (token.length() > 0) {
         payload["provision_token"] = token;
-        Serial.printf("[PROVISION] Including provision token in payload (length: %d)\n", token.length());
+        ESP_LOGI(TAG, "Including provision token in payload (length: %d)", token.length());
         clear_provision_token();  // Clear after use to ensure single-use
     }
     
@@ -114,8 +117,8 @@ bool displayPairingCodeWithTimeout(const String& pairingCode, unsigned long star
     
     if (now - last_countdown_log >= COUNTDOWN_LOG_INTERVAL_MS) {
         last_countdown_log = now;
-        Serial.printf("[SUPABASE] Pairing code: %s (expires in %lu seconds)\n", 
-                      pairingCode.c_str(), remaining);
+        ESP_LOGI(TAG, "Pairing code: %s (expires in %lu seconds)", 
+                 pairingCode.c_str(), remaining);
     }
     
     return false;  // Still within timeout
@@ -149,9 +152,9 @@ int handleAwaitingApproval(const String& response) {
         // No pairing code - display provisioning status with serial number
         if (now - last_approval_log >= APPROVAL_LOG_INTERVAL_MS) {
             last_approval_log = now;
-            Serial.println("[SUPABASE] Device awaiting user approval");
-            Serial.printf("[SUPABASE] Serial: %s\n", 
-                         deps.credentials.getSerialNumber().c_str());
+            ESP_LOGI(TAG, "Device awaiting user approval");
+            ESP_LOGI(TAG, "Serial: %s", 
+                     deps.credentials.getSerialNumber().c_str());
             deps.display.displayProvisioningStatus(deps.credentials.getSerialNumber());
         }
     }

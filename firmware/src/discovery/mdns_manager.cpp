@@ -4,6 +4,9 @@
  */
 
 #include "mdns_manager.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "MDNS";
 
 namespace {
 String sanitizeHostname(const String& input) {
@@ -55,7 +58,7 @@ MDNSManager::~MDNSManager() {
 bool MDNSManager::begin(const String& hostname) {
     const String sanitized = sanitizeHostname(hostname);
     if (sanitized != hostname) {
-        Serial.printf("[MDNS] Sanitized hostname '%s' -> '%s'\n",
+        ESP_LOGI(TAG, "Sanitized hostname '%s' -> '%s'",
                       hostname.c_str(), sanitized.c_str());
     }
 
@@ -68,14 +71,14 @@ bool MDNSManager::begin(const String& hostname) {
             initialized = true;
             current_hostname = sanitized;
             last_refresh = millis();
-            Serial.printf("[MDNS] Started with hostname: %s.local\n", sanitized.c_str());
+            ESP_LOGI(TAG, "Started with hostname: %s.local", sanitized.c_str());
             return true;
         }
-        Serial.printf("[MDNS] Start failed (attempt %d/3)\n", attempt);
+        ESP_LOGW(TAG, "Start failed (attempt %d/3)", attempt);
         delay(300);
     }
 
-    Serial.println("[MDNS] Failed to start mDNS!");
+    ESP_LOGE(TAG, "Failed to start mDNS!");
     return false;
 }
 
@@ -91,7 +94,7 @@ void MDNSManager::advertiseHTTP(uint16_t port) {
     if (!initialized) return;
     
     MDNS.addService(MDNS_SERVICE_HTTP, MDNS_PROTOCOL_TCP, port);
-    Serial.printf("[MDNS] Advertising HTTP service on port %d\n", port);
+    ESP_LOGI(TAG, "Advertising HTTP service on port %d", port);
 }
 
 void MDNSManager::refresh() {
@@ -104,7 +107,7 @@ void MDNSManager::refresh() {
     if (now - last_refresh >= 120000) {  // 2 minutes
         last_refresh = now;
         
-        Serial.printf("[MDNS] Forcing refresh of %s.local\n", current_hostname.c_str());
+        ESP_LOGI(TAG, "Forcing refresh of %s.local", current_hostname.c_str());
         
         // Save current state
         String hostname = current_hostname;
@@ -115,9 +118,9 @@ void MDNSManager::refresh() {
         
         if (MDNS.begin(hostname.c_str())) {
             MDNS.addService(MDNS_SERVICE_HTTP, MDNS_PROTOCOL_TCP, 80);
-            Serial.println("[MDNS] Refresh successful");
+            ESP_LOGI(TAG, "Refresh successful");
         } else {
-            Serial.println("[MDNS] Refresh failed - will retry next cycle");
+            ESP_LOGW(TAG, "Refresh failed - will retry next cycle");
             initialized = false;
         }
     }

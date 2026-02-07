@@ -11,6 +11,7 @@
 
 #include <WiFi.h>
 #include <time.h>
+#include "esp_log.h"
 #include "config/config_manager.h"
 #include "display/matrix_display.h"
 #include "wifi/wifi_manager.h"
@@ -147,9 +148,9 @@ void update_display() {
         cached.use_24h = deps.config.use24HourTime();
         cached.date_format = deps.config.getDateFormatCode();
         
-        // Update runtime debug flags
-        deps.debug_display = deps.config.getDebugDisplay();
-        deps.debug_realtime = deps.config.getDebugRealtime();
+        // Update ESP-IDF log levels based on config
+        esp_log_level_set("DISPLAY", deps.config.getDebugDisplay() ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+        esp_log_level_set("REALTIME", deps.config.getDebugRealtime() ? ESP_LOG_DEBUG : ESP_LOG_INFO);
     }
 
     if (!brightness_initialized || last_brightness != cached.brightness) {

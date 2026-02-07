@@ -6,7 +6,10 @@
 #include "web_server.h"
 #include "web_helpers.h"
 #include "common/lookup_tables.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "API_EMBED";
 
 void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
     // Return current status for embedded app to read
@@ -35,7 +38,7 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
         
         // Reject oversized requests early
         if (total > MAX_EMBEDDED_BODY_SIZE) {
-            Serial.printf("[WEB] Embedded body too large: %zu bytes (max %d)\n", total, MAX_EMBEDDED_BODY_SIZE);
+            ESP_LOGW(TAG, "Embedded body too large: %zu bytes (max %d)", total, MAX_EMBEDDED_BODY_SIZE);
             sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
             return;
         }
@@ -48,8 +51,8 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     if (len > 0) {
         // Prevent buffer overflow during accumulation
         if (embedded_body_buffer.length() + len > MAX_EMBEDDED_BODY_SIZE) {
-            Serial.printf("[WEB] Embedded buffer overflow prevented: %zu + %zu > %d\n",
-                          embedded_body_buffer.length(), len, MAX_EMBEDDED_BODY_SIZE);
+            ESP_LOGW(TAG, "Embedded buffer overflow prevented: %zu + %zu > %d",
+                     embedded_body_buffer.length(), len, MAX_EMBEDDED_BODY_SIZE);
             sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
             embedded_body_buffer = "";  // Reset buffer
             return;
@@ -86,7 +89,7 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
             app_state->in_call = true;
         }
         
-        Serial.printf("[WEB] Embedded app status update: %s\n", app_state->webex_status.c_str());
+        ESP_LOGI(TAG, "Embedded app status update: %s", app_state->webex_status.c_str());
     }
     
     // Handle call state

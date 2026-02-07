@@ -9,7 +9,9 @@
 #include <WiFiClientSecure.h>
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "WEBEX";
 
 WebexClient::WebexClient()
     : config_manager(nullptr), last_request_time(0), rate_limit_backoff(0) {
@@ -22,7 +24,7 @@ void WebexClient::begin(ConfigManager* config) {
     config_manager = config;
     oauth_handler.begin(config);
     
-    Serial.println("[WEBEX] Client initialized");
+    ESP_LOGI(TAG, "Client initialized");
 }
 
 bool WebexClient::refreshToken() {
@@ -47,7 +49,7 @@ bool WebexClient::getPresence(WebexPresence& presence) {
         // FIXED: Handle millis() wraparound properly
         unsigned long elapsed = now - last_request_time;
         if (elapsed < backoff_ms) {
-            Serial.println("[WEBEX] Rate limit backoff active, skipping request");
+            ESP_LOGI(TAG, "Rate limit backoff active, skipping request");
             return false;
         }
         rate_limit_backoff = 0;
@@ -56,7 +58,7 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     // Ensure we have a valid token
     if (oauth_handler.needsRefresh()) {
         if (!oauth_handler.refreshAccessToken()) {
-            RLOG_ERROR("webex", "Failed to refresh token");
+            ESP_LOGE(TAG, "Failed to refresh token");
             return false;
         }
     }
@@ -72,7 +74,7 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     DeserializationError error = deserializeJson(doc, response);
     
     if (error) {
-        Serial.printf("[WEBEX] Failed to parse response: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse response: %s", error.c_str());
         return false;
     }
     
@@ -84,9 +86,9 @@ bool WebexClient::getPresence(WebexPresence& presence) {
     presence.last_activity = doc["lastActivity"].as<String>();
     presence.valid = true;
     
-    Serial.printf("[WEBEX] Presence: %s (%s, first: %s)\n", 
-                  presence.status.c_str(), presence.display_name.c_str(),
-                  presence.first_name.c_str());
+    ESP_LOGI(TAG, "Presence: %s (%s, first: %s)",
+             presence.status.c_str(), presence.display_name.c_str(),
+             presence.first_name.c_str());
     
     return true;
 }
@@ -103,7 +105,7 @@ String WebexClient::makeApiRequest(const String& endpoint, bool is_retry) {
     String access_token = oauth_handler.getAccessToken();
     
     if (access_token.isEmpty()) {
-        Serial.println("[WEBEX] No access token available!");
+        ESP_LOGE(TAG, "No access token available!");
         return "";
     }
     
@@ -132,23 +134,23 @@ String WebexClient::makeApiRequest(const String& endpoint, bool is_retry) {
     
     // Handle 401 Unauthorized - try refresh once (prevent infinite recursion)
     if (httpCode == 401 && !is_retry) {
-        Serial.println("[WEBEX] Unauthorized - attempting token refresh");
+        ESP_LOGI(TAG, "Unauthorized - attempting token refresh");
         http.end();
         
         if (oauth_handler.refreshAccessToken()) {
-            Serial.println("[WEBEX] Token refreshed, retrying request");
+            ESP_LOGI(TAG, "Token refreshed, retrying request");
             // Retry request with new token (pass is_retry=true)
             return makeApiRequest(endpoint, true);
         } else {
-            RLOG_ERROR("webex", "Token refresh failed - re-auth required");
+            ESP_LOGE(TAG, "Token refresh failed - re-auth required");
             return "";
         }
     }
     
-    RLOG_WARN("webex", "API request failed: HTTP %d", httpCode);
+    ESP_LOGW(TAG, "API request failed: HTTP %d", httpCode);
     String errorBody = http.getString();
     if (!errorBody.isEmpty()) {
-        Serial.printf("[WEBEX] Error response: %s\n", errorBody.c_str());
+        ESP_LOGE(TAG, "Error response: %s", errorBody.c_str());
     }
     http.end();
     
@@ -165,6 +167,6 @@ void WebexClient::handleRateLimit(int httpCode) {
             rate_limit_backoff = 120;
         }
         
-        Serial.printf("[WEBEX] Rate limited! Backing off for %d seconds\n", rate_limit_backoff);
+        ESP_LOGW(TAG, "Rate limited! Backing off for %d seconds", rate_limit_backoff);
     }
 }

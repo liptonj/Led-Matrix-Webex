@@ -7,8 +7,7 @@ const LOG_LIMIT = 200;
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 export interface UseDeviceLogsOptions {
-  userUuid: string | null;
-  deviceUuid?: string | null; // Optional filter for specific device
+  deviceUuid: string | null; // Required - device-specific channel subscription
   logFilter?: 'all' | DeviceLog['level'];
   logLimit?: number;
 }
@@ -30,20 +29,22 @@ export interface UseDeviceLogsReturn {
  * BROADCAST-ONLY MODE: No historical logs are loaded from the database.
  * Only real-time streaming logs are displayed.
  * 
- * @param options - Configuration object with userUuid, deviceUuid (optional), logFilter, and logLimit
+ * Subscribes to device-specific channel: device:{deviceUuid}
+ * 
+ * @param options - Configuration object with deviceUuid (required), logFilter, and logLimit
  * @returns Object with logs, filtered logs, loading/error states, and filter controls
  * 
  * @example
  * ```typescript
  * const { filteredLogs, loading, error, status, logFilter, setLogFilter } = 
- *   useDeviceLogs({ userUuid: 'user-123', deviceUuid: 'device-456', logFilter: 'all' });
+ *   useDeviceLogs({ deviceUuid: 'device-456', logFilter: 'all' });
  * 
  * // Change filter
  * setLogFilter('error');
  * ```
  */
 export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsReturn {
-  const { userUuid, deviceUuid, logFilter: initialLogFilter = 'all', logLimit = LOG_LIMIT } = options;
+  const { deviceUuid, logFilter: initialLogFilter = 'all', logLimit = LOG_LIMIT } = options;
   
   const [logs, setLogs] = useState<DeviceLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +53,7 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
   const [logFilter, setLogFilter] = useState<'all' | DeviceLog['level']>(initialLogFilter);
 
   useEffect(() => {
-    if (!userUuid) {
+    if (!deviceUuid) {
       setLoading(false);
       setStatus('disconnected');
       return;
@@ -68,7 +69,7 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
 
     setStatus('connecting');
     subscribeToDeviceLogs(
-      userUuid,
+      deviceUuid,
       (log) => {
         setLogs((prev) => {
           const next = [log, ...prev];
@@ -91,7 +92,6 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
           setError(errorMessage || 'Failed to subscribe to device logs');
         }
       },
-      deviceUuid ?? undefined,
     ).then((unsub) => {
       unsubscribe = unsub;
     }).catch((err) => {
@@ -105,7 +105,7 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
       isMounted = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [userUuid, deviceUuid, logLimit]);
+  }, [deviceUuid, logLimit]);
 
   const filteredLogs = useMemo(() => {
     if (logFilter === 'all') return logs;

@@ -11,6 +11,9 @@
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
 #include "../common/url_utils.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "OAUTH";
 
 OAuthHandler::OAuthHandler()
     : config_manager(nullptr), token_expiry(0) {
@@ -28,7 +31,7 @@ void OAuthHandler::begin(ConfigManager* config) {
         refresh_token = config_manager->getWebexRefreshToken();
         token_expiry = config_manager->getWebexTokenExpiry();
         
-        Serial.println("[OAUTH] Loaded existing tokens from storage");
+        ESP_LOGI(TAG, "Loaded existing tokens from storage");
     }
 }
 
@@ -36,7 +39,7 @@ String OAuthHandler::buildAuthUrl(const String& redirect_uri) {
     String client_id = config_manager->getWebexClientId();
     
     if (client_id.isEmpty()) {
-        Serial.println("[OAUTH] Client ID not configured!");
+        ESP_LOGE(TAG, "Client ID not configured!");
         return "";
     }
     
@@ -64,12 +67,12 @@ String OAuthHandler::buildAuthUrl(const String& redirect_uri) {
 
 bool OAuthHandler::validateState(const String& state) const {
     if (oauth_state.isEmpty()) {
-        Serial.println("[OAUTH] No stored state - possible CSRF attack");
+        ESP_LOGW(TAG, "No stored state - possible CSRF attack");
         return false;
     }
     
     if (state != oauth_state) {
-        Serial.println("[OAUTH] State mismatch - possible CSRF attack");
+        ESP_LOGW(TAG, "State mismatch - possible CSRF attack");
         return false;
     }
     
@@ -81,7 +84,7 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     String client_secret = config_manager->getWebexClientSecret();
     
     if (client_id.isEmpty() || client_secret.isEmpty()) {
-        Serial.println("[OAUTH] Credentials not configured!");
+        ESP_LOGE(TAG, "Credentials not configured!");
         return false;
     }
     
@@ -98,13 +101,13 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     body += "&code=" + urlEncode(code);
     body += "&redirect_uri=" + urlEncode(redirect_uri);
     
-    Serial.println("[OAUTH] Exchanging authorization code for tokens...");
+    ESP_LOGI(TAG, "Exchanging authorization code for tokens...");
     
     int httpCode = http.POST(body);
     
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OAUTH] Token exchange failed with code: %d\n", httpCode);
-        Serial.println(http.getString());
+        ESP_LOGE(TAG, "Token exchange failed with code: %d", httpCode);
+        ESP_LOGE(TAG, "%s", http.getString().c_str());
         http.end();
         return false;
     }
@@ -119,7 +122,7 @@ bool OAuthHandler::exchangeCode(const String& code, const String& redirect_uri) 
     // Save tokens to config
     config_manager->setWebexTokens(access_token, refresh_token, token_expiry);
     
-    Serial.println("[OAUTH] Token exchange successful!");
+    ESP_LOGI(TAG, "Token exchange successful!");
     return true;
 }
 
@@ -128,7 +131,7 @@ bool OAuthHandler::refreshAccessToken() {
         // Try to load from config
         refresh_token = config_manager->getWebexRefreshToken();
         if (refresh_token.isEmpty()) {
-            Serial.println("[OAUTH] No refresh token available!");
+            ESP_LOGE(TAG, "No refresh token available!");
             return false;
         }
     }
@@ -137,7 +140,7 @@ bool OAuthHandler::refreshAccessToken() {
     String client_secret = config_manager->getWebexClientSecret();
     
     if (client_id.isEmpty() || client_secret.isEmpty()) {
-        Serial.println("[OAUTH] Credentials not configured!");
+        ESP_LOGE(TAG, "Credentials not configured!");
         return false;
     }
     
@@ -153,16 +156,16 @@ bool OAuthHandler::refreshAccessToken() {
     body += "&client_secret=" + urlEncode(client_secret);
     body += "&refresh_token=" + urlEncode(refresh_token);
     
-    Serial.println("[OAUTH] Refreshing access token...");
+    ESP_LOGI(TAG, "Refreshing access token...");
     
     int httpCode = http.POST(body);
     
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OAUTH] Token refresh failed with code: %d\n", httpCode);
+        ESP_LOGE(TAG, "Token refresh failed with code: %d", httpCode);
         
         if (httpCode == 400 || httpCode == 401) {
             // Refresh token may be invalid/expired
-            Serial.println("[OAUTH] Refresh token may be expired. Re-authorization required.");
+            ESP_LOGW(TAG, "Refresh token may be expired. Re-authorization required.");
             clearTokens();
         }
         
@@ -180,7 +183,7 @@ bool OAuthHandler::refreshAccessToken() {
     // Save updated tokens to config
     config_manager->setWebexTokens(access_token, refresh_token, token_expiry);
     
-    Serial.println("[OAUTH] Token refresh successful!");
+    ESP_LOGI(TAG, "Token refresh successful!");
     return true;
 }
 
@@ -211,7 +214,7 @@ void OAuthHandler::clearTokens() {
         config_manager->clearWebexTokens();
     }
     
-    Serial.println("[OAUTH] Tokens cleared");
+    ESP_LOGI(TAG, "Tokens cleared");
 }
 
 bool OAuthHandler::parseTokenResponse(const String& response) {
@@ -219,12 +222,12 @@ bool OAuthHandler::parseTokenResponse(const String& response) {
     DeserializationError error = deserializeJson(doc, response);
     
     if (error) {
-        Serial.printf("[OAUTH] Failed to parse token response: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse token response: %s", error.c_str());
         return false;
     }
     
     if (!doc["access_token"].is<String>()) {
-        Serial.println("[OAUTH] No access token in response!");
+        ESP_LOGE(TAG, "No access token in response!");
         return false;
     }
     
@@ -238,7 +241,7 @@ bool OAuthHandler::parseTokenResponse(const String& response) {
     int expires_in = doc["expires_in"] | 3600;
     token_expiry = (millis() / 1000) + expires_in;
     
-    Serial.printf("[OAUTH] Token received, expires in %d seconds\n", expires_in);
+    ESP_LOGI(TAG, "Token received, expires in %d seconds", expires_in);
     return true;
 }
 

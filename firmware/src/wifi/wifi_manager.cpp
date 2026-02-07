@@ -6,9 +6,11 @@
 #include "wifi_manager.h"
 #include "../display/matrix_display.h"
 #include "../discovery/mdns_manager.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../common/board_utils.h"
 #include <esp_heap_caps.h>
+
+static const char* TAG = "WIFI";
 
 namespace {
 // Check if we have sufficient heap to start mDNS service
@@ -30,11 +32,11 @@ WiFiManager::WiFiManager()
 
 void WiFiManager::startAPMode(const String& reason) {
     if (ap_mode_active) {
-        Serial.println("[WIFI] AP mode already active");
+        ESP_LOGI(TAG, "AP mode already active");
         return;
     }
     
-    Serial.printf("[WIFI] Starting AP mode: %s\n", reason.c_str());
+    ESP_LOGI(TAG, "Starting AP mode: %s", reason.c_str());
     
     // Use AP+STA mode instead of AP-only to allow WiFi scanning while AP is active
     WiFi.mode(WIFI_AP_STA);
@@ -46,8 +48,8 @@ void WiFiManager::startAPMode(const String& reason) {
         app_state->wifi_connected = false;
     }
     
-    Serial.printf("[WIFI] AP started (open): SSID='Webex-Display-Setup', IP=%s\n",
-                  WiFi.softAPIP().toString().c_str());
+    ESP_LOGI(TAG, "AP started (open): SSID='Webex-Display-Setup', IP=%s",
+             WiFi.softAPIP().toString().c_str());
     
     if (matrix_display) {
         matrix_display->showAPMode(WiFi.softAPIP().toString());
@@ -62,14 +64,14 @@ void WiFiManager::begin(ConfigManager* config, AppState* state, MatrixDisplay* d
 
 void WiFiManager::setupWiFi() {
     if (!config_manager || !app_state) {
-        Serial.println("[WIFI] WiFi manager not initialized!");
+        ESP_LOGE(TAG, "WiFi manager not initialized!");
         return;
     }
     
     // CRITICAL: Disable WiFi power save FIRST to prevent display interference
     // WiFi power save causes timing issues with I2S DMA used for LED matrix
     WiFi.setSleep(WIFI_PS_NONE);
-    Serial.println("[WIFI] WiFi power save disabled (prevents display interference)");
+    ESP_LOGI(TAG, "WiFi power save disabled (prevents display interference)");
     
     // Apply chip-specific WiFi configuration
     String board = getBoardType();
@@ -77,13 +79,13 @@ void WiFiManager::setupWiFi() {
         // ESP32-S2 may need explicit TX power for stability
         // The S2 has known WiFi issues that benefit from maximum TX power
         WiFi.setTxPower(WIFI_POWER_19_5dBm);
-        Serial.println("[WIFI] ESP32-S2: Set maximum TX power for stability");
+        ESP_LOGI(TAG, "ESP32-S2: Set maximum TX power for stability");
         
         // Allow radio to stabilize before connection attempts
         delay(100);
-        Serial.println("[WIFI] ESP32-S2: Radio stabilization delay complete");
+        ESP_LOGI(TAG, "ESP32-S2: Radio stabilization delay complete");
     }
-    Serial.printf("[WIFI] Board type: %s\n", board.c_str());
+    ESP_LOGI(TAG, "Board type: %s", board.c_str());
     
     String ssid = config_manager->getWiFiSSID();
     String password = config_manager->getWiFiPassword();
@@ -95,7 +97,7 @@ void WiFiManager::setupWiFi() {
     // Clean up any stale scan state before starting new scan
     int16_t scan_status = WiFi.scanComplete();
     if (scan_status == WIFI_SCAN_RUNNING) {
-        Serial.println("[WIFI] Cleaning up running scan...");
+        ESP_LOGI(TAG, "Cleaning up running scan...");
     }
     WiFi.scanDelete();  // Clear any previous scan results
     
@@ -103,21 +105,20 @@ void WiFiManager::setupWiFi() {
     // Only set mode if not already in STA mode
     wifi_mode_t current_mode = WiFi.getMode();
     if (current_mode != WIFI_STA && current_mode != WIFI_AP_STA) {
-        Serial.println("[WIFI] Setting WiFi to STA mode...");
+        ESP_LOGI(TAG, "Setting WiFi to STA mode...");
         WiFi.mode(WIFI_STA);
         vTaskDelay(pdMS_TO_TICKS(100));  // Brief delay for mode switch
     }
 
     // Start async network scan (non-blocking)
-    Serial.println("[WIFI] Starting async network scan...");
+    ESP_LOGI(TAG, "Starting async network scan...");
     int16_t result = WiFi.scanNetworks(true, false);  // Async scan, no hidden networks
     if (result == WIFI_SCAN_RUNNING) {
-        Serial.println("[WIFI] Network scan started (async)");
+        ESP_LOGI(TAG, "Network scan started (async)");
         scan_in_progress = true;
         scan_start_time = millis();
     } else if (result < 0) {
-        Serial.printf("[WIFI] Scan failed to start: %d\n", result);
-        RLOG_ERROR("wifi", "Scan failed to start: %d", result);
+        ESP_LOGE(TAG, "Scan failed to start: %d", result);
         scan_in_progress = false;
         scan_completed = false;
     }
@@ -127,22 +128,22 @@ void WiFiManager::setupWiFi() {
         int16_t scan_result = WiFi.scanComplete();
         if (scan_result >= 0) {
             // Scan completed successfully
-            Serial.printf("[WIFI] Found %d networks\n", scan_result);
+            ESP_LOGI(TAG, "Found %d networks", scan_result);
             scan_completed = true;
             scan_in_progress = false;
             
             // List networks found
             int max_to_show = (scan_result < 10) ? scan_result : 10;
             for (int i = 0; i < max_to_show; i++) {
-                Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+                ESP_LOGD(TAG, "  %d. %s (%d dBm)", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
             }
         } else if (scan_result == WIFI_SCAN_FAILED) {
-            Serial.println("[WIFI] Scan failed");
+            ESP_LOGE(TAG, "Scan failed");
             scan_in_progress = false;
             scan_completed = false;
             break;
         } else if (millis() - scan_start_time > SCAN_TIMEOUT_MS) {
-            Serial.println("[WIFI] Scan timeout");
+            ESP_LOGW(TAG, "Scan timeout");
             scan_in_progress = false;
             scan_completed = false;
             break;
@@ -154,21 +155,20 @@ void WiFiManager::setupWiFi() {
 
     // If async scan failed, try blocking scan as fallback
     if (!scan_completed) {
-        Serial.println("[WIFI] Async scan failed, trying blocking scan...");
-        RLOG_WARN("wifi", "Async scan failed, trying blocking scan");
+        ESP_LOGW(TAG, "Async scan failed, trying blocking scan...");
         WiFi.scanDelete();  // Clear any partial results
         int blocking_result = WiFi.scanNetworks(false, false);  // Blocking scan
         if (blocking_result > 0) {
-            Serial.printf("[WIFI] Blocking scan found %d networks\n", blocking_result);
+            ESP_LOGI(TAG, "Blocking scan found %d networks", blocking_result);
             scan_completed = true;
             
             // List networks found
             int max_to_show = (blocking_result < 10) ? blocking_result : 10;
             for (int i = 0; i < max_to_show; i++) {
-                Serial.printf("[WIFI]   %d. %s (%d dBm)\n", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+                ESP_LOGD(TAG, "  %d. %s (%d dBm)", i + 1, WiFi.SSID(i).c_str(), WiFi.RSSI(i));
             }
         } else {
-            Serial.printf("[WIFI] Blocking scan also failed: %d\n", blocking_result);
+            ESP_LOGE(TAG, "Blocking scan also failed: %d", blocking_result);
         }
     }
 
@@ -187,7 +187,7 @@ void WiFiManager::setupWiFi() {
     for (int i = 0; i < network_count; i++) {
         if (WiFi.SSID(i) == ssid) {
             network_found = true;
-            Serial.printf("[WIFI] Configured network '%s' found (signal: %d dBm)\n",
+            ESP_LOGI(TAG, "Configured network '%s' found (signal: %d dBm)",
                           ssid.c_str(), WiFi.RSSI(i));
             break;
         }
@@ -196,13 +196,12 @@ void WiFiManager::setupWiFi() {
     if (!network_found) {
         // Network not found in scan, but try direct connect anyway
         // Many networks can be connected to even when scanning fails
-        Serial.printf("[WIFI] Configured network '%s' NOT found in scan!\n", ssid.c_str());
-        Serial.println("[WIFI] Attempting direct connect anyway...");
-        RLOG_WARN("wifi", "Network '%s' not in scan, trying direct connect", ssid.c_str());
+        ESP_LOGW(TAG, "Configured network '%s' NOT found in scan!", ssid.c_str());
+        ESP_LOGI(TAG, "Attempting direct connect anyway...");
     }
 
     // Connect to WiFi (attempt even if scan didn't find the network)
-    Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
+    ESP_LOGI(TAG, "Connecting to '%s'...", ssid.c_str());
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), password.c_str());
 
@@ -219,16 +218,14 @@ void WiFiManager::setupWiFi() {
             yield();  // Allow other tasks and WiFi stack to run
             delay(10);  // Small delay to prevent tight loop
         }
-        Serial.print(".");
         attempts++;
         
         // Check for timeout (extra safety)
         if (millis() - connect_start > 15000) {
-            Serial.println("\n[WIFI] Connection timeout");
+            ESP_LOGW(TAG, "Connection timeout");
             break;
         }
     }
-    Serial.println();
 
     if (WiFi.status() == WL_CONNECTED) {
         // Synchronize app state with actual WiFi status
@@ -238,22 +235,21 @@ void WiFiManager::setupWiFi() {
         
         // Disable AP mode now that we're connected
         if (ap_mode_active) {
-            Serial.println("[WIFI] Connected to network, disabling AP mode...");
+            ESP_LOGI(TAG, "Connected to network, disabling AP mode...");
             WiFi.softAPdisconnect(true);
             WiFi.mode(WIFI_STA);
             ap_mode_active = false;
         }
         
-        Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-        RLOG_INFO("WiFi", "Connected to network, IP: %s, RSSI: %d dBm",
+        ESP_LOGI(TAG, "Connected! IP: %s", WiFi.localIP().toString().c_str());
+        ESP_LOGI(TAG, "Connected to network, IP: %s, RSSI: %d dBm",
                   WiFi.localIP().toString().c_str(), WiFi.RSSI());
         // Note: hostname shown later after mDNS is initialized
         if (matrix_display) {
             matrix_display->showUnconfigured(WiFi.localIP().toString(), "");
         }
     } else {
-        Serial.println("[WIFI] Connection failed");
-        RLOG_ERROR("wifi", "Connection failed");
+        ESP_LOGE(TAG, "Connection failed");
         startAPMode("Connection failed");
     }
 }
@@ -279,12 +275,12 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
     bool state_changed = (app_state->wifi_connected != is_connected);
     if (state_changed) {
         app_state->wifi_connected = is_connected;
-        Serial.printf("[WIFI] State synchronized: %s\n", is_connected ? "connected" : "disconnected");
+        ESP_LOGI(TAG, "State synchronized: %s", is_connected ? "connected" : "disconnected");
         if (is_connected) {
-            RLOG_INFO("WiFi", "Reconnected, IP: %s, RSSI: %d dBm",
+            ESP_LOGI(TAG, "Reconnected, IP: %s, RSSI: %d dBm",
                       WiFi.localIP().toString().c_str(), WiFi.RSSI());
         } else {
-            RLOG_WARN("WiFi", "Connection lost");
+            ESP_LOGW(TAG, "Connection lost");
         }
     }
 
@@ -292,7 +288,7 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
         reconnect_attempts++;
         
         if (reconnect_attempts == 1) {
-            Serial.println("[WIFI] Connection lost, reconnecting...");
+            ESP_LOGI(TAG, "Connection lost, reconnecting...");
         }
         
         // After 5 failed attempts (about 50 seconds), start AP mode for reconfiguration
@@ -308,19 +304,19 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
         WiFi.begin(ssid.c_str(), password.c_str());
         
         if (mdns_manager && mdns_manager->isInitialized()) {
-            Serial.println("[MDNS] Stopping mDNS due to WiFi disconnect...");
+            ESP_LOGI(TAG, "Stopping mDNS due to WiFi disconnect...");
             mdns_manager->end();
         }
     } else if (is_connected) {
         const bool was_connected = !state_changed || app_state->wifi_connected;
         if (state_changed && !was_connected) {
-            Serial.printf("[WIFI] Reconnected. IP: %s\n", WiFi.localIP().toString().c_str());
+            ESP_LOGI(TAG, "Reconnected. IP: %s", WiFi.localIP().toString().c_str());
         }
         reconnect_attempts = 0;  // Reset counter on successful connection
         
         // Disable AP mode after successful connection/reconnection
         if (ap_mode_active) {
-            Serial.println("[WIFI] Disabling AP mode after reconnect...");
+            ESP_LOGI(TAG, "Disabling AP mode after reconnect...");
             WiFi.softAPdisconnect(true);
             WiFi.mode(WIFI_STA);
             ap_mode_active = false;
@@ -336,13 +332,13 @@ void WiFiManager::handleConnection(MDNSManager* mdns_manager) {
             last_mdns_start_attempt = now_mdns;
 
             if (!mdnsMemoryOk()) {
-                Serial.printf("[MDNS] Skipping start (heap=%lu, largest=%lu)\n",
+                ESP_LOGD(TAG, "Skipping start (heap=%lu, largest=%lu)",
                               ESP.getFreeHeap(),
                               heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
                 return;
             }
 
-            Serial.println("[MDNS] (Re)starting mDNS after WiFi connect...");
+            ESP_LOGI(TAG, "(Re)starting mDNS after WiFi connect...");
             mdns_manager->end();
             if (mdns_manager->begin(config_manager->getDeviceName())) {
                 mdns_manager->advertiseHTTP(80);
@@ -369,10 +365,10 @@ String WiFiManager::getAPIPAddress() const {
 
 void WiFiManager::disableAP() {
     if (ap_mode_active || WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
-        Serial.println("[WIFI] Disabling AP mode...");
+        ESP_LOGI(TAG, "Disabling AP mode...");
         WiFi.softAPdisconnect(true);
         WiFi.mode(WIFI_STA);
         ap_mode_active = false;
-        Serial.println("[WIFI] AP mode disabled");
+        ESP_LOGI(TAG, "AP mode disabled");
     }
 }

@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include "config_macros.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CFG_DISP";
 
 // Device Configuration
 
@@ -28,7 +31,7 @@ CONFIG_CACHED_STRING_GETTER(DeviceUuid, "device_uuid", cached_device_uuid, "")
 void ConfigManager::setDeviceUuid(const String& uuid) {
     saveString("device_uuid", uuid);
     cached_device_uuid = uuid;
-    Serial.printf("[CONFIG] Device UUID set to: %s\n", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
+    ESP_LOGI(TAG, "Device UUID set to: %s", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
 }
 
 CONFIG_CACHED_STRING_GETTER(UserUuid, "user_uuid", cached_user_uuid, "")
@@ -36,7 +39,7 @@ CONFIG_CACHED_STRING_GETTER(UserUuid, "user_uuid", cached_user_uuid, "")
 void ConfigManager::setUserUuid(const String& uuid) {
     saveString("user_uuid", uuid);
     cached_user_uuid = uuid;
-    Serial.printf("[CONFIG] User UUID set to: %s\n", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
+    ESP_LOGI(TAG, "User UUID set to: %s", uuid.isEmpty() ? "(empty)" : uuid.substring(0, 8).c_str());
 }
 
 CONFIG_CACHED_STRING_GETTER(LastWebexStatus, "lst_webex_st", cached_last_webex_status, "")
@@ -64,7 +67,7 @@ void ConfigManager::setPageIntervalMs(uint16_t interval_ms) {
     }
     saveUInt("page_interval", interval_ms);
     cached_page_interval_ms = interval_ms;
-    Serial.printf("[CONFIG] Page interval set to %d ms\n", interval_ms);
+    ESP_LOGI(TAG, "Page interval set to %d ms", interval_ms);
 }
 
 CONFIG_CACHED_BOOL_GETTER(SensorPageEnabled, "sensor_page", cached_sensor_page_enabled, true)
@@ -74,7 +77,7 @@ void ConfigManager::setSensorPageEnabled(bool enabled) {
     cached_sensor_page_enabled = enabled;
     cached_display_pages = enabled ? String("rotate") : String("status");
     saveString("display_pages", cached_display_pages);
-    Serial.printf("[CONFIG] Sensor page %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Sensor page %s", enabled ? "enabled" : "disabled");
 }
 
 String ConfigManager::getDisplayPages() const {
@@ -107,7 +110,7 @@ void ConfigManager::setDisplayPages(const String& mode) {
     cached_display_pages = normalized;
     cached_sensor_page_enabled = (normalized == "rotate");
     saveBool("sensor_page", cached_sensor_page_enabled);
-    Serial.printf("[CONFIG] Display pages set to %s\n", normalized.c_str());
+    ESP_LOGI(TAG, "Display pages set to %s", normalized.c_str());
 }
 
 String ConfigManager::getStatusLayout() const {
@@ -134,7 +137,7 @@ void ConfigManager::setStatusLayout(const String& layout) {
     }
     saveString("status_layout", normalized);
     cached_status_layout = normalized;
-    Serial.printf("[CONFIG] Status layout set to %s\n", normalized.c_str());
+    ESP_LOGI(TAG, "Status layout set to %s", normalized.c_str());
 }
 
 CONFIG_CACHED_UINT8_GETTER(BorderWidth, "border_width", cached_border_width, DEFAULT_BORDER_WIDTH)
@@ -145,7 +148,7 @@ void ConfigManager::setBorderWidth(uint8_t width) {
     if (width > 3) width = 3;
     saveUInt("border_width", width);
     cached_border_width = width;
-    Serial.printf("[CONFIG] Border width set to %d pixels\n", width);
+    ESP_LOGI(TAG, "Border width set to %d pixels", width);
 }
 
 CONFIG_CACHED_STRING_GETTER_WITH_DEFAULT(DateColor, "date_color", cached_date_color, DEFAULT_DATE_COLOR)

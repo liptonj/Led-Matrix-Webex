@@ -33,7 +33,6 @@ class MerakiMQTTClient;
 class SyncManager;
 class RealtimeManager;
 class CommandProcessor;
-class RemoteLogger;
 class ImprovHandler;
 struct AppState;
 
@@ -58,9 +57,6 @@ struct Dependencies {
     // =========================================================================
     ConfigManager& config;
     AppState& app_state;
-    bool& debug_mode;
-    bool& debug_display;
-    bool& debug_realtime;
 
     // =========================================================================
     // Display
@@ -95,7 +91,6 @@ struct Dependencies {
     SyncManager& sync;
     RealtimeManager& realtime_manager;
     CommandProcessor& command_processor;
-    RemoteLogger& remote_logger;
     ImprovHandler& improv;
 
     // =========================================================================
@@ -109,9 +104,6 @@ struct Dependencies {
      *
      * @param config_ ConfigManager instance
      * @param app_state_ AppState instance
-     * @param debug_mode_ Debug mode flag
-     * @param debug_display_ Display debug flag
-     * @param debug_realtime_ Realtime debug flag
      * @param display_ MatrixDisplay instance
      * @param wifi_ WiFiManager instance
      * @param web_server_ WebServerManager instance
@@ -126,7 +118,6 @@ struct Dependencies {
      * @param sync_ SyncManager instance
      * @param realtime_manager_ RealtimeManager instance
      * @param command_processor_ CommandProcessor instance
-     * @param remote_logger_ RemoteLogger instance
      * @param improv_ ImprovHandler instance
      * @param webex_ WebexClient instance
      * @param xapi_ XAPIWebSocket instance
@@ -134,9 +125,6 @@ struct Dependencies {
     Dependencies(
         ConfigManager& config_,
         AppState& app_state_,
-        bool& debug_mode_,
-        bool& debug_display_,
-        bool& debug_realtime_,
         MatrixDisplay& display_,
         WiFiManager& wifi_,
         WebServerManager& web_server_,
@@ -151,15 +139,11 @@ struct Dependencies {
         SyncManager& sync_,
         RealtimeManager& realtime_manager_,
         CommandProcessor& command_processor_,
-        RemoteLogger& remote_logger_,
         ImprovHandler& improv_,
         WebexClient& webex_,
         XAPIWebSocket& xapi_
     ) : config(config_),
         app_state(app_state_),
-        debug_mode(debug_mode_),
-        debug_display(debug_display_),
-        debug_realtime(debug_realtime_),
         display(display_),
         wifi(wifi_),
         web_server(web_server_),
@@ -174,7 +158,6 @@ struct Dependencies {
         sync(sync_),
         realtime_manager(realtime_manager_),
         command_processor(command_processor_),
-        remote_logger(remote_logger_),
         improv(improv_),
         webex(webex_),
         xapi(xapi_)
@@ -193,9 +176,6 @@ struct Dependencies {
 Dependencies initializeDependencies(
     ConfigManager& config_manager,
     AppState& app_state,
-    bool& g_debug_mode,
-    bool& g_debug_display,
-    bool& g_debug_realtime,
     MatrixDisplay& matrix_display,
     WiFiManager& wifi_manager,
     WebServerManager& web_server,
@@ -210,7 +190,6 @@ Dependencies initializeDependencies(
     SyncManager& syncManager,
     RealtimeManager& realtimeManager,
     CommandProcessor& commandProcessor,
-    RemoteLogger& remoteLogger,
     ImprovHandler& improv_handler,
     WebexClient& webex_client,
     XAPIWebSocket& xapi_websocket

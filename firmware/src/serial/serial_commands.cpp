@@ -6,7 +6,10 @@
 #include "serial_commands.h"
 #include "../config/config_manager.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <WiFi.h>
+
+static const char* TAG = "SERIAL_CMD";
 
 // Serial command state
 static String serial_buffer = "";
@@ -28,7 +31,7 @@ void serial_commands_begin() {
     wifi_pending = false;
     pending_ssid = "";
     pending_password = "";
-    Serial.println("[SERIAL] Command handler initialized");
+    ESP_LOGI(TAG, "Command handler initialized");
 }
 
 void serial_commands_loop() {
@@ -41,9 +44,9 @@ void serial_commands_loop() {
                 
                 // Log received command (mask password)
                 if (serial_buffer.startsWith("WIFI:")) {
-                    Serial.println("[SERIAL] Received WiFi configuration command");
+                    ESP_LOGI(TAG, "Received WiFi configuration command");
                 } else {
-                    Serial.printf("[SERIAL] Received: %s\n", serial_buffer.c_str());
+                    ESP_LOGI(TAG, "Received: %s", serial_buffer.c_str());
                 }
                 
                 // Process command
@@ -60,8 +63,8 @@ void serial_commands_loop() {
                 } else if (serial_buffer == "HELP") {
                     handle_help_command();
                 } else {
-                    Serial.printf("[SERIAL] Unknown command: %s\n", serial_buffer.c_str());
-                    Serial.println("[SERIAL] Type HELP for available commands");
+                    ESP_LOGW(TAG, "Unknown command: %s", serial_buffer.c_str());
+                    ESP_LOGI(TAG, "Type HELP for available commands");
                 }
                 
                 serial_buffer = "";
@@ -71,7 +74,7 @@ void serial_commands_loop() {
             
             // Prevent buffer overflow
             if (serial_buffer.length() > 256) {
-                Serial.println("[SERIAL] Buffer overflow, clearing");
+                ESP_LOGW(TAG, "Buffer overflow, clearing");
                 serial_buffer = "";
             }
         }
@@ -105,8 +108,8 @@ static void handle_wifi_command(const String& command) {
     // Find first colon after "WIFI:"
     int first_colon = command.indexOf(':', 5);
     if (first_colon < 0) {
-        Serial.println("[SERIAL] Invalid WIFI command format");
-        Serial.println("[SERIAL] Usage: WIFI:<ssid>:<password>");
+        ESP_LOGE(TAG, "Invalid WIFI command format");
+        ESP_LOGI(TAG, "Usage: WIFI:<ssid>:<password>");
         return;
     }
     
@@ -126,36 +129,36 @@ static void handle_wifi_command(const String& command) {
     
     // Security: Validate SSID length (WiFi standard: max 32 bytes)
     if (ssid.isEmpty()) {
-        Serial.println("[SERIAL] Error: SSID cannot be empty");
+        ESP_LOGE(TAG, "Error: SSID cannot be empty");
         return;
     }
     if (ssid.length() > 32) {
-        Serial.printf("[SERIAL] Error: SSID too long (%d bytes, max 32)\n", ssid.length());
+        ESP_LOGE(TAG, "Error: SSID too long (%d bytes, max 32)", ssid.length());
         return;
     }
     
     // Security: Validate password length (WiFi WPA2: 8-63 characters, WEP/Open: 0-63)
     // Allow empty password for open networks
     if (password.length() > 63) {
-        Serial.printf("[SERIAL] Error: Password too long (%d chars, max 63)\n", password.length());
+        ESP_LOGE(TAG, "Error: Password too long (%d chars, max 63)", password.length());
         return;
     }
     
     // Security: Check for null bytes in SSID/password (command injection)
     for (size_t i = 0; i < ssid.length(); i++) {
         if (ssid.charAt(i) == '\0') {
-            Serial.println("[SERIAL] Error: SSID contains null byte");
+            ESP_LOGE(TAG, "Error: SSID contains null byte");
             return;
         }
     }
     for (size_t i = 0; i < password.length(); i++) {
         if (password.charAt(i) == '\0') {
-            Serial.println("[SERIAL] Error: Password contains null byte");
+            ESP_LOGE(TAG, "Error: Password contains null byte");
             return;
         }
     }
     
-    Serial.printf("[SERIAL] Configuring WiFi: SSID='%s' (len=%d)\n", ssid.c_str(), ssid.length());
+    ESP_LOGI(TAG, "Configuring WiFi: SSID='%s' (len=%d)", ssid.c_str(), ssid.length());
     
     // Save credentials using config manager
     auto& deps = getDependencies();
@@ -166,31 +169,31 @@ static void handle_wifi_command(const String& command) {
     pending_ssid = ssid;
     pending_password = password;
     
-    Serial.println("[SERIAL] WiFi credentials saved, connecting...");
+    ESP_LOGI(TAG, "WiFi credentials saved, connecting...");
 }
 
 /**
  * @brief Handle SCAN command - list available WiFi networks
  */
 static void handle_scan_command() {
-    Serial.println("[SERIAL] Scanning WiFi networks...");
+    ESP_LOGI(TAG, "Scanning WiFi networks...");
     
     // Perform a fresh scan
     int n = WiFi.scanNetworks(false, false);  // Sync scan, no hidden networks
     
-    Serial.println("[SERIAL] Available networks:");
+    ESP_LOGI(TAG, "Available networks:");
     if (n == 0) {
-        Serial.println("[SERIAL] No networks found");
+        ESP_LOGI(TAG, "No networks found");
     } else {
         for (int i = 0; i < n; i++) {
-            Serial.printf("  %d. %s (%d dBm)%s\n",
+            ESP_LOGI(TAG, "  %d. %s (%d dBm)%s",
                           i + 1,
                           WiFi.SSID(i).c_str(),
                           WiFi.RSSI(i),
                           WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "" : " [secured]");
         }
     }
-    Serial.println("[SERIAL] Scan complete");
+    ESP_LOGI(TAG, "Scan complete");
     
     // Clean up scan results
     WiFi.scanDelete();
@@ -232,21 +235,21 @@ static void handle_status_command() {
  * @brief Handle FACTORY_RESET command - clear all settings
  */
 static void handle_factory_reset_command() {
-    Serial.println("[SERIAL] FACTORY RESET requested!");
-    Serial.println("[SERIAL] This will erase all settings and partitions.");
-    Serial.println("[SERIAL] Device will reboot in 3 seconds...");
+    ESP_LOGW(TAG, "FACTORY RESET requested!");
+    ESP_LOGW(TAG, "This will erase all settings and partitions.");
+    ESP_LOGW(TAG, "Device will reboot in 3 seconds...");
     
     delay(1000);
-    Serial.println("[SERIAL] 2...");
+    ESP_LOGI(TAG, "2...");
     delay(1000);
-    Serial.println("[SERIAL] 1...");
+    ESP_LOGI(TAG, "1...");
     delay(1000);
     
     // Use ConfigManager's factory reset (clears correct namespace + partitions)
     auto& deps = getDependencies();
     deps.config.factoryReset();
     
-    Serial.println("[SERIAL] Rebooting...");
+    ESP_LOGI(TAG, "Rebooting...");
     delay(500);
     
     ESP.restart();
@@ -261,7 +264,7 @@ static void handle_provision_token_command(const String& command) {
     // Extract token after "PROVISION_TOKEN:" prefix (16 characters)
     const int prefix_len = 16;  // "PROVISION_TOKEN:"
     if (command.length() <= prefix_len) {
-        Serial.println("[SERIAL] Error: Invalid provision token length");
+        ESP_LOGE(TAG, "Error: Invalid provision token length");
         Serial.println("ACK:PROVISION_TOKEN:error:invalid_length");
         return;
     }
@@ -271,7 +274,7 @@ static void handle_provision_token_command(const String& command) {
     
     // Validate token length (exactly 32 characters)
     if (token.length() != 32) {
-        Serial.printf("[SERIAL] Error: Invalid provision token length (%d, expected 32)\n", token.length());
+        ESP_LOGE(TAG, "Error: Invalid provision token length (%d, expected 32)", token.length());
         Serial.println("ACK:PROVISION_TOKEN:error:invalid_length");
         return;
     }
@@ -287,7 +290,7 @@ static void handle_provision_token_command(const String& command) {
     }
     
     if (!is_valid) {
-        Serial.println("[SERIAL] Error: Provision token must be alphanumeric only");
+        ESP_LOGE(TAG, "Error: Provision token must be alphanumeric only");
         Serial.println("ACK:PROVISION_TOKEN:error:invalid_format");
         return;
     }
@@ -295,7 +298,7 @@ static void handle_provision_token_command(const String& command) {
     // Store token in RAM-only variable (non-persistent)
     provision_token = token;
     
-    Serial.printf("[SERIAL] Provision token received (32 chars)\n");
+    ESP_LOGI(TAG, "Provision token received (32 chars)");
     Serial.println("ACK:PROVISION_TOKEN:success");
 }
 

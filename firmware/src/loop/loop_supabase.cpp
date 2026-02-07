@@ -13,9 +13,11 @@
 #include "realtime/realtime_manager.h"
 #include "commands/command_processor.h"
 #include "supabase/supabase_client.h"
-#include "debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "display/matrix_display.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "SUPA_LOOP";
 
 // Forward declaration
 bool provisionDeviceWithSupabase();
@@ -37,7 +39,7 @@ void handleSupabase(LoopContext& ctx) {
         deps.command_processor.processPendingAcks();
         deps.command_processor.processPendingActions();
         // Keep remote logger in sync with server-side debug toggle
-        deps.remote_logger.setRemoteEnabled(deps.supabase.isRemoteDebugEnabled());
+        log_system_set_remote_enabled(deps.supabase.isRemoteDebugEnabled());
     }
 
     // Phase B: Realtime WebSocket for instant command delivery

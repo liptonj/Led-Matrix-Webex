@@ -21,7 +21,9 @@
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "SYNC";
 
 // Firmware version from build
 #ifndef FIRMWARE_VERSION
@@ -199,26 +201,26 @@ void SyncManager::pollCommands() {
     for (int i = 0; i < count; i++) {
         // REGRESSION FIX: Additional validation before command processing
         if (!commands[i].valid) {
-            Serial.printf("[SYNC] Skipping invalid command at index %d\n", i);
+            ESP_LOGW(TAG, "Skipping invalid command at index %d", i);
             continue;
         }
         
         // Validate command ID (redundant check, but defensive)
         if (commands[i].id.isEmpty() || commands[i].id.length() < 8) {
-            Serial.printf("[SYNC] Skipping command with invalid ID: '%s'\n", 
-                         commands[i].id.c_str());
+            ESP_LOGW(TAG, "Skipping command with invalid ID: '%s'", 
+                     commands[i].id.c_str());
             continue;
         }
         
         // Validate command name
         if (commands[i].command.isEmpty()) {
-            Serial.printf("[SYNC] Skipping command %s with empty command name\n", 
-                         commands[i].id.c_str());
+            ESP_LOGW(TAG, "Skipping command %s with empty command name", 
+                     commands[i].id.c_str());
             continue;
         }
         
-        RLOG_INFO("sync", "Polled command: id=%s cmd=%s",
-                  commands[i].id.c_str(), commands[i].command.c_str());
+        ESP_LOGI(TAG, "Polled command: id=%s cmd=%s",
+                 commands[i].id.c_str(), commands[i].command.c_str());
         handleSupabaseCommand(commands[i]);
     }
 }
@@ -254,15 +256,15 @@ void SyncManager::broadcastTelemetry() {
 
     // Only log on failure or every 10th success to avoid serial spam
     if (!sent) {
-        RLOG_WARN("telemetry", "Broadcast failed (heap=%u, rssi=%d)", freeHeap, rssi);
+        ESP_LOGW(TAG, "Broadcast failed (heap=%u, rssi=%d)", freeHeap, rssi);
     } else if (broadcastCount % 10 == 0) {
-        Serial.printf("[SYNC] Telemetry broadcast #%lu (heap=%u, rssi=%d)\n",
-                      broadcastCount, freeHeap, rssi);
+        ESP_LOGI(TAG, "Telemetry broadcast #%lu (heap=%u, rssi=%d)",
+                 broadcastCount, freeHeap, rssi);
     }
     // Always log to remote when enabled (even if suppressed in Serial)
     if (sent) {
-        RLOG_DEBUG("telemetry", "Sent #%lu: heap=%u rssi=%d uptime=%lu temp=%.1f fw=%s",
-                   broadcastCount, freeHeap, rssi, uptime, temperature, firmwareVersion.c_str());
+        ESP_LOGD(TAG, "Sent #%lu: heap=%u rssi=%d uptime=%lu temp=%.1f fw=%s",
+                 broadcastCount, freeHeap, rssi, uptime, temperature, firmwareVersion.c_str());
     }
 }
 
@@ -270,7 +272,7 @@ void SyncManager::broadcastDeviceConfig() {
     auto& deps = getDependencies();
 
     if (!deps.realtime.isConnected()) {
-        RLOG_DEBUG("config", "Skipping config broadcast - not connected");
+        ESP_LOGD(TAG, "Skipping config broadcast - not connected");
         return;
     }
 
@@ -279,7 +281,7 @@ void SyncManager::broadcastDeviceConfig() {
     JsonDocument configDoc;
     DeserializationError err = deserializeJson(configDoc, configStr);
     if (err) {
-        RLOG_WARN("config", "Failed to parse config JSON: %s", err.c_str());
+        ESP_LOGW(TAG, "Failed to parse config JSON: %s", err.c_str());
         return;
     }
 
@@ -289,9 +291,9 @@ void SyncManager::broadcastDeviceConfig() {
 
     bool sent = deps.realtime.sendBroadcast("device_config", configDoc);
     if (!sent) {
-        RLOG_WARN("config", "Config broadcast failed (heap=%u)", ESP.getFreeHeap());
+        ESP_LOGW(TAG, "Config broadcast failed (heap=%u)", ESP.getFreeHeap());
     } else {
-        RLOG_DEBUG("config", "Config broadcast sent");
+        ESP_LOGD(TAG, "Config broadcast sent");
     }
 }
 
@@ -336,7 +338,7 @@ bool provisionDeviceWithSupabase() {
     if (!hasSafeTlsHeap(65000, 40000)) {
         if (now - last_low_heap_log > 60000) {
             last_low_heap_log = now;
-            Serial.println("[SUPABASE] Skipping provisioning - low heap for TLS");
+            ESP_LOGW(TAG, "Skipping provisioning - low heap for TLS");
         }
         return false;
     }
@@ -349,7 +351,7 @@ bool provisionDeviceWithSupabase() {
     }
     String endpoint = supabase_url + "/functions/v1/provision-device";
 
-    RLOG_INFO("provision", "Provisioning device via %s", endpoint.c_str());
+    ESP_LOGI(TAG, "Provisioning device via %s", endpoint.c_str());
 
     // HTTP request setup (kept local as requested)
     WiFiClientSecure client;
@@ -369,15 +371,15 @@ bool provisionDeviceWithSupabase() {
 
     // Handle responses
     if (http_code < 200 || http_code >= 300) {
-        Serial.printf("[SUPABASE] Provision failed: HTTP %d\n", http_code);
-        Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
-        RLOG_WARN("provision", "Failed: HTTP %d", http_code);
+        ESP_LOGW(TAG, "Provision failed: HTTP %d", http_code);
+        ESP_LOGD(TAG, "Response: %s", response.c_str());
+        ESP_LOGW(TAG, "Failed: HTTP %d", http_code);
         
         if (http_code == 409 && response.indexOf("approval_required") >= 0) {
             deps.app_state.supabase_approval_pending = true;
             if (now - last_pending_log > 60000) {
                 last_pending_log = now;
-                Serial.println("[SUPABASE] Provisioning pending admin approval");
+                ESP_LOGI(TAG, "Provisioning pending admin approval");
             }
         } else if (http_code == 403 && response.indexOf("awaiting_approval") >= 0) {
             // Use helper for awaiting approval handling
@@ -388,13 +390,13 @@ bool provisionDeviceWithSupabase() {
             return false;
         } else if (http_code == 403 && response.indexOf("device_disabled") >= 0) {
             deps.app_state.supabase_disabled = true;
-            Serial.println("[SUPABASE] Device disabled by admin");
+            ESP_LOGW(TAG, "Device disabled by admin");
         } else if (http_code == 403 && response.indexOf("device_blacklisted") >= 0) {
             deps.app_state.supabase_blacklisted = true;
-            Serial.println("[SUPABASE] Device blacklisted by admin");
+            ESP_LOGW(TAG, "Device blacklisted by admin");
         } else if (http_code == 410 && response.indexOf("device_deleted") >= 0) {
             deps.app_state.supabase_deleted = true;
-            Serial.println("[SUPABASE] Device deleted - clearing credentials");
+            ESP_LOGW(TAG, "Device deleted - clearing credentials");
             deps.credentials.resetCredentials();
             delay(200);
             ESP.restart();
@@ -406,13 +408,13 @@ bool provisionDeviceWithSupabase() {
     JsonDocument result;
     DeserializationError error = deserializeJson(result, response);
     if (error) {
-        Serial.printf("[SUPABASE] Invalid JSON response: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Invalid JSON response: %s", error.c_str());
         return false;
     }
 
     if (!result["success"].as<bool>()) {
         const char* err = result["error"] | "Unknown error";
-        Serial.printf("[SUPABASE] Provision error: %s\n", err);
+        ESP_LOGE(TAG, "Provision error: %s", err);
         return false;
     }
 
@@ -422,7 +424,7 @@ bool provisionDeviceWithSupabase() {
         deps.pairing.setCode(pairing_code, true);
         deps.supabase.setPairingCode(pairing_code);
         deps.app_state.supabase_realtime_resubscribe = true;
-        Serial.println("[SUPABASE] Pairing code received and set");
+        ESP_LOGI(TAG, "Pairing code received and set");
     }
 
     // Success - reset state using helper
@@ -433,7 +435,7 @@ bool provisionDeviceWithSupabase() {
     deps.app_state.supabase_disabled = false;
     deps.app_state.supabase_blacklisted = false;
     deps.app_state.supabase_deleted = false;
-    RLOG_INFO("provision", "Device provisioned successfully");
+    ESP_LOGI(TAG, "Device provisioned successfully");
 
     // Immediately authenticate after provisioning so realtime can initialize
     if (deps.supabase.authenticate()) {
@@ -441,12 +443,12 @@ bool provisionDeviceWithSupabase() {
         String authAnonKey = deps.supabase.getAnonKey();
         if (!authAnonKey.isEmpty() && authAnonKey != deps.config.getSupabaseAnonKey()) {
             deps.config.setSupabaseAnonKey(authAnonKey);
-            Serial.println("[SUPABASE] Anon key updated from device-auth");
+            ESP_LOGI(TAG, "Anon key updated from device-auth");
         }
         
         // Immediately update device_connected so embedded app knows device is online
         if (hasSafeTlsHeap(65000, 40000)) {
-            Serial.println("[SUPABASE] Sending initial device state after provisioning...");
+            ESP_LOGI(TAG, "Sending initial device state after provisioning...");
             int rssi = WiFi.RSSI();
             uint32_t freeHeap = ESP.getFreeHeap();
             uint32_t uptime = millis() / 1000;
@@ -458,10 +460,10 @@ bool provisionDeviceWithSupabase() {
         }
         
         deps.app_state.realtime_defer_until = millis() + 8000UL;
-        RLOG_INFO("provision", "Authenticated after provisioning");
+        ESP_LOGI(TAG, "Authenticated after provisioning");
     } else {
         deps.app_state.supabase_connected = false;
-        RLOG_WARN("provision", "Authentication failed after provisioning");
+        ESP_LOGW(TAG, "Authentication failed after provisioning");
     }
     return true;
 }

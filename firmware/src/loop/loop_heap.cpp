@@ -12,6 +12,9 @@
 #include "esp_heap_caps.h"
 #include "supabase/supabase_realtime.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "HEAP";
 
 // =============================================================================
 // HEAP TREND MONITOR IMPLEMENTATION
@@ -55,11 +58,11 @@ void HeapTrendMonitor::logIfTrending(unsigned long now) {
 
     if (free_dropping || block_dropping) {
         last_log = now;
-        Serial.printf("[HEAP] Trend warning: free%s block%s (last=%u block=%u)\n",
-                      free_dropping ? "↓" : "-",
-                      block_dropping ? "↓" : "-",
-                      free_samples[(index + kSamples - 1) % kSamples],
-                      block_samples[(index + kSamples - 1) % kSamples]);
+        ESP_LOGW(TAG, "Trend warning: free%s block%s (last=%u block=%u)",
+                 free_dropping ? "↓" : "-",
+                 block_dropping ? "↓" : "-",
+                 free_samples[(index + kSamples - 1) % kSamples],
+                 block_samples[(index + kSamples - 1) % kSamples]);
     }
 }
 
@@ -73,8 +76,8 @@ void logHeapStatus(const char* label) {
     // Log both internal (for TLS operations) and total (includes PSRAM) for complete diagnostics
     uint32_t largestInternal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     uint32_t largestTotal = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    Serial.printf("[HEAP] %s free=%u min=%u largest_internal=%u largest_total=%u\n",
-                  label, freeHeap, minHeap, largestInternal, largestTotal);
+    ESP_LOGI(TAG, "%s free=%u min=%u largest_internal=%u largest_total=%u",
+             label, freeHeap, minHeap, largestInternal, largestTotal);
 }
 
 bool hasSafeTlsHeap(uint32_t min_free, uint32_t min_block) {
@@ -109,13 +112,13 @@ void handleLowHeapRecovery(LoopContext& ctx) {
         if (((duration >= kLowHeapDuration) || (criticalHeap && duration >= kCriticalDuration)) &&
             ctx.current_time - lastRecovery >= kRecoveryCooldown) {
             lastRecovery = ctx.current_time;
-            Serial.printf("[HEAP] Low heap recovery triggered (free=%u block=%u)\n",
-                          freeHeap, largestBlock);
+            ESP_LOGW(TAG, "Low heap recovery triggered (free=%u block=%u)",
+                     freeHeap, largestBlock);
             // Disconnect realtime to free heap
             auto& deps = getDependencies();
             deps.realtime.disconnect();
             ctx.app_state->realtime_defer_until = ctx.current_time + 60000UL;
-            Serial.println("[HEAP] Freed realtime connection to recover heap");
+            ESP_LOGI(TAG, "Freed realtime connection to recover heap");
         }
         return;
     }

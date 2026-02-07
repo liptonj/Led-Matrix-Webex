@@ -5,8 +5,9 @@
  * Intended for admin troubleshooting via Supabase Realtime on device_logs.
  *
  * Authentication:
- * - Bearer token (from device-auth), signed with SUPABASE_JWT_SECRET, OR
- * - HMAC headers (X-Device-Serial, X-Timestamp, X-Signature)
+ * - Bearer token (required primary auth, from device-auth)
+ * - HMAC headers (required second factor: X-Device-Serial, X-Timestamp, X-Signature)
+ * - Both must be present and serial numbers must match
  *
  * Request body:
  *   { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
@@ -94,32 +95,39 @@ Deno.serve(async (req) => {
     let deviceUuid = "";
     let isDebugEnabled = false;
 
+    // Step 1: Validate JWT (required primary auth)
     const authHeader = req.headers.get("Authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const tokenResult = await validateBearerToken(authHeader, tokenSecret);
-      if (!tokenResult.valid || !tokenResult.device) {
-        return new Response(JSON.stringify({ success: false, error: tokenResult.error }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      serialNumber = tokenResult.device.serial_number;
-      // Extract device_uuid from JWT if present
-      if (tokenResult.device.device_uuid) {
-        deviceUuid = tokenResult.device.device_uuid;
-      }
-    } else {
-      const hmacResult = await validateHmacRequest(req, supabase, bodyText);
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(JSON.stringify({ success: false, error: hmacResult.error }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      serialNumber = hmacResult.device.serial_number;
-      deviceId = hmacResult.device.device_id;
-      isDebugEnabled = hmacResult.device.debug_enabled;
+    const tokenResult = await validateBearerToken(authHeader, tokenSecret);
+    if (!tokenResult.valid || !tokenResult.device) {
+      return new Response(JSON.stringify({ success: false, error: tokenResult.error || "JWT required" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+    serialNumber = tokenResult.device.serial_number;
+    if (tokenResult.device.device_uuid) {
+      deviceUuid = tokenResult.device.device_uuid;
+    }
+
+    // Step 2: Validate HMAC (required second factor)
+    const hmacResult = await validateHmacRequest(req, supabase, bodyText);
+    if (!hmacResult.valid || !hmacResult.device) {
+      return new Response(JSON.stringify({ success: false, error: hmacResult.error || "HMAC verification failed" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Step 3: Cross-validate serial numbers
+    if (serialNumber !== hmacResult.device.serial_number) {
+      return new Response(JSON.stringify({ success: false, error: "Serial number mismatch between JWT and HMAC" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    deviceId = hmacResult.device.device_id || "";
+    isDebugEnabled = hmacResult.device.debug_enabled || false;
 
     // Only query devices table if device_uuid is not already in JWT (optimization)
     if (!deviceUuid || !deviceId || !isDebugEnabled) {
@@ -217,33 +225,29 @@ Deno.serve(async (req) => {
       });
     }
 
-    // BROADCAST-ONLY MODE: Skip database persistence to avoid storage costs
-    // Logs are only sent via Realtime broadcast for live viewing in admin UI
-    // Historical logs are NOT saved - only real-time streaming is supported
+    // Persist error logs to database for historical context (30-day retention)
+    if (normalizedLevel === "error") {
+      const { error: insertErr } = await supabase
+        .schema("display")
+        .from("device_logs")
+        .insert({
+          serial_number: serialNumber,
+          device_id: deviceId,
+          level: normalizedLevel,
+          message: logData.message,
+          metadata: logData.metadata || {},
+        });
 
-    // const { error: insertErr } = await supabase
-    //   .schema("display")
-    //   .from("device_logs")
-    //   .insert({
-    //     serial_number: serialNumber,
-    //     device_id: deviceId,
-    //     level: normalizedLevel,
-    //     message: logData.message,
-    //     metadata: logData.metadata || {},
-    //   });
-    //
-    // if (insertErr) {
-    //   console.error("Failed to insert device log:", insertErr);
-    //   return new Response(JSON.stringify({ success: false, error: "Failed to insert log" }), {
-    //     status: 500,
-    //     headers: { ...corsHeaders, "Content-Type": "application/json" },
-    //   });
-    // }
+      if (insertErr) {
+        console.error("Failed to insert device log:", insertErr);
+        // Don't return error - still try to broadcast
+      }
+    }
 
-    // Broadcast to user channel if user_uuid is available
-    if (userUuid) {
+    // Broadcast to device channel for live viewing
+    if (deviceUuid) {
       try {
-        await sendBroadcast(`user:${userUuid}`, "debug_log", {
+        await sendBroadcast(`device:${deviceUuid}`, "debug_log", {
           device_uuid: deviceUuid,
           serial_number: serialNumber,
           level: normalizedLevel,
@@ -251,18 +255,10 @@ Deno.serve(async (req) => {
           metadata: logData.metadata || {},
           ts: Date.now(),
         });
-        console.log(`[insert-device-log] Broadcast successful to user:${userUuid}`);
-      } catch (userBroadcastError) {
-        // Log error but don't fail the request
-        console.error(`[insert-device-log] User channel broadcast failed:`, userBroadcastError);
-        return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+      } catch (broadcastError) {
+        console.error(`[insert-device-log] Broadcast failed:`, broadcastError);
+        // Don't fail the request if broadcast fails but DB insert succeeded
       }
-    } else {
-      // If no user_uuid, still return success but log a warning
-      console.warn(`[insert-device-log] No user_uuid found for device ${serialNumber}, skipping broadcast`);
     }
 
     return new Response(JSON.stringify({ success: true }), {

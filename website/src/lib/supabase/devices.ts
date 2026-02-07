@@ -223,16 +223,15 @@ export async function getDeviceLogsBySerial(
 }
 
 // Subscribe to realtime device logs via Supabase Realtime (broadcast)
-// Now uses user-centric channel: user:{userUuid} with debug_log event
+// Uses device-specific channel: device:{deviceUuid} with debug_log event
 export async function subscribeToDeviceLogs(
-  userUuid: string,
+  deviceUuid: string,
   onLog: (log: DeviceLog) => void,
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
-  deviceUuid?: string, // Optional filter for specific device
 ): Promise<() => void> {
   const supabase = await getSupabase();
-  const channelName = `user:${userUuid}`;
+  const channelName = `device:${deviceUuid}`;
 
   const channel = supabase
     .channel(channelName, {
@@ -255,11 +254,7 @@ export async function subscribeToDeviceLogs(
           ts?: number;
         };
         
-        // Filter by deviceUuid if provided
-        if (deviceUuid && record.device_uuid !== deviceUuid) {
-          return;
-        }
-        
+        // No need to filter by device_uuid - channel is already device-scoped
         onLog({
           id: `${record.device_id ?? record.device_uuid ?? 'unknown'}-${record.ts ?? Date.now()}`,
           device_id: record.device_id ?? record.device_uuid ?? '',
@@ -286,11 +281,7 @@ export async function subscribeToDeviceLogs(
           timestamp?: number;
         };
 
-        // Filter by deviceUuid if provided
-        if (deviceUuid && record.device_uuid !== deviceUuid) {
-          return;
-        }
-
+        // No need to filter by device_uuid - channel is already device-scoped
         // Emit as a special "telemetry" log entry for display in admin panel
         onLog({
           id: `telemetry-${record.device_uuid ?? 'unknown'}-${record.timestamp ?? Date.now()}`,

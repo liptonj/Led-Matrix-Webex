@@ -8,7 +8,9 @@
 #include "../supabase/supabase_realtime.h"
 #include "../supabase/supabase_client.h"
 #include "../core/dependencies.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "RT_WDG";
 
 namespace {
 constexpr unsigned long WATCHDOG_INTERVAL = 30000;    // 30 seconds
@@ -45,7 +47,7 @@ bool checkReconnection(unsigned long current_time, unsigned long& lastInitAttemp
     if (current_time - lastInitAttempt > interval) {
         if (!deps.supabase.isRequestInFlight()) {
             lastInitAttempt = current_time;
-            RLOG_WARN("realtime", "Attempting to reconnect...");
+            ESP_LOGW(TAG, "Attempting to reconnect...");
             return true;  // Signal that reconnection should be attempted
         }
     }
@@ -79,7 +81,7 @@ void updateWatchdogTimer(unsigned long current_time,
         if (current_time - lastSubscribedTime > 60000UL &&
             current_time - lastWatchdogLog > WATCHDOG_INTERVAL) {
             lastWatchdogLog = current_time;
-            RLOG_WARN("realtime", "Watchdog: not fully connected for 60s");
+            ESP_LOGW(TAG, "Watchdog: not fully connected for 60s");
         }
     }
 }

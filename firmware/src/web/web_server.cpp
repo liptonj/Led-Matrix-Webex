@@ -22,9 +22,12 @@
 #include "web_server.h"
 #include "../display/matrix_display.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <esp_ota_ops.h>
+
+static const char* TAG = "WEBSERVER";
 
 // DNS port for captive portal
 #define DNS_PORT 53
@@ -53,7 +56,7 @@ void WebServerManager::stop() {
         return;
     }
     
-    Serial.println("[WEB] Stopping web server...");
+    ESP_LOGI(TAG, "Stopping web server...");
     
     if (server) {
         server->end();
@@ -72,7 +75,7 @@ void WebServerManager::stop() {
     
     running = false;
     captive_portal_active = false;
-    Serial.println("[WEB] Web server stopped, LittleFS unmounted");
+    ESP_LOGI(TAG, "Web server stopped, LittleFS unmounted");
 }
 
 void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManager* modules, MDNSManager* mdns) {
@@ -87,7 +90,7 @@ void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManag
     // Initialize LittleFS for dynamic user content (configs, downloads)
     // Static web assets are now embedded in firmware
     if (!LittleFS.begin(true)) {
-        Serial.println("[WEB] Failed to mount LittleFS (dynamic content may be unavailable)");
+        ESP_LOGW(TAG, "Failed to mount LittleFS (dynamic content may be unavailable)");
     }
 
     // Create server on port 80
@@ -103,7 +106,7 @@ void WebServerManager::begin(ConfigManager* config, AppState* state, ModuleManag
     server->begin();
     running = true;
 
-    Serial.println("[WEB] Web server started on port 80");
+    ESP_LOGI(TAG, "Web server started on port 80");
 }
 
 void WebServerManager::loop() {
@@ -129,9 +132,9 @@ void WebServerManager::setupCaptivePortal() {
     dns_server = new DNSServer();
     if (dns_server->start(DNS_PORT, "*", ap_ip)) {
         captive_portal_active = true;
-        Serial.println("[WEB] Captive portal DNS started");
+        ESP_LOGI(TAG, "Captive portal DNS started");
     } else {
-        Serial.println("[WEB] Failed to start captive portal DNS");
+        ESP_LOGW(TAG, "Failed to start captive portal DNS");
         delete dns_server;
         dns_server = nullptr;
         captive_portal_active = false;
@@ -153,7 +156,7 @@ bool WebServerManager::checkPendingReboot() {
         return false;
     }
     
-    Serial.println("[WEB] Executing pending reboot...");
+    ESP_LOGI(TAG, "Executing pending reboot...");
     
     // Clear display before reboot to prevent DMA corruption
     // The display uses I2S DMA which can leave garbage on screen if not properly cleared
@@ -165,9 +168,9 @@ bool WebServerManager::checkPendingReboot() {
     if (pending_boot_partition) {
         esp_err_t err = esp_ota_set_boot_partition(pending_boot_partition);
         if (err != ESP_OK) {
-            Serial.printf("[WEB] Failed to set boot partition: %s\n", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to set boot partition: %s", esp_err_to_name(err));
         } else {
-            Serial.printf("[WEB] Boot partition set to: %s\n", pending_boot_partition->label);
+            ESP_LOGI(TAG, "Boot partition set to: %s", pending_boot_partition->label);
         }
     }
     

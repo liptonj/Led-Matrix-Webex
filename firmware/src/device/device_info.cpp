@@ -9,9 +9,12 @@
 #include "../auth/device_credentials.h"
 #include "../common/pairing_manager.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <esp_ota_ops.h>
+
+static const char* TAG = "DEVICE";
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "0.0.0-dev"

@@ -5,8 +5,10 @@
 
 #include "device_credentials.h"
 #include "common/nvs_utils.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include <time.h>
+
+static const char* TAG = "AUTH";
 
 #ifndef NATIVE_BUILD
 #include <esp_random.h>
@@ -37,27 +39,27 @@ DeviceCredentials::~DeviceCredentials() {
 }
 
 bool DeviceCredentials::begin() {
-    Serial.println("[CREDS] Initializing device credentials...");
+    ESP_LOGI(TAG, "Initializing device credentials...");
 
     // First, compute serial number from eFuse MAC (always available)
     computeSerialNumber();
-    Serial.printf("[CREDS] Device serial: %s\n", _serialNumber.c_str());
+    ESP_LOGI(TAG, "Device serial: %s", _serialNumber.c_str());
 
     // Try to load existing secret from NVS
     if (loadSecretFromNVS()) {
-        Serial.println("[CREDS] Loaded existing secret from NVS");
+        ESP_LOGI(TAG, "Loaded existing secret from NVS");
         computeKeyHash();
         _provisioned = true;
         return true;
     }
 
     // No existing secret - generate a new one
-    Serial.println("[CREDS] Generating new device secret...");
+    ESP_LOGI(TAG, "Generating new device secret...");
     generateSecret();
 
     // Save to NVS
     if (!saveSecretToNVS()) {
-        RLOG_ERROR("creds", "Failed to save secret to NVS");
+        ESP_LOGE(TAG, "Failed to save secret to NVS");
         clearSecret();
         return false;
     }
@@ -65,8 +67,8 @@ bool DeviceCredentials::begin() {
     // Compute key hash for Supabase registration
     computeKeyHash();
 
-    Serial.println("[CREDS] New secret generated and saved");
-    Serial.printf("[CREDS] Key hash: %s...\n", _keyHash.substring(0, 16).c_str());
+    ESP_LOGI(TAG, "New secret generated and saved");
+    ESP_LOGI(TAG, "Key hash: %s...", _keyHash.substring(0, 16).c_str());
 
     _provisioned = true;
     return true;
@@ -172,7 +174,7 @@ String DeviceCredentials::sha256Hex(const String& data) {
 
 String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
     if (!_provisioned) {
-        RLOG_ERROR("creds", "Cannot sign - not provisioned");
+        ESP_LOGE(TAG, "Cannot sign - not provisioned");
         return "";
     }
 
@@ -192,34 +194,34 @@ String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
 
     const mbedtls_md_info_t* mdInfo = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (mdInfo == nullptr) {
-        RLOG_ERROR("creds", "SHA256 not available");
+        ESP_LOGE(TAG, "SHA256 not available");
         return "";
     }
 
     ret = mbedtls_md_setup(&ctx, mdInfo, 1);  // 1 = use HMAC
     if (ret != 0) {
-        RLOG_ERROR("creds", "HMAC setup failed: %d", ret);
+        ESP_LOGE(TAG, "HMAC setup failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
 
     ret = mbedtls_md_hmac_starts(&ctx, (const uint8_t*)_keyHash.c_str(), _keyHash.length());
     if (ret != 0) {
-        RLOG_ERROR("creds", "HMAC starts failed: %d", ret);
+        ESP_LOGE(TAG, "HMAC starts failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
 
     ret = mbedtls_md_hmac_update(&ctx, (const uint8_t*)message.c_str(), message.length());
     if (ret != 0) {
-        Serial.printf("[CREDS] HMAC update failed: %d\n", ret);
+        ESP_LOGE(TAG, "HMAC update failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
 
     ret = mbedtls_md_hmac_finish(&ctx, hmacResult);
     if (ret != 0) {
-        RLOG_ERROR("creds", "HMAC finish failed: %d", ret);
+        ESP_LOGE(TAG, "HMAC finish failed: %d", ret);
         mbedtls_md_free(&ctx);
         return "";
     }
@@ -232,7 +234,7 @@ String DeviceCredentials::signRequest(uint32_t timestamp, const String& body) {
 
     ret = mbedtls_base64_encode(base64, sizeof(base64), &base64Len, hmacResult, 32);
     if (ret != 0) {
-        Serial.printf("[CREDS] Base64 encoding failed: %d\n", ret);
+        ESP_LOGE(TAG, "Base64 encoding failed: %d", ret);
         return "";
     }
 
@@ -269,7 +271,7 @@ bool DeviceCredentials::resetCredentials() {
     _provisioned = false;
     _keyHash = "";
 
-    Serial.println("[CREDS] Credentials reset - will regenerate on next boot");
+    ESP_LOGI(TAG, "Credentials reset - will regenerate on next boot");
     return true;
 }
 

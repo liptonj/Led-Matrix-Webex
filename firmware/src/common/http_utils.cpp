@@ -5,7 +5,9 @@
 
 #include <Arduino.h>
 #include "http_utils.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "HTTP";
 
 #ifdef ESP32
 #include <esp_heap_caps.h>
@@ -23,7 +25,7 @@ HttpClientBuilder& HttpClientBuilder::withTls(const char* caCert, bool verify, c
     
 #ifdef ESP32
     // Log TLS context for debugging (matching ota_helpers.h pattern)
-    Serial.printf("[HTTP] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
+    ESP_LOGD(TAG, "TLS context: url=%s time=%lu heap=%lu verify=%s",
                   url ? url : "(null)", 
                   (unsigned long)time(nullptr), 
                   ESP.getFreeHeap(),
@@ -61,13 +63,12 @@ HttpClientBuilder& HttpClientBuilder::withAuthHeader(const char* token) {
 
 bool HttpClientBuilder::begin(const char* url) {
     if (!url) {
-        RLOG_ERROR("http", "begin() called with null URL");
+        ESP_LOGE(TAG, "begin() called with null URL");
         return false;
     }
     
     if (!_tlsConfigured) {
-        RLOG_ERROR("http", "begin() called but TLS not configured - call withTls() first");
-        Serial.println("[HTTP] Error: TLS not configured - call withTls() before begin()");
+        ESP_LOGE(TAG, "begin() called but TLS not configured - call withTls() first");
         return false;
     }
     
@@ -104,10 +105,8 @@ bool handleHttpError(HTTPClient& http, int httpCode, const char* context) {
             case -11: errorDesc = "read_timeout"; break;
             default: break;
         }
-        RLOG_ERROR("http", "%s failed: network error %d (%s)", 
+        ESP_LOGE(TAG, "%s failed: network error %d (%s)", 
                    context ? context : "request", httpCode, errorDesc);
-        Serial.printf("[HTTP] %s failed: network error %d (%s)\n",
-                      context ? context : "request", httpCode, errorDesc);
         return false;
     }
     
@@ -124,11 +123,10 @@ bool handleHttpError(HTTPClient& http, int httpCode, const char* context) {
         // Note: HTTPClient doesn't support seeking, so we store it
     }
     
-    RLOG_ERROR("http", "%s failed: HTTP %d", context ? context : "request", httpCode);
-    Serial.printf("[HTTP] %s failed: HTTP %d\n", context ? context : "request", httpCode);
+    ESP_LOGE(TAG, "%s failed: HTTP %d", context ? context : "request", httpCode);
     
     if (!errorPayload.isEmpty() && errorPayload.length() < 200) {
-        Serial.printf("[HTTP] Error response: %s\n", errorPayload.c_str());
+        ESP_LOGE(TAG, "Error response: %s", errorPayload.c_str());
     }
     
     return false;
@@ -139,8 +137,7 @@ bool parseJsonResponse(HTTPClient& http, JsonDocument& doc, const char* context)
     String response = getResponseString(http);
     
     if (response.isEmpty()) {
-        RLOG_ERROR("http", "%s: empty response", context ? context : "parse");
-        Serial.printf("[HTTP] %s: empty response\n", context ? context : "parse");
+        ESP_LOGE(TAG, "%s: empty response", context ? context : "parse");
         return false;
     }
     
@@ -148,12 +145,10 @@ bool parseJsonResponse(HTTPClient& http, JsonDocument& doc, const char* context)
     DeserializationError error = deserializeJson(doc, response);
     
     if (error) {
-        RLOG_ERROR("http", "%s: JSON parse error: %s", 
+        ESP_LOGE(TAG, "%s: JSON parse error: %s", 
                    context ? context : "parse", error.c_str());
-        Serial.printf("[HTTP] %s: JSON parse error: %s\n",
-                      context ? context : "parse", error.c_str());
         if (response.length() < 200) {
-            Serial.printf("[HTTP] Response was: %s\n", response.c_str());
+            ESP_LOGE(TAG, "Response was: %s", response.c_str());
         }
         return false;
     }

@@ -11,9 +11,11 @@
 
 #include "web/web_server.h"
 #include "webex/webex_client.h"
-#include "debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "display/matrix_display.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "WEB_LOOP";
 
 // =============================================================================
 // WEB SERVER HANDLER
@@ -47,9 +49,9 @@ bool handleWebServer(LoopContext& ctx) {
         ctx.app_state->webex_authenticated = auth_ok;
         ctx.web_server->clearPendingOAuth();
         if (auth_ok) {
-            RLOG_INFO("Webex", "OAuth authentication successful");
+            ESP_LOGI(TAG, "OAuth authentication successful");
         } else {
-            RLOG_ERROR("Webex", "OAuth authentication failed");
+            ESP_LOGE(TAG, "OAuth authentication failed");
         }
     }
 

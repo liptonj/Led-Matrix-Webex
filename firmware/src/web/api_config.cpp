@@ -15,9 +15,12 @@
 #include "../config/pin_config.h"
 #include "../common/board_utils.h"
 #include "../auth/device_credentials.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
+
+static const char* TAG = "API_CFG";
 
 void WebServerManager::handleConfig(AsyncWebServerRequest* request) {
     auto& deps = getDependencies();
@@ -153,7 +156,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         
         // Reject oversized requests early
         if (total > MAX_CONFIG_BODY_SIZE) {
-            Serial.printf("[WEB] Config body too large: %zu bytes (max %d)\n", total, MAX_CONFIG_BODY_SIZE);
+            ESP_LOGW(TAG, "Config body too large: %zu bytes (max %d)", total, MAX_CONFIG_BODY_SIZE);
             sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
             return;
         }
@@ -166,7 +169,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (len > 0) {
         // Prevent buffer overflow during accumulation
         if (config_body_buffer.length() + len > MAX_CONFIG_BODY_SIZE) {
-            Serial.printf("[WEB] Config buffer overflow prevented: %zu + %zu > %d\n",
+            ESP_LOGW(TAG, "Config buffer overflow prevented: %zu + %zu > %d",
                           config_body_buffer.length(), len, MAX_CONFIG_BODY_SIZE);
             sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
             config_body_buffer = "";  // Reset buffer
@@ -183,11 +186,11 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
 
     const String body = config_body_buffer;
 
-    Serial.printf("[WEB] Received config save request (length: %d bytes)\n", body.length());
+    ESP_LOGI(TAG, "Received config save request (length: %d bytes)", body.length());
 
     // Final size check (defense in depth)
     if (body.length() > MAX_CONFIG_BODY_SIZE) {
-        Serial.printf("[WEB] Config body too large: %d bytes (max %d)\n", body.length(), MAX_CONFIG_BODY_SIZE);
+        ESP_LOGW(TAG, "Config body too large: %d bytes (max %d)", body.length(), MAX_CONFIG_BODY_SIZE);
         sendErrorResponse(request, 413, "Request body too large", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
@@ -196,7 +199,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     DeserializationError error = deserializeJson(doc, body);
 
     if (error) {
-        Serial.printf("[WEB] Failed to parse JSON: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse JSON: %s", error.c_str());
         sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
@@ -210,10 +213,10 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             if (isPrintableAscii(device_name)) {
                 config_manager->setDeviceName(device_name);
             } else {
-                Serial.println("[WEB] Invalid device_name: non-printable characters");
+                ESP_LOGW(TAG, "Invalid device_name: non-printable characters");
             }
         } else {
-            Serial.printf("[WEB] Invalid device_name length: %d (max 64)\n", device_name.length());
+            ESP_LOGW(TAG, "Invalid device_name length: %d (max 64)", device_name.length());
         }
     }
     if (doc["display_name"].is<const char*>()) {
@@ -223,10 +226,10 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             if (isPrintableAscii(display_name)) {
                 config_manager->setDisplayName(display_name);
             } else {
-                Serial.println("[WEB] Invalid display_name: non-printable characters");
+                ESP_LOGW(TAG, "Invalid display_name: non-printable characters");
             }
         } else {
-            Serial.printf("[WEB] Invalid display_name length: %d (max 64)\n", display_name.length());
+            ESP_LOGW(TAG, "Invalid display_name length: %d (max 64)", display_name.length());
         }
     }
     if (doc["brightness"].is<int>()) {
@@ -235,7 +238,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (brightness >= 0 && brightness <= 255) {
             config_manager->setBrightness(static_cast<uint8_t>(brightness));
         } else {
-            Serial.printf("[WEB] Invalid brightness: %d (must be 0-255)\n", brightness);
+            ESP_LOGW(TAG, "Invalid brightness: %d (must be 0-255)", brightness);
         }
     }
     if (doc["scroll_speed_ms"].is<int>()) {
@@ -244,7 +247,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (scroll_speed >= 10 && scroll_speed <= 10000) {
             config_manager->setScrollSpeedMs(static_cast<uint16_t>(scroll_speed));
         } else {
-            Serial.printf("[WEB] Invalid scroll_speed_ms: %d (must be 10-10000)\n", scroll_speed);
+            ESP_LOGW(TAG, "Invalid scroll_speed_ms: %d (must be 10-10000)", scroll_speed);
         }
     }
     if (doc["page_interval_ms"].is<int>()) {
@@ -253,7 +256,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (page_interval >= 100 && page_interval <= 60000) {
             config_manager->setPageIntervalMs(static_cast<uint16_t>(page_interval));
         } else {
-            Serial.printf("[WEB] Invalid page_interval_ms: %d (must be 100-60000)\n", page_interval);
+            ESP_LOGW(TAG, "Invalid page_interval_ms: %d (must be 100-60000)", page_interval);
         }
     }
     if (doc["sensor_page_enabled"].is<bool>()) {
@@ -283,7 +286,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (poll_interval >= 5 && poll_interval <= 300) {
             config_manager->setWebexPollInterval(static_cast<uint16_t>(poll_interval));
         } else {
-            Serial.printf("[WEB] Invalid poll_interval: %d (must be 5-300)\n", poll_interval);
+            ESP_LOGW(TAG, "Invalid poll_interval: %d (must be 5-300)", poll_interval);
         }
     }
     if (doc["xapi_poll_interval"].is<int>()) {
@@ -292,7 +295,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (xapi_poll_interval >= 1 && xapi_poll_interval <= 60) {
             config_manager->setXAPIPollInterval(static_cast<uint16_t>(xapi_poll_interval));
         } else {
-            Serial.printf("[WEB] Invalid xapi_poll_interval: %d (must be 1-60)\n", xapi_poll_interval);
+            ESP_LOGW(TAG, "Invalid xapi_poll_interval: %d (must be 1-60)", xapi_poll_interval);
         }
     }
     if (doc["xapi_device_id"].is<const char*>()) {
@@ -301,7 +304,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         if (device_id.length() <= 128) {
             config_manager->setXAPIDeviceId(device_id);
         } else {
-            Serial.printf("[WEB] Invalid xapi_device_id length: %d (max 128)\n", device_id.length());
+            ESP_LOGW(TAG, "Invalid xapi_device_id length: %d (max 128)", device_id.length());
         }
     }
     // Webex credentials - only save if both fields provided
@@ -311,11 +314,11 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
 
         if (!client_id.isEmpty() && !client_secret.isEmpty()) {
             config_manager->setWebexCredentials(client_id, client_secret);
-            Serial.printf("[WEB] Webex credentials saved - Client ID: %s***\n", client_id.substring(0, 8).c_str());
+            ESP_LOGI(TAG, "Webex credentials saved - Client ID: %s***", client_id.substring(0, 8).c_str());
         } else if (client_id.isEmpty() && client_secret.isEmpty()) {
-            Serial.println("[WEB] Empty Webex credentials provided - skipping save");
+            ESP_LOGI(TAG, "Empty Webex credentials provided - skipping save");
         } else {
-            Serial.println("[WEB] Warning: Only one Webex credential field provided");
+            ESP_LOGW(TAG, "Warning: Only one Webex credential field provided");
         }
     }
 
@@ -330,7 +333,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
             if (port_val >= 1 && port_val <= 65535) {
                 port = static_cast<uint16_t>(port_val);
             } else {
-                Serial.printf("[WEB] Invalid mqtt_port: %d (must be 1-65535), using default 1883\n", port_val);
+                ESP_LOGW(TAG, "Invalid mqtt_port: %d (must be 1-65535), using default 1883", port_val);
             }
         }
         
@@ -345,25 +348,25 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
                 String newPassword = doc["mqtt_password"].as<String>();
                 if (!newPassword.isEmpty()) {
                     password = newPassword;
-                    Serial.println("[WEB] MQTT password updated");
+                    ESP_LOGI(TAG, "MQTT password updated");
                 } else {
                     // Empty string provided - keep existing password
                     password = config_manager->getMQTTPassword();
-                    Serial.println("[WEB] Empty MQTT password provided - keeping existing");
+                    ESP_LOGI(TAG, "Empty MQTT password provided - keeping existing");
                 }
             } else {
                 // Field not provided - keep existing password
                 password = config_manager->getMQTTPassword();
-                Serial.println("[WEB] MQTT password not provided - keeping existing");
+                ESP_LOGI(TAG, "MQTT password not provided - keeping existing");
             }
 
             config_manager->setMQTTConfig(broker, port, username, password, topic);
             auto& deps = getDependencies();
             deps.mqtt.invalidateConfig();  // Force reconnect with new settings
-            Serial.printf("[WEB] MQTT config saved - Broker: %s:%d, Username: %s\n",
+            ESP_LOGI(TAG, "MQTT config saved - Broker: %s:%d, Username: %s",
                          broker.c_str(), port, username.isEmpty() ? "(none)" : username.c_str());
         } else {
-            Serial.printf("[WEB] Invalid mqtt_broker length: %d (must be 1-256)\n", broker.length());
+            ESP_LOGW(TAG, "Invalid mqtt_broker length: %d (must be 1-256)", broker.length());
         }
     }
 
@@ -372,13 +375,13 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
         String macs = doc["sensor_macs"].as<String>();
         config_manager->setSensorMacs(macs);
         if (!macs.isEmpty()) {
-            Serial.printf("[WEB] Sensor MACs saved: %s\n", macs.c_str());
+            ESP_LOGI(TAG, "Sensor MACs saved: %s", macs.c_str());
         }
     } else if (doc["sensor_serial"].is<const char*>()) {
         String serial = doc["sensor_serial"].as<String>();
         config_manager->setSensorSerial(serial);
         if (!serial.isEmpty()) {
-            Serial.printf("[WEB] Sensor serial saved: %s\n", serial.c_str());
+            ESP_LOGI(TAG, "Sensor serial saved: %s", serial.c_str());
         }
     }
     if (doc["display_sensor_mac"].is<const char*>()) {
@@ -398,7 +401,7 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     // Allow clearing the failed OTA version to retry auto-updates
     if (doc["clear_failed_ota"].is<bool>() && doc["clear_failed_ota"].as<bool>()) {
         config_manager->clearFailedOTAVersion();
-        Serial.println("[CONFIG] Cleared failed OTA version marker");
+        ESP_LOGI(TAG, "Cleared failed OTA version marker");
     }
     if (doc["supabase_url"].is<const char*>()) {
         config_manager->setSupabaseUrl(doc["supabase_url"].as<const char*>());
@@ -441,10 +444,9 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (doc["debug_mode"].is<bool>()) {
         bool debug_mode = doc["debug_mode"].as<bool>();
         config_manager->setDebugMode(debug_mode);
-        // Update global flag immediately so logging takes effect
-        auto& deps = getDependencies();
-        deps.debug_mode = debug_mode;
-        Serial.printf("[WEB] Debug mode %s\n", debug_mode ? "enabled" : "disabled");
+        // Update ESP-IDF log level immediately so logging takes effect
+        esp_log_level_set("*", debug_mode ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+        ESP_LOGI(TAG, "Debug mode %s", debug_mode ? "enabled" : "disabled");
     }
     if (doc["pairing_realtime_debug"].is<bool>()) {
         bool pairing_debug = doc["pairing_realtime_debug"].as<bool>();
@@ -453,20 +455,20 @@ void WebServerManager::handleSaveConfig(AsyncWebServerRequest* request, uint8_t*
     if (doc["tls_verify"].is<bool>()) {
         bool tls_verify = doc["tls_verify"].as<bool>();
         config_manager->setTlsVerify(tls_verify);
-        Serial.printf("[WEB] TLS verify %s\n", tls_verify ? "enabled" : "disabled");
+        ESP_LOGI(TAG, "TLS verify %s", tls_verify ? "enabled" : "disabled");
     }
 
     if (time_config_updated) {
         applyTimeConfig(*config_manager, app_state);
     }
 
-    Serial.println("[WEB] Configuration save complete");
+    ESP_LOGI(TAG, "Configuration save complete");
 
     sendSuccessResponse(request, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
 void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
-    Serial.println("[WEB] GET /api/config/pins requested");
+    ESP_LOGI(TAG, "GET /api/config/pins requested");
     
     JsonDocument doc;
     
@@ -475,7 +477,7 @@ void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
     String chipDesc = getChipDescription();
     doc["board_type"] = boardType;
     doc["chip_description"] = chipDesc;
-    Serial.printf("[WEB] Board: %s, Chip: %s\n", boardType.c_str(), chipDesc.c_str());
+    ESP_LOGI(TAG, "Board: %s, Chip: %s", boardType.c_str(), chipDesc.c_str());
     
     // Current preset
     PinPreset preset = config_manager->getPinPreset();
@@ -483,7 +485,7 @@ void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
     doc["preset_name"] = getPresetName(preset);
     doc["default_preset"] = static_cast<uint8_t>(getDefaultPresetForBoard());
     doc["default_preset_name"] = getPresetName(getDefaultPresetForBoard());
-    Serial.printf("[WEB] Preset: %d (%s)\n", static_cast<int>(preset), getPresetName(preset));
+    ESP_LOGI(TAG, "Preset: %d (%s)", static_cast<int>(preset), getPresetName(preset));
     
     // Current effective pins
     PinConfig pins = config_manager->getPinConfig();
@@ -511,7 +513,7 @@ void WebServerManager::handleGetPinConfig(AsyncWebServerRequest* request) {
         p["name"] = getPresetName(static_cast<PinPreset>(i));
     }
     
-    Serial.printf("[WEB] Pin config response: %d presets, heap=%lu\n", 
+    ESP_LOGI(TAG, "Pin config response: %d presets, heap=%lu", 
                   static_cast<int>(PinPreset::PRESET_COUNT), (unsigned long)ESP.getFreeHeap());
     sendJsonResponse(request, 200, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
@@ -523,7 +525,7 @@ void WebServerManager::handleSavePinConfig(AsyncWebServerRequest* request, uint8
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        Serial.printf("[WEB] Failed to parse pin config JSON: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse pin config JSON: %s", error.c_str());
         sendErrorResponse(request, 400, "Invalid JSON", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
         return;
     }
@@ -534,7 +536,7 @@ void WebServerManager::handleSavePinConfig(AsyncWebServerRequest* request, uint8
         if (preset_id >= 0 && preset_id < static_cast<int>(PinPreset::PRESET_COUNT)) {
             PinPreset preset = static_cast<PinPreset>(preset_id);
             config_manager->setPinPreset(preset);
-            Serial.printf("[WEB] Pin preset set to: %s\n", getPresetName(preset));
+            ESP_LOGI(TAG, "Pin preset set to: %s", getPresetName(preset));
             
             // If custom preset, also save custom pins
             if (preset == PinPreset::CUSTOM && doc["pins"].is<JsonObject>()) {
@@ -557,16 +559,16 @@ void WebServerManager::handleSavePinConfig(AsyncWebServerRequest* request, uint8
                 
                 if (pins.isValid()) {
                     config_manager->setCustomPins(pins);
-                    Serial.println("[WEB] Custom pins saved");
+                    ESP_LOGI(TAG, "Custom pins saved");
                 } else {
-                    Serial.println("[WEB] Invalid custom pins - some required pins are missing");
+                    ESP_LOGW(TAG, "Invalid custom pins - some required pins are missing");
                     sendErrorResponse(request, 400, "Invalid pin configuration - required pins missing", 
                                       [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
                     return;
                 }
             }
         } else {
-            Serial.printf("[WEB] Invalid preset ID: %d\n", preset_id);
+            ESP_LOGW(TAG, "Invalid preset ID: %d", preset_id);
             sendErrorResponse(request, 400, "Invalid preset ID", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
             return;
         }

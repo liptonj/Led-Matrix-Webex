@@ -41,12 +41,27 @@ struct RealtimeMessage {
     String event;          // insert, update, delete
     String table;          // Table name
     String schema;         // Schema name (display)
+    String topic;          // Channel topic for routing
     JsonDocument payload;  // Full payload
     bool valid;
 };
 
 // Message handler callback type
 typedef void (*RealtimeMessageHandler)(const RealtimeMessage& msg);
+
+/**
+ * @brief Per-channel state for multi-channel subscriptions
+ */
+struct ChannelState {
+    String topic;
+    bool subscribed;
+    bool privateChannel;
+    int joinRef;
+    String lastJoinPayload;
+    String pendingJoinMessage;
+    bool pendingJoin;
+    ChannelState() : subscribed(false), privateChannel(false), joinRef(0), pendingJoin(false) {}
+};
 
 /**
  * @brief Supabase Realtime Client (Phoenix Protocol)
@@ -80,9 +95,9 @@ public:
 
     /**
      * @brief Check if connected to realtime
-     * @return true if connected and subscribed
+     * @return true if connected and at least one channel subscribed
      */
-    bool isConnected() const { return _connected && _subscribed; }
+    bool isConnected() const;
     bool isSocketConnected() const { return _connected; }
     bool isConnecting() const { return _connecting; }
     uint32_t connectingDurationMs() const;
@@ -130,6 +145,20 @@ public:
     bool subscribeToUserChannel(const String& user_uuid);
 
     /**
+     * @brief Subscribe to device channel (device:{device_uuid}) for device-specific events
+     * @param device_uuid Device UUID to subscribe to
+     * @return true if subscription request sent
+     */
+    bool subscribeToDeviceChannel(const String& device_uuid);
+
+    /**
+     * @brief Check if a specific channel is subscribed
+     * @param topic Channel topic to check
+     * @return true if channel is subscribed
+     */
+    bool isChannelSubscribed(const String& topic) const;
+
+    /**
      * @brief Send a broadcast message on the current channel
      * @param event Event name (e.g., "command_ack", "debug_log")
      * @param data JSON payload to broadcast
@@ -138,6 +167,15 @@ public:
      *       connection is not available, the broadcast will fail silently.
      */
     bool sendBroadcast(const String& event, const JsonDocument& data);
+
+    /**
+     * @brief Send a broadcast message on a specific channel topic
+     * @param topic Channel topic to broadcast on
+     * @param event Event name
+     * @param data JSON payload to broadcast
+     * @return true if broadcast sent successfully
+     */
+    bool sendBroadcast(const String& topic, const String& event, const JsonDocument& data);
 
     /**
      * @brief Unsubscribe from current channel
@@ -260,6 +298,25 @@ private:
      * @brief Attempt reconnection
      */
     void attemptReconnect();
+
+    /**
+     * @brief Find channel by topic
+     * @param topic Channel topic to find
+     * @return Pointer to channel state, or nullptr if not found
+     */
+    ChannelState* findChannel(const String& topic);
+    const ChannelState* findChannel(const String& topic) const;
+    int findChannelIndex(const String& topic) const;
+
+private:
+    // Multi-channel support constants
+    static constexpr size_t MAX_CHANNELS = 2;
+    static constexpr size_t CHANNEL_USER = 0;
+    static constexpr size_t CHANNEL_DEVICE = 1;
+
+    // Multi-channel state
+    ChannelState _channels[MAX_CHANNELS];
+    size_t _channelCount = 0;
 
 };
 

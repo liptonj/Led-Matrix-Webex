@@ -11,13 +11,16 @@
 #include "web_helpers.h"
 #include "../meraki/mqtt_client.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "API_MQTT";
 
 void WebServerManager::handleClearMQTT(AsyncWebServerRequest* request) {
     auto& deps = getDependencies();
     config_manager->setMQTTConfig("", 1883, "", "", "");
     deps.mqtt.invalidateConfig();  // Clear cached config
-    Serial.println("[WEB] MQTT configuration cleared");
+    ESP_LOGI(TAG, "MQTT configuration cleared");
     sendSuccessResponse(request, "MQTT configuration cleared", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
 
@@ -34,7 +37,7 @@ void WebServerManager::handleMQTTDebug(AsyncWebServerRequest* request, uint8_t* 
     bool enabled = doc["enabled"] | false;
     deps.mqtt.setDebugEnabled(enabled);
 
-    Serial.printf("[WEB] MQTT debug logging %s\n", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "MQTT debug logging %s", enabled ? "enabled" : "disabled");
 
     JsonDocument resp;
     resp["success"] = true;

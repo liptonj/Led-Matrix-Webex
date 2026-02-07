@@ -5,7 +5,10 @@
 
 #include "time_manager.h"
 #include "time_zones.h"
+#include "../debug/log_system.h"
 #include <time.h>
+
+static const char* TAG = "TIME";
 
 namespace {
 bool looksLikePosixTimeZone(const String& value) {
@@ -43,7 +46,7 @@ bool applyTimeConfig(const ConfigManager& config, AppState* state) {
             // Treat unknown values as a direct POSIX TZ string.
             posix_tz = time_zone_id.c_str();
         } else {
-            Serial.printf("[TIME] Unknown time zone '%s', falling back to UTC\n",
+            ESP_LOGW(TAG, "Unknown time zone '%s', falling back to UTC",
                           time_zone_id.c_str());
             posix_tz = "UTC0";
         }
@@ -65,7 +68,7 @@ bool syncTime(AppState* state) {
         return false;
     }
 
-    Serial.println("[TIME] Waiting for NTP sync...");
+    ESP_LOGI(TAG, "Waiting for NTP sync...");
     struct tm timeinfo;
     int attempts = 0;
     while (!getLocalTime(&timeinfo) && attempts < 20) {
@@ -75,12 +78,12 @@ bool syncTime(AppState* state) {
 
     if (getLocalTime(&timeinfo)) {
         state->time_synced = true;
-        Serial.printf("[TIME] Time synced: %02d:%02d:%02d\n",
+        ESP_LOGI(TAG, "Time synced: %02d:%02d:%02d",
                       timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
         return true;
     }
 
     state->time_synced = false;
-    Serial.println("[TIME] Failed to sync time");
+    ESP_LOGE(TAG, "Failed to sync time");
     return false;
 }

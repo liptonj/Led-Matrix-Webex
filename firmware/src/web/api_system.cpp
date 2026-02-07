@@ -13,7 +13,10 @@
 #include "../common/pairing_manager.h"
 #include "../supabase/supabase_client.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "API_SYS";
 
 void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
     sendSuccessResponse(request, "Rebooting...", [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
@@ -21,13 +24,13 @@ void WebServerManager::handleReboot(AsyncWebServerRequest* request) {
     pending_reboot = true;
     pending_reboot_time = millis() + 500;
     pending_boot_partition = nullptr;
-    Serial.println("[WEB] Reboot scheduled");
+    ESP_LOGI(TAG, "Reboot scheduled");
 }
 
 void WebServerManager::handleFactoryReset(AsyncWebServerRequest* request) {
     // Factory reset is disabled for web API - must be done locally via serial console
     // This prevents accidentally breaking the connection to Supabase
-    Serial.println("[WEB] Factory reset rejected - must be performed locally via serial");
+    ESP_LOGI(TAG, "Factory reset rejected - must be performed locally via serial");
     sendErrorResponse(request, 403, "Factory reset must be performed locally via serial console",
                       [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
 }
@@ -37,7 +40,7 @@ void WebServerManager::handleRegeneratePairingCode(AsyncWebServerRequest* reques
     String newCode = deps.pairing.generateCode(true);
     deps.supabase.setPairingCode(newCode);
     app_state->supabase_realtime_resubscribe = true;
-    Serial.println("[WEB] New pairing code generated");
+    ESP_LOGI(TAG, "New pairing code generated");
 
     JsonDocument doc;
     doc["success"] = true;

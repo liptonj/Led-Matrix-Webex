@@ -8,8 +8,10 @@
 
 #include "supabase_realtime.h"
 #include "../config/config_manager.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "PHOENIX";
 
 namespace {
 String buildRedactedJoinPayload(const JsonDocument& payload) {
@@ -55,7 +57,7 @@ bool SupabaseRealtime::parsePhoenixMessage(const String& message, String& topic,
     DeserializationError error = deserializeJson(doc, message);
     
     if (error) {
-        RLOG_ERROR("realtime", "Parse error: %s", error.c_str());
+        ESP_LOGE(TAG, "Parse error: %s", error.c_str());
         return false;
     }
 
@@ -84,7 +86,7 @@ bool SupabaseRealtime::parsePhoenixMessage(const String& message, String& topic,
 
     // Legacy Phoenix array format: [join_ref, ref, topic, event, payload]
     if (!doc.is<JsonArray>() || doc.size() < 5) {
-        Serial.println("[REALTIME] Invalid message format");
+        ESP_LOGW(TAG, "Invalid message format");
         return false;
     }
     
@@ -116,7 +118,7 @@ void SupabaseRealtime::sendHeartbeat() {
     JsonDocument emptyPayload;
     String message = buildPhoenixMessage("phoenix", "heartbeat", emptyPayload);
     if (_client && esp_websocket_client_is_connected(_client)) {
-        Serial.printf("[REALTIME] Sending heartbeat (ref=%d)\n", _msgRef);
+        ESP_LOGD(TAG, "Sending heartbeat (ref=%d)", _msgRef);
         esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
 
@@ -129,14 +131,29 @@ void SupabaseRealtime::sendAccessToken() {
     if (!_client || !esp_websocket_client_is_connected(_client)) {
         return;
     }
-    if (_accessToken.isEmpty() || _channelTopic.isEmpty()) {
+    if (_accessToken.isEmpty()) {
         return;
     }
-    _msgRef++;
-    JsonDocument payload;
-    payload["access_token"] = _accessToken;
-    String message = buildPhoenixMessage(_channelTopic, "access_token", payload, _msgRef);
-    esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    
+    // Send access token to all private channels
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].privateChannel && !_channels[i].topic.isEmpty()) {
+            _msgRef++;
+            JsonDocument payload;
+            payload["access_token"] = _accessToken;
+            String message = buildPhoenixMessage(_channels[i].topic, "access_token", payload, _msgRef);
+            esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+        }
+    }
+    
+    // Legacy fallback: send to _channelTopic if no channels registered
+    if (_channelCount == 0 && !_channelTopic.isEmpty() && _privateChannel) {
+        _msgRef++;
+        JsonDocument payload;
+        payload["access_token"] = _accessToken;
+        String message = buildPhoenixMessage(_channelTopic, "access_token", payload, _msgRef);
+        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    }
 }
 
 bool SupabaseRealtime::subscribe(const String& schema, const String& table,
@@ -153,7 +170,7 @@ bool SupabaseRealtime::subscribeBroadcast() {
 
 bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
     if (user_uuid.isEmpty()) {
-        Serial.println("[REALTIME] Cannot subscribe to user channel - user_uuid is empty");
+        ESP_LOGW(TAG, "Cannot subscribe to user channel - user_uuid is empty");
         return false;
     }
     
@@ -166,7 +183,7 @@ bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
     String channelTopic = "realtime:user:" + user_uuid;
     setChannelTopic(channelTopic);
     
-    RLOG_INFO("realtime", "Subscribing to user channel: %s", channelTopic.c_str());
+    ESP_LOGI(TAG, "Subscribing to user channel: %s", channelTopic.c_str());
     
     // Subscribe as private broadcast channel (no postgres_changes)
     _privateChannel = true;
@@ -178,9 +195,9 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
                                           bool includePostgresChanges) {
     if (!_connected) {
         if (_client) {
-            Serial.println("[REALTIME] Not connected yet - will queue subscription");
+            ESP_LOGI(TAG, "Not connected yet - will queue subscription");
         } else {
-            Serial.println("[REALTIME] Cannot subscribe - not connected");
+            ESP_LOGW(TAG, "Cannot subscribe - not connected");
             return false;
         }
     }
@@ -189,17 +206,17 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     if (includePostgresChanges) {
         _privateChannel = false;
         if (tableCount <= 0 || tableCount > 10) {
-            Serial.printf("[REALTIME] Invalid table count: %d (must be 1-10)\n", tableCount);
+            ESP_LOGW(TAG, "Invalid table count: %d (must be 1-10)", tableCount);
             return false;
         }
         
         if (tables == nullptr) {
-            Serial.println("[REALTIME] Tables array is null");
+            ESP_LOGW(TAG, "Tables array is null");
             return false;
         }
         
         if (schema.isEmpty()) {
-            Serial.println("[REALTIME] Schema is empty");
+            ESP_LOGW(TAG, "Schema is empty");
             return false;
         }
     }
@@ -207,8 +224,8 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     // Check heap before proceeding (need at least 20KB for JSON operations)
     const uint32_t min_heap = 20000;
     if (ESP.getFreeHeap() < min_heap) {
-        Serial.printf("[REALTIME] Insufficient heap for subscription (%lu < %lu)\n",
-                      ESP.getFreeHeap(), (unsigned long)min_heap);
+        ESP_LOGW(TAG, "Insufficient heap for subscription (%lu < %lu)",
+                 ESP.getFreeHeap(), (unsigned long)min_heap);
         return false;
     }
     
@@ -216,11 +233,11 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     if (includePostgresChanges) {
         for (int i = 0; i < tableCount; i++) {
             if (tables[i].isEmpty()) {
-                Serial.printf("[REALTIME] Table %d is empty\n", i);
+                ESP_LOGW(TAG, "Table %d is empty", i);
                 return false;
             }
             if (tables[i].length() > 64) {
-                Serial.printf("[REALTIME] Table name too long: %s\n", tables[i].c_str());
+                ESP_LOGW(TAG, "Table name too long: %s", tables[i].c_str());
                 return false;
             }
         }
@@ -243,14 +260,14 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     // ArduinoJson will allocate as needed, but we check heap to ensure we have enough
     size_t estimatedSize = 512 + (tableCount * 200) + filter.length() + _accessToken.length();
     if (ESP.getFreeHeap() < estimatedSize + 10000) {  // Add 10KB buffer
-        Serial.printf("[REALTIME] WARNING: Low heap (%lu bytes) for %d tables (estimated %zu bytes needed)\n",
-                      ESP.getFreeHeap(), tableCount, estimatedSize);
+        ESP_LOGW(TAG, "WARNING: Low heap (%lu bytes) for %d tables (estimated %zu bytes needed)",
+                 ESP.getFreeHeap(), tableCount, estimatedSize);
         // Continue anyway - ArduinoJson will handle memory allocation
     }
     
     JsonObject config = payload["config"].to<JsonObject>();
     if (config.isNull()) {
-        RLOG_ERROR("realtime", "Failed to create config object");
+        ESP_LOGE(TAG, "Failed to create config object");
         return false;
     }
     
@@ -264,7 +281,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         // Add postgres_changes subscription for each table
         JsonArray pgChanges = config["postgres_changes"].to<JsonArray>();
         if (pgChanges.isNull()) {
-            Serial.println("[REALTIME] Failed to create postgres_changes array");
+            ESP_LOGW(TAG, "Failed to create postgres_changes array");
             return false;
         }
         
@@ -272,7 +289,7 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
         for (int i = 0; i < tableCount; i++) {
             JsonObject change = pgChanges.add<JsonObject>();
             if (change.isNull()) {
-                Serial.printf("[REALTIME] Failed to add table %d to postgres_changes\n", i);
+                ESP_LOGW(TAG, "Failed to add table %d to postgres_changes", i);
                 return false;
             }
             
@@ -282,9 +299,9 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
             if (kIncludeFilter && !filter.isEmpty()) {
                 change["filter"] = filter;
             }
-            Serial.printf("[REALTIME] Adding subscription: %s.%s (filter: %s)\n",
-                          schema.c_str(), tables[i].c_str(), 
-                          (kIncludeFilter && !filter.isEmpty()) ? filter.c_str() : "none");
+            ESP_LOGI(TAG, "Adding subscription: %s.%s (filter: %s)",
+                     schema.c_str(), tables[i].c_str(), 
+                     (kIncludeFilter && !filter.isEmpty()) ? filter.c_str() : "none");
         }
     }
     
@@ -302,17 +319,17 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
                 tableList += tables[i];
             }
         }
-        Serial.printf("[REALTIME] Join details: schema=%s tables=%s filter=%s topic=%s token_len=%d\n",
-                      includePostgresChanges ? schema.c_str() : "none",
-                      tableList.c_str(),
-                      (includePostgresChanges && !filter.isEmpty()) ? filter.c_str() : "none",
-                      _channelTopic.c_str(),
-                      _accessToken.length());
+        ESP_LOGI(TAG, "Join details: schema=%s tables=%s filter=%s topic=%s token_len=%d",
+                 includePostgresChanges ? schema.c_str() : "none",
+                 tableList.c_str(),
+                 (includePostgresChanges && !filter.isEmpty()) ? filter.c_str() : "none",
+                 _channelTopic.c_str(),
+                 _accessToken.length());
         _loggedJoinDetails = true;
     }
     
     String payloadJson = buildRedactedJoinPayload(payload);
-    Serial.printf("[REALTIME] Join payload (redacted): %s\n", payloadJson.c_str());
+    ESP_LOGD(TAG, "Join payload (redacted): %s", payloadJson.c_str());
 
     // Build Phoenix message
     String message = buildPhoenixMessage(_channelTopic, "phx_join", payload, _joinRef);
@@ -322,37 +339,37 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
     
     // Validate message was built successfully
     if (message.isEmpty()) {
-        RLOG_ERROR("realtime", "Failed to build Phoenix message");
+        ESP_LOGE(TAG, "Failed to build Phoenix message");
         return false;
     }
     
     if (message.length() > 4096) {
-        Serial.printf("[REALTIME] WARNING: Message very large (%zu bytes)\n", message.length());
+        ESP_LOGW(TAG, "WARNING: Message very large (%zu bytes)", message.length());
     }
     
     // Debug: log first 500 chars of message for troubleshooting
     if (!_loggedJoinDetails) {
         String msgPreview = message.substring(0, 500);
-        Serial.printf("[REALTIME] Join message preview (%zu bytes): %s%s\n",
-                      message.length(), msgPreview.c_str(),
-                      message.length() > 500 ? "..." : "");
+        ESP_LOGD(TAG, "Join message preview (%zu bytes): %s%s",
+                 message.length(), msgPreview.c_str(),
+                 message.length() > 500 ? "..." : "");
     }
     
-    Serial.printf("[REALTIME] Joining channel: %s\n", _channelTopic.c_str());
+    ESP_LOGI(TAG, "Joining channel: %s", _channelTopic.c_str());
     if (!_client) {
-        Serial.println("[REALTIME] WebSocket client is null");
+        ESP_LOGW(TAG, "WebSocket client is null");
         return false;
     }
     if (!esp_websocket_client_is_connected(_client)) {
         _pendingJoinMessage = message;
         _pendingJoin = true;
-        Serial.println("[REALTIME] WebSocket not connected - queued subscription");
+        ESP_LOGI(TAG, "WebSocket not connected - queued subscription");
         return true;
     }
 
     int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     if (sent < 0) {
-        RLOG_ERROR("realtime", "Failed to send subscription message: %d", sent);
+        ESP_LOGE(TAG, "Failed to send subscription message: %d", sent);
         _pendingJoinMessage = message;
         _pendingJoin = true;
         return false;
@@ -364,25 +381,46 @@ bool SupabaseRealtime::subscribeMultiple(const String& schema, const String tabl
 }
 
 void SupabaseRealtime::unsubscribe() {
-    if (!_connected || _channelTopic.isEmpty()) {
+    if (!_connected) {
         return;
     }
     
-    _msgRef++;
-    
+    // Leave all subscribed channels
     JsonDocument emptyPayload;
-    String message = buildPhoenixMessage(_channelTopic, "phx_leave", emptyPayload);
-    if (_client && esp_websocket_client_is_connected(_client)) {
-        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    for (size_t i = 0; i < _channelCount; i++) {
+        if (_channels[i].subscribed && !_channels[i].topic.isEmpty()) {
+            _msgRef++;
+            String message = buildPhoenixMessage(_channels[i].topic, "phx_leave", emptyPayload);
+            if (_client && esp_websocket_client_is_connected(_client)) {
+                esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+            }
+            _channels[i].subscribed = false;
+        }
+    }
+    
+    // Legacy fallback: leave _channelTopic if set
+    if (!_channelTopic.isEmpty()) {
+        _msgRef++;
+        String message = buildPhoenixMessage(_channelTopic, "phx_leave", emptyPayload);
+        if (_client && esp_websocket_client_is_connected(_client)) {
+            esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+        }
     }
     
     _subscribed = false;
     
-    RLOG_INFO("realtime", "Unsubscribed from channel");
+    ESP_LOGI(TAG, "Unsubscribed from channels");
 }
 
-bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& data) {
-    if (!_connected || !_subscribed || _channelTopic.isEmpty()) {
+bool SupabaseRealtime::sendBroadcast(const String& topic, const String& event, const JsonDocument& data) {
+    if (!_connected) {
+        return false;
+    }
+    
+    // Check if channel is subscribed
+    const ChannelState* channel = findChannel(topic);
+    if (channel == nullptr || !channel->subscribed) {
+        ESP_LOGW(TAG, "Cannot send broadcast - channel not subscribed: %s", topic.c_str());
         return false;
     }
     
@@ -392,7 +430,7 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
     
     // Check heap before JSON allocation
     if (ESP.getFreeHeap() < 20000) {
-        RLOG_WARN("realtime", "Insufficient heap for broadcast: %d bytes free", ESP.getFreeHeap());
+        ESP_LOGW(TAG, "Insufficient heap for broadcast: %d bytes free", ESP.getFreeHeap());
         return false;
     }
     
@@ -405,10 +443,10 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
     broadcastPayload["payload"] = data;
     
     // Build Phoenix message with "broadcast" event
-    String message = buildPhoenixMessage(_channelTopic, "broadcast", broadcastPayload, _msgRef);
+    String message = buildPhoenixMessage(topic, "broadcast", broadcastPayload, _msgRef);
     
     if (message.isEmpty()) {
-        RLOG_WARN("realtime", "Failed to build broadcast message");
+        ESP_LOGW(TAG, "Failed to build broadcast message");
         return false;
     }
     
@@ -416,11 +454,26 @@ bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& da
                                               message.length(), portMAX_DELAY);
     
     if (sent < 0) {
-        RLOG_WARN("realtime", "Failed to send broadcast: %d", sent);
+        ESP_LOGW(TAG, "Failed to send broadcast: %d", sent);
         return false;
     }
     
     return true;
+}
+
+bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& data) {
+    // Backward compatibility: use first channel's topic or legacy _channelTopic
+    String topic;
+    if (_channelCount > 0 && !_channels[0].topic.isEmpty()) {
+        topic = _channels[0].topic;
+    } else if (!_channelTopic.isEmpty()) {
+        topic = _channelTopic;
+    } else {
+        ESP_LOGW(TAG, "Cannot send broadcast - no channel topic available");
+        return false;
+    }
+    
+    return sendBroadcast(topic, event, data);
 }
 
 void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& event,
@@ -430,57 +483,80 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
 
     // Handle heartbeat response
     if (topic == "phoenix" && event == "phx_reply") {
-        Serial.println("[REALTIME] Heartbeat reply received");
+        ESP_LOGD(TAG, "Heartbeat reply received");
         return;
     }
     
-    // Handle channel join response
-    if (event == "phx_reply" && topic == _channelTopic) {
-        String status = payload["status"] | "error";
-        if (status == "ok") {
-            _subscribed = true;
-            RLOG_INFO("realtime", "Successfully joined channel");
-            auto& deps = getDependencies();
-            if (deps.config.getPairingRealtimeDebug()) {
-                String responseStr;
-                if (payload["response"].is<JsonObject>()) {
-                    serializeJson(payload["response"], responseStr);
-                } else {
-                    serializeJson(payload, responseStr);
+    // Handle channel join response - route by topic
+    if (event == "phx_reply") {
+        ChannelState* channel = findChannel(topic);
+        if (channel != nullptr) {
+            String status = payload["status"] | "error";
+            if (status == "ok") {
+                channel->subscribed = true;
+                _subscribed = true;  // Legacy flag for backward compatibility
+                ESP_LOGI(TAG, "Successfully joined channel: %s", topic.c_str());
+                auto& deps = getDependencies();
+                if (deps.config.getPairingRealtimeDebug()) {
+                    String responseStr;
+                    if (payload["response"].is<JsonObject>()) {
+                        serializeJson(payload["response"], responseStr);
+                    } else {
+                        serializeJson(payload, responseStr);
+                    }
+                    ESP_LOGD(TAG, "Join ok response: %s", responseStr.c_str());
                 }
-                Serial.printf("[REALTIME] Join ok response: %s\n", responseStr.c_str());
-            }
-        } else {
-            RLOG_ERROR("realtime", "Join failed: status=%s", status.c_str());
-            
-            // Try to extract error details
-            if (payload["response"].is<JsonObject>()) {
-                String reason = payload["response"]["reason"] | "unknown";
-                RLOG_ERROR("realtime", "Join failed reason: %s", reason.c_str());
-                
-                // Log full response for debugging
-                String responseStr;
-                serializeJson(payload["response"], responseStr);
-                Serial.printf("[REALTIME] Full response: %s\n", responseStr.c_str());
             } else {
-                // Log entire payload if response structure is unexpected
-                String payloadStr;
-                serializeJson(payload, payloadStr);
-                RLOG_ERROR("realtime", "Join error payload: %s", payloadStr.c_str());
+                ESP_LOGE(TAG, "Join failed for channel %s: status=%s", topic.c_str(), status.c_str());
+                
+                // Try to extract error details
+                if (payload["response"].is<JsonObject>()) {
+                    String reason = payload["response"]["reason"] | "unknown";
+                    ESP_LOGE(TAG, "Join failed reason: %s", reason.c_str());
+                    
+                    // Log full response for debugging
+                    String responseStr;
+                    serializeJson(payload["response"], responseStr);
+                    ESP_LOGD(TAG, "Full response: %s", responseStr.c_str());
+                } else {
+                    // Log entire payload if response structure is unexpected
+                    String payloadStr;
+                    serializeJson(payload, payloadStr);
+                    ESP_LOGE(TAG, "Join error payload: %s", payloadStr.c_str());
+                }
             }
+            return;
         }
-        return;
+        // Legacy fallback: check _channelTopic for backward compatibility
+        if (topic == _channelTopic) {
+            String status = payload["status"] | "error";
+            if (status == "ok") {
+                _subscribed = true;
+                ESP_LOGI(TAG, "Successfully joined channel (legacy)");
+            } else {
+                ESP_LOGE(TAG, "Join failed: status=%s", status.c_str());
+            }
+            return;
+        }
     }
     
     // Handle presence events - server only sends these after a successful join.
     // This acts as a fallback subscription confirmation in case the join reply
     // (phx_reply with status "ok") was lost due to the message queue race condition.
-    if ((event == "presence_state" || event == "presence_diff") && topic == _channelTopic) {
-        if (!_subscribed) {
-            _subscribed = true;
-            RLOG_INFO("realtime", "Subscribed (confirmed via presence event)");
+    if (event == "presence_state" || event == "presence_diff") {
+        ChannelState* channel = findChannel(topic);
+        if (channel != nullptr && !channel->subscribed) {
+            channel->subscribed = true;
+            _subscribed = true;  // Legacy flag
+            ESP_LOGI(TAG, "Subscribed (confirmed via presence event): %s", topic.c_str());
+            return;
         }
-        return;
+        // Legacy fallback
+        if (topic == _channelTopic && !_subscribed) {
+            _subscribed = true;
+            ESP_LOGI(TAG, "Subscribed (confirmed via presence event - legacy)");
+            return;
+        }
     }
 
     // Handle postgres_changes events
@@ -489,7 +565,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
         if (deps.config.getPairingRealtimeDebug()) {
             String payloadStr;
             serializeJson(payload, payloadStr);
-            Serial.printf("[REALTIME] postgres_changes inbound: %s\n", payloadStr.c_str());
+                ESP_LOGD(TAG, "postgres_changes inbound: %s", payloadStr.c_str());
         }
         JsonVariantConst dataVar;
         if (payload["data"].is<JsonObjectConst>()) {
@@ -498,8 +574,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             JsonArrayConst dataArr = payload["data"].as<JsonArrayConst>();
             if (!dataArr.isNull() && dataArr.size() > 0 && dataArr[0].is<JsonObjectConst>()) {
                 dataVar = dataArr[0];
-                Serial.printf("[REALTIME] postgres_changes array size=%d (using first)\n",
-                              dataArr.size());
+                ESP_LOGD(TAG, "postgres_changes array size=%d (using first)", dataArr.size());
             }
         } else if (payload.is<JsonObjectConst>() &&
                    (payload["schema"].is<const char*>() || payload["table"].is<const char*>())) {
@@ -510,26 +585,28 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
         if (!dataVar.isNull() && dataVar.is<JsonObjectConst>()) {
             JsonObjectConst dataObj = dataVar.as<JsonObjectConst>();
             _lastMessage.valid = true;
+            _lastMessage.topic = topic;  // Set topic for routing
             _lastMessage.event = dataObj["type"] | dataObj["eventType"] | "";
             _lastMessage.table = dataObj["table"] | dataObj["relation"] | "";
             _lastMessage.schema = dataObj["schema"] | "";
             _lastMessage.payload = payload;
             _messagePending = true;
             
-            RLOG_DEBUG("realtime", "%s on %s.%s",
-                       _lastMessage.event.c_str(),
-                       _lastMessage.schema.c_str(),
-                       _lastMessage.table.c_str());
+            ESP_LOGD(TAG, "%s on %s.%s (channel: %s)",
+                     _lastMessage.event.c_str(),
+                     _lastMessage.schema.c_str(),
+                     _lastMessage.table.c_str(),
+                     topic.c_str());
             
             // Call handler if set
             if (_messageHandler) {
                 _messageHandler(_lastMessage);
             }
         } else {
-            RLOG_WARN("realtime", "Invalid postgres_changes data format");
+            ESP_LOGW(TAG, "Invalid postgres_changes data format");
             String payloadStr;
             serializeJson(payload, payloadStr);
-            Serial.printf("[REALTIME] postgres_changes payload: %s\n", payloadStr.c_str());
+            ESP_LOGD(TAG, "postgres_changes payload: %s", payloadStr.c_str());
         }
         return;
     }
@@ -537,6 +614,7 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     // Handle broadcast events
     if (event == "broadcast") {
         _lastMessage.valid = true;
+        _lastMessage.topic = topic;  // Set topic for routing
         _lastMessage.event = "broadcast";
         _lastMessage.table = "";
         _lastMessage.schema = "";
@@ -551,6 +629,6 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
     
     // Log other events for debugging
     if (event != "phx_reply") {
-        RLOG_DEBUG("realtime", "Event: %s on %s", event.c_str(), topic.c_str());
+        ESP_LOGD(TAG, "Event: %s on %s", event.c_str(), topic.c_str());
     }
 }

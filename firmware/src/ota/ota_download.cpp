@@ -15,7 +15,7 @@
 #endif
 #include "../config/config_manager.h"
 #include "../supabase/supabase_realtime.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../app_state.h"
 #include "../display/matrix_display.h"
 #include "../common/ca_certs.h"
@@ -26,22 +26,24 @@
 #include <Update.h>
 #include <LittleFS.h>
 
+static const char* TAG = "OTA_DL";
+
 bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, const char* label) {
     auto& deps = getDependencies();
-    Serial.printf("[OTA] Downloading %s from %s\n", label, url.c_str());
-    const bool remote_logging_was_enabled = deps.remote_logger.isRemoteEnabled();
-    deps.remote_logger.setRemoteEnabled(false);
+    ESP_LOGI(TAG, "Downloading %s from %s", label, url.c_str());
+    const bool remote_logging_was_enabled = log_system_is_remote_enabled();
+    log_system_set_suppressed(true);
 
     // Safety disconnect: ensure realtime is not running during OTA
     // The WebSocket competes for heap and network bandwidth, causing stream timeouts
     if (deps.realtime.isConnected() || deps.realtime.isConnecting()) {
-        Serial.println("[OTA] Safety disconnect: stopping realtime for OTA");
+        ESP_LOGI(TAG, "Safety disconnect: stopping realtime for OTA");
         deps.realtime.disconnect();
     }
     // Defer realtime reconnection for 10 minutes to cover entire OTA process
     deps.app_state.realtime_defer_until = millis() + 600000UL;
 
-    Serial.printf("[OTA] Heap before download: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
+    ESP_LOGI(TAG, "Heap before download: %lu bytes", (unsigned long)ESP.getFreeHeap());
 
     // Disable watchdog for OTA
     OTAHelpers::disableWatchdogForOTA();
@@ -56,22 +58,21 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     int httpCode = http.GET();
 
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OTA] %s download failed: %d\n", label, httpCode);
-        RLOG_ERROR("ota", "%s download failed: HTTP %d", label, httpCode);
+        ESP_LOGE(TAG, "%s download failed: %d", label, httpCode);
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
 
     int contentLength = http.getSize();
-    Serial.printf("[OTA] %s size: %d bytes\n", label, contentLength);
+    ESP_LOGI(TAG, "%s size: %d bytes", label, contentLength);
 
     if (contentLength <= 0) {
-        Serial.printf("[OTA] Invalid content length for %s\n", label);
+        ESP_LOGE(TAG, "Invalid content length for %s", label);
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
 
@@ -80,20 +81,20 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     if (update_type == U_FLASH) {
         target_partition = OTAManagerFlash::getTargetPartition();
         if (!target_partition) {
-            Serial.println("[OTA] No OTA partition available (missing ota_1?)");
+            ESP_LOGE(TAG, "No OTA partition available (missing ota_1?)");
             http.end();
             client.stop();
-            deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+            log_system_set_suppressed(false);
             return false;
         }
-        Serial.printf("[OTA] Target partition: %s (%d bytes)\n",
-                      target_partition->label, target_partition->size);
+        ESP_LOGI(TAG, "Target partition: %s (%d bytes)",
+                 target_partition->label, target_partition->size);
         if (static_cast<size_t>(contentLength) > target_partition->size) {
-            Serial.printf("[OTA] %s too large for partition (%d > %d)\n",
-                          label, contentLength, target_partition->size);
+            ESP_LOGE(TAG, "%s too large for partition (%d > %d)",
+                     label, contentLength, target_partition->size);
             http.end();
             client.stop();
-            deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+            log_system_set_suppressed(false);
             return false;
         }
     }
@@ -105,35 +106,34 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     // Begin update using flash helper
     if (!OTAManagerFlash::beginUpdate(contentLength, update_type, target_partition)) {
-        Serial.printf("[OTA] Not enough space for %s\n", label);
+        ESP_LOGE(TAG, "Not enough space for %s", label);
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
 
-    Serial.printf("[OTA] Flashing %s...\n", label);
+    ESP_LOGI(TAG, "Flashing %s...", label);
 
     // Use chunked download with watchdog feeding to prevent timeout
     // Move buffer to heap to avoid stack overflow (2KB reduces heap pressure)
     uint8_t* buffer = (uint8_t*)malloc(2048);
     if (!buffer) {
-        Serial.printf("[OTA] Failed to allocate download buffer for %s\n", label);
-        RLOG_ERROR("ota", "Failed to allocate buffer for %s", label);
+        ESP_LOGE(TAG, "Failed to allocate download buffer for %s", label);
         Update.abort();
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
     
     WiFiClient* stream = http.getStreamPtr();
     if (!stream) {
-        Serial.printf("[OTA] Failed to get stream for %s\n", label);
+        ESP_LOGE(TAG, "Failed to get stream for %s", label);
         free(buffer);
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
     
@@ -142,14 +142,14 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         // Update.write expects non-const pointer, but doesn't modify the data
         size_t written = Update.write(const_cast<uint8_t*>(data), len);
         if (written != len) {
-            Serial.printf("[OTA] Write failed: wrote %zu of %zu bytes\n", written, len);
+            ESP_LOGE(TAG, "Write failed: wrote %zu of %zu bytes", written, len);
         }
         return written;
     };
 
     // Define progress callback for display updates
     auto progressCallback = [this, &label, update_type, &deps](int progress) {
-        Serial.printf("[OTA] %s: %d%%\n", label, progress);
+        ESP_LOGI(TAG, "%s: %d%%", label, progress);
 
         // Update display with progress
         // Firmware takes 0-85%, LittleFS takes 85-100% (since LittleFS is much smaller)
@@ -172,36 +172,30 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         }
         
         if (!OTAHelpers::shouldRetry(written, contentLength)) {
-            Serial.printf("[OTA] Download failed at %zu bytes, not retryable\n", written);
-            RLOG_ERROR("ota", "Download failed at %zu/%d bytes, not retryable", written, contentLength);
+            ESP_LOGE(TAG, "Download failed at %zu bytes, not retryable", written);
             break;
         }
         
         retry_count++;
         if (retry_count > OTAHelpers::MAX_RETRY_ATTEMPTS) {
-            Serial.printf("[OTA] Max retries (%d) exceeded\n", OTAHelpers::MAX_RETRY_ATTEMPTS);
-            RLOG_ERROR("ota", "OTA failed after %d retries at %zu/%d bytes", 
-                       OTAHelpers::MAX_RETRY_ATTEMPTS, written, contentLength);
+            ESP_LOGE(TAG, "Max retries (%d) exceeded", OTAHelpers::MAX_RETRY_ATTEMPTS);
             break;
         }
         
         // Check WiFi before retry
         if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("[OTA] WiFi disconnected, cannot retry");
-            RLOG_ERROR("ota", "WiFi disconnected during OTA at %zu bytes", written);
+            ESP_LOGE(TAG, "WiFi disconnected, cannot retry");
             break;
         }
         
         int delay_ms = OTAHelpers::getRetryDelay(retry_count - 1);
-        Serial.printf("[OTA] Retry %d/%d in %dms (got %zu/%d bytes)\n",
-                      retry_count, OTAHelpers::MAX_RETRY_ATTEMPTS, delay_ms, written, contentLength);
-        RLOG_WARN("ota", "OTA retry %d/%d at %zu/%d bytes", 
-                  retry_count, OTAHelpers::MAX_RETRY_ATTEMPTS, written, contentLength);
+        ESP_LOGW(TAG, "Retry %d/%d in %dms (got %zu/%d bytes)",
+                 retry_count, OTAHelpers::MAX_RETRY_ATTEMPTS, delay_ms, written, contentLength);
         
         Update.abort();
         
         // Log heap after abort to verify cleanup
-        Serial.printf("[OTA] Heap after abort: %lu bytes\n", (unsigned long)ESP.getFreeHeap());
+        ESP_LOGI(TAG, "Heap after abort: %lu bytes", (unsigned long)ESP.getFreeHeap());
         
         http.end();
         client.stop();
@@ -209,28 +203,26 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
 
         if (!http.begin(client, url)) {
-            Serial.println("[OTA] Retry HTTP begin failed");
-            RLOG_ERROR("ota", "Retry HTTP begin failed");
+            ESP_LOGE(TAG, "Retry HTTP begin failed");
             break;
         }
         OTAHelpers::configureHttpClient(http);
         int retryCode = http.GET();
         if (retryCode != HTTP_CODE_OK) {
-            Serial.printf("[OTA] Retry HTTP failed: %d\n", retryCode);
-            RLOG_ERROR("ota", "Retry HTTP failed: %d", retryCode);
+            ESP_LOGE(TAG, "Retry HTTP failed: %d", retryCode);
             http.end();
             client.stop();
             break;
         }
         stream = http.getStreamPtr();
         if (!stream) {
-            Serial.println("[OTA] Failed to get stream on retry");
+            ESP_LOGE(TAG, "Failed to get stream on retry");
             http.end();
             client.stop();
             break;
         }
         if (!OTAManagerFlash::beginUpdate(contentLength, update_type, target_partition)) {
-            Serial.printf("[OTA] Not enough space for %s (retry)\n", label);
+            ESP_LOGE(TAG, "Not enough space for %s (retry)", label);
             http.end();
             client.stop();
             break;
@@ -238,12 +230,12 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     }
 
     if (written != static_cast<size_t>(contentLength)) {
-        Serial.printf("[OTA] Written only %zu of %d bytes for %s\n", written, contentLength, label);
+        ESP_LOGE(TAG, "Written only %zu of %d bytes for %s", written, contentLength, label);
         Update.abort();
         free(buffer);
         http.end();
         client.stop();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
     
@@ -252,17 +244,17 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     // Finalize update using flash helper
     if (!OTAManagerFlash::finalizeUpdate(update_type, target_partition, latest_version)) {
-        Serial.printf("[OTA] %s update failed\n", label);
+        ESP_LOGE(TAG, "%s update failed", label);
         http.end();
         client.stop();
         Update.abort();
-        deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+        log_system_set_suppressed(false);
         return false;
     }
 
     http.end();
     client.stop();
-    Serial.printf("[OTA] %s update applied\n", label);
-    deps.remote_logger.setRemoteEnabled(remote_logging_was_enabled);
+    ESP_LOGI(TAG, "%s update applied", label);
+    log_system_set_suppressed(false);
     return true;
 }

@@ -6,8 +6,11 @@
 #include "web_server.h"
 #include "web_helpers.h"
 #include "../common/url_utils.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+
+static const char* TAG = "API_WIFI";
 
 void WebServerManager::handleWifiScan(AsyncWebServerRequest* request) {
     // Avoid scans while connected; scans can disrupt connectivity even in AP+STA mode.
@@ -79,7 +82,7 @@ void WebServerManager::handleWifiSave(AsyncWebServerRequest* request, uint8_t* d
     // This prevents scan interference during reboot
     int16_t scan_status = WiFi.scanComplete();
     if (scan_status == WIFI_SCAN_RUNNING) {
-        Serial.println("[WEB] Cleaning up pending WiFi scan before reboot...");
+        ESP_LOGI(TAG, "Cleaning up pending WiFi scan before reboot...");
         WiFi.scanDelete();
     }
 

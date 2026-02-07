@@ -7,7 +7,9 @@
  */
 
 #include "matrix_display.h"
-#include "../debug.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "DISP_BORDER";
 
 // Border cache state
 static String last_border_key;

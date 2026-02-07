@@ -6,8 +6,10 @@
 #include "heap_utils.h"
 
 #ifndef NATIVE_BUILD
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include <esp_heap_caps.h>
+
+static const char* TAG = "HEAP_UTIL";
 
 namespace HeapUtils {
 
@@ -17,7 +19,7 @@ void logHeapStatusRemote(const char* context) {
     uint32_t maxInternalBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     uint32_t minFreeHeap = ESP.getMinFreeHeap();
     
-    remoteLogger.info("HEAP", "%s: free=%u, max_block=%u, max_internal_block=%u, min_free=%u",
+    ESP_LOGI(TAG, "%s: free=%u, max_block=%u, max_internal_block=%u, min_free=%u",
         context, freeHeap, maxBlock, maxInternalBlock, minFreeHeap);
 }
 

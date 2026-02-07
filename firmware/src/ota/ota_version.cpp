@@ -12,11 +12,13 @@
 #include "../common/ca_certs.h"
 #include "../common/board_utils.h"
 #include "../config/config_manager.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
+
+static const char* TAG = "OTA_VER";
 
 namespace {
 // Add HMAC authentication headers if device is provisioned
@@ -29,7 +31,7 @@ void addAuthHeaders(HTTPClient& http) {
         http.addHeader("X-Timestamp", String(timestamp));
         http.addHeader("X-Signature", signature);
 
-        Serial.println("[OTA] Added HMAC authentication headers");
+        ESP_LOGD(TAG, "Added HMAC authentication headers");
     }
 }
 }  // namespace
@@ -66,7 +68,7 @@ bool OTAManager::checkUpdateFromManifest() {
         return false;
     }
 
-    Serial.printf("[OTA] Fetching manifest from %s\n", manifest_url.c_str());
+    ESP_LOGI(TAG, "Fetching manifest from %s", manifest_url.c_str());
 
     WiFiClientSecure client;
     auto& deps = getDependencies();
@@ -82,8 +84,7 @@ bool OTAManager::checkUpdateFromManifest() {
     int httpCode = http.GET();
 
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OTA] Manifest fetch failed: %d\n", httpCode);
-        RLOG_ERROR("ota", "Manifest fetch failed: HTTP %d", httpCode);
+        ESP_LOGE(TAG, "Manifest fetch failed: HTTP %d", httpCode);
         http.end();
         return false;
     }
@@ -96,7 +97,7 @@ bool OTAManager::checkUpdateFromManifest() {
     DeserializationError error = deserializeJson(doc, response);
 
     if (error) {
-        Serial.printf("[OTA] Failed to parse manifest: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse manifest: %s", error.c_str());
         return false;
     }
 
@@ -106,20 +107,20 @@ bool OTAManager::checkUpdateFromManifest() {
     latest_build_date = doc["build_date"].as<String>();
 
     if (latest_version.isEmpty()) {
-        Serial.println("[OTA] No version in manifest");
+        ESP_LOGE(TAG, "No version in manifest");
         return false;
     }
 
-    Serial.printf("[OTA] Manifest: version=%s, build_id=%s, build_date=%s\n",
-                  latest_version.c_str(),
-                  latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
-                  latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
+    ESP_LOGI(TAG, "Manifest: version=%s, build_id=%s, build_date=%s",
+             latest_version.c_str(),
+             latest_build_id.isEmpty() ? "unknown" : latest_build_id.c_str(),
+             latest_build_date.isEmpty() ? "unknown" : latest_build_date.c_str());
 
     // Extract URLs for this board - prefer firmware-only (web assets embedded)
     // Use runtime board detection instead of compile-time #ifdef
     String board_type_str = getBoardType();
     const char* board_type = board_type_str.c_str();
-    Serial.printf("[OTA] Detected board type: %s\n", board_type);
+    ESP_LOGI(TAG, "Detected board type: %s", board_type);
 
     // Try firmware-only first (preferred - web assets now embedded in firmware)
     firmware_url = doc["firmware"][board_type]["url"].as<String>();
@@ -127,7 +128,7 @@ bool OTAManager::checkUpdateFromManifest() {
     bool has_firmware = !firmware_url.isEmpty();
 
     if (!has_firmware) {
-        Serial.printf("[OTA] Missing %s firmware in manifest\n", board_type);
+        ESP_LOGE(TAG, "Missing %s firmware in manifest", board_type);
         return false;
     }
 
@@ -135,13 +136,11 @@ bool OTAManager::checkUpdateFromManifest() {
     update_available = compareVersions(latest_version, current_version);
 
     if (update_available) {
-        Serial.printf("[OTA] Update available: %s -> %s\n",
-                      current_version.c_str(), latest_version.c_str());
-        RLOG_INFO("OTA", "Update available: %s -> %s", current_version.c_str(), latest_version.c_str());
-        Serial.printf("[OTA] Firmware: %s\n", firmware_url.c_str());
+        ESP_LOGI(TAG, "Update available: %s -> %s",
+                 current_version.c_str(), latest_version.c_str());
+        ESP_LOGI(TAG, "Firmware: %s", firmware_url.c_str());
     } else {
-        Serial.println("[OTA] Already on latest version");
-        RLOG_DEBUG("OTA", "Already on latest version: %s", current_version.c_str());
+        ESP_LOGD(TAG, "Already on latest version: %s", current_version.c_str());
     }
 
     return true;  // Successfully checked manifest
@@ -149,11 +148,11 @@ bool OTAManager::checkUpdateFromManifest() {
 
 bool OTAManager::checkUpdateFromGithubAPI() {
     if (update_url.isEmpty()) {
-        Serial.println("[OTA] No update URL configured");
+        ESP_LOGE(TAG, "No update URL configured");
         return false;
     }
 
-    Serial.printf("[OTA] Checking for updates at %s\n", update_url.c_str());
+    ESP_LOGI(TAG, "Checking for updates at %s", update_url.c_str());
 
     WiFiClientSecure client;
     auto& deps = getDependencies();
@@ -167,8 +166,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     int httpCode = http.GET();
 
     if (httpCode != HTTP_CODE_OK) {
-        Serial.printf("[OTA] Failed to check for updates: %d\n", httpCode);
-        RLOG_ERROR("ota", "Failed to check for updates: HTTP %d", httpCode);
+        ESP_LOGE(TAG, "Failed to check for updates: HTTP %d", httpCode);
         http.end();
         return false;
     }
@@ -181,7 +179,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     DeserializationError error = deserializeJson(doc, response);
 
     if (error) {
-        Serial.printf("[OTA] Failed to parse response: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse response: %s", error.c_str());
         return false;
     }
 
@@ -194,7 +192,7 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     // Find firmware assets in release
     JsonArray assets = doc["assets"].as<JsonArray>();
     if (!selectReleaseAssets(assets)) {
-        Serial.println("[OTA] Missing firmware asset in release");
+        ESP_LOGE(TAG, "Missing firmware asset in release");
         return false;
     }
 
@@ -202,10 +200,10 @@ bool OTAManager::checkUpdateFromGithubAPI() {
     update_available = compareVersions(latest_version, current_version);
 
     if (update_available) {
-        Serial.printf("[OTA] Update available: %s -> %s\n",
-                      current_version.c_str(), latest_version.c_str());
+        ESP_LOGI(TAG, "Update available: %s -> %s",
+                 current_version.c_str(), latest_version.c_str());
     } else {
-        Serial.println("[OTA] Already on latest version");
+        ESP_LOGD(TAG, "Already on latest version");
     }
 
     return true;  // Successfully checked (even if no update available)
@@ -264,7 +262,7 @@ bool OTAManager::selectReleaseAssets(const JsonArray& assets) {
 
     // Prefer firmware-only (web assets now embedded in firmware)
     if (firmware_priority > 0) {
-        Serial.printf("[OTA] Using firmware: %s\n", firmware_url.c_str());
+        ESP_LOGI(TAG, "Using firmware: %s", firmware_url.c_str());
         return true;
     }
 

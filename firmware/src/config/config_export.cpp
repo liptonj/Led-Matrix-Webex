@@ -4,8 +4,10 @@
  */
 
 #include "config_manager.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "CFG_EXPORT";
 
 // Export/Import Configuration
 
@@ -55,7 +57,7 @@ bool ConfigManager::importConfig(const String& json) {
     DeserializationError error = deserializeJson(doc, json.c_str());
 
     if (error) {
-        RLOG_ERROR("config", "Failed to parse config JSON: %s", error.c_str());
+        ESP_LOGE(TAG, "Failed to parse config JSON: %s", error.c_str());
         return false;
     }
 
@@ -155,6 +157,6 @@ bool ConfigManager::importConfig(const String& json) {
         setTlsVerify(doc["tls_verify"].as<bool>());
     }
 
-    Serial.println("[CONFIG] Configuration imported successfully");
+    ESP_LOGI(TAG, "Configuration imported successfully");
     return true;
 }

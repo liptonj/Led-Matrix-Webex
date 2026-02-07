@@ -4,9 +4,11 @@
  */
 
 #include "mqtt_client.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
 #include <cctype>
+
+static const char* TAG = "MQTT";
 
 namespace {
 String normalizeSensorId(const String& input) {
@@ -95,12 +97,12 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
     bool use_tls = config_manager->getMQTTUseTLS();
 
     if (cached_broker.isEmpty()) {
-        RLOG_DEBUG("mqtt", "No broker configured - MQTT module disabled");
+        ESP_LOGD(TAG, "No broker configured - MQTT module disabled");
         return;
     }
 
-    RLOG_INFO("mqtt", "Connecting to %s:%d (TLS: %s)",
-              cached_broker.c_str(), port, use_tls ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Connecting to %s:%d (TLS: %s)",
+             cached_broker.c_str(), port, use_tls ? "enabled" : "disabled");
 
     // Configure TLS client if needed
     if (use_tls) {
@@ -131,7 +133,7 @@ void MerakiMQTTClient::loop() {
 
     // Detect disconnection and log it
     if (last_connected_state && !currently_connected) {
-        RLOG_WARN("mqtt", "Disconnected (state=%d)", mqtt_client.state());
+        ESP_LOGW(TAG, "Disconnected (state=%d)", mqtt_client.state());
         last_connected_state = false;
     } else if (!last_connected_state && currently_connected) {
         last_connected_state = true;
@@ -204,8 +206,8 @@ void MerakiMQTTClient::reconnect() {
     String username = config_manager->getMQTTUsername();
     String password = config_manager->getMQTTPassword();
 
-    Serial.printf("[MQTT] Attempting connection to %s:%d (TLS: %s)...\n", 
-                  cached_broker.c_str(), cached_port, using_tls ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Attempting connection to %s:%d (TLS: %s)...",
+             cached_broker.c_str(), cached_port, using_tls ? "enabled" : "disabled");
 
     bool connected = false;
     if (username.isEmpty()) {
@@ -215,13 +217,13 @@ void MerakiMQTTClient::reconnect() {
     }
 
     if (connected) {
-        RLOG_INFO("mqtt", "Connected to %s:%d", cached_broker.c_str(), cached_port);
+        ESP_LOGI(TAG, "Connected to %s:%d", cached_broker.c_str(), cached_port);
 
         // Subscribe to Meraki MT topics using cached topic
         mqtt_client.subscribe(cached_topic.c_str());
-        RLOG_INFO("mqtt", "Subscribed to: %s", cached_topic.c_str());
+        ESP_LOGI(TAG, "Subscribed to: %s", cached_topic.c_str());
     } else {
-        RLOG_WARN("mqtt", "Connection failed, rc=%d", mqtt_client.state());
+        ESP_LOGW(TAG, "Connection failed, rc=%d", mqtt_client.state());
     }
 }
 
@@ -234,7 +236,7 @@ void MerakiMQTTClient::invalidateConfig() {
     cached_broker = "";
     cached_topic = "";
     cached_port = 1883;
-    RLOG_INFO("mqtt", "Config invalidated - will reload on next reconnect");
+    ESP_LOGI(TAG, "Config invalidated - will reload on next reconnect");
 }
 
 void MerakiMQTTClient::onMessage(char* topic, byte* payload, unsigned int length) {
@@ -256,7 +258,7 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
     DeserializationError error = deserializeJson(doc, payload);
 
     if (error) {
-        RLOG_WARN("mqtt", "Failed to parse message: %s", error.c_str());
+        ESP_LOGW(TAG, "Failed to parse message: %s", error.c_str());
         return;
     }
 
@@ -268,7 +270,7 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
 
     SensorEntry* entry = getOrCreateSensor(topic_sensor);
     if (!entry) {
-        RLOG_WARN("mqtt", "Sensor list full - ignoring update for %s", topic_sensor.c_str());
+        ESP_LOGW(TAG, "Sensor list full - ignoring update for %s", topic_sensor.c_str());
         return;
     }
     MerakiSensorData& sensor = entry->data;
@@ -321,10 +323,10 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         // Store internally as Celsius (display converts to F)
         if (is_fahrenheit) {
             sensor.temperature = (temp_value - 32.0f) * 5.0f / 9.0f;
-            if (debug_enabled) Serial.printf("[MQTT] Temperature: %.1f°F (stored as %.1f°C)\n", temp_value, sensor.temperature);
+            ESP_LOGD(TAG, "Temperature: %.1f°F (stored as %.1f°C)", temp_value, sensor.temperature);
         } else {
             sensor.temperature = temp_value;
-            if (debug_enabled) Serial.printf("[MQTT] Temperature: %.1f°C\n", sensor.temperature);
+            ESP_LOGD(TAG, "Temperature: %.1f°C", sensor.temperature);
         }
         update_pending = true;
 
@@ -335,13 +337,13 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
             sensor.humidity = doc["value"] | 0.0f;
         }
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] Humidity: %.1f%%\n", sensor.humidity);
+        ESP_LOGD(TAG, "Humidity: %.1f%%", sensor.humidity);
 
     } else if (metric == "door") {
         bool open = doc["value"] | false;
         sensor.door_status = open ? "open" : "closed";
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] Door: %s\n", sensor.door_status.c_str());
+        ESP_LOGD(TAG, "Door: %s", sensor.door_status.c_str());
 
     } else if (metric == "tvoc") {
         if (doc["tvoc"].is<float>()) {
@@ -350,25 +352,25 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
             sensor.tvoc = doc["value"] | 0.0f;
         }
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] TVOC: %.1f\n", sensor.tvoc);
+        ESP_LOGD(TAG, "TVOC: %.1f", sensor.tvoc);
 
     } else if (metric == "iaqIndex") {
         sensor.air_quality_index = doc["iaqIndex"] | doc["value"] | 0;
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] IAQ Index: %d\n", sensor.air_quality_index);
+        ESP_LOGD(TAG, "IAQ Index: %d", sensor.air_quality_index);
 
     } else if (metric == "CO2") {
         sensor.co2_ppm = doc["CO2"] | doc["value"] | 0.0f;
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] CO2: %.1f ppm\n", sensor.co2_ppm);
+        ESP_LOGD(TAG, "CO2: %.1f ppm", sensor.co2_ppm);
     } else if (metric == "PM2_5MassConcentration") {
         sensor.pm2_5 = doc["PM2_5MassConcentration"] | doc["value"] | 0.0f;
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] PM2.5: %.1f\n", sensor.pm2_5);
+        ESP_LOGD(TAG, "PM2.5: %.1f", sensor.pm2_5);
     } else if (metric == "ambientNoise") {
         sensor.ambient_noise = doc["ambientNoise"] | doc["value"] | 0.0f;
         update_pending = true;
-        if (debug_enabled) Serial.printf("[MQTT] Noise: %.1f\n", sensor.ambient_noise);
+        ESP_LOGD(TAG, "Noise: %.1f", sensor.ambient_noise);
     }
 
     if (update_pending) {
@@ -376,8 +378,8 @@ void MerakiMQTTClient::parseMessage(const String& topic, const String& payload) 
         sensor.valid = true;
         sensor_data = sensor;
         latest_sensor_id = topic_sensor;
-        RLOG_DEBUG("mqtt", "Sensor %s updated: temp=%.1f hum=%.1f",
-                   topic_sensor.c_str(), sensor.temperature, sensor.humidity);
+        ESP_LOGD(TAG, "Sensor %s updated: temp=%.1f hum=%.1f",
+                 topic_sensor.c_str(), sensor.temperature, sensor.humidity);
     }
 }
 

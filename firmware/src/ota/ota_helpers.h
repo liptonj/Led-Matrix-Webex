@@ -23,6 +23,9 @@
 #endif
 #include "../common/secure_client_config.h"
 #include "../common/heap_utils.h"
+#include "../debug/log_system.h"
+
+static const char* OTA_HELP_TAG = "OTA_HELP";
 
 namespace OTAHelpers {
 
@@ -52,7 +55,7 @@ inline void disableWatchdogForOTA() {
     // First, delete the current task from WDT (if subscribed)
     esp_err_t err = esp_task_wdt_delete(nullptr);  // nullptr = current task
     if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
-        Serial.printf("[OTA] Warning: Failed to delete current task from WDT: %s\n", esp_err_to_name(err));
+        ESP_LOGW(OTA_HELP_TAG, "Warning: Failed to delete current task from WDT: %s", esp_err_to_name(err));
     }
 
     // Delete async_tcp task from WDT if it exists
@@ -61,9 +64,9 @@ inline void disableWatchdogForOTA() {
     if (async_tcp_task != nullptr) {
         err = esp_task_wdt_delete(async_tcp_task);
         if (err == ESP_OK) {
-            Serial.println("[OTA] Removed async_tcp task from watchdog");
+            ESP_LOGD(OTA_HELP_TAG, "Removed async_tcp task from watchdog");
         } else if (err != ESP_ERR_NOT_FOUND) {
-            Serial.printf("[OTA] Warning: Failed to delete async_tcp from WDT: %s\n", esp_err_to_name(err));
+            ESP_LOGW(OTA_HELP_TAG, "Warning: Failed to delete async_tcp from WDT: %s", esp_err_to_name(err));
         }
     }
 
@@ -76,15 +79,15 @@ inline void disableWatchdogForOTA() {
     // Now we can safely reconfigure WDT with longer timeout
     err = esp_task_wdt_deinit();
     if (err != ESP_OK) {
-        Serial.printf("[OTA] Warning: WDT deinit failed: %s (continuing anyway)\n", esp_err_to_name(err));
+        ESP_LOGW(OTA_HELP_TAG, "Warning: WDT deinit failed: %s (continuing anyway)", esp_err_to_name(err));
     }
 
     // Reinitialize WDT with longer timeout for OTA (120s, no panic, don't subscribe IDLE)
     err = esp_task_wdt_init(120, false);
     if (err != ESP_OK) {
-        Serial.printf("[OTA] Warning: WDT init failed: %s\n", esp_err_to_name(err));
+        ESP_LOGW(OTA_HELP_TAG, "Warning: WDT init failed: %s", esp_err_to_name(err));
     } else {
-        Serial.println("[OTA] Task watchdog reconfigured for update (120s timeout)");
+        ESP_LOGI(OTA_HELP_TAG, "Task watchdog reconfigured for update (120s timeout)");
     }
 #endif
 }
@@ -112,9 +115,9 @@ inline void configureHttpClient(HTTPClient& http) {
  */
 inline void configureTlsClient(WiFiClientSecure& client, const char* ca_cert_bundle,
                                 bool tls_verify, const String& url) {
-    Serial.printf("[OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  tls_verify ? "on" : "off");
+    ESP_LOGD(OTA_HELP_TAG, "TLS context: url=%s time=%lu heap=%lu verify=%s",
+             url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+             tls_verify ? "on" : "off");
 
     // Use existing secure client configuration helper
     configureSecureClientWithTls(client, ca_cert_bundle, tls_verify, 2048, 2048);
@@ -136,7 +139,7 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
                              std::function<size_t(const uint8_t*, size_t)> write_callback,
                              std::function<void(int)> progress_callback = nullptr) {
     if (!stream) {
-        Serial.println("[OTA] Invalid stream pointer");
+        ESP_LOGE(OTA_HELP_TAG, "Invalid stream pointer");
         return 0;
     }
 
@@ -157,7 +160,7 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
             unsigned long wait_start = millis();
             while (stream->available() == 0 && stream->connected()) {
                 if (millis() - wait_start > 60000) {  // 60 second timeout
-                    Serial.printf("[OTA] Stream timeout waiting for data (60s)\n");
+                    ESP_LOGE(OTA_HELP_TAG, "Stream timeout waiting for data (60s)");
                     return total_written;
                 }
 #ifndef NATIVE_BUILD
@@ -175,8 +178,8 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
 
         size_t to_read = min(available, buffer_size);
         if (to_read > buffer_size) {
-            Serial.printf("[OTA] Buffer overflow prevented: toRead=%zu > buffer=%zu\n", 
-                          to_read, buffer_size);
+            ESP_LOGW(OTA_HELP_TAG, "Buffer overflow prevented: toRead=%zu > buffer=%zu", 
+                     to_read, buffer_size);
             return total_written;
         }
 
@@ -184,7 +187,7 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
         int bytes_read = stream->readBytes(buffer, to_read);
         unsigned long read_time = millis() - read_start;
         if (read_time > 1000) {
-            Serial.printf("[OTA] WARNING: Slow read: %lu ms for %d bytes\n", read_time, bytes_read);
+            ESP_LOGW(OTA_HELP_TAG, "WARNING: Slow read: %lu ms for %d bytes", read_time, bytes_read);
         }
 
         if (bytes_read > 0) {
@@ -192,12 +195,12 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
             size_t bytes_written = write_callback(buffer, bytes_read);
             unsigned long write_time = millis() - write_start;
             if (write_time > 500) {
-                Serial.printf("[OTA] WARNING: Slow write: %lu ms for %zu bytes\n", write_time, bytes_written);
+                ESP_LOGW(OTA_HELP_TAG, "WARNING: Slow write: %lu ms for %zu bytes", write_time, bytes_written);
             }
 
             if (bytes_written != static_cast<size_t>(bytes_read)) {
-                Serial.printf("[OTA] Write failed: wrote %zu of %d bytes\n", 
-                              bytes_written, bytes_read);
+                ESP_LOGE(OTA_HELP_TAG, "Write failed: wrote %zu of %d bytes", 
+                        bytes_written, bytes_read);
                 return total_written;
             }
             total_written += bytes_written;
@@ -212,10 +215,10 @@ inline size_t downloadStream(WiFiClient* stream, uint8_t* buffer, size_t buffer_
                     // Heap monitoring
                     uint32_t freeHeap = ESP.getFreeHeap();
                     uint32_t maxBlock = HeapUtils::getMaxAllocBlock();
-                    Serial.printf("[OTA] %d%% complete, heap: %u bytes (block=%u)\n",
-                                  progress, freeHeap, maxBlock);
+                    ESP_LOGI(OTA_HELP_TAG, "%d%% complete, heap: %u bytes (block=%u)",
+                             progress, freeHeap, maxBlock);
                     if (freeHeap < 30000 || (freeHeap < 50000 && maxBlock < 20000)) {
-                        Serial.println("[OTA] CRITICAL: Heap too low, aborting");
+                        ESP_LOGE(OTA_HELP_TAG, "CRITICAL: Heap too low, aborting");
 #ifndef NATIVE_BUILD
                         Update.abort();
 #endif
@@ -249,7 +252,7 @@ inline bool readExactBytes(WiFiClient* stream, uint8_t* buffer, size_t length,
 
     while (bytes_read < length) {
         if (millis() - start_time > timeout_ms) {
-            Serial.printf("[OTA] Timeout reading %zu bytes (got %zu)\n", length, bytes_read);
+            ESP_LOGE(OTA_HELP_TAG, "Timeout reading %zu bytes (got %zu)", length, bytes_read);
             return false;
         }
 

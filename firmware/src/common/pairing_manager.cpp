@@ -6,6 +6,9 @@
 #include "pairing_manager.h"
 #include "nvs_utils.h"
 #include <esp_random.h>
+#include "../debug/log_system.h"
+
+static const char* TAG = "PAIRING";
 
 // Character set for pairing codes (excluding confusing chars)
 static const char CHARSET[] = PAIRING_CODE_CHARSET;
@@ -19,9 +22,9 @@ void PairingManager::begin() {
     if (!loadCode()) {
         // No saved code, generate a new one
         generateCode(true);
-        Serial.println("[PAIRING] Generated new pairing code");
+        ESP_LOGI(TAG, "Generated new pairing code");
     } else {
-        Serial.println("[PAIRING] Loaded existing pairing code from NVS");
+        ESP_LOGI(TAG, "Loaded existing pairing code from NVS");
     }
 }
 
@@ -32,7 +35,7 @@ String PairingManager::generateCode(bool save) {
         pairing_code += randomChar();
     }
     
-    Serial.println("[PAIRING] Generated new pairing code");
+    ESP_LOGI(TAG, "Generated new pairing code");
     
     if (save) {
         saveCode();
@@ -46,7 +49,7 @@ bool PairingManager::setCode(const String& code, bool save) {
     upperCode.toUpperCase();
     
     if (!isValidCode(upperCode)) {
-        Serial.println("[PAIRING] Invalid code format");
+        ESP_LOGW(TAG, "Invalid code format");
         return false;
     }
     
@@ -56,7 +59,7 @@ bool PairingManager::setCode(const String& code, bool save) {
         saveCode();
     }
     
-    Serial.println("[PAIRING] Code updated");
+    ESP_LOGI(TAG, "Code updated");
     return true;
 }
 
@@ -68,7 +71,7 @@ void PairingManager::clearCode() {
         nvs.remove(PAIRING_NVS_KEY_CODE);
     }
     
-    Serial.println("[PAIRING] Code cleared");
+    ESP_LOGI(TAG, "Code cleared");
 }
 
 void PairingManager::saveCode() {
@@ -76,12 +79,12 @@ void PairingManager::saveCode() {
     if (nvs.isOpen()) {
         NvsResult result = nvs.putString(PAIRING_NVS_KEY_CODE, pairing_code);
         if (result == NvsResult::OK) {
-            Serial.println("[PAIRING] Code saved to NVS");
+            ESP_LOGI(TAG, "Code saved to NVS");
         } else {
-            Serial.printf("[PAIRING] Failed to save code: %s\n", nvsResultToString(result));
+            ESP_LOGE(TAG, "Failed to save code: %s", nvsResultToString(result));
         }
     } else {
-        Serial.println("[PAIRING] Failed to open NVS for writing");
+        ESP_LOGE(TAG, "Failed to open NVS for writing");
     }
 }
 

@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include "config_macros.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CFG_MQTT";
 
 // MQTT Configuration
 
@@ -37,7 +40,7 @@ void ConfigManager::setMQTTConfig(const String& broker, uint16_t port,
     cached_mqtt_password = password;
     cached_mqtt_topic = topic;
     cached_mqtt_use_tls = use_tls;
-    Serial.printf("[CONFIG] MQTT config saved: %s:%d (TLS: %s)\n", broker.c_str(), port, use_tls ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "MQTT config saved: %s:%d (TLS: %s)", broker.c_str(), port, use_tls ? "enabled" : "disabled");
 }
 
 void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
@@ -70,7 +73,7 @@ void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
     saveBool("mqtt_tls", use_tls);
     cached_mqtt_use_tls = use_tls;
     
-    Serial.printf("[CONFIG] MQTT config updated: %s:%d (TLS: %s, password %s)\n", 
+    ESP_LOGI(TAG, "MQTT config updated: %s:%d (TLS: %s, password %s)", 
                   cached_mqtt_broker.c_str(), cached_mqtt_port,
                   use_tls ? "enabled" : "disabled",
                   updatePassword ? "updated" : "unchanged");
@@ -79,7 +82,7 @@ void ConfigManager::updateMQTTConfig(const String& broker, uint16_t port,
 void ConfigManager::setMQTTUseTLS(bool use_tls) {
     saveBool("mqtt_tls", use_tls);
     cached_mqtt_use_tls = use_tls;
-    Serial.printf("[CONFIG] MQTT TLS %s\n", use_tls ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "MQTT TLS %s", use_tls ? "enabled" : "disabled");
 }
 
 bool ConfigManager::hasMQTTConfig() const {
@@ -90,7 +93,7 @@ CONFIG_UNCACHED_STRING_GETTER(SensorSerial, "sensor_serial", "")
 
 void ConfigManager::setSensorSerial(const String& serial) {
     saveString("sensor_serial", serial);
-    Serial.printf("[CONFIG] Sensor serial saved: %s\n", serial.c_str());
+    ESP_LOGI(TAG, "Sensor serial saved: %s", serial.c_str());
 }
 
 String ConfigManager::getSensorMacs() const {
@@ -133,17 +136,17 @@ void ConfigManager::setSensorMacs(const String& macs) {
     if (!macs.isEmpty()) {
         saveString("sensor_serial", "");
     }
-    Serial.printf("[CONFIG] Sensor MACs saved: %s\n", macs.c_str());
+    ESP_LOGI(TAG, "Sensor MACs saved: %s", macs.c_str());
 }
 
 void ConfigManager::setDisplaySensorMac(const String& mac) {
     saveString("display_sensor_mac", mac);
     cached_display_sensor_mac = mac;
-    Serial.printf("[CONFIG] Display sensor MAC saved: %s\n", mac.c_str());
+    ESP_LOGI(TAG, "Display sensor MAC saved: %s", mac.c_str());
 }
 
 void ConfigManager::setDisplayMetric(const String& metric) {
     saveString("display_metric", metric);
     cached_display_metric = metric;
-    Serial.printf("[CONFIG] Display metric saved: %s\n", metric.c_str());
+    ESP_LOGI(TAG, "Display metric saved: %s", metric.c_str());
 }

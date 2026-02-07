@@ -10,8 +10,10 @@
 #include "../config/config_manager.h"
 #include "../common/pairing_manager.h"
 #include "../core/dependencies.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "RT_CONN";
 
 namespace {
 constexpr unsigned long INIT_RETRY_INTERVAL = 15000;  // 15 seconds
@@ -30,14 +32,14 @@ bool RealtimeManager::attemptInit() {
     if (anonKey.isEmpty()) {
         deps.app_state.realtime_error = "anon_key_missing";
         deps.app_state.last_realtime_error = millis();
-        RLOG_WARN("realtime", "Init blocked: anon_key_missing");
+        ESP_LOGW(TAG, "Init blocked: anon_key_missing");
         return false;
     }
 
     if (!deps.app_state.time_synced) {
         deps.app_state.realtime_error = "time_not_synced";
         deps.app_state.last_realtime_error = millis();
-        RLOG_WARN("realtime", "Init blocked: time_not_synced");
+        ESP_LOGW(TAG, "Init blocked: time_not_synced");
         return false;
     }
 
@@ -45,8 +47,8 @@ bool RealtimeManager::attemptInit() {
     if (ESP.getFreeHeap() < min_heap) {
         deps.app_state.realtime_error = "low_heap";
         deps.app_state.last_realtime_error = millis();
-        RLOG_WARN("realtime", "Init blocked: low_heap (free=%lu, need=%lu)",
-                  ESP.getFreeHeap(), (unsigned long)min_heap);
+        ESP_LOGW(TAG, "Init blocked: low_heap (free=%lu, need=%lu)",
+                 ESP.getFreeHeap(), (unsigned long)min_heap);
         return false;
     }
 
@@ -56,12 +58,12 @@ bool RealtimeManager::attemptInit() {
     if (supabaseUrl.isEmpty() || accessToken.isEmpty()) {
         deps.app_state.realtime_error = "missing_url_or_token";
         deps.app_state.last_realtime_error = millis();
-        RLOG_WARN("realtime", "Init blocked: missing_url_or_token");
+        ESP_LOGW(TAG, "Init blocked: missing_url_or_token");
         return false;
     }
 
     // Setup connection
-    RLOG_INFO("realtime", "Initializing Phase B realtime connection...");
+    ESP_LOGI(TAG, "Initializing Phase B realtime connection...");
 
     // Set message handler
     deps.realtime.setMessageHandler(handleRealtimeMessage);
@@ -71,23 +73,43 @@ bool RealtimeManager::attemptInit() {
 
     // Subscribe to channels
     String userUuid = deps.config.getUserUuid();
+    String deviceUuid = deps.config.getDeviceUuid();
     bool queued = false;
     
     if (!userUuid.isEmpty()) {
         queued = deps.realtime.subscribeToUserChannel(userUuid);
+        if (!queued) {
+            ESP_LOGW(TAG, "Failed to subscribe to user channel");
+            deps.app_state.realtime_error = "user_channel_subscribe_failed";
+            deps.app_state.last_realtime_error = millis();
+            return false;
+        }
     } else {
-        Serial.println("[REALTIME] No user_uuid -- deferred until paired via post-device-state");
-        RLOG_WARN("realtime", "Init blocked: no user_uuid");
+        ESP_LOGW(TAG, "No user_uuid -- deferred until paired via post-device-state");
+        ESP_LOGW(TAG, "Init blocked: no user_uuid");
         return false;
+    }
+    
+    // Subscribe to device channel if device UUID is available
+    if (!deviceUuid.isEmpty()) {
+        bool deviceQueued = deps.realtime.subscribeToDeviceChannel(deviceUuid);
+        if (!deviceQueued) {
+            ESP_LOGW(TAG, "Failed to subscribe to device channel (non-fatal)");
+            // Continue anyway - user channel is more important
+        } else {
+            ESP_LOGI(TAG, "Device channel subscription requested");
+        }
+    } else {
+        ESP_LOGD(TAG, "No device_uuid - skipping device channel subscription");
     }
 
     if (queued) {
-        RLOG_INFO("realtime", "Subscription requested");
+        ESP_LOGI(TAG, "Subscription requested (user channel)");
         deps.app_state.realtime_error = "";
         return true;
     }
 
-    RLOG_WARN("realtime", "Connection timeout - will retry");
+    ESP_LOGW(TAG, "Connection timeout - will retry");
     deps.app_state.realtime_error = "connection_timeout";
     deps.app_state.last_realtime_error = millis();
 

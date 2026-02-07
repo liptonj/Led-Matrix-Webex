@@ -4,7 +4,10 @@
  */
 
 #include "web_server.h"
+#include "../debug/log_system.h"
 #include <ArduinoJson.h>
+
+static const char* TAG = "API_MOD";
 
 void WebServerManager::handleGetModules(AsyncWebServerRequest* request) {
     JsonDocument doc;
@@ -171,7 +174,7 @@ void WebServerManager::handleInstallVariant(AsyncWebServerRequest* request, uint
     
     // Trigger OTA update (handled by OTA manager)
     // The OTA manager will be called after this response
-    Serial.printf("[WEB] Installing variant: %s from %s\n", variantName, firmwareUrl.c_str());
+    ESP_LOGI(TAG, "Installing variant: %s from %s", variantName, firmwareUrl.c_str());
     
     // Store the URL for OTA manager to pick up
     config_manager->setOTAUrl(firmwareUrl);

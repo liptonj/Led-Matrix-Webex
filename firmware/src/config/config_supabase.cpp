@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include "config_macros.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CFG_SUPA";
 
 // Supabase Configuration
 
@@ -29,7 +32,7 @@ String ConfigManager::getSupabaseUrl() const {
 void ConfigManager::setSupabaseUrl(const String& url) {
     saveString("supabase_url", url);
     cached_supabase_url = url;
-    Serial.printf("[CONFIG] Supabase URL saved: %s\n", url.isEmpty() ? "(empty)" : url.c_str());
+    ESP_LOGI(TAG, "Supabase URL saved: %s", url.isEmpty() ? "(empty)" : url.c_str());
 }
 
 String ConfigManager::getSupabaseAnonKey() const {
@@ -53,7 +56,7 @@ String ConfigManager::getSupabaseAnonKey() const {
 void ConfigManager::setSupabaseAnonKey(const String& key) {
     saveString("supabase_anon", key);
     cached_supabase_anon_key = key;
-    Serial.printf("[CONFIG] Supabase anon key saved: %s\n", key.isEmpty() ? "(empty)" : "(set)");
+    ESP_LOGI(TAG, "Supabase anon key saved: %s", key.isEmpty() ? "(empty)" : "(set)");
 }
 
 // OTA Configuration

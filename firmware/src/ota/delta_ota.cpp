@@ -11,7 +11,10 @@
 #include "../common/lookup_tables.h"
 #include "../config/config_manager.h"
 #include "../core/dependencies.h"
+#include "../debug/log_system.h"
 #include <time.h>
+
+static const char* TAG = "DELTA_OTA";
 
 // Module size estimates in KB (for patch size calculation)
 const size_t MODULE_SIZES[] = {
@@ -34,7 +37,7 @@ bool DeltaOTAManager::begin(const String& url) {
         base_url = base_url.substring(0, base_url.length() - 1);
     }
     
-    Serial.printf("[DELTA-OTA] Initialized with base URL: %s\n", base_url.c_str());
+    ESP_LOGI(TAG, "Initialized with base URL: %s", base_url.c_str());
     return true;
 }
 
@@ -49,10 +52,10 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
     // Build manifest URL
     String manifest_url = base_url + "/ota-manifest.json";
     
-    Serial.printf("[DELTA-OTA] Checking: %s\n", manifest_url.c_str());
-    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  deps.config.getTlsVerify() ? "on" : "off");
+    ESP_LOGI(TAG, "Checking: %s", manifest_url.c_str());
+    ESP_LOGD(TAG, "TLS context: url=%s time=%lu heap=%lu verify=%s",
+             manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+             deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect to OTA server");
@@ -87,7 +90,7 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
     
     // Check if update is needed
     if (manifest.target_version == current_version) {
-        Serial.println("[DELTA-OTA] Already up to date");
+        ESP_LOGI(TAG, "Already up to date");
         return false;
     }
     
@@ -145,8 +148,8 @@ bool DeltaOTAManager::checkForUpdates(const String& current_version,
         }
     }
     
-    Serial.printf("[DELTA-OTA] Found %d update paths, recommended: %d (%zu bytes)\n",
-                  manifest.path_count, manifest.recommended_path, smallest);
+    ESP_LOGI(TAG, "Found %d update paths, recommended: %d (%zu bytes)",
+             manifest.path_count, manifest.recommended_path, smallest);
     
     return manifest.path_count > 0;
 }
@@ -159,9 +162,9 @@ bool DeltaOTAManager::getUpdatePath(const String& target_variant,
     configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), 2048, 2048);
     
     String manifest_url = base_url + "/ota-manifest.json";
-    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  deps.config.getTlsVerify() ? "on" : "off");
+    ESP_LOGD(TAG, "TLS context: url=%s time=%lu heap=%lu verify=%s",
+             manifest_url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+             deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, manifest_url)) {
         setError("Failed to connect");
@@ -231,8 +234,8 @@ bool DeltaOTAManager::performUpdate(const OTAManifest& manifest,
     
     const auto& path = manifest.paths[manifest.recommended_path];
     
-    Serial.printf("[DELTA-OTA] Starting update: %s (%zu bytes)\n", 
-                  path.url.c_str(), path.size);
+    ESP_LOGI(TAG, "Starting update: %s (%zu bytes)",
+             path.url.c_str(), path.size);
     
     bool success = false;
     
@@ -258,7 +261,7 @@ bool DeltaOTAManager::performUpdate(const OTAManifest& manifest,
     }
     
     if (success) {
-        Serial.println("[DELTA-OTA] Update successful, rebooting...");
+        ESP_LOGI(TAG, "Update successful, rebooting...");
         delay(1000);
         ESP.restart();
     }
@@ -289,9 +292,9 @@ bool DeltaOTAManager::downloadAndApplyFull(const String& url, size_t size,
     WiFiClientSecure client;
     auto& deps = getDependencies();
     configureSecureClientWithTls(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), 2048, 2048);
-    Serial.printf("[DELTA-OTA] TLS context: url=%s time=%lu heap=%lu verify=%s\n",
-                  url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
-                  deps.config.getTlsVerify() ? "on" : "off");
+    ESP_LOGD(TAG, "TLS context: url=%s time=%lu heap=%lu verify=%s",
+             url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap(),
+             deps.config.getTlsVerify() ? "on" : "off");
     
     if (!http.begin(client, url)) {
         setError("Connection failed");
@@ -379,7 +382,7 @@ bool DeltaOTAManager::downloadAndApplyDelta(const String& url, size_t size,
     // This requires significant RAM and a patching library
     // For MVP, we fall back to full download
     
-    Serial.println("[DELTA-OTA] Delta patches not yet supported, using full download");
+    ESP_LOGW(TAG, "Delta patches not yet supported, using full download");
     setError("Delta patches require server-side support");
     return false;
 }
@@ -392,7 +395,7 @@ bool DeltaOTAManager::verifyChecksum(const String& expected) {
 
 void DeltaOTAManager::setError(const String& error) {
     last_error = error;
-    Serial.printf("[DELTA-OTA] Error: %s\n", error.c_str());
+    ESP_LOGE(TAG, "Error: %s", error.c_str());
 }
 
 // Module delta calculations

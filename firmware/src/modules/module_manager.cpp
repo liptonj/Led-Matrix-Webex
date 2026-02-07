@@ -4,6 +4,9 @@
  */
 
 #include "module_manager.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "MODULES";
 
 ModuleManager::ModuleManager()
     : enabled_modules(INSTALLED_MODULES) {
@@ -12,14 +15,14 @@ ModuleManager::ModuleManager()
 bool ModuleManager::begin() {
     loadPreferences();
     
-    Serial.println("[MODULES] Module Manager initialized");
-    Serial.printf("[MODULES] Installed: 0x%02X, Enabled: 0x%02X\n", 
+    ESP_LOGI(TAG, "Module Manager initialized");
+    ESP_LOGI(TAG, "Installed: 0x%02X, Enabled: 0x%02X", 
                   INSTALLED_MODULES, enabled_modules);
     
     // Log installed modules
     for (size_t i = 0; i < AVAILABLE_MODULES_COUNT; i++) {
         if (isInstalled(AVAILABLE_MODULES[i].id)) {
-            Serial.printf("[MODULES] - %s v%s (%s)\n",
+            ESP_LOGI(TAG, "- %s v%s (%s)",
                          AVAILABLE_MODULES[i].name,
                          AVAILABLE_MODULES[i].version,
                          isEnabled(AVAILABLE_MODULES[i].id) ? "enabled" : "disabled");

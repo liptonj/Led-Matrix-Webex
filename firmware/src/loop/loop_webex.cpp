@@ -14,8 +14,10 @@
 #include "webex/webex_client.h"
 #include "supabase/supabase_client.h"
 #include "config/config_manager.h"
-#include "debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "WEBEX_LOOP";
 
 // =============================================================================
 // HELPER FUNCTIONS
@@ -94,9 +96,9 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
 
     // Log why we're polling (for debugging)
     if (supabase_status_stale) {
-        Serial.println("[WEBEX] Supabase status stale, polling cloud status");
+        ESP_LOGD(TAG, "Supabase status stale, polling cloud status");
     } else if (!ctx.app_state->embedded_app_connected) {
-        Serial.println("[WEBEX] Embedded app not connected, polling cloud status");
+        ESP_LOGD(TAG, "Embedded app not connected, polling cloud status");
     }
 
     bool cloud_synced = false;
@@ -104,7 +106,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
 
     if (deps.supabase.isAuthenticated()) {
         if (!hasSafeTlsHeap(65000, 40000)) {
-            Serial.println("[SUPABASE] Skipping webex-status - low heap for TLS");
+            ESP_LOGW(TAG, "Skipping webex-status - low heap for TLS");
         } else {
             cloud_synced = deps.supabase.syncWebexStatus(cloud_status);
             if (cloud_synced) {
@@ -115,9 +117,9 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
                 // Mark as authenticated so the UI reflects the connection
                 if (!ctx.app_state->webex_authenticated) {
                     ctx.app_state->webex_authenticated = true;
-                    Serial.println("[WEBEX] Authenticated via cloud (Supabase OAuth)");
+                    ESP_LOGI(TAG, "Authenticated via cloud (Supabase OAuth)");
                 }
-                Serial.printf("[WEBEX] Cloud status: %s\n", cloud_status.c_str());
+                ESP_LOGI(TAG, "Cloud status: %s", cloud_status.c_str());
             }
         }
     }
@@ -127,7 +129,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             return true;
         }
         if (deps.supabase.isWebexTokenMissing() && ctx.app_state->wifi_connected) {
-            Serial.println("[WEBEX] No Webex token; skipping local fallback");
+            ESP_LOGD(TAG, "No Webex token; skipping local fallback");
             return true;
         }
         if (!ctx.app_state->webex_authenticated) {
@@ -135,11 +137,11 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             unsigned long now = millis();
             if (now - last_local_skip_log > 60000) {
                 last_local_skip_log = now;
-                Serial.println("[WEBEX] Local API auth unavailable; skipping local fallback");
+                ESP_LOGD(TAG, "Local API auth unavailable; skipping local fallback");
             }
             return true;
         }
-        RLOG_WARN("loop", "Cloud status failed, falling back to local API");
+        ESP_LOGW(TAG, "Cloud status failed, falling back to local API");
         WebexPresence presence;
         if (ctx.webex_client->getPresence(presence)) {
             ctx.app_state->webex_status = presence.status;
@@ -149,7 +151,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
             // Auto-populate display name with firstName if not already set
             if (ctx.config_manager->getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {
                 ctx.config_manager->setDisplayName(presence.first_name);
-                Serial.printf("[WEBEX] Auto-populated display name: %s\n", presence.first_name.c_str());
+                ESP_LOGI(TAG, "Auto-populated display name: %s", presence.first_name.c_str());
             }
 
             // Derive in_call from status if not connected to xAPI

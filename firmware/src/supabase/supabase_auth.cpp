@@ -9,9 +9,11 @@
 #include "supabase_realtime.h"
 #include <time.h>
 #include "../auth/device_credentials.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../config/config_manager.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "SUPABASE_AUTH";
 
 bool SupabaseClient::isAuthenticated() const {
     if (_token.isEmpty()) {
@@ -37,16 +39,16 @@ bool SupabaseClient::ensureAuthenticated() {
 bool SupabaseClient::authenticate() {
     _lastAuthError = SupabaseAuthError::None;
     if (!deviceCredentials.isProvisioned()) {
-        Serial.println("[SUPABASE] Cannot authenticate - device not provisioned");
+        ESP_LOGW(TAG, "Cannot authenticate - device not provisioned");
         return false;
     }
     
     if (_supabaseUrl.isEmpty()) {
-        Serial.println("[SUPABASE] Cannot authenticate - URL not configured");
+        ESP_LOGW(TAG, "Cannot authenticate - URL not configured");
         return false;
     }
     
-    Serial.println("[SUPABASE] Authenticating with device-auth...");
+    ESP_LOGI(TAG, "Authenticating with device-auth...");
     
     // Build empty body for device-auth (POST with no body)
     String body = "";
@@ -58,9 +60,9 @@ bool SupabaseClient::authenticate() {
     }
     
     if (httpCode != 200) {
-        RLOG_ERROR("supabase", "Auth failed: HTTP %d", httpCode);
+        ESP_LOGE(TAG, "Auth failed: HTTP %d", httpCode);
         if (!response.isEmpty()) {
-            Serial.printf("[SUPABASE] Response: %s\n", response.c_str());
+            ESP_LOGD(TAG, "Response: %s", response.c_str());
             if (response.indexOf("Invalid signature") >= 0) {
                 _lastAuthError = SupabaseAuthError::InvalidSignature;
             } else if (response.indexOf("approval_required") >= 0) {
@@ -84,7 +86,7 @@ bool SupabaseClient::authenticate() {
     SupabaseAuthResult result = parseAuthResponse(response);
     
     if (!result.success) {
-        RLOG_ERROR("supabase", "Auth response parsing failed");
+        ESP_LOGE(TAG, "Auth response parsing failed");
         _lastAuthError = SupabaseAuthError::Other;
         return false;
     }
@@ -100,27 +102,27 @@ bool SupabaseClient::authenticate() {
 
     // Debug: log auth response summary without secrets
 #if SUPABASE_AUTH_DEBUG
-    Serial.printf("[SUPABASE] Auth response summary: pairing=%s device_id=%s expires_at=%lu debug=%d\n",
-                  result.pairing_code.isEmpty() ? "(none)" : "***",
-                  result.device_id.c_str(),
-                  result.expires_at,
-                  result.debug_enabled ? 1 : 0);
+    ESP_LOGI(TAG, "Auth response summary: pairing=%s device_id=%s expires_at=%lu debug=%d",
+             result.pairing_code.isEmpty() ? "(none)" : "***",
+             result.device_id.c_str(),
+             result.expires_at,
+             result.debug_enabled ? 1 : 0);
     if (!result.target_firmware_version.isEmpty()) {
-        Serial.printf("[SUPABASE] Auth response target firmware: %s\n",
-                      result.target_firmware_version.c_str());
+        ESP_LOGI(TAG, "Auth response target firmware: %s",
+                 result.target_firmware_version.c_str());
     }
 #endif
     
-    Serial.printf("[SUPABASE] Authenticated successfully (expires in %lu seconds)\n",
-                  _tokenExpiresAt - (unsigned long)(time(nullptr)));
+    ESP_LOGI(TAG, "Authenticated successfully (expires in %lu seconds)",
+             _tokenExpiresAt - (unsigned long)(time(nullptr)));
     
     if (!_targetFirmwareVersion.isEmpty()) {
-        Serial.printf("[SUPABASE] Target firmware version: %s\n", 
-                      _targetFirmwareVersion.c_str());
+        ESP_LOGI(TAG, "Target firmware version: %s", 
+                 _targetFirmwareVersion.c_str());
     }
 
     if (_remoteDebugEnabled) {
-        Serial.println("[SUPABASE] Remote debug logging enabled by server");
+        ESP_LOGI(TAG, "Remote debug logging enabled by server");
     }
     
     return true;
@@ -128,7 +130,7 @@ bool SupabaseClient::authenticate() {
 
 bool SupabaseClient::addHmacHeaders(HTTPClient& http, const String& body) {
     if (!deviceCredentials.isProvisioned()) {
-        Serial.println("[SUPABASE] Cannot add HMAC headers - not provisioned");
+        ESP_LOGW(TAG, "Cannot add HMAC headers - not provisioned");
         return false;
     }
     
@@ -153,13 +155,13 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
     DeserializationError error = deserializeJson(doc, json);
     
     if (error) {
-        RLOG_ERROR("supabase", "JSON parse error: %s", error.c_str());
+        ESP_LOGE(TAG, "JSON parse error: %s", error.c_str());
         return result;
     }
     
     if (!doc["success"].as<bool>()) {
         String errMsg = doc["error"] | "Unknown error";
-        RLOG_ERROR("supabase", "Auth error: %s", errMsg.c_str());
+        ESP_LOGE(TAG, "Auth error: %s", errMsg.c_str());
         return result;
     }
     
@@ -182,15 +184,15 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
         
         if (!device_uuid.isEmpty()) {
             deps.config.setDeviceUuid(device_uuid);
-            Serial.printf("[SUPABASE] Device UUID parsed: %s\n", device_uuid.substring(0, 8).c_str());
+            ESP_LOGI(TAG, "Device UUID parsed: %s", device_uuid.substring(0, 8).c_str());
         }
         if (!user_uuid.isEmpty()) {
             deps.config.setUserUuid(user_uuid);
-            Serial.printf("[SUPABASE] User UUID parsed: %s\n", user_uuid.substring(0, 8).c_str());
+            ESP_LOGI(TAG, "User UUID parsed: %s", user_uuid.substring(0, 8).c_str());
             
             // If user_uuid is newly assigned, trigger realtime reconnection to subscribe to user channel
             if (previousUserUuid.isEmpty() || previousUserUuid != user_uuid) {
-                Serial.println("[SUPABASE] User UUID assigned - will reconnect realtime to user channel");
+                ESP_LOGI(TAG, "User UUID assigned - will reconnect realtime to user channel");
                 // Disconnect realtime - it will reconnect on next loop iteration with user channel
                 deps.realtime.disconnect();
             }
@@ -221,7 +223,7 @@ SupabaseAuthResult SupabaseClient::parseAuthResponse(const String& json) {
             #endif
         } else {
             // If parsing fails, set to 24 hours from now
-            Serial.printf("[SUPABASE] Failed to parse expires_at: %s\n", expiresAtStr.c_str());
+            ESP_LOGW(TAG, "Failed to parse expires_at: %s", expiresAtStr.c_str());
             result.expires_at = (unsigned long)time(nullptr) + 86400;
         }
     } else {

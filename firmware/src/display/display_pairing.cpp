@@ -5,6 +5,9 @@
 
 #include "matrix_display.h"
 #include "display_helpers.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "DISPLAY";
 
 /**
  * @brief Show pairing code for app connection
@@ -114,7 +117,7 @@ void MatrixDisplay::displayProvisioningStatus(const String& serial_number) {
         dma_display->print(displaySerial);
         
         // Print to Serial monitor (only when screen changes)
-        Serial.println("[DISPLAY] Device awaiting approval");
-        Serial.printf("[DISPLAY] Serial: %s\n", serial_number.c_str());
+        ESP_LOGI(TAG, "Device awaiting approval");
+        ESP_LOGI(TAG, "Serial: %s", serial_number.c_str());
     }
 }

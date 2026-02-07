@@ -8,7 +8,9 @@
  */
 
 #include "matrix_display.h"
-#include "../debug.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "DISP_STATUS";
 
 void MatrixDisplay::drawStatusPage(const DisplayData& data) {
     // Status Page Layout (64x32) with colored border:
@@ -107,10 +109,10 @@ void MatrixDisplay::drawStatusPage(const DisplayData& data) {
         last_name_logged = data.display_name;
         last_layout_logged = data.status_layout;
 
-        DEBUG_DISPLAY("========== Status Page ==========");
-        DEBUG_DISPLAY("Border: %dpx, Content: %dx%d, Max lines: %d",
+        ESP_LOGD("DISPLAY", "========== Status Page ==========");
+        ESP_LOGD("DISPLAY", "Border: %dpx, Content: %dx%d, Max lines: %d",
                      border, content_width, available_height, max_lines);
-        DEBUG_DISPLAY("Line 0 (y=%d): %s (status)", line0_y, status_text.c_str());
+        ESP_LOGD("DISPLAY", "Line 0 (y=%d): %s (status)", line0_y, status_text.c_str());
 
         if (data.time_valid) {
             String date_str = formatDate(data.month, data.day, data.date_format);
@@ -363,8 +365,8 @@ void MatrixDisplay::drawInCallPage(const DisplayData& data) {
             DEBUG_DISPLAY("Line 2: %s  %s (date/time)", date_str.c_str(), time_str.c_str());
         }
         if (data.show_sensors) {
-            Serial.printf("[DISPLAY] Line 3: %dF %d%% (sensors)\n",
-                         (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
+            ESP_LOGD(TAG, "Line 3: %dF %d%% (sensors)",
+                     (int)((data.temperature * 9.0f / 5.0f) + 32.0f), (int)data.humidity);
         }
         DEBUG_DISPLAY("===============================");
     }
@@ -551,9 +553,9 @@ void MatrixDisplay::update(const DisplayData& data) {
         // Log page change
         const char* page_name = (target_page == DisplayPage::STATUS) ? "STATUS" :
                                 (target_page == DisplayPage::SENSORS) ? "SENSORS" : "IN_CALL";
-        DEBUG_DISPLAY("==========================================");
-        DEBUG_DISPLAY("PAGE SWITCH: %s", page_name);
-        DEBUG_DISPLAY("==========================================");
+        ESP_LOGD("DISPLAY", "==========================================");
+        ESP_LOGD("DISPLAY", "PAGE SWITCH: %s", page_name);
+        ESP_LOGD("DISPLAY", "==========================================");
 
         last_page = target_page;
     }

@@ -18,8 +18,10 @@
 #include "supabase/supabase_client.h"
 #include "common/pairing_manager.h"
 #include "display/matrix_display.h"
-#include "debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
+
+static const char* TAG = "NET";
 
 // Forward declarations for functions still in main.cpp
 extern void setup_time();
@@ -47,7 +49,7 @@ void handleSerialAndImprov(LoopContext& ctx) {
         String password = serial_wifi_get_password();
         serial_wifi_clear_pending();
 
-        Serial.printf("[WIFI] Connecting to '%s'...\n", ssid.c_str());
+        ESP_LOGI(TAG, "Connecting to '%s'...", ssid.c_str());
 
         WiFi.disconnect();
         WiFi.begin(ssid.c_str(), password.c_str());
@@ -56,12 +58,11 @@ void handleSerialAndImprov(LoopContext& ctx) {
         unsigned long start = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
             vTaskDelay(pdMS_TO_TICKS(500));
-            Serial.print(".");
+            // Progress dots handled silently
         }
-        Serial.println();
 
         if (WiFi.status() == WL_CONNECTED) {
-            Serial.printf("[WIFI] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+            ESP_LOGI(TAG, "Connected! IP: %s", WiFi.localIP().toString().c_str());
             ctx.app_state->wifi_connected = true;
 
             // Disable provisioning AP now that we're connected
@@ -76,7 +77,7 @@ void handleSerialAndImprov(LoopContext& ctx) {
 
             ctx.matrix_display->showUnconfigured(WiFi.localIP().toString(), ctx.mdns_manager->getHostname());
         } else {
-            RLOG_ERROR("loop", "WiFi connection failed");
+            ESP_LOGE(TAG, "WiFi connection failed");
             ctx.app_state->wifi_connected = false;
         }
     }
@@ -103,7 +104,7 @@ void handleWiFiConnection(LoopContext& ctx) {
         if (!deps.supabase.isInitialized()) {
             String supabase_url = deps.config.getSupabaseUrl();
             if (!supabase_url.isEmpty()) {
-                Serial.println("[SUPABASE] Deferred initialization - WiFi now connected");
+                ESP_LOGI(TAG, "Deferred Supabase initialization - WiFi now connected");
                 deps.supabase.begin(supabase_url, deps.pairing.getCode());
             }
         }
@@ -128,7 +129,7 @@ void handleMDNS(LoopContext& ctx) {
     if (ctx.current_time - last_mdns_check >= 5000) {
         last_mdns_check = ctx.current_time;
         if (!ctx.mdns_manager->isInitialized()) {
-            Serial.println("[MDNS] mDNS not running, restarting...");
+            ESP_LOGW(TAG, "mDNS not running, restarting...");
             ctx.mdns_manager->end();
             if (ctx.mdns_manager->begin(ctx.config_manager->getDeviceName())) {
                 ctx.mdns_manager->advertiseHTTP(80);

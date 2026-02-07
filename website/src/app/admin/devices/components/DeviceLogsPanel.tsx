@@ -15,20 +15,34 @@ interface DeviceLogsPanelProps {
     onFilterChange: (filter: 'all' | DeviceLog['level']) => void;
 }
 
+const levelColor: Record<string, string> = {
+    error: 'text-red-500',
+    warn: 'text-yellow-500',
+    info: 'text-blue-500',
+    debug: 'text-gray-400',
+    verbose: 'text-gray-300',
+};
+
 const VirtualizedLogList = memo(function VirtualizedLogList({ logs }: { logs: DeviceLog[] }) {
     const parentRef = useRef<HTMLDivElement>(null);
-    
+
     const virtualizer = useVirtualizer({
         count: logs.length,
         getScrollElement: () => parentRef.current,
-        estimateSize: () => 70, // Estimated height of each log item
-        overscan: 5,
+        estimateSize: () => 32,
+        overscan: 10,
+        measureElement: (el) => el.getBoundingClientRect().height,
     });
 
     return (
         <div
             ref={parentRef}
-            className="mt-3 max-h-72 overflow-y-auto"
+            className="mt-3 overflow-y-auto overscroll-contain border rounded-md"
+            style={{
+                height: '400px',
+                borderColor: 'var(--color-border)',
+                backgroundColor: 'var(--color-bg, #0d1117)',
+            }}
         >
             <div
                 style={{
@@ -40,24 +54,44 @@ const VirtualizedLogList = memo(function VirtualizedLogList({ logs }: { logs: De
                 {virtualizer.getVirtualItems().map((virtualItem) => {
                     const log = logs[virtualItem.index];
                     if (!log) return null;
+                    const lvl = log.level?.toLowerCase() ?? 'info';
                     return (
                         <div
                             key={log.id}
+                            ref={virtualizer.measureElement}
+                            data-index={virtualItem.index}
+                            className="border-b text-xs font-mono"
                             style={{
                                 position: 'absolute',
                                 top: 0,
                                 left: 0,
                                 width: '100%',
                                 transform: `translateY(${virtualItem.start}px)`,
+                                borderColor: 'var(--color-border)',
                             }}
-                            className="pb-2"
                         >
-                            <div className="rounded border px-2 py-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                                <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                                    <span>{log.level.toUpperCase()}</span>
-                                    <span>{new Date(log.created_at).toLocaleString()}</span>
-                                </div>
-                                <p className="mt-1" style={{ color: 'var(--color-text)' }}>{log.message}</p>
+                            <div className="flex items-baseline gap-2 px-3 py-1.5 min-w-0">
+                                <span
+                                    className={`shrink-0 inline-block w-[3.5rem] text-right uppercase font-semibold ${levelColor[lvl] ?? 'text-gray-400'}`}
+                                >
+                                    {log.level}
+                                </span>
+                                <span
+                                    className="shrink-0 tabular-nums text-[10px]"
+                                    style={{ color: 'var(--color-text-muted)' }}
+                                >
+                                    {new Date(log.created_at).toLocaleTimeString()}
+                                </span>
+                                <span
+                                    className="min-w-0 whitespace-pre-wrap"
+                                    style={{
+                                        color: 'var(--color-text)',
+                                        overflowWrap: 'anywhere',
+                                        wordBreak: 'break-word',
+                                    }}
+                                >
+                                    {log.message}
+                                </span>
                             </div>
                         </div>
                     );
@@ -79,8 +113,10 @@ export default memo(function DeviceLogsPanel({
         <div className="panel">
             <div className="flex items-center justify-between">
                 <div>
-                    <h3 className="panel-header">Device Logs (Live Only)</h3>
-                    <p className="panel-subtext">Subscription: {logStatus} • Real-time streaming only, no history</p>
+                    <h3 className="panel-header">Device Logs</h3>
+                    <p className="panel-subtext">
+                        {logStatus === 'connected' ? 'Live' : logStatus} • {logs.length} log{logs.length !== 1 ? 's' : ''} • Newest first
+                    </p>
                 </div>
                 <select
                     value={logFilter}

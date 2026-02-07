@@ -15,14 +15,15 @@
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
 #include "../config/config_manager.h"
-#include "../debug.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
 #include "../core/dependencies.h"
 #include "../supabase/supabase_realtime.h"
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "1.0.0"
 #endif
+
+static const char* TAG = "SUPABASE";
 
 // Global instance
 SupabaseClient supabaseClient;
@@ -47,8 +48,8 @@ void SupabaseClient::begin(const String& supabase_url, const String& pairing_cod
     _pairingCode = pairing_code;
     _pairingCode.toUpperCase();
     
-    Serial.printf("[SUPABASE] Initialized with URL: %s\n", _supabaseUrl.c_str());
-    Serial.println("[SUPABASE] Pairing code configured");
+    ESP_LOGI(TAG, "Initialized with URL: %s", _supabaseUrl.c_str());
+    ESP_LOGI(TAG, "Pairing code configured");
 }
 
 void SupabaseClient::setPairingCode(const String& code) {
@@ -71,7 +72,7 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     state.in_call = false;
     
     if (!ensureAuthenticated()) {
-        Serial.println("[SUPABASE] Cannot post state - not authenticated");
+        ESP_LOGW(TAG, "Cannot post state - not authenticated");
         return state;
     }
     
@@ -99,7 +100,7 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     int httpCode = makeRequestWithRetry("post-device-state", "POST", body, response);
     
     if (httpCode != 200) {
-        RLOG_WARN("supabase", "Post state failed: HTTP %d", httpCode);
+        ESP_LOGW(TAG, "Post state failed: HTTP %d", httpCode);
         return state;
     }
     
@@ -108,13 +109,13 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
     DeserializationError error = deserializeJson(respDoc, response);
     
     if (error) {
-        RLOG_ERROR("supabase", "Response parse error: %s", error.c_str());
+        ESP_LOGE(TAG, "Response parse error: %s", error.c_str());
         return state;
     }
     
     if (!respDoc["success"].as<bool>()) {
         String errMsg = respDoc["error"] | "Unknown error";
-        RLOG_ERROR("supabase", "Post state error: %s", errMsg.c_str());
+        ESP_LOGE(TAG, "Post state error: %s", errMsg.c_str());
         return state;
     }
 
@@ -145,8 +146,8 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
         String currentUserUuid = deps.config.getUserUuid();
         if (currentUserUuid.isEmpty() || currentUserUuid != newUserUuid) {
             deps.config.setUserUuid(newUserUuid);
-            Serial.printf("[SUPABASE] User UUID updated from post-device-state: %s\n",
-                          newUserUuid.substring(0, 8).c_str());
+            ESP_LOGI(TAG, "User UUID updated from post-device-state: %s",
+                     newUserUuid.substring(0, 8).c_str());
             deps.realtime.disconnect(); // Reconnect to user channel with new user_uuid
         }
     }
@@ -156,7 +157,7 @@ SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap,
 
 int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     if (!ensureAuthenticated()) {
-        Serial.println("[SUPABASE] Cannot poll commands - not authenticated");
+        ESP_LOGW(TAG, "Cannot poll commands - not authenticated");
         return 0;
     }
     
@@ -165,7 +166,7 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     
     if (httpCode != 200) {
         if (httpCode != 0) {  // Don't log connection failures
-            Serial.printf("[SUPABASE] Poll commands failed: HTTP %d\n", httpCode);
+            ESP_LOGW(TAG, "Poll commands failed: HTTP %d", httpCode);
         }
         return 0;
     }
@@ -175,7 +176,7 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     DeserializationError error = deserializeJson(doc, response);
     
     if (error) {
-        Serial.printf("[SUPABASE] Command response parse error: %s\n", error.c_str());
+        ESP_LOGE(TAG, "Command response parse error: %s", error.c_str());
         return 0;
     }
     
@@ -196,21 +197,21 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
         
         if (cmdId.isEmpty()) {
             skipped++;
-            Serial.println("[SUPABASE] Skipping command with empty ID");
+            ESP_LOGW(TAG, "Skipping command with empty ID");
             continue;
         }
         
         // Validate ID format (should be UUID-like: at least 8 chars, alphanumeric with dashes)
         if (cmdId.length() < 8) {
             skipped++;
-            Serial.printf("[SUPABASE] Skipping command with invalid ID (too short): %s\n", cmdId.c_str());
+            ESP_LOGW(TAG, "Skipping command with invalid ID (too short): %s", cmdId.c_str());
             continue;
         }
         
         String cmdName = cmdVal["command"].as<String>();
         if (cmdName.isEmpty()) {
             skipped++;
-            Serial.printf("[SUPABASE] Skipping command %s with empty command name\n", cmdId.c_str());
+            ESP_LOGW(TAG, "Skipping command %s with empty command name", cmdId.c_str());
             continue;
         }
         
@@ -231,7 +232,7 @@ int SupabaseClient::pollCommands(SupabaseCommand commands[], int maxCommands) {
     }
     
     if (count > 0 || skipped > 0) {
-        Serial.printf("[SUPABASE] Received %d commands (skipped %d invalid)\n", count, skipped);
+        ESP_LOGI(TAG, "Received %d commands (skipped %d invalid)", count, skipped);
     }
     
     return count;
@@ -244,17 +245,17 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     trimmedId.trim();
     
     if (trimmedId.isEmpty()) {
-        Serial.println("[SUPABASE] Cannot ack command - empty command ID");
+        ESP_LOGW(TAG, "Cannot ack command - empty command ID");
         return false;
     }
     
     if (trimmedId.length() < 8) {
-        Serial.printf("[SUPABASE] Cannot ack command - invalid ID (too short): %s\n", trimmedId.c_str());
+        ESP_LOGW(TAG, "Cannot ack command - invalid ID (too short): %s", trimmedId.c_str());
         return false;
     }
     
     if (!ensureAuthenticated()) {
-        Serial.println("[SUPABASE] Cannot ack command - not authenticated");
+        ESP_LOGW(TAG, "Cannot ack command - not authenticated");
         return false;
     }
     
@@ -285,8 +286,8 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
         
         broadcastSent = deps.realtime.sendBroadcast("command_ack", broadcastData);
         if (broadcastSent) {
-            Serial.printf("[SUPABASE] Command %s broadcast via realtime (success=%d)\n", 
-                          trimmedId.c_str(), success);
+            ESP_LOGI(TAG, "Command %s broadcast via realtime (success=%d)",
+                     trimmedId.c_str(), success);
         }
     }
     
@@ -316,13 +317,13 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     int httpCode = makeRequestWithRetry("ack-command", "POST", body, response);
     
     if (httpCode != 200) {
-        RLOG_WARN("supabase", "Ack command failed: HTTP %d", httpCode);
+        ESP_LOGW(TAG, "Ack command failed: HTTP %d", httpCode);
         // Return true if broadcast succeeded even if HTTP failed
         return broadcastSent;
     }
     
-    Serial.printf("[SUPABASE] Command %s acknowledged (success=%d, broadcast=%d)\n", 
-                  trimmedId.c_str(), success, broadcastSent);
+    ESP_LOGI(TAG, "Command %s acknowledged (success=%d, broadcast=%d)",
+             trimmedId.c_str(), success, broadcastSent);
     return true;
 }
 
@@ -356,7 +357,7 @@ bool SupabaseClient::insertDeviceLog(const String& level, const String& message,
         unsigned long elapsed = now - last_log_error;
         if (elapsed > 10000) {
             last_log_error = now;
-            Serial.printf("[SUPABASE] insert-device-log failed: HTTP %d\n", httpCode);
+            ESP_LOGW(TAG, "insert-device-log failed: HTTP %d", httpCode);
         }
         return false;
     }
@@ -387,9 +388,9 @@ bool SupabaseClient::syncWebexStatus(String& webexStatus, const String& payload)
             _webexTokenMissing = true;
         }
         if (!response.isEmpty()) {
-            Serial.printf("[SUPABASE] webex-status failed (%d): %s\n", httpCode, response.c_str());
+            ESP_LOGW(TAG, "webex-status failed (%d): %s", httpCode, response.c_str());
         } else {
-            Serial.printf("[SUPABASE] webex-status failed (%d)\n", httpCode);
+            ESP_LOGW(TAG, "webex-status failed (%d)", httpCode);
         }
         return false;
     }
@@ -397,7 +398,7 @@ bool SupabaseClient::syncWebexStatus(String& webexStatus, const String& payload)
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, response);
     if (err) {
-        RLOG_ERROR("supabase", "webex-status parse error: %s", err.c_str());
+        ESP_LOGE(TAG, "webex-status parse error: %s", err.c_str());
         return false;
     }
 
@@ -468,21 +469,21 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
 
 #if SUPABASE_AUTH_DEBUG
     if (endpoint == "device-auth") {
-        Serial.printf("[SUPABASE] Request debug: %s %s\n", method.c_str(), url.c_str());
-        Serial.println("[SUPABASE] Request headers: Content-Type=application/json");
+        ESP_LOGD(TAG, "Request debug: %s %s", method.c_str(), url.c_str());
+        ESP_LOGD(TAG, "Request headers: Content-Type=application/json");
         if (hmacUsed) {
-            Serial.printf("[SUPABASE] Request headers: X-Device-Serial=%s\n",
-                          deviceCredentials.getSerialNumber().c_str());
-            Serial.printf("[SUPABASE] Request headers: X-Timestamp=%lu\n",
-                          (unsigned long)hmacTimestamp);
-            Serial.println("[SUPABASE] Request headers: X-Signature=<redacted>");
+            ESP_LOGD(TAG, "Request headers: X-Device-Serial=%s",
+                     deviceCredentials.getSerialNumber().c_str());
+            ESP_LOGD(TAG, "Request headers: X-Timestamp=%lu",
+                     (unsigned long)hmacTimestamp);
+            ESP_LOGD(TAG, "Request headers: X-Signature=<redacted>");
         } else if (!_token.isEmpty()) {
-            Serial.println("[SUPABASE] Request headers: Authorization=Bearer <redacted>");
+            ESP_LOGD(TAG, "Request headers: Authorization=Bearer <redacted>");
         }
         if (body.isEmpty()) {
-            Serial.println("[SUPABASE] Request payload: (empty)");
+            ESP_LOGD(TAG, "Request payload: (empty)");
         } else {
-            Serial.printf("[SUPABASE] Request payload: %s\n", body.c_str());
+            ESP_LOGD(TAG, "Request payload: %s", body.c_str());
         }
     }
 #endif
@@ -494,7 +495,7 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     } else if (method == "POST") {
         httpCode = http.POST(body);
     } else {
-        Serial.printf("[SUPABASE] Unsupported method: %s\n", method.c_str());
+        ESP_LOGW(TAG, "Unsupported method: %s", method.c_str());
         http.end();
         _requestInFlight = false;
         return 0;
@@ -503,9 +504,9 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     if (httpCode > 0) {
         response = http.getString();
     } else {
-        RLOG_ERROR("supabase", "Request failed: %s", http.errorToString(httpCode).c_str());
-        Serial.printf("[SUPABASE] TLS context: url=%s time=%lu heap=%lu\n",
-                      url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap());
+        ESP_LOGE(TAG, "Request failed: %s", http.errorToString(httpCode).c_str());
+        ESP_LOGD(TAG, "TLS context: url=%s time=%lu heap=%lu",
+                 url.c_str(), (unsigned long)time(nullptr), ESP.getFreeHeap());
         response = "";
     }
     

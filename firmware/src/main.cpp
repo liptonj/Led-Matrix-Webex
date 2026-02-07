@@ -18,8 +18,7 @@
 #include "boot_validator.h"
 #include "common/board_utils.h"
 #include "config/config_manager.h"
-#include "debug.h"
-#include "debug/remote_logger.h"
+#include "debug/log_system.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
 #include "improv/improv_handler.h"
@@ -49,6 +48,8 @@
 
 // Dependency Injection Framework
 #include "core/dependencies.h"
+
+static const char* TAG = "MAIN";
 
 // Firmware version - defined in platformio.ini [version] section
 #ifndef FIRMWARE_VERSION
@@ -82,7 +83,6 @@ extern DeviceCredentials deviceCredentials;
 extern SyncManager syncManager;
 extern RealtimeManager realtimeManager;
 extern CommandProcessor commandProcessor;
-extern RemoteLogger remoteLogger;
 extern ImprovHandler improv_handler;
 extern SupabaseClient supabaseClient;
 extern SupabaseRealtime supabaseRealtime;
@@ -100,7 +100,7 @@ static Dependencies* g_dependencies = nullptr;
  */
 Dependencies& getDependencies() {
     if (g_dependencies == nullptr) {
-        Serial.println("[CRITICAL] Dependencies not initialized - setup() failed or not called");
+        ESP_LOGE(TAG, "Dependencies not initialized - setup() failed or not called");
         Serial.flush();
         // Abort - this is a critical programming error
         // On ESP32, this will trigger a watchdog reset
@@ -124,7 +124,6 @@ void initDisplay();
 void initWebServer();
 void initWebexClient();
 void initManagers();
-void initRemoteLogger();
 void initIntegrations();
 void initOTAManager();
 void initSerialCommands();
@@ -138,6 +137,7 @@ void initDependencies();
  */
 void setup() {
     initSerialAndWatchdog();
+    log_system_init();  // Initialize unified logging system early
     initBootValidation();  // From boot_manager module
     initConfigManager();
     initDebugMode();
@@ -150,7 +150,7 @@ void setup() {
     initWebexClient();
     initManagers();
     initSupabase(config_manager, app_state, pairing_manager);  // From supabase_init module
-    initRemoteLogger();
+    log_system_set_remote_ready(&supabaseClient, &supabaseRealtime, &config_manager);
     initIntegrations();
     initOTAManager();
     initSerialCommands();
@@ -219,18 +219,16 @@ void initSerialAndWatchdog() {
     // CRITICAL: Configure watchdog timeout FIRST to prevent boot loops
     esp_task_wdt_init(30, false);  // 30 second timeout, no panic
 
-    Serial.println();
-    Serial.println("===========================================");
-    Serial.printf("  Webex Status Display - %s\n", getChipDescription().c_str());
-    Serial.printf("  Firmware Version: %s\n", FIRMWARE_VERSION);
-    Serial.println("===========================================");
-    Serial.println();
+    ESP_LOGI(TAG, "===========================================");
+    ESP_LOGI(TAG, "  Webex Status Display - %s", getChipDescription().c_str());
+    ESP_LOGI(TAG, "  Firmware Version: %s", FIRMWARE_VERSION);
+    ESP_LOGI(TAG, "===========================================");
 }
 
 void initConfigManager() {
-    Serial.println("[INIT] Loading configuration...");
+    ESP_LOGI(TAG, "Loading configuration...");
     if (!config_manager.begin()) {
-        RLOG_ERROR("init", "Failed to initialize configuration");
+        ESP_LOGE(TAG, "Failed to initialize configuration");
         boot_validator.onCriticalFailure("Config", "Failed to load configuration");
     }
 
@@ -239,45 +237,64 @@ void initConfigManager() {
 }
 
 void initDebugMode() {
+    // Set global debug flags for backward compatibility (if any code still references them)
     g_debug_mode = config_manager.getDebugMode();
     g_debug_display = config_manager.getDebugDisplay();
     g_debug_realtime = config_manager.getDebugRealtime();
+    
+    // Configure ESP-IDF log levels based on config
     if (g_debug_mode) {
-        Serial.println("[INIT] Debug mode ENABLED - verbose logging active");
+        esp_log_level_set("*", ESP_LOG_DEBUG);
+        ESP_LOGI(TAG, "Debug mode ENABLED - verbose logging active");
+    } else {
+        esp_log_level_set("*", ESP_LOG_INFO);
     }
+    
     if (g_debug_display) {
-        Serial.println("[INIT] Display debug ENABLED");
+        esp_log_level_set("DISPLAY", ESP_LOG_DEBUG);
+        ESP_LOGI(TAG, "Display debug ENABLED");
+    } else {
+        esp_log_level_set("DISPLAY", ESP_LOG_INFO);
     }
+    
     if (g_debug_realtime) {
-        Serial.println("[INIT] Realtime debug ENABLED");
+        esp_log_level_set("REALTIME", ESP_LOG_DEBUG);
+        ESP_LOGI(TAG, "Realtime debug ENABLED");
+    } else {
+        esp_log_level_set("REALTIME", ESP_LOG_INFO);
+    }
+    
+    // Enable remote logging if debug mode is on
+    if (g_debug_mode) {
+        log_system_set_remote_enabled(true);
     }
 }
 
 void initDeviceCredentials() {
-    Serial.println("[INIT] Initializing device credentials...");
+    ESP_LOGI(TAG, "Initializing device credentials...");
     if (!deviceCredentials.begin()) {
-        RLOG_WARN("init", "Failed to initialize device credentials - auth disabled");
+        ESP_LOGW(TAG, "Failed to initialize device credentials - auth disabled");
     } else {
-        Serial.printf("[INIT] Device serial: %s\n", deviceCredentials.getSerialNumber().c_str());
-        Serial.printf("[INIT] Device ID: %s\n", deviceCredentials.getDeviceId().c_str());
+        ESP_LOGI(TAG, "Device serial: %s", deviceCredentials.getSerialNumber().c_str());
+        ESP_LOGI(TAG, "Device ID: %s", deviceCredentials.getDeviceId().c_str());
     }
 }
 
 void initDisplay() {
-    Serial.println("[INIT] Initializing LED matrix...");
+    ESP_LOGI(TAG, "Initializing LED matrix...");
     Serial.flush();
     delay(10);  // Feed watchdog before long operation
 
     // Get pin configuration from ConfigManager (supports runtime presets and custom pins)
     PinConfig pins = config_manager.getPinConfig();
     PinPreset preset = config_manager.getPinPreset();
-    Serial.printf("[INIT] Using pin preset: %s\n", getPresetName(preset));
+    ESP_LOGI(TAG, "Using pin preset: %s", getPresetName(preset));
     
     s_display_ok = matrix_display.begin(pins);
     if (!s_display_ok) {
-        Serial.println("[WARN] Display initialization failed - continuing without display");
+        ESP_LOGW(TAG, "Display initialization failed - continuing without display");
     } else {
-        Serial.println("[INIT] Display ready!");
+        ESP_LOGI(TAG, "Display ready!");
         matrix_display.setBrightness(config_manager.getBrightness());
         matrix_display.setScrollSpeedMs(config_manager.getScrollSpeedMs());
         matrix_display.showStartupScreen(FIRMWARE_VERSION);
@@ -287,13 +304,13 @@ void initDisplay() {
 // initWiFiAndImprov() moved to improv_provisioner.cpp
 
 void initWebServer() {
-    Serial.println("[INIT] Starting web server...");
+    ESP_LOGI(TAG, "Starting web server...");
     web_server.begin(&config_manager, &app_state, nullptr, &mdns_manager);
 }
 
 void initWebexClient() {
     if (config_manager.hasWebexCredentials()) {
-        Serial.println("[INIT] Initializing Webex client...");
+        ESP_LOGI(TAG, "Initializing Webex client...");
         webex_client.begin(&config_manager);
 
         if (config_manager.hasWebexTokens()) {
@@ -303,43 +320,37 @@ void initWebexClient() {
 }
 
 void initManagers() {
-    Serial.println("[INIT] Initializing pairing manager...");
+    ESP_LOGI(TAG, "Initializing pairing manager...");
     pairing_manager.begin();
-    Serial.println("[INIT] Pairing manager initialized");
+    ESP_LOGI(TAG, "Pairing manager initialized");
 
-    Serial.println("[INIT] Initializing command processor...");
+    ESP_LOGI(TAG, "Initializing command processor...");
     commandProcessor.begin();
 
-    Serial.println("[INIT] Initializing sync manager...");
+    ESP_LOGI(TAG, "Initializing sync manager...");
     syncManager.begin();
 
-    Serial.println("[INIT] Initializing realtime manager...");
+    ESP_LOGI(TAG, "Initializing realtime manager...");
     realtimeManager.begin();
 }
 
 // initSupabase() moved to supabase_init.cpp
 
-void initRemoteLogger() {
-    remoteLogger.begin(app_state.wifi_connected ? &supabaseClient : nullptr);
-    if (g_debug_mode) {
-        remoteLogger.setRemoteEnabled(true);
-    }
-}
 
 void initIntegrations() {
     if (config_manager.hasXAPIDevice()) {
-        Serial.println("[INIT] Connecting to RoomOS device...");
+        ESP_LOGI(TAG, "Connecting to RoomOS device...");
         xapi_websocket.begin(&config_manager);
     }
 
     if (config_manager.hasMQTTConfig()) {
-        Serial.println("[INIT] Connecting to MQTT broker...");
+        ESP_LOGI(TAG, "Connecting to MQTT broker...");
         mqtt_client.begin(&config_manager);
     }
 }
 
 void initOTAManager() {
-    Serial.println("[INIT] Initializing OTA manager...");
+    ESP_LOGI(TAG, "Initializing OTA manager...");
     String ota_url = config_manager.getOTAUrl();
     ota_manager.begin(ota_url, FIRMWARE_VERSION);
 
@@ -350,21 +361,18 @@ void initOTAManager() {
 }
 
 void initSerialCommands() {
-    Serial.println("[INIT] Initializing serial command handler...");
+    ESP_LOGI(TAG, "Initializing serial command handler...");
     serial_commands_begin();
 }
 
 void initDependencies() {
-    Serial.println("[INIT] Initializing dependency injection framework...");
+    ESP_LOGI(TAG, "Initializing dependency injection framework...");
     
     // Initialize the global Dependencies instance with all component references
     // Using static allocation to ensure it persists for the lifetime of the program
     static Dependencies deps = initializeDependencies(
         config_manager,
         app_state,
-        g_debug_mode,
-        g_debug_display,
-        g_debug_realtime,
         matrix_display,
         wifi_manager,
         web_server,
@@ -379,19 +387,17 @@ void initDependencies() {
         syncManager,
         realtimeManager,
         commandProcessor,
-        remoteLogger,
         improv_handler,
         webex_client,
         xapi_websocket
     );
     
     g_dependencies = &deps;
-    Serial.println("[INIT] Dependency injection framework ready");
+    ESP_LOGI(TAG, "Dependency injection framework ready");
 }
 
 void finalizeBootAndDisplay() {
-    Serial.println("[INIT] Setup complete!");
-    Serial.println();
+    ESP_LOGI(TAG, "Setup complete!");
 
     // Mark boot as successful - cancels OTA rollback
     boot_validator.markBootSuccessful();
@@ -399,7 +405,7 @@ void finalizeBootAndDisplay() {
     if (app_state.wifi_connected) {
         String hostname = mdns_manager.getHostname();
         matrix_display.showUnconfigured(WiFi.localIP().toString(), hostname);
-        Serial.printf("[INIT] Device ready at http://%s or http://%s.local\n",
+        ESP_LOGI(TAG, "Device ready at http://%s or http://%s.local",
                       WiFi.localIP().toString().c_str(), hostname.c_str());
     }
 }
@@ -411,7 +417,7 @@ void finalizeBootAndDisplay() {
  */
 void setup_time() {
     if (!applyTimeConfig(config_manager, &app_state)) {
-        Serial.println("[TIME] Failed to apply time configuration");
+        ESP_LOGE(TAG, "Failed to apply time configuration");
     }
 }
 

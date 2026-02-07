@@ -15,7 +15,6 @@
 #include "boot_validator.h"
 #include "commands/command_processor.h"
 #include "config/config_manager.h"
-#include "debug/remote_logger.h"
 #include "display/matrix_display.h"
 #include "discovery/mdns_manager.h"
 #include "improv/improv_handler.h"
@@ -33,9 +32,6 @@
 Dependencies initializeDependencies(
     ConfigManager& config_manager,
     AppState& app_state,
-    bool& g_debug_mode,
-    bool& g_debug_display,
-    bool& g_debug_realtime,
     MatrixDisplay& matrix_display,
     WiFiManager& wifi_manager,
     WebServerManager& web_server,
@@ -50,7 +46,6 @@ Dependencies initializeDependencies(
     SyncManager& syncManager,
     RealtimeManager& realtimeManager,
     CommandProcessor& commandProcessor,
-    RemoteLogger& remoteLogger,
     ImprovHandler& improv_handler,
     WebexClient& webex_client,
     XAPIWebSocket& xapi_websocket
@@ -58,9 +53,6 @@ Dependencies initializeDependencies(
     return Dependencies(
         config_manager,
         app_state,
-        g_debug_mode,
-        g_debug_display,
-        g_debug_realtime,
         matrix_display,
         wifi_manager,
         web_server,
@@ -75,7 +67,6 @@ Dependencies initializeDependencies(
         syncManager,
         realtimeManager,
         commandProcessor,
-        remoteLogger,
         improv_handler,
         webex_client,
         xapi_websocket

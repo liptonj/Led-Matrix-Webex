@@ -185,11 +185,11 @@ export default function DeviceDetailPanel({
             setCommandStatus('disconnected');
         }
 
-        // Only subscribe to logs if we have a userUuid
-        if (userUuid) {
+        // Subscribe to logs using device-specific channel
+        if (device?.id) {
             setLogStatus('connecting');
             subscribeToDeviceLogs(
-                userUuid,
+                device.id, // device_uuid for device-specific channel
                 (log) => {
                     setLogs((prev) => {
                         const next = [log, ...prev];
@@ -208,7 +208,6 @@ export default function DeviceDetailPanel({
                     setLogStatus('error');
                     setLogsError(errorMessage || 'Failed to subscribe to device logs');
                 },
-                device.id, // device_uuid for filtering
             ).then((unsubscribe) => {
                 logsUnsubscribe = unsubscribe;
             }).catch((err) => {
@@ -417,27 +416,27 @@ export default function DeviceDetailPanel({
                                 pairingStatus={pairingStatus}
                                 pairingError={pairingError}
                             />
-                            <DeviceLogsPanel
-                                logs={filteredLogs}
-                                logsLoading={logsLoading}
-                                logsError={logsError}
-                                logStatus={logStatus}
-                                logFilter={logFilter}
-                                onFilterChange={setLogFilter}
+                            <DeviceCommandsPanel
+                                commands={commands}
+                                commandError={commandError}
+                                commandStatus={commandStatus}
+                                commandFilter={commandFilter}
+                                commandCount={commandCount}
+                                commandPage={commandPage}
+                                commandTotalPages={Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE))}
+                                onFilterChange={setCommandFilter}
+                                onPageChange={setCommandPage}
+                                onShowResponse={handleShowResponse}
                             />
                         </div>
                     </div>
-                    <DeviceCommandsPanel
-                        commands={commands}
-                        commandError={commandError}
-                        commandStatus={commandStatus}
-                        commandFilter={commandFilter}
-                        commandCount={commandCount}
-                        commandPage={commandPage}
-                        commandTotalPages={Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE))}
-                        onFilterChange={setCommandFilter}
-                        onPageChange={setCommandPage}
-                        onShowResponse={handleShowResponse}
+                    <DeviceLogsPanel
+                        logs={filteredLogs}
+                        logsLoading={logsLoading}
+                        logsError={logsError}
+                        logStatus={logStatus}
+                        logFilter={logFilter}
+                        onFilterChange={setLogFilter}
                     />
                 </div>
             )}

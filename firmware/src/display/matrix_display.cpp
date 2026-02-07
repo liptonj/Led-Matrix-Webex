@@ -16,6 +16,9 @@
 #include "icons.h"
 #include "../config/pin_config.h"
 #include "../common/board_utils.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "DISPLAY";
 
 MatrixDisplay::MatrixDisplay()
     : dma_display(nullptr), initialized(false), brightness(128) {
@@ -30,7 +33,7 @@ MatrixDisplay::~MatrixDisplay() {
 bool MatrixDisplay::begin() {
     // Use default pins for the detected board type
     PinConfig pins = getDefaultPinsForBoard();
-    Serial.printf("[DISPLAY] Using default pins for %s\n", getChipDescription().c_str());
+    ESP_LOGI(TAG, "Using default pins for %s", getChipDescription().c_str());
     return begin(pins);
 }
 
@@ -44,15 +47,15 @@ bool MatrixDisplay::begin(const PinConfig& pins) {
         initialized = false;
     }
 
-    Serial.println("===============================================");
-    Serial.println("[DISPLAY] Initialization starting...");
-    Serial.printf("[DISPLAY] Board type: %s\n", getChipDescription().c_str());
+    ESP_LOGI(TAG, "===============================================");
+    ESP_LOGI(TAG, "Initialization starting...");
+    ESP_LOGI(TAG, "Board type: %s", getChipDescription().c_str());
     Serial.flush();
     yield(); // Feed watchdog
 
     // Validate pin configuration
     if (!pins.isValid()) {
-        Serial.println("[DISPLAY] ERROR: Invalid pin configuration");
+        ESP_LOGE(TAG, "Invalid pin configuration");
         return false;
     }
 
@@ -64,7 +67,7 @@ bool MatrixDisplay::begin(const PinConfig& pins) {
     );
 
     // Apply pin configuration from runtime settings
-    Serial.println("[DISPLAY] Applying runtime pin configuration");
+    ESP_LOGI(TAG, "Applying runtime pin configuration");
     mxconfig.gpio.r1 = pins.r1;
     mxconfig.gpio.g1 = pins.g1;
     mxconfig.gpio.b1 = pins.b1;
@@ -80,9 +83,9 @@ bool MatrixDisplay::begin(const PinConfig& pins) {
     mxconfig.gpio.oe = pins.oe;
     mxconfig.gpio.clk = pins.clk;
 
-    Serial.printf("[DISPLAY] Pins: R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d\n",
+    ESP_LOGI(TAG, "Pins: R1=%d G1=%d B1=%d R2=%d G2=%d B2=%d",
                   pins.r1, pins.g1, pins.b1, pins.r2, pins.g2, pins.b2);
-    Serial.printf("[DISPLAY] Pins: A=%d B=%d C=%d D=%d E=%d CLK=%d LAT=%d OE=%d\n",
+    ESP_LOGI(TAG, "Pins: A=%d B=%d C=%d D=%d E=%d CLK=%d LAT=%d OE=%d",
                   pins.a, pins.b, pins.c, pins.d, pins.e, pins.clk, pins.lat, pins.oe);
 
     mxconfig.clkphase = false;
@@ -92,23 +95,23 @@ bool MatrixDisplay::begin(const PinConfig& pins) {
     mxconfig.min_refresh_rate = 120;
     mxconfig.latch_blanking = 1;
 
-    Serial.println("[DISPLAY] Creating DMA display object...");
+    ESP_LOGI(TAG, "Creating DMA display object...");
     dma_display = new MatrixPanel_I2S_DMA(mxconfig);
 
     if (!dma_display) {
-        Serial.println("[DISPLAY] ERROR: Failed to allocate display object");
+        ESP_LOGE(TAG, "Failed to allocate display object");
         return false;
     }
 
-    Serial.println("[DISPLAY] Calling begin() on display...");
+    ESP_LOGI(TAG, "Calling begin() on display...");
     if (!dma_display->begin()) {
-        Serial.println("[DISPLAY] ERROR: Display begin() failed");
+        ESP_LOGE(TAG, "Display begin() failed");
         delete dma_display;
         dma_display = nullptr;
         return false;
     }
 
-    Serial.println("[DISPLAY] Setting brightness and clearing screen...");
+    ESP_LOGI(TAG, "Setting brightness and clearing screen...");
     brightness = 255;
     dma_display->setBrightness8(brightness);
     dma_display->setTextWrap(false);
@@ -120,10 +123,10 @@ bool MatrixDisplay::begin(const PinConfig& pins) {
     dma_display->setCursor(8, 12);
     dma_display->print("WEBEX");
 
-    Serial.println("[DISPLAY] Initialization complete");
-    Serial.printf("[DISPLAY] Matrix size: %dx%d pixels\n", MATRIX_WIDTH, MATRIX_HEIGHT);
-    Serial.printf("[DISPLAY] Brightness: %d/255\n", brightness);
-    Serial.println("===============================================");
+    ESP_LOGI(TAG, "Initialization complete");
+    ESP_LOGI(TAG, "Matrix size: %dx%d pixels", MATRIX_WIDTH, MATRIX_HEIGHT);
+    ESP_LOGI(TAG, "Brightness: %d/255", brightness);
+    ESP_LOGI(TAG, "===============================================");
     Serial.flush();
 
     initialized = true;

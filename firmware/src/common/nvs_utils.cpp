@@ -6,6 +6,9 @@
 #include "nvs_utils.h"
 #include <cstdarg>
 #include <cstdio>
+#include "../debug/log_system.h"
+
+static const char* TAG = "NVS";
 
 // ============== NvsScope Implementation ==============
 
@@ -97,7 +100,7 @@ void NvsScope::log(const char* format, ...) const {
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     
-    Serial.printf("%s %s\n", NVS_LOG_TAG, buffer);
+    ESP_LOGD(TAG, "%s", buffer);
 }
 
 // ============== String Operations ==============

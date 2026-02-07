@@ -10,6 +10,9 @@
 #include "supabase_realtime.h"
 #include "../core/dependencies.h"
 #include "../app_state.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "REALTIME";
 
 namespace {
 constexpr uint32_t REALTIME_LOW_HEAP_LOG_MS = 30000;
@@ -30,14 +33,14 @@ void SupabaseRealtime::attemptReconnect() {
         return;
     }
     
-    Serial.printf("[REALTIME] Reconnecting (next attempt in %lu ms)...\n", _reconnectDelay);
+    ESP_LOGI(TAG, "Reconnecting (next attempt in %lu ms)...", _reconnectDelay);
     uint32_t minHeap = minHeapRequired();
     if (ESP.getFreeHeap() < minHeap) {
         unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
-            Serial.printf("[REALTIME] Skipping reconnect - low heap (%lu < %lu)\n",
-                          ESP.getFreeHeap(), (unsigned long)minHeap);
+            ESP_LOGW(TAG, "Skipping reconnect - low heap (%lu < %lu)",
+                     ESP.getFreeHeap(), (unsigned long)minHeap);
         }
         return;
     }

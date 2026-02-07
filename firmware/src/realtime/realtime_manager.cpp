@@ -8,7 +8,9 @@
 #include "../supabase/supabase_realtime.h"
 #include "realtime_watchdog.h"
 #include "../core/dependencies.h"
-#include "../debug/remote_logger.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "RT_MGR";
 
 // Global instance
 RealtimeManager realtimeManager;
@@ -45,7 +47,7 @@ void RealtimeManager::loop(unsigned long current_time) {
         if (current_time >= deps.app_state.realtime_defer_until) {
             // Disconnect stale socket before reconnecting (prevents WebSocket handle leak)
             if (deps.realtime.isSocketConnected() && !deps.realtime.isConnected()) {
-                RLOG_WARN("realtime", "Disconnecting stale socket before reconnect");
+                ESP_LOGW(TAG, "Disconnecting stale socket before reconnect");
                 deps.realtime.disconnect();
             }
             initConnection();

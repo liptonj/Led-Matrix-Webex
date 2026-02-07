@@ -373,30 +373,14 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Determine user_uuid for broadcast
-    const userUuid = caller.user_uuid;
-
-    // If we don't have user_uuid yet, look it up from user_devices
-    let broadcastUserUuid = userUuid;
-    if (!broadcastUserUuid) {
-      const { data: userDevice } = await supabase
-        .schema("display")
-        .from("user_devices")
-        .select("user_id")
-        .eq("device_uuid", deviceUuid)
-        .maybeSingle();
-
-      broadcastUserUuid = userDevice?.user_id || null;
-    }
-
     console.log(
       `Command ${commandData.command} queued for device ${deviceUuid} (id: ${command.id}, auth: ${caller.auth_type})`,
     );
 
-    // Broadcast to user channel if user_uuid is available
-    if (broadcastUserUuid) {
+    // Broadcast to device channel for command delivery
+    if (deviceUuid) {
       try {
-        await sendBroadcast(`user:${broadcastUserUuid}`, "command", {
+        await sendBroadcast(`device:${deviceUuid}`, "command", {
           device_uuid: deviceUuid,
           command: {
             id: command.id,
@@ -407,13 +391,11 @@ Deno.serve(async (req) => {
             expires_at: expiresAt.toISOString(),
           },
         });
-        console.log(`Command broadcast to user:${broadcastUserUuid}`);
+        console.log(`Command broadcast to device:${deviceUuid}`);
       } catch (broadcastError) {
-        console.error("Failed to broadcast to user channel:", broadcastError);
+        console.error("Failed to broadcast to device channel:", broadcastError);
         // Don't fail the request - command is already queued
       }
-    } else {
-      console.warn(`No user_uuid found for device ${deviceUuid} - command not broadcast`);
     }
 
     const response: InsertCommandResponse = {

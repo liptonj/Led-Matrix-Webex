@@ -5,6 +5,9 @@
 
 #include "config_manager.h"
 #include "config_macros.h"
+#include "../debug/log_system.h"
+
+static const char* TAG = "CFG_WIFI";
 
 // WiFi Configuration
 
@@ -16,7 +19,7 @@ void ConfigManager::setWiFiCredentials(const String& ssid, const String& passwor
     saveString("wifi_pass", password);
     cached_ssid = ssid;
     cached_password = password;
-    Serial.printf("[CONFIG] WiFi credentials saved for SSID: %s\n", ssid.c_str());
+    ESP_LOGI(TAG, "WiFi credentials saved for SSID: %s", ssid.c_str());
 }
 
 bool ConfigManager::hasWiFiCredentials() const {
