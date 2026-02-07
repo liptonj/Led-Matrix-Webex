@@ -101,9 +101,9 @@ describe('TerminalDisplay', () => {
   describe('visual elements', () => {
     it('renders traffic light dots in header', () => {
       const { container } = render(<TerminalDisplay lines={[]} />);
-      const dots = container.querySelectorAll('.rounded-full');
-      // 3 traffic light dots (red, yellow, green)
-      expect(dots.length).toBeGreaterThanOrEqual(3);
+      // Red and yellow are divs, green is a button
+      const dots = container.querySelectorAll('.rounded-full.bg-red-500, .rounded-full.bg-yellow-500, .rounded-full.bg-green-500');
+      expect(dots.length).toBe(3);
     });
 
     it('applies custom height class', () => {
@@ -268,6 +268,63 @@ describe('TerminalDisplay', () => {
       fireEvent.click(toggle);
 
       expect(screen.queryByRole('button', { name: /scroll to bottom/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('fullscreen toggle', () => {
+    it('renders the green dot as a fullscreen button', () => {
+      render(<TerminalDisplay lines={[]} />);
+      const btn = screen.getByRole('button', { name: /fullscreen/i });
+      expect(btn).toBeInTheDocument();
+    });
+
+    it('enters fullscreen when green dot is clicked', () => {
+      const { container } = render(<TerminalDisplay lines={['Line 1']} />);
+      const btn = screen.getByRole('button', { name: /enter fullscreen/i });
+
+      fireEvent.click(btn);
+
+      // The outer container should have fixed positioning
+      const outer = container.firstElementChild;
+      expect(outer?.className).toContain('fixed');
+      expect(outer?.className).toContain('inset-0');
+      // Header should show an Esc hint
+      expect(screen.getByText(/esc to exit/i)).toBeInTheDocument();
+    });
+
+    it('exits fullscreen when green dot is clicked again', () => {
+      const { container } = render(<TerminalDisplay lines={['Line 1']} />);
+      const btn = screen.getByRole('button', { name: /enter fullscreen/i });
+
+      fireEvent.click(btn); // enter
+      fireEvent.click(screen.getByRole('button', { name: /exit fullscreen/i })); // exit
+
+      const outer = container.firstElementChild;
+      expect(outer?.className).not.toContain('fixed');
+    });
+
+    it('exits fullscreen on Escape key', () => {
+      const { container } = render(<TerminalDisplay lines={['Line 1']} />);
+      const btn = screen.getByRole('button', { name: /enter fullscreen/i });
+
+      fireEvent.click(btn);
+      expect(container.firstElementChild?.className).toContain('fixed');
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(container.firstElementChild?.className).not.toContain('fixed');
+    });
+
+    it('uses flex-1 height class in fullscreen instead of the provided heightClass', () => {
+      const { container } = render(<TerminalDisplay lines={['Line 1']} heightClass="h-96" />);
+      const btn = screen.getByRole('button', { name: /enter fullscreen/i });
+
+      // Before fullscreen, uses the provided h-96
+      expect(container.querySelector('.h-96')).toBeInTheDocument();
+
+      fireEvent.click(btn);
+
+      // In fullscreen, h-96 should no longer be applied
+      expect(container.querySelector('.h-96')).not.toBeInTheDocument();
     });
   });
 

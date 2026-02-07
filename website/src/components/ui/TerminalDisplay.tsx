@@ -83,9 +83,20 @@ export function TerminalDisplay({
 }: TerminalDisplayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(defaultAutoScroll);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Track whether the user is interacting (to distinguish programmatic scrolls)
   const isUserScrolling = useRef(false);
+
+  // Exit fullscreen on Escape key
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isFullscreen]);
 
   // Auto-scroll to bottom when new output arrives (if enabled)
   useEffect(() => {
@@ -124,16 +135,35 @@ export function TerminalDisplay({
     }
   }, []);
 
+  // When fullscreen, override the container to fill the entire viewport
+  const containerClasses = isFullscreen
+    ? 'fixed inset-0 z-50 bg-gray-900 dark:bg-black flex flex-col'
+    : `bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden flex flex-col${className ? ` ${className}` : ''}`;
+
+  // In fullscreen mode the content area should fill all remaining space
+  const effectiveHeightClass = isFullscreen ? 'flex-1 min-h-0' : heightClass;
+
   return (
-    <div className={`bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden flex flex-col${className ? ` ${className}` : ''}`}>
+    <div className={containerClasses}>
       {/* Terminal Header */}
       <div className="shrink-0 bg-gray-800 dark:bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700 dark:border-gray-800">
         <div className="flex gap-2">
           <div className="w-3 h-3 rounded-full bg-red-500" />
           <div className="w-3 h-3 rounded-full bg-yellow-500" />
-          <div className="w-3 h-3 rounded-full bg-green-500" />
+          <button
+            type="button"
+            onClick={() => setIsFullscreen((prev) => !prev)}
+            className="w-3 h-3 rounded-full bg-green-500 hover:bg-green-400 transition-colors cursor-pointer"
+            title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          />
         </div>
-        <span className="text-xs text-gray-400 ml-2">{title}</span>
+        <span className="text-xs text-gray-400 ml-2">
+          {title}
+          {isFullscreen && (
+            <span className="ml-2 text-gray-500 text-[10px]">(Esc to exit)</span>
+          )}
+        </span>
 
         {/* Auto-scroll toggle */}
         <button
@@ -154,7 +184,7 @@ export function TerminalDisplay({
       </div>
 
       {/* Terminal Content -- relative wrapper for the scroll-to-bottom FAB */}
-      <div className={`${heightClass} relative`}>
+      <div className={`${effectiveHeightClass} relative`}>
         <div
           ref={scrollRef}
           className="absolute inset-0 p-4 font-mono text-sm overflow-y-auto"
