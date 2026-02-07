@@ -157,8 +157,8 @@ bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
         return false;
     }
     
-    // Set channel topic to user:{user_uuid}
-    String channelTopic = "user:" + user_uuid;
+    // Set channel topic to realtime:user:{user_uuid}
+    String channelTopic = "realtime:user:" + user_uuid;
     setChannelTopic(channelTopic);
     
     Serial.printf("[REALTIME] Subscribing to user channel: %s\n", channelTopic.c_str());

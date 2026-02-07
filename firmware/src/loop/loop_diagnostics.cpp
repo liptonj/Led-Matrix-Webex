@@ -12,6 +12,8 @@
 #include <WiFi.h>
 #include "discovery/mdns_manager.h"
 #include "common/pairing_manager.h"
+#include "common/board_utils.h"
+#include "config/config_manager.h"
 
 // =============================================================================
 // CONNECTION STATUS LOGGING HANDLER
@@ -37,8 +39,15 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
     // Get pairing code for display
     String pairing_code = ctx.pairing_manager ? ctx.pairing_manager->getCode() : "";
     
+    // Get user UUID for association check
+    String user_uuid = ctx.config_manager ? ctx.config_manager->getUserUuid() : "";
+    bool has_user = !user_uuid.isEmpty();
+    
     Serial.println();
     Serial.println("=== WEBEX STATUS DISPLAY ===");
+    Serial.printf("Hardware: %s | Board: %s\n",
+                  getChipDescription().c_str(),
+                  getBoardType().c_str());
     Serial.printf("IP: %s | mDNS: %s.local\n",
                   WiFi.localIP().toString().c_str(),
                   ctx.mdns_manager->getHostname().c_str());
@@ -50,6 +59,7 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
                   ctx.app_state->supabase_connected ? "Yes" : "No",
                   ctx.app_state->embedded_app_connected ? "Yes" : "No",
                   status_source);
+    Serial.printf("User: %s\n", has_user ? "Yes" : "No");
     if (!pairing_code.isEmpty()) {
         Serial.printf("PAIRING CODE: %s\n", pairing_code.c_str());
     }

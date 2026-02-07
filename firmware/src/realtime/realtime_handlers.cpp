@@ -373,14 +373,11 @@ void handleRealtimeMessage(const RealtimeMessage& msg) {
         JsonDocument& payload = const_cast<JsonDocument&>(msg.payload);
         
         // Check if this is a user channel broadcast by examining the event type in payload
-        JsonObject broadcast = payload["payload"];
-        if (!broadcast.isNull()) {
-            String event = broadcast["event"] | "";
-            // User channel events: user_assigned, webex_status, command
-            if (event == "user_assigned" || event == "webex_status" || event == "command") {
-                handleUserChannelBroadcast(payload);
-                return;
-            }
+        String broadcastEvent = payload["event"] | "";  // TOP level, not nested
+        // User channel events: user_assigned, webex_status, command
+        if (broadcastEvent == "user_assigned" || broadcastEvent == "webex_status" || broadcastEvent == "command") {
+            handleUserChannelBroadcast(payload);
+            return;
         }
         
         // Legacy pairing channel broadcast
@@ -626,21 +623,16 @@ void handleUserChannelCommand(JsonObject& payload) {
  * @param payload JSON document containing broadcast payload
  */
 void handleUserChannelBroadcast(JsonDocument& payload) {
-    JsonObject broadcast = payload["payload"];
-    if (broadcast.isNull()) {
-        Serial.println("[REALTIME] User channel broadcast missing payload");
-        return;
-    }
-    
-    String event = broadcast["event"] | "";
-    JsonObject data = broadcast["data"] | broadcast;
+    String event = payload["event"] | "";  // TOP level
+    JsonVariant inner = payload["payload"];
+    JsonObject data = inner.is<JsonObject>() ? inner.as<JsonObject>() : payload.as<JsonObject>();
     
     if (data.isNull()) {
         Serial.println("[REALTIME] User channel broadcast missing data");
         return;
     }
     
-    Serial.printf("[REALTIME] User channel broadcast event: %s\n", event.c_str());
+    Serial.printf("[REALTIME] User channel event: %s\n", event.c_str());
     
     if (event == "user_assigned") {
         handleUserAssigned(data);
@@ -649,6 +641,6 @@ void handleUserChannelBroadcast(JsonDocument& payload) {
     } else if (event == "command") {
         handleUserChannelCommand(data);
     } else {
-        Serial.printf("[REALTIME] Unknown user channel event: %s\n", event.c_str());
+        Serial.printf("[REALTIME] Unknown event: %s\n", event.c_str());
     }
 }

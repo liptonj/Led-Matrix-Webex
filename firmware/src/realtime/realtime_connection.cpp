@@ -13,7 +13,6 @@
 #include <ArduinoJson.h>
 
 namespace {
-constexpr int REALTIME_SUBSCRIPTION_MODE = 0;  // 0=all tables, 1=commands only, 2=pairings only, 3=broadcast
 constexpr unsigned long INIT_RETRY_INTERVAL = 15000;  // 15 seconds
 }  // namespace
 
@@ -65,46 +64,14 @@ bool RealtimeManager::attemptInit() {
     deps.realtime.begin(supabaseUrl, anonKey, accessToken);
 
     // Subscribe to channels
-    // Phase 3: Prefer user channel if user_uuid is available, otherwise fall back to pairing-based subscription
     String userUuid = deps.config.getUserUuid();
     bool queued = false;
     
     if (!userUuid.isEmpty()) {
-        // UUID-based device identity: Subscribe to user channel
-        Serial.printf("[REALTIME] User UUID available - subscribing to user channel: %s\n", userUuid.substring(0, 8).c_str());
         queued = deps.realtime.subscribeToUserChannel(userUuid);
     } else {
-        // Legacy pairing-based subscription
-        String pairingCode = deps.pairing.getCode();
-        if (pairingCode.isEmpty()) {
-            Serial.println("[REALTIME] No pairing code and no user_uuid - cannot subscribe");
-            return false;
-        }
-
-        String filter = "pairing_code=eq." + pairingCode;
-        Serial.printf("[REALTIME] Subscribing mode=%d (pairing-based)\n", REALTIME_SUBSCRIPTION_MODE);
-
-        if (REALTIME_SUBSCRIPTION_MODE == 3) {
-            // Broadcast mode
-            String channelTopic = "realtime:pairing:" + pairingCode + ":events";
-            deps.realtime.setChannelTopic(channelTopic);
-            queued = deps.realtime.subscribeBroadcast();
-        } else if (REALTIME_SUBSCRIPTION_MODE == 1) {
-            // Commands only
-            deps.realtime.setChannelTopic("realtime:display");
-            const String tables[] = { "commands" };
-            queued = deps.realtime.subscribeMultiple("display", tables, 1, filter);
-        } else if (REALTIME_SUBSCRIPTION_MODE == 2) {
-            // Pairings only
-            deps.realtime.setChannelTopic("realtime:display");
-            const String tables[] = { "pairings" };
-            queued = deps.realtime.subscribeMultiple("display", tables, 1, filter);
-        } else {
-            // All tables (default)
-            deps.realtime.setChannelTopic("realtime:display");
-            const String tables[] = { "commands", "pairings", "devices" };
-            queued = deps.realtime.subscribeMultiple("display", tables, 3, filter);
-        }
+        Serial.println("[REALTIME] No user_uuid -- deferred until paired via post-device-state");
+        return false;
     }
 
     if (queued) {
