@@ -21,15 +21,6 @@ export interface Device {
   paired_user_email?: string | null;
 }
 
-export interface ConnectionHeartbeat {
-  pairing_code: string;
-  device_uuid: string | null;
-  app_last_seen: string | null;
-  device_last_seen: string | null;
-  app_connected: boolean;
-  device_connected: boolean;
-}
-
 export interface DeviceLog {
   id: string;
   device_id: string;

@@ -130,6 +130,14 @@ public:
     bool subscribeToUserChannel(const String& user_uuid);
 
     /**
+     * @brief Send a broadcast message on the current channel
+     * @param event Event name (e.g., "command_ack", "debug_log")
+     * @param data JSON payload to broadcast
+     * @return true if broadcast sent successfully
+     */
+    bool sendBroadcast(const String& event, const JsonDocument& data);
+
+    /**
      * @brief Unsubscribe from current channel
      */
     void unsubscribe();

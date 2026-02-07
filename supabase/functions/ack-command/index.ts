@@ -35,6 +35,7 @@ interface TokenPayload {
   serial_number: string;
   token_type: string;
   exp: number;
+  device_uuid?: string;
 }
 
 /**
@@ -112,7 +113,7 @@ Deno.serve(async (req) => {
     // Read body
     const body = await req.text();
 
-    let deviceInfo: { serial_number: string; pairing_code: string };
+    let deviceInfo: { serial_number: string; device_uuid: string | null };
 
     // Try bearer token first, fall back to HMAC
     const authHeader = req.headers.get("Authorization");
@@ -128,9 +129,19 @@ Deno.serve(async (req) => {
           },
         );
       }
+      // Extract device_uuid from JWT token
+      if (!tokenResult.device.device_uuid) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Device UUID not found in token" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
       deviceInfo = {
         serial_number: tokenResult.device.serial_number,
-        pairing_code: tokenResult.device.pairing_code,
+        device_uuid: tokenResult.device.device_uuid,
       };
     } else {
       // Fall back to HMAC authentication
@@ -144,9 +155,27 @@ Deno.serve(async (req) => {
           },
         );
       }
+      // For HMAC, fetch device_uuid from devices table
+      const { data: dev } = await supabase
+        .schema("display")
+        .from("devices")
+        .select("id")
+        .eq("serial_number", hmacResult.device.serial_number)
+        .single();
+      
+      if (!dev?.id) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Device UUID not found" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      
       deviceInfo = {
         serial_number: hmacResult.device.serial_number,
-        pairing_code: hmacResult.device.pairing_code,
+        device_uuid: dev.id,
       };
     }
 
@@ -185,7 +214,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Verify command belongs to this device's pairing code
+    // Fetch command
     const { data: command, error: fetchError } = await supabase
       .schema("display")
       .from("commands")
@@ -204,10 +233,29 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Verify ownership
-    if (command.pairing_code !== deviceInfo.pairing_code) {
+    // Fetch pairing to get device_uuid for ownership verification
+    const { data: pairing, error: pairingError } = await supabase
+      .schema("display")
+      .from("pairings")
+      .select("device_uuid")
+      .eq("pairing_code", command.pairing_code)
+      .single();
+
+    if (pairingError || !pairing) {
+      console.log(`Pairing not found for command ${ackData.command_id}`);
+      return new Response(
+        JSON.stringify({ success: false, error: "Command not found" }),
+        {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // Verify ownership using device_uuid
+    if (pairing.device_uuid !== deviceInfo.device_uuid) {
       console.log(
-        `Command ${ackData.command_id} belongs to ${command.pairing_code}, not ${deviceInfo.pairing_code}`,
+        `Command ${ackData.command_id} belongs to device ${pairing.device_uuid}, not ${deviceInfo.device_uuid}`,
       );
       return new Response(
         JSON.stringify({ success: false, error: "Command not found" }),

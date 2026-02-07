@@ -376,6 +376,42 @@ void SupabaseRealtime::unsubscribe() {
     Serial.println("[REALTIME] Unsubscribed from channel");
 }
 
+bool SupabaseRealtime::sendBroadcast(const String& event, const JsonDocument& data) {
+    if (!_connected || !_subscribed || _channelTopic.isEmpty()) {
+        return false;
+    }
+    
+    if (!_client || !esp_websocket_client_is_connected(_client)) {
+        return false;
+    }
+    
+    // Increment message reference
+    _msgRef++;
+    
+    // Build broadcast payload: { event: "...", payload: {...} }
+    JsonDocument broadcastPayload;
+    broadcastPayload["event"] = event;
+    broadcastPayload["payload"] = data;
+    
+    // Build Phoenix message with "broadcast" event
+    String message = buildPhoenixMessage(_channelTopic, "broadcast", broadcastPayload, _msgRef);
+    
+    if (message.isEmpty()) {
+        Serial.println("[REALTIME] Failed to build broadcast message");
+        return false;
+    }
+    
+    int sent = esp_websocket_client_send_text(_client, message.c_str(), 
+                                              message.length(), portMAX_DELAY);
+    
+    if (sent < 0) {
+        Serial.printf("[REALTIME] Failed to send broadcast: %d\n", sent);
+        return false;
+    }
+    
+    return true;
+}
+
 void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& event,
                                              const JsonDocument& payload) {
     // Any valid message indicates the socket is alive.

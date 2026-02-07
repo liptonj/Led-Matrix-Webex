@@ -158,32 +158,32 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
         return;
       }
 
-      // Query heartbeat by pairing_code (may not exist yet if device hasn't connected)
-      const { data: heartbeat } = await supabaseRef.current
+      // Query pairing by pairing_code (may not exist yet if device hasn't connected)
+      const { data: pairing } = await supabaseRef.current
         .schema('display')
-        .from('connection_heartbeats')
+        .from('pairings')
         .select('device_last_seen, device_connected')
         .eq('pairing_code', device.pairing_code)
         .maybeSingle();
 
-      if (heartbeat) {
+      if (pairing) {
         const staleThresholdMs = 60_000;
-        const lastSeen = heartbeat.device_last_seen 
-          ? new Date(heartbeat.device_last_seen).getTime() 
+        const lastSeen = pairing.device_last_seen 
+          ? new Date(pairing.device_last_seen).getTime() 
           : 0;
         const isStale = Date.now() - lastSeen > staleThresholdMs;
         
-        setIsPeerConnected(!!heartbeat.device_connected && !isStale);
-        setLastDeviceSeenAt(heartbeat.device_last_seen ?? null);
+        setIsPeerConnected(!!pairing.device_connected && !isStale);
+        setLastDeviceSeenAt(pairing.device_last_seen ?? null);
         setLastDeviceSeenMs(lastSeen || null);
         lastPairingSnapshotRef.current = Date.now();
-        addLog(`[${reason}] device_connected=${heartbeat.device_connected}, stale=${isStale}`);
+        addLog(`[${reason}] device_connected=${pairing.device_connected}, stale=${isStale}`);
       } else {
-        // No heartbeat yet - device hasn't connected
+        // No pairing yet - device hasn't connected
         setIsPeerConnected(false);
         setLastDeviceSeenAt(null);
         setLastDeviceSeenMs(null);
-        addLog(`[${reason}] No heartbeat found - device hasn't connected yet`);
+        addLog(`[${reason}] No pairing found - device hasn't connected yet`);
       }
     } catch (err) { 
       addLog(`Failed to refresh display status: ${err instanceof Error ? err.message : 'unknown error'}`); 
@@ -221,6 +221,40 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       if (broadcast.device_uuid === selectedDeviceUuid) {
         lastPairingSnapshotRef.current = Date.now();
         addLog(`Received webex_status broadcast: ${broadcast.webex_status}`);
+      }
+    })
+    .on('broadcast', { event: 'command_ack' }, async (payload: { payload: { command_id: string; status: 'acked' | 'failed'; response?: Record<string, unknown>; error?: string } }) => {
+      // Handle command_ack broadcast events - update command status in DB
+      const ack = payload.payload;
+      if (!supabaseRef.current || !ack.command_id) return;
+      
+      try {
+        const updateData: { status: 'acked' | 'failed'; acked_at?: string; response?: Record<string, unknown>; error?: string } = {
+          status: ack.status,
+        };
+        
+        if (ack.status === 'acked') {
+          updateData.acked_at = new Date().toISOString();
+          if (ack.response) {
+            updateData.response = ack.response;
+          }
+        } else if (ack.status === 'failed') {
+          updateData.error = ack.error || 'Command failed';
+        }
+        
+        const { error: updateError } = await supabaseRef.current
+          .schema('display')
+          .from('commands')
+          .update(updateData)
+          .eq('id', ack.command_id);
+        
+        if (updateError) {
+          addLog(`Failed to update command ${ack.command_id}: ${updateError.message}`);
+        } else {
+          addLog(`Command ${ack.command_id} ${ack.status}`);
+        }
+      } catch (err) {
+        addLog(`Error handling command_ack: ${err instanceof Error ? err.message : 'unknown error'}`);
       }
     })
     .subscribe((status, err) => {
@@ -296,16 +330,29 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       setRtStatus('connected');
       addLog(`Connected to user channel`);
       
-      // Start heartbeat interval
+      // Start heartbeat interval - write to pairings table
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = setInterval(async () => {
         if (!supabaseRef.current || !selectedDeviceUuid) return;
         try {
-          await supabaseRef.current.schema('display').from('connection_heartbeats')
-            .upsert({ device_uuid: selectedDeviceUuid, app_last_seen: new Date().toISOString(), app_connected: true },
-              { onConflict: 'device_uuid' });
+          // Get pairing_code from device
+          const { data: device } = await supabaseRef.current
+            .schema('display')
+            .from('devices')
+            .select('pairing_code')
+            .eq('id', selectedDeviceUuid)
+            .maybeSingle();
+          
+          if (device?.pairing_code) {
+            await supabaseRef.current.schema('display').from('pairings')
+              .update({ 
+                app_last_seen: new Date().toISOString(), 
+                app_connected: true 
+              })
+              .eq('pairing_code', device.pairing_code);
+          }
         } catch (error) {
-          // Silently fail heartbeat upsert
+          // Silently fail heartbeat update
         }
       }, CONFIG.heartbeatIntervalMs);
       

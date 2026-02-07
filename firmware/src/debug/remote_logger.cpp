@@ -5,8 +5,12 @@
 
 #include "remote_logger.h"
 #include "../supabase/supabase_client.h"
+#include "../core/dependencies.h"
+#include "../config/config_manager.h"
+#include "../auth/device_credentials.h"
 #include "esp_heap_caps.h"
 #include <stdarg.h>
+#include <time.h>
 
 // Global instance
 RemoteLogger remoteLogger;
@@ -151,5 +155,28 @@ void RemoteLogger::sendToSupabase(LogLevel level, const char* tag, const char* m
     // Format full message with tag
     String fullMessage = String("[") + tag + "] " + message;
 
+    // Try broadcasting via realtime first
+    auto& deps = getDependencies();
+    bool broadcastSent = false;
+    if (deps.realtime.isConnected()) {
+        JsonDocument broadcastData;
+        broadcastData["device_uuid"] = deps.config.getDeviceUuid();
+        broadcastData["serial_number"] = deps.credentials.getSerialNumber();
+        broadcastData["level"] = levelToString(level);
+        broadcastData["message"] = fullMessage;
+        broadcastData["metadata"] = metaDoc;
+        
+        time_t now;
+        time(&now);
+        broadcastData["ts"] = (unsigned long)now;
+        
+        broadcastSent = deps.realtime.sendBroadcast("debug_log", broadcastData);
+        if (broadcastSent) {
+            // Broadcast succeeded, skip HTTP call
+            return;
+        }
+    }
+    
+    // Fall back to HTTP if realtime broadcast failed or not available
     _supabase->insertDeviceLog(levelToString(level), fullMessage, metadata);
 }

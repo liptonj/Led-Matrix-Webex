@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
 
     // Read body
     const body = await req.text();
-    let deviceInfo: { serial_number: string; pairing_code: string };
+    let deviceInfo: { serial_number: string; device_uuid: string | null };
 
     // Try bearer token first, fall back to HMAC
     const authHeader = req.headers.get("Authorization");
@@ -176,9 +176,19 @@ Deno.serve(async (req) => {
           },
         );
       }
+      // Extract device_uuid from JWT token
+      if (!tokenResult.device.device_uuid) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Device UUID not found in token" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
       deviceInfo = {
         serial_number: tokenResult.device.serial_number,
-        pairing_code: tokenResult.device.pairing_code,
+        device_uuid: tokenResult.device.device_uuid,
       };
     } else {
       // Fall back to HMAC authentication
@@ -192,9 +202,27 @@ Deno.serve(async (req) => {
           },
         );
       }
+      // For HMAC, fetch device_uuid from devices table
+      const { data: dev } = await supabase
+        .schema("display")
+        .from("devices")
+        .select("id")
+        .eq("serial_number", hmacResult.device.serial_number)
+        .single();
+      
+      if (!dev?.id) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Device UUID not found" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      
       deviceInfo = {
         serial_number: hmacResult.device.serial_number,
-        pairing_code: hmacResult.device.pairing_code,
+        device_uuid: dev.id,
       };
     }
 
@@ -251,25 +279,13 @@ Deno.serve(async (req) => {
       .eq("serial_number", deviceInfo.serial_number)
       .single();
 
-    // Fetch app status from pairings table
+    // Fetch app status from pairings table using device_uuid
     const { data: pairingData } = await supabase
       .schema("display")
       .from("pairings")
       .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected, user_uuid")
-      .eq("pairing_code", deviceInfo.pairing_code)
+      .eq("device_uuid", deviceInfo.device_uuid)
       .single();
-
-    // ALWAYS update heartbeat table (does NOT trigger realtime to device)
-    // Include device_uuid for UUID-based queries
-    await supabase
-      .schema("display")
-      .from("connection_heartbeats")
-      .upsert({
-        pairing_code: deviceInfo.pairing_code,
-        device_uuid: deviceInfo.device_uuid || null,
-        device_last_seen: now,
-        device_connected: true,
-      }, { onConflict: "pairing_code" });
 
     // Build telemetry update data (only include fields that are provided)
     const telemetryData: Record<string, unknown> = {};
@@ -304,48 +320,49 @@ Deno.serve(async (req) => {
       hasTelemetryUpdate = true;
     }
 
-    // Only update pairings table if there's telemetry data (reduces realtime noise)
-    // Pure heartbeats (no telemetry) only update the heartbeat table
-    let updateError: { code?: string; message?: string } | null = null;
+    // Always update pairings table with device_last_seen and device_connected
+    // Include telemetry data if provided
+    const updateData: Record<string, unknown> = {
+      device_last_seen: now,
+      device_connected: true,
+      ...telemetryData,
+    };
 
-    if (hasTelemetryUpdate) {
-      const { error } = await supabase
-        .schema("display")
-        .from("pairings")
-        .update(telemetryData)
-        .eq("pairing_code", deviceInfo.pairing_code)
-        .select("pairing_code")
-        .single();
-      updateError = error;
-    }
+    const { error: updateError } = await supabase
+      .schema("display")
+      .from("pairings")
+      .update(updateData)
+      .eq("device_uuid", deviceInfo.device_uuid)
+      .select("device_uuid")
+      .single();
 
     if (updateError) {
       // If pairing doesn't exist, try to create it
       if (updateError.code === "PGRST116") {
         // No rows returned - pairing doesn't exist
+        // Fetch pairing_code from devices table for backward compatibility
+        const { data: deviceData } = await supabase
+          .schema("display")
+          .from("devices")
+          .select("pairing_code")
+          .eq("id", deviceInfo.device_uuid)
+          .single();
+
         const { error: insertError } = await supabase
           .schema("display")
           .from("pairings")
           .insert({
-            pairing_code: deviceInfo.pairing_code,
+            device_uuid: deviceInfo.device_uuid,
             serial_number: deviceInfo.serial_number,
+            pairing_code: deviceData?.pairing_code || null,
+            device_last_seen: now,
+            device_connected: true,
             ...telemetryData,
           });
 
         if (insertError) {
           console.error("Failed to create pairing:", insertError);
         }
-
-        // Also ensure heartbeat record exists with device_uuid
-        await supabase
-          .schema("display")
-          .from("connection_heartbeats")
-          .upsert({
-            pairing_code: deviceInfo.pairing_code,
-            device_uuid: deviceInfo.device_uuid || null,
-            device_last_seen: now,
-            device_connected: true,
-          }, { onConflict: "pairing_code" });
 
         // Return telemetry echo with app state
         const response: DeviceStateResponse = {
@@ -358,13 +375,13 @@ Deno.serve(async (req) => {
           ssid: stateData.ssid,
           ota_partition: stateData.ota_partition,
           debug_enabled: dev?.debug_enabled === true,
-          app_connected: pairingData?.app_connected || false,
-          webex_status: pairingData?.webex_status || "offline",
-          camera_on: pairingData?.camera_on || false,
-          mic_muted: pairingData?.mic_muted || false,
-          in_call: pairingData?.in_call || false,
-          display_name: pairingData?.display_name || null,
-          user_uuid: pairingData?.user_uuid || null,
+          app_connected: false,
+          webex_status: "offline",
+          camera_on: false,
+          mic_muted: false,
+          in_call: false,
+          display_name: null,
+          user_uuid: null,
         };
 
         return new Response(JSON.stringify(response), {

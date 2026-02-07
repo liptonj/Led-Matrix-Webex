@@ -18,6 +18,7 @@
 #include "../debug.h"
 #include "../debug/remote_logger.h"
 #include "../core/dependencies.h"
+#include "../supabase/supabase_realtime.h"
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "1.0.0"
@@ -244,6 +245,39 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
         return false;
     }
     
+    // Try broadcasting via realtime first
+    auto& deps = getDependencies();
+    bool broadcastSent = false;
+    if (deps.realtime.isConnected()) {
+        JsonDocument broadcastData;
+        broadcastData["device_uuid"] = deps.config.getDeviceUuid();
+        broadcastData["command_id"] = trimmedId;
+        broadcastData["status"] = success ? "success" : "error";
+        
+        time_t now;
+        time(&now);
+        broadcastData["acknowledged_at"] = (unsigned long)now;
+        
+        if (!responseData.isEmpty()) {
+            JsonDocument respDoc;
+            DeserializationError err = deserializeJson(respDoc, responseData);
+            if (!err) {
+                broadcastData["response"] = respDoc;
+            }
+        }
+        
+        if (!error.isEmpty()) {
+            broadcastData["error"] = error;
+        }
+        
+        broadcastSent = deps.realtime.sendBroadcast("command_ack", broadcastData);
+        if (broadcastSent) {
+            Serial.printf("[SUPABASE] Command %s broadcast via realtime (success=%d)\n", 
+                          trimmedId.c_str(), success);
+        }
+    }
+    
+    // Always send HTTP for DB persistence (even if broadcast succeeded)
     // Build request body
     JsonDocument doc;
     doc["command_id"] = trimmedId;
@@ -270,11 +304,12 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     
     if (httpCode != 200) {
         RLOG_WARN("supabase", "Ack command failed: HTTP %d", httpCode);
-        return false;
+        // Return true if broadcast succeeded even if HTTP failed
+        return broadcastSent;
     }
     
-    Serial.printf("[SUPABASE] Command %s acknowledged (success=%d)\n", 
-                  trimmedId.c_str(), success);
+    Serial.printf("[SUPABASE] Command %s acknowledged (success=%d, broadcast=%d)\n", 
+                  trimmedId.c_str(), success, broadcastSent);
     return true;
 }
 

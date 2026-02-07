@@ -228,30 +228,6 @@ Deno.serve(async (req) => {
     //   });
     // }
 
-    const payload = {
-      serial_number: serialNumber,
-      device_id: deviceId,
-      level: normalizedLevel,
-      message: logData.message,
-      metadata: logData.metadata || {},
-      ts: Date.now(),
-    };
-
-    // Broadcast to device_logs channel
-    const channelTopic = `device_logs:${serialNumber}`;
-    console.log(`[insert-device-log] Broadcasting to topic: ${channelTopic}, level: ${normalizedLevel}`);
-
-    try {
-      await sendBroadcast(channelTopic, "log", payload);
-      console.log(`[insert-device-log] Broadcast successful to ${channelTopic}`);
-    } catch (broadcastError) {
-      console.error(`[insert-device-log] Broadcast failed:`, broadcastError);
-      return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     // Broadcast to user channel if user_uuid is available
     if (userUuid) {
       try {
@@ -265,10 +241,18 @@ Deno.serve(async (req) => {
         });
         console.log(`[insert-device-log] Broadcast successful to user:${userUuid}`);
       } catch (userBroadcastError) {
-        // Log error but don't fail the request - device_logs broadcast succeeded
+        // Log error but don't fail the request
         console.error(`[insert-device-log] User channel broadcast failed:`, userBroadcastError);
+        return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+    } else {
+      // If no user_uuid, still return success but log a warning
+      console.warn(`[insert-device-log] No user_uuid found for device ${serialNumber}, skipping broadcast`);
     }
+
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

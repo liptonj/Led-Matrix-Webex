@@ -9,6 +9,7 @@ import {
     DeviceLog,
     getCommandsPage,
     getDevice,
+    getDeviceUserId,
     getPairing,
     insertCommand,
     Pairing,
@@ -45,6 +46,7 @@ export default function DeviceDetailPanel({
     const [pairing, setPairing] = useState<Pairing | null>(null);
     const [logs, setLogs] = useState<DeviceLog[]>([]);
     const [commands, setCommands] = useState<Command[]>([]);
+    const [userUuid, setUserUuid] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [logsLoading, setLogsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -85,6 +87,18 @@ export default function DeviceDetailPanel({
                     return;
                 }
                 setDevice(record);
+                
+                // Get user UUID for this device
+                try {
+                    const userId = await getDeviceUserId(record.id);
+                    if (!isMounted) return;
+                    setUserUuid(userId);
+                } catch (err) {
+                    // If user lookup fails, set to null (device may not be paired)
+                    if (isMounted) {
+                        setUserUuid(null);
+                    }
+                }
             } catch (err) {
                 if (!isMounted) return;
                 setError(err instanceof Error ? err.message : 'Failed to load device.');
@@ -171,26 +185,33 @@ export default function DeviceDetailPanel({
             setCommandStatus('disconnected');
         }
 
-        setLogStatus('connecting');
-        subscribeToDeviceLogs(
-            device.serial_number,
-            (log) => {
-                setLogs((prev) => {
-                    const next = [log, ...prev];
-                    return next.slice(0, LOG_LIMIT);
-                });
-            },
-            (subscribed) => {
-                setLogStatus(subscribed ? 'connected' : 'disconnected');
-            },
-            () => {
+        // Only subscribe to logs if we have a userUuid
+        if (userUuid) {
+            setLogStatus('connecting');
+            subscribeToDeviceLogs(
+                userUuid,
+                (log) => {
+                    setLogs((prev) => {
+                        const next = [log, ...prev];
+                        return next.slice(0, LOG_LIMIT);
+                    });
+                },
+                (subscribed) => {
+                    setLogStatus(subscribed ? 'connected' : 'disconnected');
+                },
+                () => {
+                    setLogStatus('error');
+                },
+                device.id, // device_uuid for filtering
+            ).then((unsubscribe) => {
+                logsUnsubscribe = unsubscribe;
+            }).catch(() => {
                 setLogStatus('error');
-            },
-        ).then((unsubscribe) => {
-            logsUnsubscribe = unsubscribe;
-        }).catch(() => {
-            setLogStatus('error');
-        });
+            });
+        } else {
+            setLogStatus('disconnected');
+            setLogsError('Device is not paired to a user. Logs are only available for paired devices.');
+        }
 
         return () => {
             isMounted = false;
@@ -198,7 +219,7 @@ export default function DeviceDetailPanel({
             if (logsUnsubscribe) logsUnsubscribe();
             if (commandsUnsubscribe) commandsUnsubscribe();
         };
-    }, [device?.serial_number, device?.pairing_code, commandFilter]);
+    }, [device?.serial_number, device?.pairing_code, device?.id, userUuid, commandFilter]);
 
     const filteredLogs = useMemo(() => {
         if (logFilter === 'all') return logs;

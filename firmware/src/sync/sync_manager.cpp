@@ -78,11 +78,7 @@ void SyncManager::loop(unsigned long current_time) {
     bool shouldSync = false;
 
     if (realtimeWorking) {
-        // Realtime active: heartbeat every 30s, full sync every 5min
-        if (current_time - _lastHeartbeat >= HEARTBEAT_INTERVAL) {
-            isHeartbeat = true;
-            shouldSync = true;
-        }
+        // Realtime active: only full sync every 5min (no periodic HTTP polling)
         if (current_time - _lastFullSync >= SYNC_INTERVAL) {
             isHeartbeat = false;
             shouldSync = true;

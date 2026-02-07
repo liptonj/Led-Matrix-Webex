@@ -91,6 +91,7 @@ Deno.serve(async (req) => {
 
     let serialNumber = "";
     let deviceId = "";
+    let deviceUuid = "";
     let isDebugEnabled = false;
 
     const authHeader = req.headers.get("Authorization");
@@ -103,7 +104,7 @@ Deno.serve(async (req) => {
         });
       }
       serialNumber = tokenResult.device.serial_number;
-      deviceId = tokenResult.device.device_uuid || "";
+      deviceUuid = tokenResult.device.device_uuid || "";
     } else {
       const hmacResult = await validateHmacRequest(req, supabase, bodyText);
       if (!hmacResult.valid || !hmacResult.device) {
@@ -117,15 +118,40 @@ Deno.serve(async (req) => {
       isDebugEnabled = hmacResult.device.debug_enabled;
     }
 
-    // If we used a bearer token, fetch debug_enabled once (service role, cheap query).
-    if (!isDebugEnabled) {
-      const { data: dev } = await (supabase as any)
+    // If we used a bearer token, fetch device_id and debug_enabled once (service role, cheap query).
+    if (!deviceId || !deviceUuid || !isDebugEnabled) {
+      const { data: dev } = await supabase
         .schema("display")
         .from("devices")
-        .select("debug_enabled")
+        .select("id, device_id, debug_enabled")
         .eq("serial_number", serialNumber)
         .single();
-      isDebugEnabled = dev?.debug_enabled === true;
+      if (dev) {
+        if (!deviceId) deviceId = dev.device_id;
+        if (!deviceUuid) deviceUuid = dev.id;
+        if (!isDebugEnabled) isDebugEnabled = dev.debug_enabled === true;
+      }
+    }
+
+    // Fetch user_uuid from pairings table
+    let userUuid: string | null = null;
+    if (deviceUuid) {
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid")
+        .eq("device_uuid", deviceUuid)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid || null;
+    } else {
+      // Fallback: query by serial_number if device_uuid not available
+      const { data: pairing } = await supabase
+        .schema("display")
+        .from("pairings")
+        .select("user_uuid")
+        .eq("serial_number", serialNumber)
+        .maybeSingle();
+      userUuid = pairing?.user_uuid || null;
     }
 
     let logData: InsertLogRequest;
@@ -180,23 +206,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    const payload = {
-      serial_number: serialNumber,
-      device_id: deviceId,
-      level: normalizedLevel,
-      message: logData.message,
-      metadata: logData.metadata || {},
-      ts: Date.now(),
-    };
-
-    try {
-      await sendBroadcast(`device_logs:${serialNumber}`, "log", payload);
-    } catch (err) {
-      console.error("Broadcast send failed:", err);
-      return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    // Broadcast to user channel if user_uuid is available
+    if (userUuid) {
+      try {
+        await sendBroadcast(`user:${userUuid}`, "debug_log", {
+          device_uuid: deviceUuid,
+          serial_number: serialNumber,
+          level: normalizedLevel,
+          message: logData.message,
+          metadata: logData.metadata || {},
+          ts: Date.now(),
+        });
+        console.log(`[broadcast-device-log] Broadcast successful to user:${userUuid}`);
+      } catch (err) {
+        console.error("[broadcast-device-log] Broadcast send failed:", err);
+        return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      // If no user_uuid, still return success but log a warning
+      console.warn(`[broadcast-device-log] No user_uuid found for device ${serialNumber}, skipping broadcast`);
     }
 
     return new Response(JSON.stringify({ success: true }), {

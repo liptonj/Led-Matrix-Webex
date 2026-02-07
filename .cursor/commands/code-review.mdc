@@ -1,0 +1,203 @@
+---
+description: Comprehensive Code Review - Quality, Security & Functionality Check
+alwaysApply: false
+---
+
+# Code Review Checklist
+
+Perform a comprehensive code review of the current file or selection against these criteria:
+
+## 🔍 Functionality Review
+- [ ] Code does what it's supposed to do
+- [ ] Edge cases are handled properly
+- [ ] Error handling is appropriate and comprehensive
+- [ ] No obvious bugs or logic errors
+- [ ] Return values are checked
+- [ ] Null/undefined checks are present where needed
+
+## 📝 Code Quality Review
+- [ ] Code is readable and well-structured
+- [ ] Functions are small and focused (single responsibility)
+- [ ] Variable names are descriptive and meaningful
+- [ ] No code duplication (DRY principle)
+- [ ] Follows project conventions and style guide
+- [ ] Comments explain "why", not "what"
+- [ ] Complex logic is documented
+- [ ] No dead/commented-out code
+- [ ] Proper indentation and formatting
+
+## 🔒 Security Review
+- [ ] **CRITICAL: No hardcoded secrets** (passwords, API keys, tokens)
+- [ ] **CRITICAL: No weak crypto algorithms** (MD5, SHA-1, DES, RC4, Blowfish)
+- [ ] **No deprecated OpenSSL functions** (AES_encrypt, SHA1_Init, HMAC with SHA1)
+- [ ] Input validation is present and thorough
+- [ ] Sensitive data is handled properly
+- [ ] No SQL injection vulnerabilities
+- [ ] No eval() or unsafe dynamic code execution
+- [ ] No unsafe C functions (strcpy, sprintf, gets)
+- [ ] Authentication and authorization checks are present
+- [ ] Data sanitization before output
+
+## ⚡ Performance Review
+- [ ] No unnecessary loops or nested iterations
+- [ ] Efficient data structures used
+- [ ] Database queries are optimized
+- [ ] No blocking operations in critical paths
+- [ ] Async/await used appropriately
+- [ ] Memory usage is reasonable
+- [ ] No memory leaks (malloc without free, etc.)
+
+## 🧪 Testability Review
+- [ ] Code is testable and modular
+- [ ] Dependencies can be mocked
+- [ ] Functions have clear inputs and outputs
+- [ ] Side effects are minimized
+
+## 📋 Review Instructions
+
+For each file or code selection:
+
+1. **Read the entire code** to understand context and purpose
+2. **Check each category** systematically
+3. **Report findings** with:
+   - 🔴 **CRITICAL** - Security vulnerabilities, hardcoded secrets
+   - 🟠 **HIGH** - Weak crypto, unsafe functions, major bugs
+   - 🟡 **MEDIUM** - Missing error handling, code quality issues
+   - 🔵 **LOW** - Style issues, minor improvements
+   - ℹ️ **INFO** - Suggestions and best practices
+
+4. **Provide specific feedback**:
+   - Line numbers where issues occur
+   - Clear description of the problem
+   - Recommended fix or improvement
+   - Code example if helpful
+
+5. **Highlight what's good** - Acknowledge well-written code
+
+## 🎯 Focus Areas by Language
+
+### Python
+- Bare except clauses
+- Missing docstrings
+- Type hints
+- List comprehensions vs loops
+- Context managers for resources
+
+### TypeScript/JavaScript
+- `any` type usage
+- `==` vs `===`
+- Console statements in production
+- Proper error boundaries
+- Missing null checks
+
+### C/C++
+- Buffer overflows
+- Memory leaks (malloc/free pairs)
+- Unsafe functions (strcpy, sprintf, gets)
+- Deprecated OpenSSL APIs
+- Null pointer dereferences
+
+### Shell Scripts
+- Unquoted variables
+- Missing `set -e` or `set -euo pipefail`
+- Unsafe variable expansions
+- Missing error checks
+
+## 📊 Report Format
+
+Structure your review as:
+
+```
+## Code Review Summary
+
+**Overall Assessment:** [Brief summary]
+
+### 🔴 Critical Issues (Must Fix)
+1. [Issue with line number and fix]
+
+### 🟠 High Priority Issues
+1. [Issue with line number and fix]
+
+### 🟡 Medium Priority Issues
+1. [Issue with line number and fix]
+
+### 🔵 Low Priority Improvements
+1. [Suggestion]
+
+### ✅ What's Done Well
+- [Positive aspects]
+
+### 💡 Recommendations
+- [General improvements]
+```
+
+## 🚨 Security-First Approach
+
+**ALWAYS check for:**
+1. Hardcoded credentials (passwords, API keys, tokens, secrets)
+2. Weak cryptographic algorithms (MD5, SHA-1, DES, 3DES, RC4, Blowfish)
+3. Deprecated security APIs (per Broccoli project requirements)
+4. SQL injection vulnerabilities (string concatenation in queries)
+5. Unsafe file operations
+6. Missing input validation
+7. Improper error messages (leaking sensitive info)
+
+**Report Format for Security Issues:**
+```
+🔴 CRITICAL: [Security Issue]
+  File: [filename]
+  Line: [number]
+  Code: [snippet]
+  Risk: [description of security impact]
+  Fix: [specific remediation steps]
+```
+
+## 📝 Example Review Output
+
+```
+## Code Review Summary
+
+**Overall Assessment:** Good structure but several security concerns need immediate attention.
+
+### 🔴 Critical Issues (Must Fix)
+
+1. **Hardcoded API Key** (Line 42)
+   ```python
+   api_key = "sk_live_abc123xyz"
+   ```
+   **Fix:** Use environment variable
+   ```python
+   api_key = os.getenv("API_KEY")
+   ```
+
+### 🟠 High Priority Issues
+
+1. **Bare except clause** (Line 78)
+   ```python
+   except:  # Catches all exceptions
+   ```
+   **Fix:** Catch specific exceptions
+   ```python
+   except (ValueError, KeyError) as e:
+       logger.error(f"Error: {e}")
+   ```
+
+### ✅ What's Done Well
+- Clear function names and good documentation
+- Proper use of context managers for file handling
+- Good error logging throughout
+
+### 💡 Recommendations
+- Consider adding type hints for better IDE support
+- Extract magic numbers to named constants
+```
+
+## 🔄 Iterative Review
+
+If code has many issues:
+1. Prioritize critical security issues first
+2. Then address high-priority functionality bugs
+3. Then code quality improvements
+4. Finally style and minor improvements
+
+Ready to perform the review!

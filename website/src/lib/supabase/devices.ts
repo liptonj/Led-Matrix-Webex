@@ -3,7 +3,7 @@ import {
   getSupabase,
   withTimeout,
 } from "./core";
-import type { ConnectionHeartbeat, Device, DeviceChangeEvent, DeviceLog } from "./types";
+import type { Device, DeviceChangeEvent, DeviceLog } from "./types";
 
 // Explicit column list for devices - NEVER include key_hash for security
 const DEVICE_COLUMNS = `
@@ -45,9 +45,18 @@ export async function getDevices(): Promise<Device[]> {
 }
 
 // Helper to get connection heartbeats for a set of pairing codes
+// DEPRECATED: This function uses the deprecated connection_heartbeats table.
+// Use pairings table directly instead.
 export async function getConnectionHeartbeats(
   pairingCodes: string[],
-): Promise<ConnectionHeartbeat[]> {
+): Promise<Array<{
+  pairing_code: string;
+  device_uuid: string | null;
+  app_last_seen: string | null;
+  device_last_seen: string | null;
+  app_connected: boolean;
+  device_connected: boolean;
+}>> {
   if (!pairingCodes.length) return [];
 
   const supabase = await getSupabase();
@@ -63,6 +72,24 @@ export async function getConnectionHeartbeats(
 
   if (error) throw error;
   return data || [];
+}
+
+// Helper to get user_id for a device
+export async function getDeviceUserId(deviceUuid: string): Promise<string | null> {
+  const supabase = await getSupabase();
+  const { data: userDevice, error: userDeviceError } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("user_devices")
+      .select("user_id")
+      .eq("device_uuid", deviceUuid)
+      .maybeSingle(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while loading user device assignment.",
+  );
+
+  if (userDeviceError) throw userDeviceError;
+  return userDevice?.user_id ?? null;
 }
 
 // Helper to get paired user for a device
@@ -204,33 +231,42 @@ export async function getDeviceLogsBySerial(
 }
 
 // Subscribe to realtime device logs via Supabase Realtime (broadcast)
+// Now uses user-centric channel: user:{userUuid} with debug_log event
 export async function subscribeToDeviceLogs(
-  serialNumber: string,
+  userUuid: string,
   onLog: (log: DeviceLog) => void,
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
+  deviceUuid?: string, // Optional filter for specific device
 ): Promise<() => void> {
   const supabase = await getSupabase();
-  const channelName = `device_logs:${serialNumber}`;
+  const channelName = `user:${userUuid}`;
 
   const channel = supabase
     .channel(channelName)
     .on(
       "broadcast",
-      { event: "log" },
+      { event: "debug_log" },
       (payload) => {
         const record = payload.payload as {
-          serial_number: string;
-          device_id: string;
+          device_uuid?: string;
+          serial_number?: string;
+          device_id?: string;
           level: "debug" | "info" | "warn" | "error";
           message: string;
           metadata: Record<string, unknown>;
           ts?: number;
         };
+        
+        // Filter by deviceUuid if provided
+        if (deviceUuid && record.device_uuid !== deviceUuid) {
+          return;
+        }
+        
         onLog({
-          id: `${record.device_id}-${record.ts ?? Date.now()}`,
-          device_id: record.device_id,
-          serial_number: record.serial_number,
+          id: `${record.device_id ?? record.device_uuid ?? 'unknown'}-${record.ts ?? Date.now()}`,
+          device_id: record.device_id ?? record.device_uuid ?? '',
+          serial_number: record.serial_number ?? null,
           level: record.level,
           message: record.message,
           metadata: record.metadata || {},
