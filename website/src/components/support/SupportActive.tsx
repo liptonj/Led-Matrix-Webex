@@ -12,12 +12,13 @@ interface SupportActiveProps {
 /**
  * Active state: technician connected, showing full terminal view.
  * User sees everything the admin sees plus activity annotations.
+ * Uses flex layout so the terminal fills remaining viewport space.
  */
 export function SupportActive({ terminalLines, isFlashing, onEndSession }: SupportActiveProps) {
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full gap-4">
       {/* Active session header */}
-      <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 flex items-center gap-3">
+      <div className="shrink-0 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 flex items-center gap-3">
         <span className="inline-block w-3 h-3 bg-green-500 rounded-full" />
         <div className="flex-1">
           <p className="font-medium text-green-900 dark:text-green-200">
@@ -36,13 +37,16 @@ export function SupportActive({ terminalLines, isFlashing, onEndSession }: Suppo
         </button>
       </div>
 
-      {/* Terminal */}
-      <TerminalDisplay
-        lines={terminalLines}
-        title="Support Console"
-        heightClass="h-[calc(100vh-280px)]"
-        emptyText="Waiting for device output..."
-      />
+      {/* Terminal -- fills remaining space */}
+      <div className="flex-1 min-h-0">
+        <TerminalDisplay
+          lines={terminalLines}
+          title="Support Console"
+          className="h-full"
+          heightClass="flex-1 min-h-0"
+          emptyText="Waiting for device output..."
+        />
+      </div>
     </div>
   );
 }

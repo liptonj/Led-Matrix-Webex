@@ -162,7 +162,8 @@ export function RemoteTerminal({
         <TerminalDisplay
           lines={lines}
           title="Remote Console"
-          heightClass="h-full"
+          className="h-full"
+          heightClass="flex-1 min-h-0"
           emptyText="Waiting for device output..."
           statusSlot={<BridgeHealthIndicator health={bridgeHealth} />}
         />

@@ -11,6 +11,7 @@ interface SupportFlashingProps {
 /**
  * Flash in progress state: shows warning banner and progress bar.
  * End Session is disabled during flash.
+ * Uses flex layout so the terminal fills remaining viewport space.
  */
 export function SupportFlashing({ terminalLines, flashProgress }: SupportFlashingProps) {
   const percent = flashProgress?.percent ?? 0;
@@ -18,9 +19,9 @@ export function SupportFlashing({ terminalLines, flashProgress }: SupportFlashin
   const message = flashProgress?.message ?? 'Starting firmware update...';
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full gap-4">
       {/* Warning banner */}
-      <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4">
+      <div className="shrink-0 bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-xl p-4">
         <div className="flex items-center gap-3 mb-3">
           <span className="text-2xl">⚠️</span>
           <div>
@@ -48,13 +49,16 @@ export function SupportFlashing({ terminalLines, flashProgress }: SupportFlashin
         </div>
       </div>
 
-      {/* Terminal (read-only during flash) */}
-      <TerminalDisplay
-        lines={terminalLines}
-        title="Firmware Flash"
-        heightClass="h-64"
-        emptyText="Waiting for flash output..."
-      />
+      {/* Terminal (read-only during flash) -- fills remaining space */}
+      <div className="flex-1 min-h-0">
+        <TerminalDisplay
+          lines={terminalLines}
+          title="Firmware Flash"
+          className="h-full"
+          heightClass="flex-1 min-h-0"
+          emptyText="Waiting for flash output..."
+        />
+      </div>
     </div>
   );
 }

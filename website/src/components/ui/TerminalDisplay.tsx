@@ -19,12 +19,17 @@ interface TerminalDisplayProps {
   statusSlot?: React.ReactNode;
   /** Show line numbers (default: true) */
   showLineNumbers?: boolean;
-  /** Terminal height CSS class (default: "h-64") */
+  /**
+   * Height class for the scrollable content area (default: "h-64").
+   * For flex fill mode, use "flex-1 min-h-0" together with className="h-full".
+   */
   heightClass?: string;
   /** Placeholder text when no lines (default: "Waiting for output...") */
   emptyText?: string;
   /** Initial auto-scroll state (default: true) */
   defaultAutoScroll?: boolean;
+  /** Additional class names for the outermost container (e.g., "h-full" for flex fill) */
+  className?: string;
 }
 
 /** Pixel threshold to consider "at the bottom" */
@@ -74,6 +79,7 @@ export function TerminalDisplay({
   heightClass = 'h-64',
   emptyText = 'Waiting for output...',
   defaultAutoScroll = true,
+  className,
 }: TerminalDisplayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(defaultAutoScroll);
@@ -119,7 +125,7 @@ export function TerminalDisplay({
   }, []);
 
   return (
-    <div className="bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden">
+    <div className={`bg-gray-900 dark:bg-black rounded-lg border border-gray-700 dark:border-gray-800 overflow-hidden flex flex-col${className ? ` ${className}` : ''}`}>
       {/* Terminal Header */}
       <div className="bg-gray-800 dark:bg-gray-900 px-4 py-2 flex items-center gap-2 border-b border-gray-700 dark:border-gray-800">
         <div className="flex gap-2">

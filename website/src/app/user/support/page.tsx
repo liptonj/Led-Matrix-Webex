@@ -68,36 +68,42 @@ export default function UserSupportPage() {
   // Flash in progress
   if (flash.isFlashing) {
     return (
-      <SupportFlashing
-        terminalLines={terminalLines}
-        flashProgress={{
-          phase: flash.progress.phase,
-          percent: flash.progress.percent,
-          message: flash.progress.message,
-        }}
-      />
+      <div className="h-[calc(100vh-120px)] flex flex-col">
+        <SupportFlashing
+          terminalLines={terminalLines}
+          flashProgress={{
+            phase: flash.progress.phase,
+            percent: flash.progress.percent,
+            message: flash.progress.message,
+          }}
+        />
+      </div>
     );
   }
 
   // Waiting for admin
   if (supportSession.sessionStatus === 'waiting') {
     return (
-      <SupportWaiting
-        sessionId={supportSession.session?.id ?? ''}
-        terminalLines={terminalLines}
-        onEndSession={() => endSupport('user_ended')}
-      />
+      <div className="h-[calc(100vh-120px)] flex flex-col">
+        <SupportWaiting
+          sessionId={supportSession.session?.id ?? ''}
+          terminalLines={terminalLines}
+          onEndSession={() => endSupport('user_ended')}
+        />
+      </div>
     );
   }
 
   // Active session (admin connected)
   if (supportSession.sessionStatus === 'active') {
     return (
-      <SupportActive
-        terminalLines={terminalLines}
-        isFlashing={flash.isFlashing}
-        onEndSession={() => endSupport('user_ended')}
-      />
+      <div className="h-[calc(100vh-120px)] flex flex-col">
+        <SupportActive
+          terminalLines={terminalLines}
+          isFlashing={flash.isFlashing}
+          onEndSession={() => endSupport('user_ended')}
+        />
+      </div>
     );
   }
 
