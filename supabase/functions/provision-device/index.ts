@@ -198,6 +198,17 @@ serve(async (req: Request) => {
             // Don't fail the request - device is already approved
           }
 
+          // Update pairings.user_uuid to keep tables in sync
+          await supabase
+            .schema("display")
+            .from("pairings")
+            .upsert({
+              pairing_code: existingDevice.pairing_code,
+              serial_number: serial_number.toUpperCase(),
+              device_uuid: existingDevice.id,
+              user_uuid: autoApproveUserId
+            }, { onConflict: "pairing_code" });
+
           return new Response(
             JSON.stringify({
               success: true,
@@ -348,6 +359,17 @@ serve(async (req: Request) => {
         console.error("Failed to create user_devices entry:", upsertError);
         // Don't fail the request - device is already created
       }
+
+      // Update pairings.user_uuid to keep tables in sync
+      await supabase
+        .schema("display")
+        .from("pairings")
+        .upsert({
+          pairing_code: pairingCode,
+          serial_number: serial_number.toUpperCase(),
+          device_uuid: newDevice.id,
+          user_uuid: autoApproveUserId
+        }, { onConflict: "pairing_code" });
 
       return new Response(
         JSON.stringify({

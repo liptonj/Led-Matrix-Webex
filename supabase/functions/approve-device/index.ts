@@ -170,14 +170,16 @@ serve(async (req: Request) => {
       // Just log the error
     }
 
-    // Update pairings.user_uuid
+    // Update pairings.user_uuid (use UPSERT to handle race condition)
     const { error: pairingUpdateError } = await (supabase as any)
       .schema("display")
       .from("pairings")
-      .update({
+      .upsert({
+        pairing_code: normalizedCode,
+        serial_number: device.serial_number,
+        device_uuid: device.id,
         user_uuid: user.id,
-      })
-      .eq("pairing_code", normalizedCode);
+      }, { onConflict: "pairing_code" });
 
     if (pairingUpdateError) {
       console.error("Failed to update pairings.user_uuid:", pairingUpdateError);
@@ -185,10 +187,10 @@ serve(async (req: Request) => {
       // Just log the error
     }
 
-    // Broadcast user_assigned event to device channel
+    // Broadcast user_assigned event to user channel
     try {
       await sendBroadcast(
-        `device:${device.id}`,
+        `user:${user.id}`,
         "user_assigned",
         {
           user_uuid: user.id,
@@ -196,7 +198,7 @@ serve(async (req: Request) => {
           pairing_code: normalizedCode,
         },
       );
-      console.log(`Broadcasted user_assigned event to device:${device.id}`);
+      console.log(`Broadcasted user_assigned event to user:${user.id}`);
     } catch (broadcastError) {
       console.error("Failed to broadcast user_assigned event:", broadcastError);
       // Don't fail the request - device is already approved

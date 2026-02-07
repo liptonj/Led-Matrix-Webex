@@ -74,6 +74,7 @@ interface DeviceStateResponse {
   mic_muted?: boolean;
   in_call?: boolean;
   display_name?: string | null;
+  user_uuid?: string | null;
 }
 
 interface TokenPayload {
@@ -254,7 +255,7 @@ Deno.serve(async (req) => {
     const { data: pairingData } = await supabase
       .schema("display")
       .from("pairings")
-      .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected")
+      .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected, user_uuid")
       .eq("pairing_code", deviceInfo.pairing_code)
       .single();
 
@@ -363,6 +364,7 @@ Deno.serve(async (req) => {
           mic_muted: pairingData?.mic_muted || false,
           in_call: pairingData?.in_call || false,
           display_name: pairingData?.display_name || null,
+          user_uuid: pairingData?.user_uuid || null,
         };
 
         return new Response(JSON.stringify(response), {
@@ -398,6 +400,7 @@ Deno.serve(async (req) => {
       mic_muted: pairingData?.mic_muted || false,
       in_call: pairingData?.in_call || false,
       display_name: pairingData?.display_name || null,
+      user_uuid: pairingData?.user_uuid || null,
     };
 
     return new Response(JSON.stringify(response), {
