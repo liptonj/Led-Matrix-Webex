@@ -1,7 +1,18 @@
 'use client';
 
 import { Device } from '@/lib/supabase';
-import { memo } from 'react';
+import { memo, useState } from 'react';
+
+const LOG_LEVELS = [
+    { value: 'none', label: 'None (silent)' },
+    { value: 'error', label: 'Error' },
+    { value: 'warn', label: 'Warn' },
+    { value: 'info', label: 'Info (default)' },
+    { value: 'debug', label: 'Debug' },
+    { value: 'verbose', label: 'Verbose' },
+] as const;
+
+type LogLevel = (typeof LOG_LEVELS)[number]['value'];
 
 interface DeviceActionsPanelProps {
     device: Device;
@@ -14,6 +25,7 @@ interface DeviceActionsPanelProps {
     onToggleBlacklisted: () => void;
     onDelete: () => void;
     onSendReboot: () => void;
+    onSetLogLevel: (level: string) => void;
 }
 
 export default memo(function DeviceActionsPanel({
@@ -27,7 +39,15 @@ export default memo(function DeviceActionsPanel({
     onToggleBlacklisted,
     onDelete,
     onSendReboot,
+    onSetLogLevel,
 }: DeviceActionsPanelProps) {
+    const [logLevel, setLogLevel] = useState<LogLevel>('info');
+
+    const handleLogLevelChange = (level: LogLevel) => {
+        setLogLevel(level);
+        onSetLogLevel(level);
+    };
+
     return (
         <div className="panel space-y-2">
             <h3 className="panel-header">Actions</h3>
@@ -38,6 +58,27 @@ export default memo(function DeviceActionsPanel({
             >
                 {device.debug_enabled ? 'Disable debug logs' : 'Enable debug logs'}
             </button>
+
+            {/* Log Verbosity Level */}
+            <div className="pt-1">
+                <label htmlFor="log-level-select" className="block text-xs font-medium text-gray-500 mb-1">
+                    Serial Log Level
+                </label>
+                <select
+                    id="log-level-select"
+                    value={logLevel}
+                    onChange={(e) => handleLogLevelChange(e.target.value as LogLevel)}
+                    disabled={commandSubmitting || !device.pairing_code}
+                    className="w-full rounded-md border border-gray-300 bg-white text-xs px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                >
+                    {LOG_LEVELS.map((l) => (
+                        <option key={l.value} value={l.value}>
+                            {l.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
             {device.approval_required && (
                 <button
                     onClick={onApprove}

@@ -65,6 +65,23 @@ inline bool log_system_is_suppressed() { return false; }
 #include <freertos/queue.h>
 #include <freertos/task.h>
 
+// =========================================================================
+// Simplified log format: remove file:line and function() from output
+// =========================================================================
+// Default Arduino format:  [timestamp][L][file.cpp:line] function(): message
+// Our format:              [timestamp][L] message
+//
+// Module identification is already provided by the [TAG] prefix in every
+// ESP_LOGx call (e.g., "[REALTIME] Connecting..."), making file:line and
+// function() redundant and noisy.
+#ifdef ARDUHAL_LOG_FORMAT
+#undef ARDUHAL_LOG_FORMAT
+#define ARDUHAL_LOG_FORMAT(letter, format) \
+    ARDUHAL_LOG_COLOR_ ## letter "[%6lu][" #letter "] " format \
+    ARDUHAL_LOG_RESET_COLOR "\r\n", \
+    (unsigned long) (esp_timer_get_time() / 1000ULL)
+#endif
+
 // Forward declarations
 class SupabaseClient;
 class SupabaseRealtime;

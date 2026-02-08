@@ -19,11 +19,22 @@
 #define SUPABASE_REALTIME_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
+
+#ifdef NATIVE_BUILD
+// Minimal type stubs for native test compilation
+typedef void* esp_websocket_client_handle_t;
+typedef const char* esp_event_base_t;
+typedef int esp_websocket_event_id_t;
+#define portMAX_DELAY 0xFFFFFFFF
+inline bool esp_websocket_client_is_connected(esp_websocket_client_handle_t) { return false; }
+inline int esp_websocket_client_send_text(esp_websocket_client_handle_t, const char*, int, int) { return 0; }
+#else
 #include <esp_event.h>
 #include <esp_websocket_client.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
-#include <ArduinoJson.h>
+#endif
 
 // Phoenix protocol constants
 #define PHOENIX_HEARTBEAT_INTERVAL_MS 30000
@@ -101,41 +112,6 @@ public:
     bool isSocketConnected() const { return _connected; }
     bool isConnecting() const { return _connecting; }
     uint32_t connectingDurationMs() const;
-
-    /**
-     * @brief Subscribe to a single table channel
-     * @param schema Database schema
-     * @param table Table name
-     * @param filter Optional filter (e.g., "device_uuid=eq.ABC123")
-     * @return true if subscription request sent
-     */
-    bool subscribe(const String& schema, const String& table, 
-                   const String& filter = "");
-
-    /**
-     * @brief Set channel topic for subscriptions
-     * @param topic Channel topic (must not be "realtime")
-     */
-    void setChannelTopic(const String& topic);
-    
-    /**
-     * @brief Subscribe to multiple tables on a single channel
-     * @param schema Database schema
-     * @param tables Array of table names
-     * @param tableCount Number of tables
-     * @param filter Filter to apply to all tables (e.g., "device_uuid=eq.ABC123")
-     * @param includePostgresChanges Whether to include postgres_changes config
-     * @return true if subscription request sent
-     */
-    bool subscribeMultiple(const String& schema, const String tables[], 
-                           int tableCount, const String& filter = "",
-                           bool includePostgresChanges = true);
-
-    /**
-     * @brief Subscribe to broadcast-only channel (no postgres_changes)
-     * @return true if subscription request sent
-     */
-    bool subscribeBroadcast();
 
     /**
      * @brief Subscribe to user channel (user:{user_uuid}) for user-specific events
@@ -230,19 +206,13 @@ private:
     String _anonKey;
     String _accessToken;
     String _wsHeaders;
-    String _channelTopic;
-    bool _privateChannel;
     bool _connected;
-    bool _subscribed;
     bool _connecting;
     unsigned long _connectStartMs;
     bool _loggedFirstMessage;
     bool _loggedCloseFrame;
     bool _loggedJoinDetails;
-    String _pendingJoinMessage;
-    bool _pendingJoin;
     bool _messagePending;
-    String _lastJoinPayload;
     int _joinRef;
     int _msgRef;
     unsigned long _lastHeartbeat;

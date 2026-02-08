@@ -113,6 +113,7 @@ serve(async (req: Request) => {
       .from("oauth_clients")
       .select("client_id, redirect_uri, active")
       .eq("provider", "webex")
+      .eq("purpose", "device")
       .eq("active", true)
       .order("updated_at", { ascending: false })
       .limit(1)

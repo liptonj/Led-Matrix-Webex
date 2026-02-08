@@ -349,9 +349,22 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
             if (doc["poll_interval"].is<int>()) {
                 deps.config.setWebexPollInterval(doc["poll_interval"].as<uint16_t>());
             }
+            // Log verbosity level: "none", "error", "warn", "info", "debug", "verbose"
+            if (doc["log_level"].is<const char*>()) {
+                String level = doc["log_level"].as<String>();
+                level.toUpperCase();
+                esp_log_level_t esp_level = ESP_LOG_INFO;
+                if (level == "NONE")         esp_level = ESP_LOG_NONE;
+                else if (level == "ERROR")   esp_level = ESP_LOG_ERROR;
+                else if (level == "WARN")    esp_level = ESP_LOG_WARN;
+                else if (level == "INFO")    esp_level = ESP_LOG_INFO;
+                else if (level == "DEBUG")   esp_level = ESP_LOG_DEBUG;
+                else if (level == "VERBOSE") esp_level = ESP_LOG_VERBOSE;
+                esp_log_level_set("*", esp_level);
+                ESP_LOGI(TAG, "Log level set to %s via set_config", level.c_str());
+            }
             
             response = DeviceInfo::buildConfigJson();
-            ESP_LOGI(TAG, "Config updated");
             ESP_LOGI(TAG, "Config updated via set_config");
             syncManager.broadcastDeviceConfig();
         }

@@ -42,10 +42,9 @@ src_filter = [
     "+<config/config_export.cpp>",
     # Common utilities
     "+<common/nvs_utils.cpp>",
-    # Serial commands - include for all tests that need it
-    # The mocks in globals.cpp use weak linkage, so they'll only be used
-    # if serial_commands.cpp is not linked. This allows both approaches to work.
-    "+<serial/serial_commands.cpp>",
+    # Note: serial_commands.cpp is excluded from native test builds because it
+    # depends on ESP32-specific APIs (heap_caps, esp_partition, FreeRTOS tasks).
+    # The mocks in globals.cpp use weak linkage to provide the necessary symbols.
     # Note: provision_helpers.cpp excluded from global test sources
     # It requires the Dependencies framework with 23 mock manager objects
     # that only test_provision_helpers provides. The test file directly includes

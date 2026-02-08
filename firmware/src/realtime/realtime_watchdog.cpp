@@ -31,8 +31,8 @@ bool checkReconnection(unsigned long current_time, unsigned long& lastInitAttemp
         return false;
     }
 
-    // Use isSocketConnected() (not isConnected()) because the subscription
-    // confirmation (_subscribed flag) may be delayed due to message queuing.
+    // Use isSocketConnected() (not isConnected()) because channel subscription
+    // confirmation may be delayed due to message queuing.
     // Heartbeat timeout handles actual dead connections; we only need to
     // reconnect when the socket itself is down.
     if (deps.realtime.isSocketConnected() || deps.realtime.isConnecting()) {

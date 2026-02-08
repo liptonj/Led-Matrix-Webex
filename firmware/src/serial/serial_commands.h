@@ -1,14 +1,52 @@
 /**
  * @file serial_commands.h
- * @brief Serial Command Handler for Web Installer WiFi Configuration
+ * @brief Serial Command Handler for Web Installer and Remote Support Console
  * 
- * Provides serial commands for the website's Web Serial interface:
- * - WIFI:<ssid>:<password> - Configure WiFi credentials
- * - PROVISION_TOKEN:<token> - Set provision token (32 alphanumeric chars, RAM-only)
- * - SCAN - Scan and list available WiFi networks
- * - STATUS - Print current device status
- * - FACTORY_RESET - Clear all settings and reboot
- * - HELP - Show available commands
+ * Provides serial commands for the website's Web Serial interface and
+ * remote support console. Commands are grouped by function:
+ * 
+ * Setup:
+ *   WIFI:<ssid>:<password>       - Configure WiFi credentials
+ *   PROVISION_TOKEN:<token>      - Set provision token (32 alphanumeric chars)
+ *   SCAN                         - Scan available WiFi networks
+ *   FACTORY_RESET                - Erase all settings and reboot
+ * 
+ * Info & Diagnostics:
+ *   STATUS                       - Connection summary
+ *   INFO                         - Chip/board/flash/PSRAM details
+ *   HEAP                         - Memory diagnostics
+ *   UPTIME                       - Uptime, reset reason, boot count
+ *   VERSION                      - Firmware version & partition info
+ *   CONFIG                       - Dump current configuration (JSON)
+ *   TASKS                        - FreeRTOS task list
+ * 
+ * Network & Services:
+ *   NETWORK                      - WiFi/IP/DNS/gateway details
+ *   SUPABASE                     - Supabase auth & app status
+ *   REALTIME                     - Realtime WebSocket status
+ *   MQTT                         - MQTT broker & sensor status
+ *   WEBEX                        - Webex auth & status details
+ *   SENSOR                       - Latest sensor readings
+ * 
+ * Actions:
+ *   REBOOT                       - Restart the device
+ *   OTA                          - Check for OTA update
+ *   OTA_UPDATE                   - Check + apply OTA update
+ *   SYNC                         - Force Supabase state sync
+ *   TELEMETRY                    - Force send telemetry
+ *   LOG_ON                       - Enable remote debug logging
+ *   LOG_OFF                      - Disable remote debug logging
+ *   PING                         - Echo "PONG" (connection test)
+ * 
+ * Log Verbosity (controls serial output level):
+ *   QUIET / LOG_NONE             - Silence all log output
+ *   LOG_ERROR                    - Errors only
+ *   LOG_WARN                     - Errors + warnings
+ *   LOG_INFO                     - Normal output (default)
+ *   LOG_DEBUG                    - Include debug messages
+ *   LOG_VERBOSE                  - Everything
+ * 
+ *   HELP                         - Show all commands
  */
 
 #ifndef SERIAL_COMMANDS_H

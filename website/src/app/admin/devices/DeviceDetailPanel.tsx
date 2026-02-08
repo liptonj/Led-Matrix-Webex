@@ -337,17 +337,21 @@ export default function DeviceDetailPanel({
         }
     };
 
-    const handleInsertCommand = async (command: string) => {
+    const handleInsertCommand = async (command: string, payload: Record<string, unknown> = {}) => {
         if (!device?.pairing_code) return;
         try {
             setCommandSubmitting(true);
-            const result = await insertCommand(device.pairing_code, device.serial_number, command, {});
+            const result = await insertCommand(device.pairing_code, device.serial_number, command, payload);
             void result;
         } catch (err) {
             setCommandError(err instanceof Error ? err.message : 'Failed to send command.');
         } finally {
             setCommandSubmitting(false);
         }
+    };
+
+    const handleSetLogLevel = (level: string) => {
+        void handleInsertCommand('set_config', { log_level: level });
     };
 
     const handleShowResponse = (title: string, body: Record<string, unknown> | null) => {
@@ -407,6 +411,7 @@ export default function DeviceDetailPanel({
                                 onToggleBlacklisted={handleToggleBlacklisted}
                                 onDelete={handleDelete}
                                 onSendReboot={() => handleInsertCommand('reboot')}
+                                onSetLogLevel={handleSetLogLevel}
                             />
                         </div>
 
