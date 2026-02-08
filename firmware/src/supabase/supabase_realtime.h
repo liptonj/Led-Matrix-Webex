@@ -67,11 +67,13 @@ struct ChannelState {
     String topic;
     bool subscribed;
     bool privateChannel;
+    bool joinRejected;       // Permanently rejected (e.g., authorization error)
     int joinRef;
     String lastJoinPayload;
     String pendingJoinMessage;
     bool pendingJoin;
-    ChannelState() : subscribed(false), privateChannel(false), joinRef(0), pendingJoin(false) {}
+    ChannelState() : subscribed(false), privateChannel(false), joinRejected(false),
+                     joinRef(0), pendingJoin(false) {}
 };
 
 /**

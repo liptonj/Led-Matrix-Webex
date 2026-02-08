@@ -266,7 +266,7 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
         JsonDocument broadcastData;
         broadcastData["device_uuid"] = deps.config.getDeviceUuid();
         broadcastData["command_id"] = trimmedId;
-        broadcastData["status"] = success ? "success" : "error";
+        broadcastData["status"] = success ? "acked" : "failed";
         
         time_t now;
         time(&now);

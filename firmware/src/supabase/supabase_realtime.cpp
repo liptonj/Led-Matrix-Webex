@@ -237,9 +237,10 @@ void SupabaseRealtime::disconnect() {
     _connecting = false;
     _lastHeartbeatResponse = 0;
 
-    // Clear all channel states
+    // Clear all channel states (including rejection flags so channels retry on reconnect)
     for (size_t i = 0; i < _channelCount; i++) {
         _channels[i].subscribed = false;
+        _channels[i].joinRejected = false;
         _channels[i].pendingJoin = false;
         _channels[i].pendingJoinMessage = "";
         _channels[i].lastJoinPayload = "";
@@ -289,11 +290,11 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         instance->_lastHeartbeatResponse = millis();
         instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
         
-        // Rejoin all registered channels
+        // Rejoin all registered channels (rejection flags are cleared on disconnect/reconnect)
         if (instance->_client && esp_websocket_client_is_connected(instance->_client)) {
             for (size_t i = 0; i < instance->_channelCount; i++) {
                 ChannelState& channel = instance->_channels[i];
-                if (channel.topic.isEmpty()) continue;
+                if (channel.topic.isEmpty() || channel.joinRejected) continue;
                 
                 // Check for pending join message first
                 if (channel.pendingJoin && !channel.pendingJoinMessage.isEmpty()) {
@@ -346,8 +347,10 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         instance->_connected = false;
         instance->_connecting = false;
         // Mark all channels as unsubscribed (will rejoin on reconnect)
+        // Clear rejection flags so channels get a fresh attempt after reconnect
         for (size_t i = 0; i < instance->_channelCount; i++) {
             instance->_channels[i].subscribed = false;
+            instance->_channels[i].joinRejected = false;
         }
         return;
     }
@@ -362,6 +365,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         instance->_connecting = false;
         for (size_t i = 0; i < instance->_channelCount; i++) {
             instance->_channels[i].subscribed = false;
+            instance->_channels[i].joinRejected = false;
         }
         return;
     }

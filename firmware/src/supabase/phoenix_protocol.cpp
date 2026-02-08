@@ -107,15 +107,15 @@ void SupabaseRealtime::sendHeartbeat() {
         esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
     }
 
-    // Refresh access token on all private channels
-    bool hasPrivate = false;
+    // Refresh access token on subscribed private channels
+    bool hasSubscribedPrivate = false;
     for (size_t i = 0; i < _channelCount; i++) {
-        if (_channels[i].privateChannel) {
-            hasPrivate = true;
+        if (_channels[i].privateChannel && _channels[i].subscribed && !_channels[i].joinRejected) {
+            hasSubscribedPrivate = true;
             break;
         }
     }
-    if (hasPrivate) {
+    if (hasSubscribedPrivate) {
         sendAccessToken();
     }
 }
@@ -128,9 +128,11 @@ void SupabaseRealtime::sendAccessToken() {
         return;
     }
     
-    // Send access token to all private channels
+    // Send access token only to subscribed private channels
+    // Skip channels that were rejected (e.g., authorization error) or not yet joined
     for (size_t i = 0; i < _channelCount; i++) {
-        if (_channels[i].privateChannel && !_channels[i].topic.isEmpty()) {
+        if (_channels[i].privateChannel && _channels[i].subscribed &&
+            !_channels[i].joinRejected && !_channels[i].topic.isEmpty()) {
             _msgRef++;
             JsonDocument payload;
             payload["access_token"] = _accessToken;
@@ -338,8 +340,9 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
             } else {
                 ESP_LOGE(TAG, "Join failed for channel %s: status=%s", topic.c_str(), status.c_str());
                 
+                String reason = "unknown";
                 if (payload["response"].is<JsonObject>()) {
-                    String reason = payload["response"]["reason"] | "unknown";
+                    reason = payload["response"]["reason"] | "unknown";
                     ESP_LOGE(TAG, "Join failed reason: %s", reason.c_str());
                     String responseStr;
                     serializeJson(payload["response"], responseStr);
@@ -348,6 +351,14 @@ void SupabaseRealtime::handlePhoenixMessage(const String& topic, const String& e
                     String payloadStr;
                     serializeJson(payload, payloadStr);
                     ESP_LOGE(TAG, "Join error payload: %s", payloadStr.c_str());
+                }
+                
+                // Mark channel as permanently rejected on authorization errors
+                // to prevent repeated access_token sends and retry spam
+                if (reason.indexOf("Unauthorized") >= 0 || reason.indexOf("unmatched topic") >= 0) {
+                    channel->joinRejected = true;
+                    ESP_LOGW(TAG, "Channel %s marked as rejected - will not retry until reconnect",
+                             topic.c_str());
                 }
             }
             return;
