@@ -46,7 +46,7 @@ describe('useDeviceLogs', () => {
     let onStatusChange: ((subscribed: boolean) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_deviceUuid, _onLog, statusCb) => {
+      async (_deviceUuid, _userUuid, _onLog, statusCb) => {
         onStatusChange = statusCb;
         return mockUnsubscribe;
       }
@@ -59,6 +59,7 @@ describe('useDeviceLogs', () => {
     await waitFor(() => {
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
         TEST_DEVICE_UUID,
+        null,
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),
@@ -82,7 +83,7 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_deviceUuid, logCb) => {
+      async (_deviceUuid, _userUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
@@ -119,7 +120,7 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_deviceUuid, logCb) => {
+      async (_deviceUuid, _userUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
@@ -151,7 +152,7 @@ describe('useDeviceLogs', () => {
     let onLog: ((log: DeviceLog) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_deviceUuid, logCb) => {
+      async (_deviceUuid, _userUuid, logCb) => {
         onLog = logCb;
         return mockUnsubscribe;
       }
@@ -192,7 +193,7 @@ describe('useDeviceLogs', () => {
     let onError: ((error: string) => void) | undefined;
     
     mockSubscribeToDeviceLogs.mockImplementation(
-      async (_deviceUuid, _onLog, _statusCb, errorCb) => {
+      async (_deviceUuid, _userUuid, _onLog, _statusCb, errorCb) => {
         onError = errorCb;
         return mockUnsubscribe;
       }
@@ -250,6 +251,7 @@ describe('useDeviceLogs', () => {
     await waitFor(() => {
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
         'ABC123',
+        null,
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),
@@ -265,6 +267,7 @@ describe('useDeviceLogs', () => {
       expect(mockUnsubscribe).toHaveBeenCalled();
       expect(mockSubscribeToDeviceLogs).toHaveBeenCalledWith(
         'XYZ789',
+        null,
         expect.any(Function),
         expect.any(Function),
         expect.any(Function),

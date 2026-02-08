@@ -32,9 +32,46 @@ export default memo(function CommandResponseModal({
                         Close
                     </button>
                 </div>
-                <pre className="text-xs p-3 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
-{JSON.stringify(body, null, 2)}
-                </pre>
+                {body === null ? (
+                    <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No response data</p>
+                ) : (
+                    <div className="space-y-3">
+                        {/* Structured fields */}
+                        <div className="space-y-2 text-xs">
+                            {body.success !== undefined && (
+                                <div className="flex gap-2">
+                                    <span className="font-medium shrink-0" style={{ color: 'var(--color-text-muted)' }}>Status:</span>
+                                    <span className={body.success ? 'text-green-600' : 'text-red-600'}>
+                                        {body.success ? 'Success' : 'Failed'}
+                                    </span>
+                                </div>
+                            )}
+                            {body.error && (
+                                <div className="flex gap-2">
+                                    <span className="font-medium shrink-0" style={{ color: 'var(--color-text-muted)' }}>Error:</span>
+                                    <span className="text-red-600">{String(body.error)}</span>
+                                </div>
+                            )}
+                            {body.data && (
+                                <div>
+                                    <span className="font-medium block mb-1" style={{ color: 'var(--color-text-muted)' }}>Data:</span>
+                                    <pre className="text-xs p-2 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
+                                        {JSON.stringify(body.data, null, 2)}
+                                    </pre>
+                                </div>
+                            )}
+                        </div>
+                        {/* Collapsible raw JSON */}
+                        <details className="text-xs">
+                            <summary className="cursor-pointer font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                                Raw JSON
+                            </summary>
+                            <pre className="mt-2 p-3 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
+                                {JSON.stringify(body, null, 2)}
+                            </pre>
+                        </details>
+                    </div>
+                )}
             </div>
         </div>
     );

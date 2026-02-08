@@ -159,8 +159,25 @@ describe('supportSessions', () => {
         joined_at: expect.any(String),
       });
       expect(mockEq).toHaveBeenCalledWith('id', 'session-123');
+      expect(mockEq).toHaveBeenCalledWith('status', 'waiting');
       expect(result.status).toBe('active');
       expect(result.admin_id).toBe('admin-789');
+    });
+
+    it('only joins sessions with waiting status', async () => {
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'No rows returned', code: 'PGRST116' },
+      });
+
+      // Attempting to join a closed session should fail
+      await expect(joinSupportSession('closed-session', 'admin-789')).rejects.toEqual({
+        message: 'No rows returned',
+        code: 'PGRST116',
+      });
+
+      // Verify the status filter was applied
+      expect(mockEq).toHaveBeenCalledWith('status', 'waiting');
     });
 
     it('throws error when join fails', async () => {

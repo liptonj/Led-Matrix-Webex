@@ -17,6 +17,7 @@ import {
   waitForDeviceApproval,
 } from '../provisionToken';
 import type { Device } from '@/lib/supabase/types';
+import { spyOnConsole } from '@/test-utils/setup';
 
 // Mock dependencies
 jest.mock('@/lib/supabase/auth');
@@ -107,6 +108,18 @@ describe('provisionToken utilities', () => {
   });
 
   describe('createProvisionToken', () => {
+    let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
+    beforeEach(() => {
+      // Suppress expected console warnings from error scenarios
+      consoleSpy = spyOnConsole(['[createProvisionToken]']);
+    });
+
+    afterEach(() => {
+      consoleSpy.error.mockRestore();
+      consoleSpy.warn.mockRestore();
+    });
+
     it('generates a 32-character token', async () => {
       mockQueryBuilder.insert.mockResolvedValue({
         data: null,
@@ -235,7 +248,14 @@ describe('provisionToken utilities', () => {
       release_channel: 'production',
     };
 
+    let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
     beforeEach(() => {
+      // Suppress expected console warnings from timeout/abort/error scenarios
+      consoleSpy = spyOnConsole([
+        '[waitForDeviceApproval]',
+      ]);
+
       // Setup default query builder for device queries
       mockQueryBuilder.limit.mockResolvedValue({
         data: [],
@@ -249,6 +269,8 @@ describe('provisionToken utilities', () => {
     });
     
     afterEach(() => {
+      consoleSpy.error.mockRestore();
+      consoleSpy.warn.mockRestore();
       jest.spyOn(Date, 'now').mockRestore();
     });
 
@@ -515,6 +537,18 @@ describe('provisionToken utilities', () => {
   });
 
   describe('deleteProvisionToken', () => {
+    let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
+    beforeEach(() => {
+      // Suppress expected console warnings from error scenarios
+      consoleSpy = spyOnConsole(['[deleteProvisionToken]']);
+    });
+
+    afterEach(() => {
+      consoleSpy.error.mockRestore();
+      consoleSpy.warn.mockRestore();
+    });
+
     it('successfully deletes token and returns true', async () => {
       const result = await deleteProvisionToken(mockToken);
 

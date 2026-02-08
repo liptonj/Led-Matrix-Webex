@@ -8,6 +8,7 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { TextEncoder, TextDecoder } from 'util';
 import { useSerialPort } from '../useSerialPort';
+import { spyOnConsole } from '@/test-utils/setup';
 
 // Mock Web Serial API types
 interface MockReadableStreamReader {
@@ -104,6 +105,17 @@ afterEach(() => {
 });
 
 describe('useSerialPort', () => {
+  let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
+  beforeEach(() => {
+    consoleSpy = spyOnConsole(['[SerialPort]']);
+  });
+
+  afterEach(() => {
+    consoleSpy.error.mockRestore();
+    consoleSpy.warn.mockRestore();
+  });
+
   describe('initial state', () => {
     it('initializes with disconnected status', () => {
       const { result } = renderHook(() => useSerialPort());

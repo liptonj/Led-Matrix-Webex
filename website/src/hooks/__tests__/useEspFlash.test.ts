@@ -7,6 +7,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useEspFlash } from '../useEspFlash';
+import { spyOnConsole } from '@/test-utils/setup';
 
 // Mock esptool-js
 const mockChipRom = {
@@ -66,6 +67,17 @@ beforeEach(() => {
 });
 
 describe('useEspFlash', () => {
+  let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
+  beforeEach(() => {
+    consoleSpy = spyOnConsole(['[useEspFlash]']);
+  });
+
+  afterEach(() => {
+    consoleSpy.error.mockRestore();
+    consoleSpy.warn.mockRestore();
+  });
+
   describe('initial state', () => {
     it('initializes with idle state', () => {
       const { result } = renderHook(() => useEspFlash());

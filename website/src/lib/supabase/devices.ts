@@ -223,15 +223,18 @@ export async function getDeviceLogsBySerial(
 }
 
 // Subscribe to realtime device logs via Supabase Realtime (broadcast)
-// Uses device-specific channel: device:{deviceUuid} with debug_log event
+// Prefers user-specific channel: user:{userUuid} (where firmware sends logs)
+// Falls back to device-specific channel: device:{deviceUuid} if userUuid unavailable
 export async function subscribeToDeviceLogs(
   deviceUuid: string,
+  userUuid: string | null,
   onLog: (log: DeviceLog) => void,
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
 ): Promise<() => void> {
   const supabase = await getSupabase();
-  const channelName = `device:${deviceUuid}`;
+  // Prefer user channel (where firmware actually sends logs), fall back to device channel
+  const channelName = userUuid ? `user:${userUuid}` : `device:${deviceUuid}`;
 
   const channel = supabase
     .channel(channelName, {
@@ -254,7 +257,11 @@ export async function subscribeToDeviceLogs(
           ts?: number;
         };
         
-        // No need to filter by device_uuid - channel is already device-scoped
+        // When listening on user channel, filter to only this device's logs
+        if (userUuid && record.device_uuid && record.device_uuid !== deviceUuid) {
+          return; // Skip logs from other devices on this user's channel
+        }
+        
         onLog({
           id: `${record.device_id ?? record.device_uuid ?? 'unknown'}-${record.ts ?? Date.now()}`,
           device_id: record.device_id ?? record.device_uuid ?? '',
@@ -281,7 +288,11 @@ export async function subscribeToDeviceLogs(
           timestamp?: number;
         };
 
-        // No need to filter by device_uuid - channel is already device-scoped
+        // When listening on user channel, filter to only this device's logs
+        if (userUuid && record.device_uuid && record.device_uuid !== deviceUuid) {
+          return; // Skip telemetry from other devices on this user's channel
+        }
+        
         // Emit as a special "telemetry" log entry for display in admin panel
         onLog({
           id: `telemetry-${record.device_uuid ?? 'unknown'}-${record.timestamp ?? Date.now()}`,

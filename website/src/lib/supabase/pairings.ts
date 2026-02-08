@@ -253,6 +253,7 @@ export async function getCommandsPage(
 
 /**
  * Insert a command for a device (admin only).
+ * Uses Edge Function to ensure real-time broadcast to device.
  */
 export async function insertCommand(
   pairingCode: string,
@@ -267,19 +268,58 @@ export async function insertCommand(
     throw new Error("Not authenticated.");
   }
 
-  const { data, error } = await supabase
+  // Look up device_uuid from pairing
+  const { data: pairing, error: pairingError } = await supabase
     .schema("display")
-    .from("commands")
-    .insert({
-      pairing_code: pairingCode,
-      serial_number: serialNumber,
+    .from("pairings")
+    .select("device_uuid")
+    .eq("pairing_code", pairingCode)
+    .single();
+  
+  if (pairingError || !pairing?.device_uuid) {
+    throw new Error("Failed to find device for pairing code.");
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("Supabase URL not configured.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/insert-command`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify({
       command,
       payload,
-    })
+      device_uuid: pairing.device_uuid,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error || `Command insert failed: HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+  
+  // The edge function returns the command_id, fetch the full command record
+  if (!result.command_id) {
+    throw new Error("Edge function did not return command_id.");
+  }
+
+  const { data: cmd, error: cmdError } = await supabase
+    .schema("display")
+    .from("commands")
     .select(COMMAND_COLUMNS)
+    .eq("id", result.command_id)
     .single();
 
-  if (error) throw error;
-  if (!data) throw new Error("Failed to insert command.");
-  return data;
+  if (cmdError || !cmd) {
+    throw new Error("Command inserted but failed to fetch record.");
+  }
+
+  return cmd;
 }

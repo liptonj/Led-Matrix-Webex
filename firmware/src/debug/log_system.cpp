@@ -258,7 +258,13 @@ static void remote_log_task(void* param) {
         // Try Realtime broadcast first (if realtime is available and connected)
         bool broadcastSent = false;
         if (_s_realtime != nullptr && _s_realtime->isConnected()) {
+            // Send to user channel (for embedded app)
             broadcastSent = _s_realtime->sendBroadcast("debug_log", doc);
+            // Also send to device channel (for admin panel)
+            if (!deviceUuid.isEmpty()) {
+                String deviceTopic = "realtime:device:" + deviceUuid;
+                _s_realtime->sendBroadcast(deviceTopic, "debug_log", doc);
+            }
         }
 
         // If broadcast failed or realtime not available, fall back to HTTP

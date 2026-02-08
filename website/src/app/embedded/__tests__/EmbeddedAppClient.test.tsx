@@ -9,6 +9,7 @@ import type { Session } from "@supabase/supabase-js";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
+import { spyOnConsole } from "@/test-utils/setup";
 
 // Store original env
 const originalEnv = process.env;
@@ -261,8 +262,10 @@ import { EmbeddedAppClient } from "../EmbeddedAppClient";
 describe("EmbeddedAppClient", () => {
   // Configure userEvent to work with fake timers
   let user: ReturnType<typeof userEvent.setup>;
+  let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
 
   beforeEach(() => {
+    consoleSpy = spyOnConsole(['must be a scalar value', 'not wrapped in act']);
     jest.useFakeTimers();
     // Setup user AFTER fake timers are enabled
     user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
@@ -300,6 +303,10 @@ describe("EmbeddedAppClient", () => {
     // Cleanup React components BEFORE switching timers
     // This ensures clearInterval is still available from fake timers during cleanup
     cleanup();
+    
+    // Restore console spies
+    consoleSpy.error.mockRestore();
+    consoleSpy.warn.mockRestore();
     
     process.env = originalEnv;
     jest.useRealTimers();

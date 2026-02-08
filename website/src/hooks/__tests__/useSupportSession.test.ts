@@ -7,6 +7,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useSupportSession } from '../useSupportSession';
+import { spyOnConsole } from '@/test-utils/setup';
 
 // Mock Supabase helpers
 const mockCreateSupportSession = jest.fn();
@@ -87,6 +88,18 @@ beforeEach(() => {
 });
 
 describe('useSupportSession', () => {
+  let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
+  beforeEach(() => {
+    // Suppress expected console warnings from error scenarios
+    consoleSpy = spyOnConsole(['[useSupportSession]']);
+  });
+
+  afterEach(() => {
+    consoleSpy.error.mockRestore();
+    consoleSpy.warn.mockRestore();
+  });
+
   describe('initial state', () => {
     it('initializes with no session', () => {
       const { result } = renderHook(() => useSupportSession());

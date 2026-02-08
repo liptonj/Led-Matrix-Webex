@@ -7,7 +7,8 @@ const LOG_LIMIT = 200;
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 export interface UseDeviceLogsOptions {
-  deviceUuid: string | null; // Required - device-specific channel subscription
+  deviceUuid: string | null; // Required - device UUID
+  userUuid?: string | null; // Optional - user UUID (preferred channel, falls back to device channel if null)
   logFilter?: 'all' | DeviceLog['level'];
   logLimit?: number;
 }
@@ -29,9 +30,10 @@ export interface UseDeviceLogsReturn {
  * BROADCAST-ONLY MODE: No historical logs are loaded from the database.
  * Only real-time streaming logs are displayed.
  * 
- * Subscribes to device-specific channel: device:{deviceUuid}
+ * Subscribes to user channel: user:{userUuid} (preferred, where firmware sends logs)
+ * Falls back to device channel: device:{deviceUuid} if userUuid unavailable
  * 
- * @param options - Configuration object with deviceUuid (required), logFilter, and logLimit
+ * @param options - Configuration object with deviceUuid (required), userUuid (optional), logFilter, and logLimit
  * @returns Object with logs, filtered logs, loading/error states, and filter controls
  * 
  * @example
@@ -44,7 +46,7 @@ export interface UseDeviceLogsReturn {
  * ```
  */
 export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsReturn {
-  const { deviceUuid, logFilter: initialLogFilter = 'all', logLimit = LOG_LIMIT } = options;
+  const { deviceUuid, userUuid = null, logFilter: initialLogFilter = 'all', logLimit = LOG_LIMIT } = options;
   
   const [logs, setLogs] = useState<DeviceLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +72,7 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
     setStatus('connecting');
     subscribeToDeviceLogs(
       deviceUuid,
+      userUuid ?? null,
       (log) => {
         setLogs((prev) => {
           const next = [log, ...prev];
@@ -105,7 +108,7 @@ export function useDeviceLogs(options: UseDeviceLogsOptions): UseDeviceLogsRetur
       isMounted = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [deviceUuid, logLimit]);
+  }, [deviceUuid, userUuid, logLimit]);
 
   const filteredLogs = useMemo(() => {
     if (logFilter === 'all') return logs;

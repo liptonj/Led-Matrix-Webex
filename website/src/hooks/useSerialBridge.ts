@@ -188,7 +188,8 @@ export function useSerialBridge(): UseSerialBridgeReturn {
     const { reason } = payload as unknown as SessionEndEvent;
     addLine(`Session ended by technician: ${reason || 'no reason given'}`, 'system');
     supportSession.close(reason || 'admin_ended');
-  }, [addLine, supportSession]);
+    serialPort.disconnect();
+  }, [addLine, supportSession, serialPort]);
 
   const handleShimHello = useCallback((payload: Record<string, unknown>) => {
     setShimConnected(true);
@@ -284,8 +285,12 @@ export function useSerialBridge(): UseSerialBridgeReturn {
     }
   }, [serialPort, supportSession, addLine]);
 
-  // End support: close session + disconnect
+  // End support: notify admin, close session, disconnect serial
   const endSupport = useCallback(async (reason = 'user_ended') => {
+    // Notify admin immediately via broadcast before closing
+    if (channelSendRef.current) {
+      channelSendRef.current('session_end', { reason });
+    }
     await supportSession.close(reason);
     serialPort.disconnect();
     addLine('Support session ended', 'system');

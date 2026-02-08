@@ -206,28 +206,39 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Broadcast to user channel if user_uuid is available
-    if (userUuid) {
+    // Prepare broadcast payload
+    const broadcastPayload = {
+      device_uuid: deviceUuid,
+      serial_number: serialNumber,
+      level: normalizedLevel,
+      message: logData.message,
+      metadata: logData.metadata || {},
+      ts: Date.now(),
+    };
+
+    // Always broadcast to device channel if deviceUuid is available
+    if (deviceUuid) {
       try {
-        await sendBroadcast(`user:${userUuid}`, "debug_log", {
-          device_uuid: deviceUuid,
-          serial_number: serialNumber,
-          level: normalizedLevel,
-          message: logData.message,
-          metadata: logData.metadata || {},
-          ts: Date.now(),
-        });
-        console.log(`[broadcast-device-log] Broadcast successful to user:${userUuid}`);
+        await sendBroadcast(`device:${deviceUuid}`, "debug_log", broadcastPayload);
+        console.log(`[broadcast-device-log] Broadcast successful to device:${deviceUuid}`);
       } catch (err) {
-        console.error("[broadcast-device-log] Broadcast send failed:", err);
+        console.error("[broadcast-device-log] Device channel broadcast failed:", err);
         return new Response(JSON.stringify({ success: false, error: "Failed to broadcast log" }), {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-    } else {
-      // If no user_uuid, still return success but log a warning
-      console.warn(`[broadcast-device-log] No user_uuid found for device ${serialNumber}, skipping broadcast`);
+    }
+
+    // Also broadcast to user channel if user_uuid is available (for embedded app)
+    if (userUuid) {
+      try {
+        await sendBroadcast(`user:${userUuid}`, "debug_log", broadcastPayload);
+        console.log(`[broadcast-device-log] Broadcast successful to user:${userUuid}`);
+      } catch (err) {
+        console.error("[broadcast-device-log] User channel broadcast failed:", err);
+        // Don't fail the request if user channel broadcast fails, device channel is primary
+      }
     }
 
     return new Response(JSON.stringify({ success: true }), {

@@ -387,7 +387,7 @@ describe("subscribeToDeviceLogs", () => {
     const { subscribeToDeviceLogs } = await import("../supabase");
     const onLog = jest.fn();
 
-    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", onLog);
+    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", null, onLog);
     expect(typeof unsubscribe).toBe("function");
   });
 
@@ -396,7 +396,7 @@ describe("subscribeToDeviceLogs", () => {
     const onLog = jest.fn();
     const onStatusChange = jest.fn();
 
-    await subscribeToDeviceLogs("A1B2C3D4", onLog, onStatusChange);
+    await subscribeToDeviceLogs("A1B2C3D4", null, onLog, onStatusChange);
     expect(onStatusChange).toHaveBeenCalledWith(true);
   });
 
@@ -404,7 +404,7 @@ describe("subscribeToDeviceLogs", () => {
     const { subscribeToDeviceLogs } = await import("../supabase");
     const onLog = jest.fn();
 
-    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", onLog);
+    const unsubscribe = await subscribeToDeviceLogs("A1B2C3D4", null, onLog);
     unsubscribe();
     expect(mockRemoveChannel).toHaveBeenCalled();
   });
@@ -421,7 +421,7 @@ describe("subscribeToDeviceLogs", () => {
     const onStatusChange = jest.fn();
     const onError = jest.fn();
 
-    await subscribeToDeviceLogs("A1B2C3D4", onLog, onStatusChange, onError);
+    await subscribeToDeviceLogs("A1B2C3D4", null, onLog, onStatusChange, onError);
     expect(onError).toHaveBeenCalledWith("Failed to subscribe to realtime logs");
     expect(onStatusChange).toHaveBeenCalledWith(false);
   });
@@ -1267,7 +1267,7 @@ describe("subscribeToDeviceLogs - payload parsing edge cases", () => {
     const { subscribeToDeviceLogs } = await import("../supabase");
     const onLog = jest.fn();
 
-    await subscribeToDeviceLogs("A1B2C3D4", onLog);
+    await subscribeToDeviceLogs("A1B2C3D4", null, onLog);
 
     if (capturedCallback) {
       const payload = {
@@ -1294,7 +1294,7 @@ describe("subscribeToDeviceLogs - payload parsing edge cases", () => {
     const { subscribeToDeviceLogs } = await import("../supabase");
     const onLog = jest.fn();
 
-    await subscribeToDeviceLogs("A1B2C3D4", onLog);
+    await subscribeToDeviceLogs("A1B2C3D4", null, onLog);
 
     if (capturedCallback) {
       const payload = {

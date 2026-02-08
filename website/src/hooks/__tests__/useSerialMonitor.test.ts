@@ -8,6 +8,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { TextEncoder, TextDecoder } from 'util';
 import { useSerialMonitor, extractPairingCode } from '../useSerialMonitor';
+import { spyOnConsole } from '@/test-utils/setup';
 
 // Mock Web Serial API types
 interface MockSerialPort {
@@ -124,7 +125,10 @@ const mockSerial = {
   requestPort: jest.fn(),
 };
 
+let consoleSpy: { error: jest.SpyInstance; warn: jest.SpyInstance };
+
 beforeEach(() => {
+  consoleSpy = spyOnConsole(['[SerialPort]']);
   jest.useFakeTimers({ advanceTimers: true });
   jest.clearAllMocks();
   
@@ -141,6 +145,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  consoleSpy.error.mockRestore();
+  consoleSpy.warn.mockRestore();
   jest.useRealTimers();
   jest.clearAllMocks();
   // Clean up navigator.serial

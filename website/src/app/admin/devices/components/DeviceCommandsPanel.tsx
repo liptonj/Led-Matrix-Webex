@@ -1,7 +1,7 @@
 'use client';
 
 import { Command } from '@/lib/supabase';
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -13,8 +13,10 @@ interface DeviceCommandsPanelProps {
     commandCount: number;
     commandPage: number;
     commandTotalPages: number;
+    commandPageSize: number;
     onFilterChange: (filter: 'all' | Command['status']) => void;
     onPageChange: (page: number) => void;
+    onPageSizeChange: (size: number) => void;
     onShowResponse: (title: string, body: Record<string, unknown> | null) => void;
 }
 
@@ -26,10 +28,19 @@ export default memo(function DeviceCommandsPanel({
     commandCount,
     commandPage,
     commandTotalPages,
+    commandPageSize,
     onFilterChange,
     onPageChange,
+    onPageSizeChange,
     onShowResponse,
 }: DeviceCommandsPanelProps) {
+    // tick triggers re-renders for live timestamps
+    const [tick, setTick] = useState(0);
+    useEffect(() => {
+        const interval = setInterval(() => setTick((t) => t + 1), 30000);
+        return () => clearInterval(interval);
+    }, []);
+
     const formatCommandAge = (createdAt: string) => {
         const deltaMs = Date.now() - new Date(createdAt).getTime();
         const minutes = Math.max(0, Math.floor(deltaMs / 60000));
@@ -57,19 +68,30 @@ export default memo(function DeviceCommandsPanel({
                     <h3 className="panel-header">Command Status</h3>
                     <p className="panel-subtext">Subscription: {commandStatus}</p>
                 </div>
-                <select
-                    value={commandFilter}
-                    onChange={(event) =>
-                        onFilterChange(event.target.value as 'all' | Command['status'])
-                    }
-                    className="input-field-sm"
-                >
-                    <option value="pending">Pending</option>
-                    <option value="acked">Acked</option>
-                    <option value="failed">Failed</option>
-                    <option value="expired">Expired</option>
-                    <option value="all">All</option>
-                </select>
+                <div className="flex gap-2">
+                    <select
+                        value={commandPageSize}
+                        onChange={(event) => onPageSizeChange(Number(event.target.value))}
+                        className="input-field-sm"
+                    >
+                        <option value={3}>3 per page</option>
+                        <option value={5}>5 per page</option>
+                        <option value={10}>10 per page</option>
+                    </select>
+                    <select
+                        value={commandFilter}
+                        onChange={(event) =>
+                            onFilterChange(event.target.value as 'all' | Command['status'])
+                        }
+                        className="input-field-sm"
+                    >
+                        <option value="pending">Pending</option>
+                        <option value="acked">Acked</option>
+                        <option value="failed">Failed</option>
+                        <option value="expired">Expired</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
             </div>
             {commandError && (
                 <p className="text-xs text-red-600 mt-2">{commandError}</p>

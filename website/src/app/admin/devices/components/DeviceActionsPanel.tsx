@@ -1,7 +1,7 @@
 'use client';
 
 import { Device } from '@/lib/supabase';
-import { memo, useState } from 'react';
+import { memo, useState, useEffect } from 'react';
 
 const LOG_LEVELS = [
     { value: 'none', label: 'None (silent)' },
@@ -19,6 +19,7 @@ interface DeviceActionsPanelProps {
     debugUpdating: boolean;
     accessUpdating: boolean;
     commandSubmitting: boolean;
+    currentLogLevel?: string;
     onToggleDebug: () => void;
     onApprove: () => void;
     onToggleDisabled: () => void;
@@ -33,6 +34,7 @@ export default memo(function DeviceActionsPanel({
     debugUpdating,
     accessUpdating,
     commandSubmitting,
+    currentLogLevel,
     onToggleDebug,
     onApprove,
     onToggleDisabled,
@@ -41,81 +43,126 @@ export default memo(function DeviceActionsPanel({
     onSendReboot,
     onSetLogLevel,
 }: DeviceActionsPanelProps) {
-    const [logLevel, setLogLevel] = useState<LogLevel>('info');
+    const [logLevel, setLogLevel] = useState<LogLevel>((currentLogLevel as LogLevel) || 'info');
+
+    useEffect(() => {
+        if (currentLogLevel) {
+            setLogLevel(currentLogLevel as LogLevel);
+        }
+    }, [currentLogLevel]);
 
     const handleLogLevelChange = (level: LogLevel) => {
         setLogLevel(level);
         onSetLogLevel(level);
     };
 
+    const handleDisableClick = () => {
+        const action = device.disabled ? 'enable' : 'disable';
+        if (window.confirm(`Are you sure you want to ${action} this device?`)) {
+            onToggleDisabled();
+        }
+    };
+
+    const handleBlacklistClick = () => {
+        const action = device.blacklisted ? 'remove from blacklist' : 'blacklist';
+        if (window.confirm(`Are you sure you want to ${action} this device? ${!device.blacklisted ? 'Blacklisted devices cannot connect.' : ''}`)) {
+            onToggleBlacklisted();
+        }
+    };
+
     return (
-        <div className="panel space-y-2">
+        <div className="panel space-y-3">
             <h3 className="panel-header">Actions</h3>
-            <button
-                onClick={onToggleDebug}
-                disabled={debugUpdating}
-                className="w-full rounded-md bg-gray-900 text-white text-xs px-3 py-2 hover:bg-gray-700 disabled:opacity-50"
-            >
-                {device.debug_enabled ? 'Disable debug logs' : 'Enable debug logs'}
-            </button>
-
-            {/* Log Verbosity Level */}
-            <div className="pt-1">
-                <label htmlFor="log-level-select" className="block text-xs font-medium text-gray-500 mb-1">
-                    Serial Log Level
-                </label>
-                <select
-                    id="log-level-select"
-                    value={logLevel}
-                    onChange={(e) => handleLogLevelChange(e.target.value as LogLevel)}
-                    disabled={commandSubmitting || !device.pairing_code}
-                    className="w-full rounded-md border border-gray-300 bg-white text-xs px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                >
-                    {LOG_LEVELS.map((l) => (
-                        <option key={l.value} value={l.value}>
-                            {l.label}
-                        </option>
-                    ))}
-                </select>
-            </div>
-
-            {device.approval_required && (
+            
+            {/* Monitoring */}
+            <div className="space-y-2">
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-muted)' }}>Monitoring</p>
                 <button
-                    onClick={onApprove}
-                    disabled={accessUpdating}
-                    className="w-full rounded-md bg-green-600 text-white text-xs px-3 py-2 hover:bg-green-700 disabled:opacity-50"
+                    onClick={onToggleDebug}
+                    disabled={debugUpdating}
+                    className="w-full rounded-md bg-gray-900 text-white text-xs px-3 py-2 hover:bg-gray-700 disabled:opacity-50"
                 >
-                    Approve device
+                    {device.debug_enabled ? 'Disable debug logs' : 'Enable debug logs'}
                 </button>
-            )}
-            <button
-                onClick={onToggleDisabled}
-                disabled={accessUpdating}
-                className="w-full rounded-md bg-yellow-600 text-white text-xs px-3 py-2 hover:bg-yellow-700 disabled:opacity-50"
-            >
-                {device.disabled ? 'Enable device' : 'Disable device'}
-            </button>
-            <button
-                onClick={onToggleBlacklisted}
-                disabled={accessUpdating}
-                className="w-full rounded-md bg-red-600 text-white text-xs px-3 py-2 hover:bg-red-700 disabled:opacity-50"
-            >
-                {device.blacklisted ? 'Remove blacklist' : 'Blacklist device'}
-            </button>
-            <button
-                onClick={onDelete}
-                disabled={accessUpdating}
-                className="w-full rounded-md border border-red-600 text-red-600 text-xs px-3 py-2 hover:bg-red-50 disabled:opacity-50"
-            >
-                Delete device
-            </button>
-            <button
-                onClick={onSendReboot}
-                disabled={commandSubmitting || !device.pairing_code}
-                className="w-full rounded-md bg-blue-600 text-white text-xs px-3 py-2 hover:bg-blue-700 disabled:opacity-50"
-            >
-                Send reboot command
-            </button>
+
+                {/* Log Verbosity Level */}
+                <div className="pt-1">
+                    <label htmlFor="log-level-select" className="block text-xs font-medium text-gray-500 mb-1">
+                        Serial Log Level
+                    </label>
+                    <select
+                        id="log-level-select"
+                        value={logLevel}
+                        onChange={(e) => handleLogLevelChange(e.target.value as LogLevel)}
+                        disabled={commandSubmitting || !device.pairing_code}
+                        className="w-full rounded-md border border-gray-300 bg-white text-xs px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                        {LOG_LEVELS.map((l) => (
+                            <option key={l.value} value={l.value}>
+                                {l.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+            
+            <hr className="border-gray-200 dark:border-gray-700" />
+            
+            {/* Device Control */}
+            <div className="space-y-2">
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-muted)' }}>Device Control</p>
+                <button
+                    onClick={onSendReboot}
+                    disabled={commandSubmitting || !device.pairing_code}
+                    className="w-full rounded-md bg-blue-600 text-white text-xs px-3 py-2 hover:bg-blue-700 disabled:opacity-50"
+                >
+                    Send reboot command
+                </button>
+            </div>
+            
+            <hr className="border-gray-200 dark:border-gray-700" />
+            
+            {/* Access Control */}
+            <div className="space-y-2">
+                <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-muted)' }}>Access Control</p>
+                {device.approval_required && (
+                    <button
+                        onClick={onApprove}
+                        disabled={accessUpdating}
+                        className="w-full rounded-md bg-green-600 text-white text-xs px-3 py-2 hover:bg-green-700 disabled:opacity-50"
+                    >
+                        Approve device
+                    </button>
+                )}
+                <button
+                    onClick={handleDisableClick}
+                    disabled={accessUpdating}
+                    className="w-full rounded-md bg-yellow-600 text-white text-xs px-3 py-2 hover:bg-yellow-700 disabled:opacity-50"
+                >
+                    {device.disabled ? 'Enable device' : 'Disable device'}
+                </button>
+                <button
+                    onClick={handleBlacklistClick}
+                    disabled={accessUpdating}
+                    className="w-full rounded-md bg-red-600 text-white text-xs px-3 py-2 hover:bg-red-700 disabled:opacity-50"
+                >
+                    {device.blacklisted ? 'Remove blacklist' : 'Blacklist device'}
+                </button>
+            </div>
+            
+            <hr className="border-gray-200 dark:border-gray-700" />
+            
+            {/* Danger Zone */}
+            <div className="space-y-2 pt-1">
+                <p className="text-[10px] uppercase tracking-wide font-semibold text-red-500">Danger Zone</p>
+                <button
+                    onClick={onDelete}
+                    disabled={accessUpdating}
+                    className="w-full rounded-md border border-red-600 text-red-600 text-xs px-3 py-2 hover:bg-red-50 disabled:opacity-50"
+                >
+                    Delete device
+                </button>
+            </div>
         </div>
     );
 });

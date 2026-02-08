@@ -33,6 +33,8 @@ const MAX_HISTORY = 100;
 interface UseRemoteConsoleOptions {
   /** Session ID to join and subscribe to */
   sessionId: string | null;
+  /** Callback invoked when the session is ended by the remote user (via session_end broadcast) */
+  onSessionEnded?: () => void;
 }
 
 interface UseRemoteConsoleReturn {
@@ -91,6 +93,7 @@ function saveCommandHistory(history: string[]): void {
  */
 export function useRemoteConsole({
   sessionId,
+  onSessionEnded,
 }: UseRemoteConsoleOptions): UseRemoteConsoleReturn {
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([]);
   const [isJoined, setIsJoined] = useState(false);
@@ -151,13 +154,23 @@ export function useRemoteConsole({
     setBridgeHealth(connected ? 'healthy' : 'degraded');
   }, []);
 
+  // Handle session_end broadcast from user side
+  const handleSessionEnd = useCallback((payload: Record<string, unknown>) => {
+    const reason = (payload.reason as string) || 'user_ended';
+    addLine(`Session ended by user: ${reason}`, 'system');
+    setIsJoined(false);
+    setBridgeHealth('unknown');
+    onSessionEnded?.();
+  }, [addLine, onSessionEnded]);
+
   const eventHandlers = useMemo(() => ({
     serial_output: handleSerialOutput,
     flash_progress: handleFlashProgress,
     device_info: handleDeviceInfo,
     action_result: handleActionResult,
     heartbeat: handleHeartbeat,
-  }), [handleSerialOutput, handleFlashProgress, handleDeviceInfo, handleActionResult, handleHeartbeat]);
+    session_end: handleSessionEnd,
+  }), [handleSerialOutput, handleFlashProgress, handleDeviceInfo, handleActionResult, handleHeartbeat, handleSessionEnd]);
 
   // Channel subscription
   const channel = useSupportChannel({

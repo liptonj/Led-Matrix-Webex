@@ -136,7 +136,12 @@ export default memo(function DeviceLogsPanel({
             {logsLoading ? (
                 <div className="py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>Loading logs...</div>
             ) : logs.length === 0 ? (
-                <div className="py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>Waiting for live logs... (Enable debug mode on device to see more logs)</div>
+                <div className="py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    {logStatus === 'connecting' && 'Connecting to log stream...'}
+                    {logStatus === 'connected' && 'Connected — waiting for device to send logs. Enable debug mode for more output.'}
+                    {logStatus === 'disconnected' && 'Log stream disconnected. The device may be offline.'}
+                    {logStatus === 'error' && (logsError || 'Log stream error. Check connection.')}
+                </div>
             ) : (
                 <VirtualizedLogList logs={logs} />
             )}

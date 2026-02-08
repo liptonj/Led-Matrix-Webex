@@ -121,11 +121,15 @@ export function useDeviceCommands(options: UseDeviceCommandsOptions): UseDeviceC
 
     // Broadcast command via WebSocket for instant delivery (edge function HTTP broadcast is backup)
     if (broadcastToUserChannel) {
-      broadcastToUserChannel('new_command', {
-        command_id: commandId,
-        command,
-        payload,
+      broadcastToUserChannel('command', {
         device_uuid: deviceUuid,
+        command: {
+          id: commandId,
+          command,
+          payload,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        },
       }).catch(() => {
         // Silently fail - edge function broadcast is the backup
       });

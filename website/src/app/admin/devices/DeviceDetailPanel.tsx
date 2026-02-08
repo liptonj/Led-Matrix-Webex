@@ -21,8 +21,7 @@ import {
     subscribeToDeviceLogs,
     subscribeToPairing
 } from '@/lib/supabase';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import CommandResponseModal from './components/CommandResponseModal';
 import DeviceActionsPanel from './components/DeviceActionsPanel';
 import DeviceCommandsPanel from './components/DeviceCommandsPanel';
@@ -31,7 +30,7 @@ import DeviceLogsPanel from './components/DeviceLogsPanel';
 import DeviceTelemetryPanel from './components/DeviceTelemetryPanel';
 
 const LOG_LIMIT = 200;
-const COMMAND_PAGE_SIZE = 10;
+const DEFAULT_COMMAND_PAGE_SIZE = 5;
 
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -67,6 +66,8 @@ export default function DeviceDetailPanel({
     const [responseModalOpen, setResponseModalOpen] = useState(false);
     const [responseModalTitle, setResponseModalTitle] = useState('');
     const [responseModalBody, setResponseModalBody] = useState<Record<string, unknown> | null>(null);
+    const [commandPageSize, setCommandPageSize] = useState(DEFAULT_COMMAND_PAGE_SIZE);
+    const [currentLogLevel, setCurrentLogLevel] = useState<string | undefined>(undefined);
 
     useEffect(() => {
         if (!serialNumber) {
@@ -185,11 +186,12 @@ export default function DeviceDetailPanel({
             setCommandStatus('disconnected');
         }
 
-        // Subscribe to logs using device-specific channel
+        // Subscribe to logs using user channel (preferred) or device channel (fallback)
         if (device?.id) {
             setLogStatus('connecting');
             subscribeToDeviceLogs(
-                device.id, // device_uuid for device-specific channel
+                device.id, // device_uuid
+                userUuid, // user_uuid (preferred channel, null falls back to device channel)
                 (log) => {
                     setLogs((prev) => {
                         const next = [log, ...prev];
@@ -234,7 +236,7 @@ export default function DeviceDetailPanel({
 
     useEffect(() => {
         setCommandPage(1);
-    }, [commandFilter]);
+    }, [commandFilter, commandPageSize]);
 
     useEffect(() => {
         if (!device?.pairing_code) {
@@ -249,7 +251,7 @@ export default function DeviceDetailPanel({
                 const result = await getCommandsPage(device.pairing_code, {
                     status: commandFilter,
                     page: commandPage,
-                    pageSize: COMMAND_PAGE_SIZE,
+                    pageSize: commandPageSize,
                 });
                 if (!isMounted) return;
                 setCommands(result.data);
@@ -264,7 +266,7 @@ export default function DeviceDetailPanel({
         return () => {
             isMounted = false;
         };
-    }, [device?.pairing_code, commandFilter, commandPage, commandRefreshToken]);
+    }, [device?.pairing_code, commandFilter, commandPage, commandPageSize, commandRefreshToken]);
 
     const handleToggleDebug = async () => {
         if (!device) return;
@@ -351,6 +353,7 @@ export default function DeviceDetailPanel({
     };
 
     const handleSetLogLevel = (level: string) => {
+        setCurrentLogLevel(level);
         void handleInsertCommand('set_config', { log_level: level });
     };
 
@@ -396,6 +399,7 @@ export default function DeviceDetailPanel({
                         <div className="space-y-4">
                             <DeviceInfoCard
                                 device={device}
+                                pairing={pairing}
                                 pairingStatus={pairingStatus}
                                 commandStatus={commandStatus}
                                 logStatus={logStatus}
@@ -405,6 +409,7 @@ export default function DeviceDetailPanel({
                                 debugUpdating={debugUpdating}
                                 accessUpdating={accessUpdating}
                                 commandSubmitting={commandSubmitting}
+                                currentLogLevel={currentLogLevel}
                                 onToggleDebug={handleToggleDebug}
                                 onApprove={handleApprove}
                                 onToggleDisabled={handleToggleDisabled}
@@ -428,9 +433,11 @@ export default function DeviceDetailPanel({
                                 commandFilter={commandFilter}
                                 commandCount={commandCount}
                                 commandPage={commandPage}
-                                commandTotalPages={Math.max(1, Math.ceil(commandCount / COMMAND_PAGE_SIZE))}
+                                commandTotalPages={Math.max(1, Math.ceil(commandCount / commandPageSize))}
+                                commandPageSize={commandPageSize}
                                 onFilterChange={setCommandFilter}
                                 onPageChange={setCommandPage}
+                                onPageSizeChange={setCommandPageSize}
                                 onShowResponse={handleShowResponse}
                             />
                         </div>

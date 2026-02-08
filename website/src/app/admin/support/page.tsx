@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRemoteConsole } from '@/hooks/useRemoteConsole';
 import {
   BrowserGate,
@@ -25,7 +25,21 @@ export default function AdminSupportPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [showFirmwarePicker, setShowFirmwarePicker] = useState(false);
 
-  const console = useRemoteConsole({ sessionId: selectedSessionId });
+  // Guard: tracks whether we intentionally ended/left a session.
+  // Prevents the auto-join effect from re-joining a closed session.
+  const sessionEndedRef = useRef(false);
+
+  // Callback invoked by useRemoteConsole when the user ends the session
+  // via broadcast (session_end event received from user side).
+  const handleSessionEnded = useCallback(() => {
+    sessionEndedRef.current = true;
+    setSelectedSessionId(null);
+  }, []);
+
+  const remoteConsole = useRemoteConsole({
+    sessionId: selectedSessionId,
+    onSessionEnded: handleSessionEnded,
+  });
 
   // Fetch sessions
   const fetchSessions = useCallback(async () => {
@@ -53,7 +67,6 @@ export default function AdminSupportPage() {
       },
       undefined,
       (err) => {
-        console.channelError; // just reference to suppress lint
         setError(err);
       },
     ).then((unsub) => {
@@ -67,16 +80,18 @@ export default function AdminSupportPage() {
 
   // Handle join
   const handleJoin = async (sessionId: string) => {
+    sessionEndedRef.current = false;
     setSelectedSessionId(sessionId);
     // The useRemoteConsole hook will handle the actual join
   };
 
-  // After selecting session, join it
+  // After selecting session, join it.
+  // The sessionEndedRef guard prevents re-joining after an explicit end/leave.
   useEffect(() => {
-    if (selectedSessionId && !console.isJoined) {
-      console.join();
+    if (selectedSessionId && !remoteConsole.isJoined && !sessionEndedRef.current) {
+      remoteConsole.join();
     }
-  }, [selectedSessionId, console.isJoined, console]);
+  }, [selectedSessionId, remoteConsole.isJoined, remoteConsole]);
 
   // Handle action (with firmware picker for flash)
   const handleAction = useCallback((type: ActionType, manifestUrl?: string) => {
@@ -84,25 +99,33 @@ export default function AdminSupportPage() {
       setShowFirmwarePicker(true);
       return;
     }
-    console.sendAction(type, manifestUrl);
-  }, [console]);
+    remoteConsole.sendAction(type, manifestUrl);
+  }, [remoteConsole]);
 
   // Handle firmware version selection
   const handleFirmwareSelect = useCallback((manifestUrl: string) => {
     setShowFirmwarePicker(false);
-    console.sendAction('flash', manifestUrl);
-  }, [console]);
+    remoteConsole.sendAction('flash', manifestUrl);
+  }, [remoteConsole]);
 
-  // Back to session list
+  // End session (admin-initiated): close session, clear selection
+  const handleEndSession = useCallback(async () => {
+    sessionEndedRef.current = true;
+    await remoteConsole.endSession('admin_ended');
+    setSelectedSessionId(null);
+  }, [remoteConsole]);
+
+  // Back to session list (leave without ending)
   const handleBack = useCallback(async () => {
-    if (console.isJoined) {
-      await console.leaveSession();
+    sessionEndedRef.current = true;
+    if (remoteConsole.isJoined) {
+      await remoteConsole.leaveSession();
     }
     setSelectedSessionId(null);
-  }, [console]);
+  }, [remoteConsole]);
 
   // Active console view
-  if (selectedSessionId && console.isJoined) {
+  if (selectedSessionId && remoteConsole.isJoined) {
     return (
       <div className="h-[calc(100vh-120px)] flex flex-col">
         {/* Back button */}
@@ -124,14 +147,14 @@ export default function AdminSupportPage() {
         {/* Remote Terminal */}
         <div className="flex-1 min-h-0">
           <RemoteTerminal
-            lines={console.terminalLines}
-            bridgeHealth={console.bridgeHealth}
-            flashProgress={console.flashProgress}
-            commandHistory={console.commandHistory}
-            onCommand={console.sendCommand}
+            lines={remoteConsole.terminalLines}
+            bridgeHealth={remoteConsole.bridgeHealth}
+            flashProgress={remoteConsole.flashProgress}
+            commandHistory={remoteConsole.commandHistory}
+            onCommand={remoteConsole.sendCommand}
             onAction={handleAction}
-            onEndSession={() => console.endSession('admin_ended')}
-            onClear={console.clearTerminal}
+            onEndSession={handleEndSession}
+            onClear={remoteConsole.clearTerminal}
           />
         </div>
 

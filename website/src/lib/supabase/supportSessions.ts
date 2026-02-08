@@ -46,6 +46,8 @@ export async function createSupportSession(
 /**
  * Admin joins a waiting support session.
  * Updates status to 'active' and records the admin_id and joined_at timestamp.
+ * Only joins sessions that are currently in 'waiting' status to prevent
+ * accidentally re-opening closed sessions.
  */
 export async function joinSupportSession(
   sessionId: string,
@@ -62,6 +64,7 @@ export async function joinSupportSession(
         joined_at: new Date().toISOString(),
       })
       .eq("id", sessionId)
+      .eq("status", "waiting")
       .select(SESSION_COLUMNS)
       .single(),
     SUPABASE_REQUEST_TIMEOUT_MS,
