@@ -46,13 +46,13 @@ export default memo(function CommandResponseModal({
                                     </span>
                                 </div>
                             )}
-                            {body.error && (
+                            {body.error != null && (
                                 <div className="flex gap-2">
                                     <span className="font-medium shrink-0" style={{ color: 'var(--color-text-muted)' }}>Error:</span>
                                     <span className="text-red-600">{String(body.error)}</span>
                                 </div>
                             )}
-                            {body.data && (
+                            {body.data != null && (
                                 <div>
                                     <span className="font-medium block mb-1" style={{ color: 'var(--color-text-muted)' }}>Data:</span>
                                     <pre className="text-xs p-2 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
