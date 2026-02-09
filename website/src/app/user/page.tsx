@@ -73,14 +73,17 @@ export default function UserDashboard() {
         }
 
         if (assignments) {
-          const deviceList: Device[] = assignments.map((d: any) => ({
-            serial_number: d.serial_number,
-            device_uuid: d.device_uuid,
-            provisioning_method: d.provisioning_method || 'unknown',
-            created_at: d.created_at,
-            webex_polling_enabled: d.webex_polling_enabled || false,
-            device: d.devices
-          }));
+          // Filter out assignments without device_uuid or devices data (legacy/broken assignments)
+          const deviceList: Device[] = assignments
+            .filter((d: any) => d.device_uuid && d.devices)
+            .map((d: any) => ({
+              serial_number: d.serial_number,
+              device_uuid: d.device_uuid,
+              provisioning_method: d.provisioning_method || 'unknown',
+              created_at: d.created_at,
+              webex_polling_enabled: d.webex_polling_enabled || false,
+              device: d.devices
+            }));
 
           setDevices(deviceList);
 
@@ -89,6 +92,7 @@ export default function UserDashboard() {
           const onlineThreshold = 5 * 60 * 1000; // 5 minutes
           
           const online = deviceList.filter((d) => {
+            if (!d.device?.last_seen) return false;
             const lastSeen = new Date(d.device.last_seen);
             return now.getTime() - lastSeen.getTime() < onlineThreshold;
           }).length;
@@ -156,19 +160,23 @@ export default function UserDashboard() {
                 .eq('user_id', session.user.id);
               
               if (assignments) {
-                const deviceList: Device[] = assignments.map((d: any) => ({
-                  serial_number: d.serial_number,
-                  device_uuid: d.device_uuid,
-                  provisioning_method: d.provisioning_method || 'unknown',
-                  created_at: d.created_at,
-                  webex_polling_enabled: d.webex_polling_enabled || false,
-                  device: d.devices
-                }));
+                // Filter out assignments without device_uuid or devices data
+                const deviceList: Device[] = assignments
+                  .filter((d: any) => d.device_uuid && d.devices)
+                  .map((d: any) => ({
+                    serial_number: d.serial_number,
+                    device_uuid: d.device_uuid,
+                    provisioning_method: d.provisioning_method || 'unknown',
+                    created_at: d.created_at,
+                    webex_polling_enabled: d.webex_polling_enabled || false,
+                    device: d.devices
+                  }));
                 setDevices(deviceList);
                 
                 const now = new Date();
                 const onlineThreshold = 5 * 60 * 1000;
                 const online = deviceList.filter((d) => {
+                  if (!d.device?.last_seen) return false;
                   const lastSeen = new Date(d.device.last_seen);
                   return now.getTime() - lastSeen.getTime() < onlineThreshold;
                 }).length;
@@ -240,6 +248,7 @@ export default function UserDashboard() {
                 const now = new Date();
                 const onlineThreshold = 5 * 60 * 1000;
                 const online = updated.filter((d) => {
+                  if (!d.device?.last_seen) return false;
                   const lastSeen = new Date(d.device.last_seen);
                   return now.getTime() - lastSeen.getTime() < onlineThreshold;
                 }).length;

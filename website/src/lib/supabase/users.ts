@@ -33,7 +33,7 @@ export async function getUserDeviceAssignments(): Promise<UserDeviceAssignment[]
     supabase
       .schema("display")
       .from("user_devices")
-      .select("id, user_id, serial_number, created_at, created_by")
+      .select("id, user_id, device_uuid, serial_number, created_at, created_by")
       .order("created_at", { ascending: false }),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while loading device assignments.",
@@ -49,11 +49,24 @@ export async function assignDeviceToUser(
 ): Promise<void> {
   const supabase = await getSupabase();
   const user = await getUser();
+  
+  // Look up device UUID from serial_number
+  const { data: device, error: deviceError } = await supabase
+    .schema("display")
+    .from("devices")
+    .select("id")
+    .eq("serial_number", serialNumber)
+    .maybeSingle();
+  
+  if (deviceError) throw deviceError;
+  if (!device) throw new Error(`Device not found: ${serialNumber}`);
+  
   const { error } = await supabase
     .schema("display")
     .from("user_devices")
     .insert({
       user_id: userId,
+      device_uuid: device.id,
       serial_number: serialNumber,
       created_by: user?.id ?? null,
     });

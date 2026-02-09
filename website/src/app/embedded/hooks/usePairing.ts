@@ -6,13 +6,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CONFIG } from '../constants';
 import type { RealtimeStatus, WebexStatusBroadcast } from '../types';
 
-const API_TIMEOUT_MS = 15000;
+import { isValidUUID } from '@/lib/utils/validation';
 
-// Helper to detect UUID format
-function isUUID(s: string): boolean {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(s);
-}
+const API_TIMEOUT_MS = 15000;
 
 export interface UsePairingOptions {
   addLog: (message: string) => void;
@@ -85,6 +81,11 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     display_name?: string;
   }): Promise<boolean> => {
     if (!session || !selectedDeviceUuid || !supabaseRef.current) return false;
+    // Validate that selectedDeviceUuid is a proper UUID before using in query
+    if (!isValidUUID(selectedDeviceUuid)) {
+      addLog(`Cannot update pairing: invalid device UUID format`);
+      return false;
+    }
     try {
       const { error } = await supabaseRef.current
         .schema('display')
@@ -180,16 +181,16 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const refreshPairingSnapshot = useCallback(async (deviceUuid: string, reason: string) => {
     if (!supabaseRef.current || !deviceUuid) return;
     try {
-      // Query devices table by UUID or serial_number to get pairing_code
+      // Query devices table by UUID or serial_number to get device info
       // This avoids the 406 error when no pairing row exists yet
       // When device_uuid is null, we may have a serial_number instead (legacy fallback)
       const query = supabaseRef.current
         .schema('display')
         .from('devices')
-        .select('pairing_code, last_seen');
+        .select('id, pairing_code, last_seen');
       
       // Query by id if UUID, otherwise query by serial_number (legacy fallback)
-      const filteredQuery = isUUID(deviceUuid)
+      const filteredQuery = isValidUUID(deviceUuid)
         ? query.eq('id', deviceUuid)
         : query.eq('serial_number', deviceUuid);
 
@@ -201,12 +202,12 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
         return;
       }
 
-      // Query pairing by pairing_code (may not exist yet if device hasn't connected)
+      // Query pairing by device_uuid (preferred) since pairing_code may be null after pairing
       const { data: pairing } = await supabaseRef.current
         .schema('display')
         .from('pairings')
         .select('device_last_seen, device_connected')
-        .eq('pairing_code', device.pairing_code)
+        .eq('device_uuid', device.id)
         .maybeSingle();
 
       if (pairing) {
@@ -503,12 +504,22 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
             addLog(`Failed to fetch devices: ${error.message}`);
           } else if (data) {
             // Transform nested devices data to flat structure
-            const transformedDevices: UserDevice[] = data.map((item: any) => ({
-              device_uuid: item.device_uuid || item.serial_number, // Fallback to serial_number if uuid missing
-              serial_number: item.serial_number,
-              display_name: item.devices?.display_name,
-              last_seen: item.devices?.last_seen,
-            }));
+            // Filter out devices without a valid device_uuid - these are legacy devices
+            // that need to be re-paired to get a proper UUID
+            const transformedDevices: UserDevice[] = data
+              .filter((item: any) => item.device_uuid && isValidUUID(item.device_uuid))
+              .map((item: any) => ({
+                device_uuid: item.device_uuid,
+                serial_number: item.serial_number,
+                display_name: item.devices?.display_name,
+                last_seen: item.devices?.last_seen,
+              }));
+            
+            const skippedCount = data.length - transformedDevices.length;
+            if (skippedCount > 0) {
+              addLog(`Skipped ${skippedCount} legacy device(s) without valid UUID`);
+            }
+            
             setUserDevices(transformedDevices);
             addLog(`Found ${transformedDevices.length} devices`);
             
