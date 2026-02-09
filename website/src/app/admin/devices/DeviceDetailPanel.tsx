@@ -1,6 +1,7 @@
 'use client';
 
 import { Alert } from '@/components/ui/Alert';
+import { Button } from '@/components/ui/Button';
 import { Spinner } from '@/components/ui/Spinner';
 import {
     Command,
@@ -68,6 +69,7 @@ export default function DeviceDetailPanel({
     const [responseModalBody, setResponseModalBody] = useState<Record<string, unknown> | null>(null);
     const [commandPageSize, setCommandPageSize] = useState(DEFAULT_COMMAND_PAGE_SIZE);
     const [currentLogLevel, setCurrentLogLevel] = useState<string | undefined>(undefined);
+    const [deviceRetryTrigger, setDeviceRetryTrigger] = useState(0);
 
     useEffect(() => {
         if (!serialNumber) {
@@ -111,7 +113,18 @@ export default function DeviceDetailPanel({
         return () => {
             isMounted = false;
         };
-    }, [serialNumber]);
+    }, [serialNumber, deviceRetryTrigger]);
+
+    const handleRetry = () => {
+        setError(null);
+        setLoading(true);
+        setDeviceRetryTrigger((t) => t + 1);
+    };
+
+    const handleRetryCommands = () => {
+        setCommandError(null);
+        setCommandRefreshToken((t) => t + 1);
+    };
 
     useEffect(() => {
         if (!device?.serial_number || !device?.id) return;
@@ -369,7 +382,7 @@ export default function DeviceDetailPanel({
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Device Details</h2>
+                    <h2 className="text-xl font-semibold leading-tight text-gray-900 dark:text-white">Device Details</h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">Serial {serialNumber}</p>
                 </div>
                 <button
@@ -388,14 +401,17 @@ export default function DeviceDetailPanel({
             )}
 
             {error && (
-                <Alert variant="danger">
-                    {error}
+                <Alert variant="danger" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="flex-1">{error}</span>
+                    <Button variant="primary" size="sm" onClick={handleRetry}>
+                        Retry
+                    </Button>
                 </Alert>
             )}
 
             {!loading && device && (
-                <div className="space-y-4">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="space-y-4 animate-fade-in transition-opacity duration-300">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
                         <div className="space-y-4">
                             <DeviceInfoCard
                                 device={device}
@@ -439,6 +455,7 @@ export default function DeviceDetailPanel({
                                 onPageChange={setCommandPage}
                                 onPageSizeChange={setCommandPageSize}
                                 onShowResponse={handleShowResponse}
+                                onRetry={handleRetryCommands}
                             />
                         </div>
                     </div>

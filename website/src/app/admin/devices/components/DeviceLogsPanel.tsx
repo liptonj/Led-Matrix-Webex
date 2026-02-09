@@ -1,6 +1,7 @@
 'use client';
 
 import { DeviceLog } from '@/lib/supabase';
+import { Select } from '@/components/ui';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { memo, useRef } from 'react';
 
@@ -37,19 +38,13 @@ const VirtualizedLogList = memo(function VirtualizedLogList({ logs }: { logs: De
     return (
         <div
             ref={parentRef}
-            className="mt-3 overflow-y-auto overscroll-contain border rounded-md"
-            style={{
-                height: '400px',
-                borderColor: 'var(--color-border)',
-                backgroundColor: 'var(--color-bg, #0d1117)',
-            }}
+            role="log"
+            aria-label="Device log entries"
+            className="mt-3 h-[300px] md:h-[400px] lg:h-[500px] xl:h-[600px] overflow-y-auto overscroll-contain rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]"
         >
             <div
-                style={{
-                    height: `${virtualizer.getTotalSize()}px`,
-                    width: '100%',
-                    position: 'relative',
-                }}
+                className="relative w-full"
+                style={{ height: `${virtualizer.getTotalSize()}px` }}
             >
                 {virtualizer.getVirtualItems().map((virtualItem) => {
                     const log = logs[virtualItem.index];
@@ -60,15 +55,8 @@ const VirtualizedLogList = memo(function VirtualizedLogList({ logs }: { logs: De
                             key={log.id}
                             ref={virtualizer.measureElement}
                             data-index={virtualItem.index}
-                            className="border-b text-xs font-mono"
-                            style={{
-                                position: 'absolute',
-                                top: 0,
-                                left: 0,
-                                width: '100%',
-                                transform: `translateY(${virtualItem.start}px)`,
-                                borderColor: 'var(--color-border)',
-                            }}
+                            className="absolute left-0 top-0 w-full border-b border-[var(--color-border)] text-xs font-mono animate-fade-in"
+                            style={{ transform: `translateY(${virtualItem.start}px)` }}
                         >
                             <div className="flex items-baseline gap-2 px-3 py-1.5 min-w-0">
                                 <span
@@ -77,18 +65,12 @@ const VirtualizedLogList = memo(function VirtualizedLogList({ logs }: { logs: De
                                     {log.level}
                                 </span>
                                 <span
-                                    className="shrink-0 tabular-nums text-[10px]"
-                                    style={{ color: 'var(--color-text-muted)' }}
+                                    className="shrink-0 tabular-nums text-[10px] text-text-muted"
                                 >
                                     {new Date(log.created_at).toLocaleTimeString()}
                                 </span>
                                 <span
-                                    className="min-w-0 whitespace-pre-wrap"
-                                    style={{
-                                        color: 'var(--color-text)',
-                                        overflowWrap: 'anywhere',
-                                        wordBreak: 'break-word',
-                                    }}
+                                    className="min-w-0 whitespace-pre-wrap text-[var(--color-text)] [overflow-wrap:anywhere]"
                                 >
                                     {log.message}
                                 </span>
@@ -109,34 +91,45 @@ export default memo(function DeviceLogsPanel({
     logFilter,
     onFilterChange,
 }: DeviceLogsPanelProps) {
+    const logCountText = `${logs.length} log${logs.length !== 1 ? 's' : ''}`;
+    const statusText = logStatus === 'connected' ? 'Live' : logStatus;
+
     return (
-        <div className="panel">
+        <div className="panel" role="region" aria-label="Device logs">
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="panel-header">Device Logs</h3>
-                    <p className="panel-subtext">
-                        {logStatus === 'connected' ? 'Live' : logStatus} • {logs.length} log{logs.length !== 1 ? 's' : ''} • Newest first
+                    <p
+                        role="status"
+                        aria-live="polite"
+                        aria-label={`Log stream: ${statusText}. ${logCountText}. Newest first.`}
+                        className="panel-subtext"
+                    >
+                        {statusText} • {logCountText} • Newest first
                     </p>
                 </div>
-                <select
+                <Select
+                    size="sm"
                     value={logFilter}
                     onChange={(event) => onFilterChange(event.target.value as 'all' | DeviceLog['level'])}
-                    className="input-field-sm"
+                    aria-label="Filter logs by level"
                 >
                     <option value="all">All</option>
                     <option value="info">Info</option>
                     <option value="warn">Warn</option>
                     <option value="error">Error</option>
                     <option value="debug">Debug</option>
-                </select>
+                </Select>
             </div>
             {logsError && (
-                <p className="text-xs text-red-600 mt-2">{logsError}</p>
+                <p role="alert" className="text-xs text-red-600 mt-2">
+                    {logsError}
+                </p>
             )}
             {logsLoading ? (
-                <div className="py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>Loading logs...</div>
+                <div className="py-6 text-xs text-text-muted">Loading logs...</div>
             ) : logs.length === 0 ? (
-                <div className="py-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <div className="py-6 text-xs text-text-muted">
                     {logStatus === 'connecting' && 'Connecting to log stream...'}
                     {logStatus === 'connected' && 'Connected — waiting for device to send logs. Enable debug mode for more output.'}
                     {logStatus === 'disconnected' && 'Log stream disconnected. The device may be offline.'}

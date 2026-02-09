@@ -1,5 +1,6 @@
 'use client';
 
+import { Tooltip } from '@/components/ui';
 import { Device, Pairing } from '@/lib/supabase';
 import { memo } from 'react';
 
@@ -76,44 +77,65 @@ export default memo(function DeviceInfoCard({
             : 'Not paired';
 
     return (
-        <div className="panel">
+        <div className="panel" role="region" aria-label="Device information">
             <h3 className="panel-header">Device</h3>
             <div className="flex items-center gap-2 mt-1">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${onlineStatus.color}`}>
+                <span
+                    role="status"
+                    aria-label={`Device is ${onlineStatus.label.toLowerCase()}`}
+                    className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 ${onlineStatus.color}`}
+                >
                     {onlineStatus.label}
                 </span>
             </div>
-            <p className="text-sm mt-2" style={{ color: 'var(--color-text)' }}>{device.display_name || 'Unnamed device'}</p>
+            <p className="text-sm mt-2 text-[var(--color-text)]">{device.display_name || 'Unnamed device'}</p>
             <p className="panel-subtext">Firmware {device.firmware_version || 'Unknown'}</p>
             <div className="mt-2">
                 <span className="panel-subtext">Device UUID:</span>
-                <span className="ml-2 text-sm font-mono" style={{ color: 'var(--color-text)' }}>
-                    {deviceUuidDisplay}...
-                </span>
+                <Tooltip content={`Full Device UUID: ${device.id}`}>
+                    <span className="ml-2 text-sm font-mono text-[var(--color-text)]">
+                        {deviceUuidDisplay}...
+                    </span>
+                </Tooltip>
             </div>
             {hasActivePairingCode && (
                 <div className="mt-2">
                     <span className="panel-subtext">Pairing Code:</span>
-                    <span className="ml-2 text-sm font-mono" style={{ color: 'var(--color-text)' }}>
-                        {pairing.pairing_code}
-                    </span>
+                    <Tooltip
+                        content={
+                            pairing.pairing_code_expires_at
+                                ? `Expires: ${new Date(pairing.pairing_code_expires_at).toLocaleString()}`
+                                : 'No expiration'
+                        }
+                    >
+                        <span className="ml-2 text-sm font-mono text-[var(--color-text)]">
+                            {pairing.pairing_code}
+                        </span>
+                    </Tooltip>
                 </div>
             )}
             <div className="mt-2">
                 <span className="panel-subtext">Paired user:</span>
-                <span className="ml-2 text-sm" style={{ color: 'var(--color-text)' }}>
+                <span className="ml-2 text-sm text-[var(--color-text)]">
                     {pairedUserDisplay}
                 </span>
             </div>
             <div className="mt-2">
                 <span className="panel-subtext">Access:</span>
-                <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 text-gray-700">
+                <span
+                    aria-label={`Access level: ${accessLabel}`}
+                    className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-200 text-gray-700 transition-colors duration-200"
+                >
                     {accessLabel}
                 </span>
             </div>
             <div className="mt-2">
                 <span className="panel-subtext">Realtime (Admin):</span>
-                <span className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs ${realtimeBadgeClass}`}>
+                <span
+                    role="status"
+                    aria-label={`Realtime connection: ${realtimeLabel}`}
+                    className={`ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs transition-colors duration-200 ${realtimeBadgeClass}`}
+                >
                     {realtimeLabel}
                 </span>
             </div>

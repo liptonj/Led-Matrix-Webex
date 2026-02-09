@@ -1,5 +1,6 @@
 'use client';
 
+import { Button, Select } from '@/components/ui';
 import { Command } from '@/lib/supabase';
 import { memo, useEffect, useState } from 'react';
 
@@ -18,6 +19,7 @@ interface DeviceCommandsPanelProps {
     onPageChange: (page: number) => void;
     onPageSizeChange: (size: number) => void;
     onShowResponse: (title: string, body: Record<string, unknown> | null) => void;
+    onRetry?: () => void;
 }
 
 export default memo(function DeviceCommandsPanel({
@@ -33,6 +35,7 @@ export default memo(function DeviceCommandsPanel({
     onPageChange,
     onPageSizeChange,
     onShowResponse,
+    onRetry,
 }: DeviceCommandsPanelProps) {
     // tick triggers re-renders for live timestamps
     const [tick, setTick] = useState(0);
@@ -62,61 +65,88 @@ export default memo(function DeviceCommandsPanel({
     const commandPageSafe = Math.min(commandPage, commandTotalPages);
 
     return (
-        <div className="panel">
+        <div className="panel" role="region" aria-label="Command status">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <h3 className="panel-header">Command Status</h3>
-                    <p className="panel-subtext">Subscription: {commandStatus}</p>
+                    <p
+                        role="status"
+                        aria-label={`Command subscription: ${commandStatus}`}
+                        className="panel-subtext"
+                    >
+                        Subscription: {commandStatus}
+                    </p>
                 </div>
-                <div className="flex gap-2">
-                    <select
+                <div className="flex flex-wrap gap-2 min-w-0">
+                    <Select
+                        size="sm"
                         value={commandPageSize}
                         onChange={(event) => onPageSizeChange(Number(event.target.value))}
-                        className="input-field-sm"
+                        aria-label="Commands per page"
                     >
                         <option value={3}>3 per page</option>
                         <option value={5}>5 per page</option>
                         <option value={10}>10 per page</option>
-                    </select>
-                    <select
+                    </Select>
+                    <Select
+                        size="sm"
                         value={commandFilter}
                         onChange={(event) =>
                             onFilterChange(event.target.value as 'all' | Command['status'])
                         }
-                        className="input-field-sm"
+                        aria-label="Filter commands by status"
                     >
                         <option value="pending">Pending</option>
                         <option value="acked">Acked</option>
                         <option value="failed">Failed</option>
                         <option value="expired">Expired</option>
                         <option value="all">All</option>
-                    </select>
+                    </Select>
                 </div>
             </div>
             {commandError && (
-                <p className="text-xs text-red-600 mt-2">{commandError}</p>
+                <div
+                    role="alert"
+                    className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+                >
+                    <p className="text-xs text-red-600 flex-1">{commandError}</p>
+                    {onRetry && (
+                        <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={onRetry}
+                            aria-label="Retry command subscription"
+                        >
+                            Retry
+                        </Button>
+                    )}
+                </div>
             )}
-            <p className="text-[10px] mt-2" style={{ color: 'var(--color-text-muted)' }}>
+            <p
+                aria-live="polite"
+                aria-label={`Showing ${commands.length} of ${commandCount} commands`}
+                className="text-xs mt-2 text-text-muted"
+            >
                 Showing {commands.length} of {commandCount}
             </p>
-            {commands.length > 0 && (
+            {commands.length > 0 ? (
                 <div className="mt-3 space-y-2">
                     {commands.map((cmd) => (
                         <button
                             key={cmd.id}
                             onClick={() => onShowResponse(`Command ${cmd.command}`, cmd.response || null)}
-                            className="w-full text-left text-xs px-2 py-2 rounded border"
-                            style={{ borderColor: 'var(--color-border)' }}
+                            className="w-full text-left text-xs px-2 py-2 rounded border border-[var(--color-border)] animate-fade-in"
+                            aria-label={`View command ${cmd.command}, status: ${cmd.status}`}
                         >
                             <div className="flex items-center justify-between">
-                                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{cmd.command}</span>
+                                <span className="font-medium text-[var(--color-text)]">{cmd.command}</span>
                                 <span
-                                    className={`text-[10px] px-2 py-0.5 rounded ${getCommandStatusClasses(cmd.status)}`}
+                                    className={`text-xs px-2 py-0.5 rounded transition-colors duration-200 ${getCommandStatusClasses(cmd.status)}`}
                                 >
                                     {cmd.status}
                                 </span>
                             </div>
-                            <div className="flex items-center justify-between mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                            <div className="flex items-center justify-between mt-1 text-xs text-text-muted">
                                 <span>Created {formatCommandAge(cmd.created_at)}</span>
                                 <span>
                                     {cmd.acked_at ? `Acked ${formatCommandAge(cmd.acked_at)}` : 'Not acked'}
@@ -130,18 +160,34 @@ export default memo(function DeviceCommandsPanel({
                         </button>
                     ))}
                 </div>
+            ) : (
+                <div
+                    className="flex flex-col items-center justify-center gap-3 py-10 text-center px-4 mt-3 rounded-md border border-[var(--color-border)] text-text-muted"
+                >
+                    <span className="text-3xl" aria-hidden>📤</span>
+                    <p className="text-xs font-medium text-[var(--color-text)]">
+                        No commands yet
+                    </p>
+                    <p className="text-xs max-w-sm">
+                        Commands sent to this device will appear here. Use Device Actions to send a command, or try a different filter.
+                    </p>
+                </div>
             )}
-            <div className="mt-3 flex items-center justify-between text-xs" style={{ color: 'var(--color-text)' }}>
+            <div
+                role="navigation"
+                aria-label="Command list pagination"
+                className="mt-3 flex items-center justify-between text-xs text-[var(--color-text)]"
+            >
                 <button
                     type="button"
                     onClick={() => onPageChange(Math.max(1, commandPage - 1))}
                     disabled={commandPageSafe <= 1}
-                    className="rounded border px-2 py-1 disabled:opacity-50"
-                    style={{ borderColor: 'var(--color-border)' }}
+                    className="rounded border border-[var(--color-border)] px-2 py-1 disabled:opacity-50"
+                    aria-label="Previous page"
                 >
                     Prev
                 </button>
-                <span>
+                <span aria-live="polite" aria-label={`Page ${commandPageSafe} of ${commandTotalPages}`}>
                     Page {commandPageSafe} of {commandTotalPages}
                 </span>
                 <button
@@ -150,8 +196,8 @@ export default memo(function DeviceCommandsPanel({
                         onPageChange(Math.min(commandTotalPages, commandPage + 1))
                     }
                     disabled={commandPageSafe >= commandTotalPages}
-                    className="rounded border px-2 py-1 disabled:opacity-50"
-                    style={{ borderColor: 'var(--color-border)' }}
+                    className="rounded border border-[var(--color-border)] px-2 py-1 disabled:opacity-50"
+                    aria-label="Next page"
                 >
                     Next
                 </button>

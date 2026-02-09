@@ -1,6 +1,8 @@
 'use client';
 
+import { Tooltip } from '@/components/ui';
 import { Pairing } from '@/lib/supabase';
+import { formatRelativeTime } from '@/lib/utils';
 import { memo } from 'react';
 
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -33,22 +35,53 @@ export default memo(function DeviceTelemetryPanel({
         return { label: status, color: 'bg-gray-200 text-gray-700' };
     };
 
+    const webexBadge = getWebexStatusBadge(pairing?.webex_status);
+    const rssiQuality = getRssiQuality(pairing?.rssi);
+
     return (
-        <div className="panel">
+        <div className="panel" role="region" aria-label="Device telemetry">
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="panel-header">Telemetry</h3>
-                    <p className="panel-subtext">Subscription: {pairingStatus}</p>
+                    <p
+                        role="status"
+                        aria-label={`Telemetry subscription: ${pairingStatus}`}
+                        className="panel-subtext"
+                    >
+                        Subscription: {pairingStatus}
+                    </p>
                 </div>
                 {pairingError && (
-                    <span className="text-xs text-red-600">{pairingError}</span>
+                    <span role="alert" className="text-xs text-red-600">
+                        {pairingError}
+                    </span>
                 )}
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs" style={{ color: 'var(--color-text)' }}>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-[var(--color-text)]">
+                <div>
+                    <Tooltip
+                        content={
+                            pairing?.device_last_seen
+                                ? new Date(pairing.device_last_seen).toLocaleString()
+                                : 'Unknown'
+                        }
+                    >
+                        <span>
+                            Last seen:{' '}
+                            {pairing?.device_last_seen
+                                ? formatRelativeTime(pairing.device_last_seen)
+                                : 'Unknown'}
+                        </span>
+                    </Tooltip>
+                </div>
                 <div>
                     Webex:{' '}
-                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] ${getWebexStatusBadge(pairing?.webex_status).color}`}>
-                        {getWebexStatusBadge(pairing?.webex_status).label}
+                    <span
+                        role="status"
+                        aria-label={`Webex status: ${webexBadge.label}`}
+                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${webexBadge.color}`}
+                    >
+                        {webexBadge.label}
                     </span>
                 </div>
                 <div>In call: {pairing?.in_call ? 'Yes' : 'No'}</div>
@@ -56,8 +89,12 @@ export default memo(function DeviceTelemetryPanel({
                 <div>Mic muted: {pairing?.mic_muted ? 'Yes' : 'No'}</div>
                 <div>
                     RSSI: {pairing?.rssi != null ? `${pairing.rssi} dBm` : 'N/A'}{' '}
-                    <span className={`text-[10px] ${getRssiQuality(pairing?.rssi).color}`}>
-                        ({getRssiQuality(pairing?.rssi).label})
+                    <span
+                        role="status"
+                        aria-label={`Signal strength: ${rssiQuality.label}`}
+                        className={`text-xs ${rssiQuality.color}`}
+                    >
+                        ({rssiQuality.label})
                     </span>
                 </div>
                 <div>Temp: {pairing?.temperature != null ? `${pairing.temperature}°` : 'N/A'}</div>

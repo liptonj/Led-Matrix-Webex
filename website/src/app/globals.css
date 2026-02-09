@@ -334,7 +334,7 @@ html.light,
   }
 
   .panel-header {
-    @apply text-sm font-semibold;
+    @apply text-sm font-semibold leading-tight;
     color: var(--color-text);
   }
 
