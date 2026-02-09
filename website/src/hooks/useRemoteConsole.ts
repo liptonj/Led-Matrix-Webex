@@ -104,6 +104,7 @@ export function useRemoteConsole({
 
   const lastHeartbeatRef = useRef<number>(0);
   const healthCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const joiningRef = useRef(false);
 
   // Add a line to the terminal buffer (with limit)
   const addLine = useCallback((text: string, source: TerminalLine['source'], level?: TerminalLine['level']) => {
@@ -178,6 +179,13 @@ export function useRemoteConsole({
     eventHandlers,
   });
 
+  // Reset join state when sessionId changes so a fresh attempt can be made
+  useEffect(() => {
+    setIsJoined(false);
+    setJoinError(null);
+    joiningRef.current = false;
+  }, [sessionId]);
+
   // Bridge health monitoring (check heartbeat timeout)
   useEffect(() => {
     if (!isJoined || !channel.isConnected) {
@@ -211,7 +219,8 @@ export function useRemoteConsole({
 
   // Join session
   const join = useCallback(async (): Promise<boolean> => {
-    if (!sessionId) return false;
+    if (!sessionId || joiningRef.current) return false;
+    joiningRef.current = true;
 
     try {
       setJoinError(null);
@@ -232,6 +241,8 @@ export function useRemoteConsole({
       setJoinError(message);
       addLine(`Failed to join session: ${message}`, 'system', 'error');
       return false;
+    } finally {
+      joiningRef.current = false;
     }
   }, [sessionId, addLine]);
 

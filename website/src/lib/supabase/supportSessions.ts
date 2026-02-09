@@ -65,14 +65,16 @@ export async function joinSupportSession(
       })
       .eq("id", sessionId)
       .eq("status", "waiting")
-      .select(SESSION_COLUMNS)
-      .single(),
+      .select(SESSION_COLUMNS),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while joining support session.",
   );
 
   if (error) throw error;
-  return data;
+  if (!data || data.length === 0) {
+    throw new Error("Session is not available or has already been joined.");
+  }
+  return data[0];
 }
 
 /**

@@ -87,11 +87,19 @@ export default function AdminSupportPage() {
 
   // After selecting session, join it.
   // The sessionEndedRef guard prevents re-joining after an explicit end/leave.
+  // The joinError guard prevents infinite retry loops when the join fails.
   useEffect(() => {
-    if (selectedSessionId && !remoteConsole.isJoined && !sessionEndedRef.current) {
+    if (
+      selectedSessionId &&
+      !remoteConsole.isJoined &&
+      !remoteConsole.joinError &&
+      !sessionEndedRef.current
+    ) {
       remoteConsole.join();
     }
-  }, [selectedSessionId, remoteConsole.isJoined, remoteConsole]);
+    // remoteConsole.join is stable (useCallback); only re-run when session or join state changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSessionId, remoteConsole.isJoined, remoteConsole.joinError]);
 
   // Handle action (with firmware picker for flash)
   const handleAction = useCallback((type: ActionType, manifestUrl?: string) => {
@@ -123,6 +131,31 @@ export default function AdminSupportPage() {
     }
     setSelectedSessionId(null);
   }, [remoteConsole]);
+
+  // Join error view – shown when we selected a session but the join failed
+  if (selectedSessionId && remoteConsole.joinError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6 max-w-md text-center">
+          <p className="text-sm font-medium text-red-700 dark:text-red-300 mb-1">
+            Failed to join session
+          </p>
+          <p className="text-sm text-red-600 dark:text-red-400 mb-4">
+            {remoteConsole.joinError}
+          </p>
+          <button
+            onClick={() => {
+              sessionEndedRef.current = true;
+              setSelectedSessionId(null);
+            }}
+            className="px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+          >
+            Back to Sessions
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Active console view
   if (selectedSessionId && remoteConsole.isJoined) {
