@@ -54,6 +54,8 @@ export async function joinSupportSession(
   adminId: string,
 ): Promise<SupportSession> {
   const supabase = await getSupabase();
+  
+  // First, try to join a waiting session
   const { data, error } = await withTimeout(
     supabase
       .schema("display")
@@ -71,11 +73,37 @@ export async function joinSupportSession(
   );
 
   if (error) throw error;
+  
+  // If we successfully joined a waiting session, return it
   const session = data?.[0];
-  if (!session) {
-    throw new Error("Session is not available or has already been joined.");
+  if (session) {
+    return session;
   }
-  return session;
+  
+  // If no waiting session found, check if this is a rejoin of an active session
+  // where this admin was already assigned
+  const { data: existingSession, error: fetchError } = await withTimeout(
+    supabase
+      .schema("display")
+      .from("support_sessions")
+      .select(SESSION_COLUMNS)
+      .eq("id", sessionId)
+      .eq("status", "active")
+      .eq("admin_id", adminId)
+      .single(),
+    SUPABASE_REQUEST_TIMEOUT_MS,
+    "Timed out while checking session status.",
+  );
+  
+  // Ignore "no rows" error (PGRST116) - we'll throw our own error
+  if (fetchError && fetchError.code !== "PGRST116") throw fetchError;
+  
+  if (existingSession) {
+    // Admin is rejoining their own active session
+    return existingSession;
+  }
+  
+  throw new Error("Session is not available or has already been joined.");
 }
 
 /**

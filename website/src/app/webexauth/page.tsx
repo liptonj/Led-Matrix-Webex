@@ -3,23 +3,16 @@
 import { fetchWithTimeout } from '@/lib/utils/fetchWithTimeout';
 import { useEffect, useMemo, useState } from 'react';
 
-const DEFAULT_REDIRECT = 'https://display.5ls.us/callback';
 const API_TIMEOUT_MS = 15000;
 
 interface AuthParams {
-  pairing_code: string;
+  nonce: string;
   serial: string;
-  ts: string;
-  sig: string;
-  token: string;
 }
 
 const EMPTY_PARAMS: AuthParams = {
-  pairing_code: '',
+  nonce: '',
   serial: '',
-  ts: '',
-  sig: '',
-  token: '',
 };
 
 export default function WebexAuthPage() {
@@ -27,20 +20,16 @@ export default function WebexAuthPage() {
   const [submitting, setSubmitting] = useState(false);
   const [params, setParams] = useState<AuthParams>(EMPTY_PARAMS);
 
-  // Read URL params only on the client after mount to avoid SSR/hydration mismatch
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     setParams({
-      pairing_code: sp.get('pairing_code') ?? '',
+      nonce: sp.get('nonce') ?? '',
       serial: sp.get('serial') ?? '',
-      ts: sp.get('ts') ?? '',
-      sig: sp.get('sig') ?? '',
-      token: sp.get('token') ?? '',
     });
   }, []);
 
   const missing = useMemo(() => {
-    return (['pairing_code', 'serial', 'ts', 'sig', 'token'] as (keyof AuthParams)[]).filter((key) => !params[key]);
+    return (['nonce'] as (keyof AuthParams)[]).filter((key) => !params[key]);
   }, [params]);
 
   const handleAuthorize = async () => {
@@ -62,11 +51,9 @@ export default function WebexAuthPage() {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${params.token}`,
-            'X-Device-Serial': params.serial,
-            'X-Timestamp': params.ts,
-            'X-Signature': params.sig,
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify({ nonce: params.nonce }),
         },
         API_TIMEOUT_MS
       );
@@ -96,7 +83,6 @@ export default function WebexAuthPage() {
         </p>
 
         <div className="mt-6 space-y-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-          <div><span style={{ color: 'var(--color-text-muted)' }}>Pairing Code:</span> {params.pairing_code || '—'}</div>
           <div><span style={{ color: 'var(--color-text-muted)' }}>Serial:</span> {params.serial || '—'}</div>
         </div>
 

@@ -62,6 +62,101 @@ This document summarizes the critical security fixes applied based on the code r
 **Files Changed**:
 - `website/src/app/admin/devices/[serial]/page.tsx`
 
+## Known Security Limitations (Documented)
+
+### 1. MQTT TLS Uses setInsecure() (Medium Priority)
+
+**Issue**: MQTT client uses `setInsecure()` which skips certificate verification when TLS is enabled.
+
+**Location**: `firmware/src/meraki/mqtt_client.cpp` line 109
+
+```cpp
+if (use_tls) {
+    wifi_client_secure.setInsecure();  // Skip certificate verification for simplicity
+    mqtt_client.setClient(wifi_client_secure);
+}
+```
+
+**Risk**: Susceptible to man-in-the-middle attacks if attacker can intercept MQTT traffic.
+
+**Justification**: 
+- MQTT is used for Meraki MT sensor integration (optional feature)
+- Users configure their own MQTT broker with varying certificate chains
+- Creating a universal CA bundle for all possible MQTT brokers is impractical
+- Encrypted transport (TLS) still provides confidentiality even without certificate verification
+
+**Mitigations**:
+- MQTT is optional and disabled by default
+- Most deployments use MQTT on trusted internal networks
+- Data transmitted is sensor readings (temperature, humidity) - low sensitivity
+
+**Future Improvement**: Consider adding a configurable CA certificate field in MQTT settings to allow users to provide their own CA certificate for strict verification.
+
+### 2. CORS Allows Any Origin (Low Priority)
+
+**Issue**: Web server allows requests from any origin via `Access-Control-Allow-Origin: *`.
+
+**Location**: `firmware/src/web/web_server.cpp` lines 229-235
+
+```cpp
+void WebServerManager::addCorsHeaders(AsyncWebServerResponse* response) {
+    response->addHeader("Access-Control-Allow-Origin", "*");
+    response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-API-Key");
+}
+```
+
+**Risk**: Any website can make requests to the device's API endpoints if they know the device IP.
+
+**Justification - Required for Architecture**:
+
+The device is accessed from multiple origins that cannot be enumerated:
+
+| Category | Origin Examples | Use Case |
+|----------|-----------------|----------|
+| **Cloud Services** | | |
+| Webex Embedded App | `https://app.webex.com` | Primary status display control (runs in Webex iframe) |
+| Cloud Dashboard | `https://display.5ls.us` | Device configuration & management |
+| Supabase API | `https://fmultmlsevqgtnqzaylg.supabase.co` | Backend API calls to device |
+| **Local Network Access** | | |
+| Private IP (Class C) | `http://192.168.x.x` | Most common home/office networks |
+| Private IP (Class A) | `http://10.x.x.x` | Enterprise networks |
+| Private IP (Class B) | `http://172.16-31.x.x` | Some corporate networks |
+| AP Mode (Captive Portal) | `http://192.168.4.1` | Device setup/provisioning mode |
+| **mDNS Access** | | |
+| Default mDNS | `http://webex-display.local` | Default device hostname |
+| Custom mDNS | `http://<user-configured>.local` | User-configured device name |
+| **Development** | | |
+| Local Dev Server | `http://localhost:3000` | Website development |
+| Local Dev Server | `http://127.0.0.1:3000` | Alternative localhost |
+| **Third-Party Tools** | | |
+| ESP Web Tools | Various CDN origins | Browser-based firmware flashing |
+
+**Note on Dynamic Origins**:
+- **Private IPs**: Device IP depends on DHCP assignment from user's router
+- **mDNS Names**: Default is `webex-display.local`, but users can configure custom names via web UI or serial commands
+- **Supabase**: Project-specific subdomain (`fmultmlsevqgtnqzaylg.supabase.co` for production)
+- **ESP Web Tools**: Can be hosted from `unpkg.com`, `jsdelivr.net`, or self-hosted
+
+**Mitigations Already In Place**:
+1. **API Token Required**: All sensitive endpoints require `X-API-Key` header or `token` query parameter
+2. **Local Network Only**: Devices are typically on private LANs, not internet-exposed
+3. **Token Not Guessable**: API token is a randomly generated 32-character hex string
+4. **Sensitive Data Protected**: `/api/status` gates sensitive info behind authentication
+
+**Why Restricting Origins Won't Work**:
+- **Webex Embedded App**: Runs inside Webex's iframe with `app.webex.com` origin
+- **Private IPs**: Three RFC1918 ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x) with dynamic DHCP assignment
+- **mDNS Names**: User-configurable device names mean `http://*.local` cannot be allowlisted
+- **Supabase**: Project-specific subdomain would need to be configured per-deployment
+- **ESP Web Tools**: Can run from various CDN origins (unpkg, jsdelivr, self-hosted)
+- **Development**: localhost:3000, 127.0.0.1:3000, potentially other ports
+- **AP Mode**: Always uses fixed IP `192.168.4.1` but browser origin varies
+
+**Recommendation**: This is acceptable for a local-network IoT device. Document in user guide that devices should not be exposed directly to the internet without additional network-level protection (firewall, VPN).
+
+---
+
 ## Security Warnings (Not Fixed - Requires External Action)
 
 ### SHA-1 Signed Root Certificates

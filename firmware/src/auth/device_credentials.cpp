@@ -16,6 +16,7 @@ static const char* TAG = "AUTH";
 #include <mbedtls/sha256.h>
 #include <mbedtls/md.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/platform_util.h>
 #else
 // Mock implementations for native builds
 #include <cstring>
@@ -276,6 +277,15 @@ bool DeviceCredentials::resetCredentials() {
 }
 
 void DeviceCredentials::clearSecret() {
-    // Securely clear secret from memory
-    memset(_secret, 0, DEVICE_SECRET_SIZE);
+    // Securely clear secret from memory (resistant to compiler optimization)
+#ifndef NATIVE_BUILD
+    // Use mbedtls secure zeroization function for ESP32 builds
+    mbedtls_platform_zeroize(_secret, DEVICE_SECRET_SIZE);
+#else
+    // For native builds, use volatile pointer to prevent optimization
+    volatile uint8_t* p = (volatile uint8_t*)_secret;
+    for (size_t i = 0; i < DEVICE_SECRET_SIZE; i++) {
+        p[i] = 0;
+    }
+#endif
 }

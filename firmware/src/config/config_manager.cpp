@@ -8,6 +8,11 @@
 #include "common/lookup_tables.h"
 #include <ArduinoJson.h>
 #include <cstring>
+#ifndef NATIVE_BUILD
+#include <esp_random.h>
+#else
+#include <cstdlib>
+#endif
 #if __has_include("secrets.h")
 #include "secrets.h"
 #endif
@@ -450,4 +455,33 @@ PinConfig ConfigManager::getPinConfig() const {
 bool ConfigManager::hasCustomPins() const {
     if (!initialized) return false;
     return loadBool("has_custom_pins", false);
+}
+
+// API Token Configuration
+
+String ConfigManager::getApiToken() {
+    String token = loadString("api_token", "");
+    if (token.isEmpty()) {
+        // Generate a new token if none exists
+        regenerateApiToken();
+        token = loadString("api_token", "");
+    }
+    return token;
+}
+
+void ConfigManager::regenerateApiToken() {
+    // Generate a 16-character hex token (64 bits of entropy)
+    char token_chars[17];  // 16 hex chars + null terminator
+    for (int i = 0; i < 8; i++) {
+#ifndef NATIVE_BUILD
+        uint32_t rand = esp_random();  // Cryptographically secure on ESP32
+#else
+        uint32_t rand = (uint32_t)std::rand();  // For testing only
+#endif
+        snprintf(&token_chars[i * 2], 3, "%02x", (rand >> 16) & 0xFF);
+    }
+    String token = String(token_chars);
+    
+    saveString("api_token", token);
+    ESP_LOGI(TAG, "API token regenerated");
 }

@@ -9,6 +9,69 @@
 #define APP_STATE_H
 
 #include <Arduino.h>
+#include <string.h>
+
+/**
+ * @brief Helper function to safely copy a String to a fixed-size buffer
+ * @param dest Destination buffer
+ * @param size Size of destination buffer (including null terminator)
+ * @param src Source String
+ * @return true if copied successfully, false if truncated
+ */
+inline bool safeStrCopy(char* dest, size_t size, const String& src) {
+    if (size == 0) return false;
+    const char* src_str = src.c_str();
+    if (src_str == nullptr) {
+        dest[0] = '\0';
+        return true;
+    }
+    size_t len = strlen(src_str);
+    if (len >= size) {
+        len = size - 1;
+    }
+    memcpy(dest, src_str, len);
+    dest[len] = '\0';
+    return len == strlen(src_str);
+}
+
+/**
+ * @brief Helper function to safely copy a const char* to a fixed-size buffer
+ * @param dest Destination buffer
+ * @param size Size of destination buffer (including null terminator)
+ * @param src Source const char*
+ * @return true if copied successfully, false if truncated
+ */
+inline bool safeStrCopy(char* dest, size_t size, const char* src) {
+    if (size == 0) return false;
+    if (src == nullptr) {
+        dest[0] = '\0';
+        return true;
+    }
+    size_t len = strlen(src);
+    if (len >= size) {
+        len = size - 1;
+    }
+    memcpy(dest, src, len);
+    dest[len] = '\0';
+    return len == strlen(src);
+}
+
+/**
+ * @brief Helper function to safely copy a string literal to a fixed-size buffer
+ */
+inline void safeStrCopyLiteral(char* dest, size_t size, const char* src) {
+    if (size == 0) return;
+    if (src == nullptr) {
+        dest[0] = '\0';
+        return;
+    }
+    size_t len = strlen(src);
+    if (len >= size) {
+        len = size - 1;
+    }
+    memcpy(dest, src, len);
+    dest[len] = '\0';
+}
 
 /**
  * @brief Application state structure
@@ -21,22 +84,22 @@ struct AppState {
     bool embedded_app_connected = false;
     bool xapi_connected = false;
     bool mqtt_connected = false;
-    String webex_status = "unknown";
+    char webex_status[16] = "unknown";  // Values: "active", "call", "meeting", "presenting", "dnd", "quiet", "inactive", "ooo", "pending", "unknown"
     bool webex_status_received = false;  // Set true after first status payload is received
-    String webex_status_source = "unknown";  // embedded_app | cloud | local | unknown
-    String embedded_app_display_name = "";  // Display name from embedded app user
+    char webex_status_source[16] = "unknown";  // embedded_app | cloud | local | unknown
+    char embedded_app_display_name[65] = "";  // Display name from embedded app user (max 64 chars)
     bool camera_on = false;
     bool mic_muted = false;
     bool in_call = false;
     float temperature = 0.0f;
     float humidity = 0.0f;
-    String door_status = "";
+    char door_status[8] = "";  // Values: "open", "closed", ""
     int air_quality_index = 0;      // Air quality as numeric index (0-500)
     float tvoc = 0.0f;              // TVOC in ppb
     float co2_ppm = 0.0f;
     float pm2_5 = 0.0f;
     float ambient_noise = 0.0f;
-    String sensor_mac = "";
+    char sensor_mac[18] = "";  // MAC address format: "AA:BB:CC:DD:EE:FF" (17 chars + null)
     bool sensor_data_valid = false;
     unsigned long last_sensor_update = 0;
     unsigned long last_poll_time = 0;

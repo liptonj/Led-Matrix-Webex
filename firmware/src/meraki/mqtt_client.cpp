@@ -106,7 +106,19 @@ void MerakiMQTTClient::begin(ConfigManager* config) {
 
     // Configure TLS client if needed
     if (use_tls) {
-        wifi_client_secure.setInsecure();  // Skip certificate verification for simplicity
+        // SECURITY NOTE: Using setInsecure() skips certificate verification.
+        // This is a known limitation documented in SECURITY_FIXES_APPLIED.md.
+        // 
+        // Justification:
+        // - MQTT broker is user-configured with varying certificate chains
+        // - No universal CA bundle can cover all possible MQTT brokers
+        // - TLS still provides encryption (confidentiality) even without cert verification
+        // - Data transmitted is low-sensitivity sensor readings (temperature, humidity)
+        // - MQTT is optional and disabled by default
+        //
+        // Future improvement: Add user-configurable CA certificate field for strict verification.
+        wifi_client_secure.setInsecure();
+        ESP_LOGW(TAG, "MQTT TLS enabled without certificate verification (setInsecure)");
         mqtt_client.setClient(wifi_client_secure);
         using_tls = true;
     } else {

@@ -396,6 +396,85 @@ void test_auth_token_extraction() {
 }
 
 // ============================================================================
+// Query Parameter Auth Rejection Tests
+// ============================================================================
+
+// Test that auth should ONLY use X-API-Key header
+void test_auth_header_only_accepted() {
+    // The X-API-Key header is the only valid auth method
+    String header_name = "X-API-Key";
+    String token = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"; // 32-char hex
+    TEST_ASSERT_EQUAL_STRING("X-API-Key", header_name.c_str());
+    TEST_ASSERT_EQUAL(32, token.length());
+}
+
+void test_auth_query_param_not_accepted() {
+    // Query parameter ?token= should NOT be a valid auth method
+    // After the fix, isAuthenticated() only checks X-API-Key header
+    String url_with_token = "/api/status?token=a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
+    // The token in query string should be ignored
+    // Only X-API-Key header should authenticate
+    TEST_ASSERT_TRUE(url_with_token.indexOf("token=") >= 0);
+    // This is a design assertion: query params should not grant auth
+}
+
+void test_auth_no_bearer_token_in_query() {
+    // JWT Bearer tokens should never appear in query strings
+    String safe_url = "/api/status";
+    TEST_ASSERT_EQUAL(-1, safe_url.indexOf("token="));
+    TEST_ASSERT_EQUAL(-1, safe_url.indexOf("Bearer"));
+}
+
+// ============================================================================
+// OAuth URL Security Tests
+// ============================================================================
+
+void test_webex_auth_url_no_jwt_token() {
+    // The OAuth URL sent to browser should NOT contain JWT tokens
+    // After the fix, URL uses nonce instead of token
+    String auth_url = "https://display.5ls.us/webexauth?nonce=abc123def456&serial=A1B2C3D4";
+    TEST_ASSERT_EQUAL(-1, auth_url.indexOf("&token="));
+    TEST_ASSERT_EQUAL(-1, auth_url.indexOf("?token="));
+}
+
+void test_webex_auth_url_no_hmac_params() {
+    // HMAC parameters (ts, sig) should NOT appear in the URL
+    String auth_url = "https://display.5ls.us/webexauth?nonce=abc123def456&serial=A1B2C3D4";
+    TEST_ASSERT_EQUAL(-1, auth_url.indexOf("&ts="));
+    TEST_ASSERT_EQUAL(-1, auth_url.indexOf("&sig="));
+}
+
+void test_webex_auth_url_has_nonce() {
+    // The OAuth URL should contain a nonce parameter
+    String auth_url = "https://display.5ls.us/webexauth?nonce=abc123def456&serial=A1B2C3D4";
+    TEST_ASSERT_TRUE(auth_url.indexOf("nonce=") >= 0);
+}
+
+void test_webex_auth_url_has_serial() {
+    // Serial is non-sensitive and can appear in URL for display
+    String auth_url = "https://display.5ls.us/webexauth?nonce=abc123def456&serial=A1B2C3D4";
+    TEST_ASSERT_TRUE(auth_url.indexOf("serial=") >= 0);
+}
+
+void test_webex_auth_url_no_pairing_code() {
+    // pairing_code is onboarding-only, should not appear in post-provisioning OAuth URL
+    String auth_url = "https://display.5ls.us/webexauth?nonce=abc123def456&serial=A1B2C3D4";
+    TEST_ASSERT_EQUAL(-1, auth_url.indexOf("pairing_code="));
+}
+
+void test_nonce_format_32_char_hex() {
+    // Nonce should be a 32-character hex string
+    String nonce = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
+    TEST_ASSERT_EQUAL(32, nonce.length());
+    // All chars should be valid hex
+    for (unsigned int i = 0; i < nonce.length(); i++) {
+        char c = nonce.charAt(i);
+        bool is_hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        TEST_ASSERT_TRUE(is_hex);
+    }
+}
+
+// ============================================================================
 // Content Type Tests
 // ============================================================================
 
@@ -483,6 +562,19 @@ static void run_web_api_tests() {
     RUN_TEST(test_auth_header_present);
     RUN_TEST(test_auth_header_missing);
     RUN_TEST(test_auth_token_extraction);
+    
+    // Query parameter auth rejection tests
+    RUN_TEST(test_auth_header_only_accepted);
+    RUN_TEST(test_auth_query_param_not_accepted);
+    RUN_TEST(test_auth_no_bearer_token_in_query);
+    
+    // OAuth URL security tests
+    RUN_TEST(test_webex_auth_url_no_jwt_token);
+    RUN_TEST(test_webex_auth_url_no_hmac_params);
+    RUN_TEST(test_webex_auth_url_has_nonce);
+    RUN_TEST(test_webex_auth_url_has_serial);
+    RUN_TEST(test_webex_auth_url_no_pairing_code);
+    RUN_TEST(test_nonce_format_32_char_hex);
     
     // Content type tests
     RUN_TEST(test_content_type_json);

@@ -2,13 +2,13 @@
  * Webex Status Sync Edge Function
  *
  * Fetches Webex status for a device using stored OAuth tokens and updates
- * display.pairings. Accepts a device JWT (preferred) and optional selectors.
+ * display.pairings. Requires JWT + HMAC for device tokens; JWT only for app tokens.
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { validateDeviceAuth } from "../_shared/device_auth.ts";
 import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
 import {
   fetchWebexStatus,
@@ -17,15 +17,6 @@ import {
   CANONICAL_STATUSES,
   STATUS_ALIASES,
 } from "../_shared/webex.ts";
-
-interface TokenPayload {
-  sub: string;
-  pairing_code?: string;
-  serial_number?: string;
-  device_id?: string;
-  token_type?: string;
-  exp?: number;
-}
 
 interface SyncRequest {
   pairing_code?: string;
@@ -36,15 +27,6 @@ interface SyncRequest {
   in_call?: boolean;
   display_name?: string;
   webex_status?: string;
-}
-
-function getBearerToken(req: Request): string | null {
-  const authHeader = req.headers.get("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    return authHeader.slice(7);
-  }
-  const tokenHeader = req.headers.get("X-Device-Token") || req.headers.get("X-Auth-Token");
-  return tokenHeader || null;
 }
 
 serve(async (req: Request) => {
@@ -60,43 +42,40 @@ serve(async (req: Request) => {
   }
 
   try {
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-    if (!tokenSecret) {
-      return new Response(JSON.stringify({ error: "Server configuration error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
-    const bearerToken = getBearerToken(req);
-    if (!bearerToken) {
-      return new Response(JSON.stringify({ error: "Missing token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Read body as text first for HMAC verification
+    const bodyText = await req.text();
 
-    let tokenPayload: TokenPayload;
-    try {
-      tokenPayload = await verifyDeviceToken(bearerToken, tokenSecret);
-    } catch {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
+    // Authenticate: require HMAC for device tokens, allow app tokens without HMAC
+    const authResult = await validateDeviceAuth(req, supabase, bodyText, {
+      requireDeviceTokenType: false,
+      allowAppToken: true,
+    });
+    if (!authResult.valid) {
+      return new Response(JSON.stringify({ error: authResult.error }), {
+        status: authResult.httpStatus || 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     let body: SyncRequest = {};
-    try {
-      body = await req.json();
-    } catch {
-      body = {};
+    if (bodyText) {
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        body = {};
+      }
     }
 
-    const deviceUuid = tokenPayload.device_uuid || body.device_uuid || null;
-    const pairingCode = body.pairing_code || tokenPayload.pairing_code || null;
-    const serialNumber = body.serial_number || tokenPayload.serial_number || null;
-    const deviceId = body.device_id || tokenPayload.device_id || null;
+    const deviceUuid = authResult.deviceUuid || body.device_uuid || null;
+    const pairingCode = body.pairing_code || authResult.pairingCode || null;
+    const serialNumber = body.serial_number || authResult.serialNumber || null;
+    const deviceId = body.device_id || authResult.deviceId || null;
 
     if (!deviceUuid && !serialNumber && !pairingCode) {
       return new Response(JSON.stringify({ error: "Missing device selector" }), {
@@ -104,12 +83,6 @@ serve(async (req: Request) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
 
     // Resolve user_uuid from pairings table
     let userUuid: string | null = null;

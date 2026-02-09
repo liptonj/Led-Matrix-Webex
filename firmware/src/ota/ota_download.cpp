@@ -20,6 +20,7 @@
 #include "../display/matrix_display.h"
 #include "../common/ca_certs.h"
 #include "../core/dependencies.h"
+#include "../web/web_server.h"
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
@@ -43,10 +44,48 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     // Defer realtime reconnection for 10 minutes to cover entire OTA process
     deps.app_state.realtime_defer_until = millis() + 600000UL;
 
+    // Stop web server to free memory for OTA download
+    // The web server consumes ~20-40KB heap which is needed for large downloads
+    bool web_server_was_running = deps.web_server.isRunning();
+    if (web_server_was_running) {
+        ESP_LOGI(TAG, "Stopping web server to free memory for OTA");
+        deps.web_server.stop();
+    }
+
     ESP_LOGI(TAG, "Heap before download: %lu bytes", (unsigned long)ESP.getFreeHeap());
 
     // Disable watchdog for OTA
     OTAHelpers::disableWatchdogForOTA();
+
+    // Initialize buffer early so RAII guard can safely free it
+    uint8_t* buffer = nullptr;
+
+    // RAII cleanup guard - handles cleanup on all error paths
+    struct OTACleanupGuard {
+        HTTPClient& http;
+        WiFiClientSecure& client;
+        uint8_t*& buffer;
+        bool& web_server_was_running;
+        Dependencies& deps;
+        bool success;
+
+        OTACleanupGuard(HTTPClient& h, WiFiClientSecure& c, uint8_t*& b, bool& ws, Dependencies& d)
+            : http(h), client(c), buffer(b), web_server_was_running(ws), deps(d), success(false) {}
+
+        ~OTACleanupGuard() {
+            http.end();
+            client.stop();
+            if (buffer != nullptr) {
+                free(buffer);
+                buffer = nullptr;
+            }
+            log_system_set_suppressed(false);
+            if (!success && web_server_was_running) {
+                ESP_LOGI(TAG, "OTA failed, restarting web server");
+                deps.web_server.begin(&deps.config, &deps.app_state, nullptr, &deps.mdns);
+            }
+        }
+    };
 
     WiFiClientSecure client;
     OTAHelpers::configureTlsClient(client, CA_CERT_BUNDLE_OTA, deps.config.getTlsVerify(), url);
@@ -55,14 +94,14 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     http.begin(client, url);
     OTAHelpers::configureHttpClient(http);
 
+    // Create RAII guard after http and client are initialized
+    OTACleanupGuard cleanup(http, client, buffer, web_server_was_running, deps);
+
     int httpCode = http.GET();
 
     if (httpCode != HTTP_CODE_OK) {
         ESP_LOGE(TAG, "%s download failed: %d", label, httpCode);
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
 
     int contentLength = http.getSize();
@@ -70,10 +109,7 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
 
     if (contentLength <= 0) {
         ESP_LOGE(TAG, "Invalid content length for %s", label);
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
 
 #ifndef NATIVE_BUILD
@@ -82,20 +118,14 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
         target_partition = OTAManagerFlash::getTargetPartition();
         if (!target_partition) {
             ESP_LOGE(TAG, "No OTA partition available (missing ota_1?)");
-            http.end();
-            client.stop();
-            log_system_set_suppressed(false);
-            return false;
+            return false;  // RAII guard handles cleanup
         }
         ESP_LOGI(TAG, "Target partition: %s (%d bytes)",
                  target_partition->label, target_partition->size);
         if (static_cast<size_t>(contentLength) > target_partition->size) {
             ESP_LOGE(TAG, "%s too large for partition (%d > %d)",
                      label, contentLength, target_partition->size);
-            http.end();
-            client.stop();
-            log_system_set_suppressed(false);
-            return false;
+            return false;  // RAII guard handles cleanup
         }
     }
 #endif
@@ -107,34 +137,24 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     // Begin update using flash helper
     if (!OTAManagerFlash::beginUpdate(contentLength, update_type, target_partition)) {
         ESP_LOGE(TAG, "Not enough space for %s", label);
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
 
     ESP_LOGI(TAG, "Flashing %s...", label);
 
     // Use chunked download with watchdog feeding to prevent timeout
     // Move buffer to heap to avoid stack overflow (2KB reduces heap pressure)
-    uint8_t* buffer = (uint8_t*)malloc(2048);
+    buffer = (uint8_t*)malloc(2048);
     if (!buffer) {
         ESP_LOGE(TAG, "Failed to allocate download buffer for %s", label);
         Update.abort();
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
     
     WiFiClient* stream = http.getStreamPtr();
     if (!stream) {
         ESP_LOGE(TAG, "Failed to get stream for %s", label);
-        free(buffer);
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
     
     // Define write callback for Update.write
@@ -232,29 +252,18 @@ bool OTAManager::downloadAndInstallBinary(const String& url, int update_type, co
     if (written != static_cast<size_t>(contentLength)) {
         ESP_LOGE(TAG, "Written only %zu of %d bytes for %s", written, contentLength, label);
         Update.abort();
-        free(buffer);
-        http.end();
-        client.stop();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
-    
-    // Free buffer after successful download
-    free(buffer);
 
     // Finalize update using flash helper
     if (!OTAManagerFlash::finalizeUpdate(update_type, target_partition, latest_version)) {
         ESP_LOGE(TAG, "%s update failed", label);
-        http.end();
-        client.stop();
         Update.abort();
-        log_system_set_suppressed(false);
-        return false;
+        return false;  // RAII guard handles cleanup
     }
 
-    http.end();
-    client.stop();
+    // Mark success before cleanup - this prevents web server restart
+    cleanup.success = true;
     ESP_LOGI(TAG, "%s update applied", label);
-    log_system_set_suppressed(false);
     return true;
 }

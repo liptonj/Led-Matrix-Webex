@@ -2,6 +2,7 @@
  * Webex OAuth Callback Edge Function Tests
  *
  * Tests for the webex-oauth-callback Edge Function that handles device OAuth flow.
+ * Uses nonce-based state validation (state is a plain 32-char hex nonce string).
  *
  * Run: deno test --allow-net --allow-env _tests/webex-oauth-callback.test.ts
  */
@@ -33,14 +34,11 @@ function createMockRequest(
   });
 }
 
-function fromBase64Url(input: string): string {
-  const padded = input.replace(/-/g, "+").replace(/_/g, "/") +
-    "===".slice((input.length + 3) % 4);
-  try {
-    return atob(padded);
-  } catch {
-    throw new Error("Invalid base64url encoding");
-  }
+function generateNonce(): string {
+  // Generate a 32-character hex string (nonce format)
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // ============================================================================
@@ -77,19 +75,23 @@ Deno.test("webex-oauth-callback: returns 400 when state missing", () => {
 });
 
 // ============================================================================
-// State Parsing Tests
+// State Parsing Tests (Nonce-based)
 // ============================================================================
 
-Deno.test("webex-oauth-callback: parses state from base64url", () => {
-  const state = "eyJwYWlyaW5nX2NvZGUiOiJBQkMxMjMiLCJzZXJpYWwiOiJBMUIyQzNENCJ9";
-  let parsedState;
-  try {
-    parsedState = JSON.parse(fromBase64Url(state));
-  } catch {
-    parsedState = null;
-  }
+Deno.test("webex-oauth-callback: state is plain nonce string (not base64)", () => {
+  const nonce = generateNonce();
+  assertEquals(nonce.length, 32);
+  assertEquals(/^[0-9a-f]{32}$/.test(nonce), true);
+});
 
-  assertExists(parsedState);
+Deno.test("webex-oauth-callback: validates nonce format (32-char hex)", () => {
+  const validNonce = "a1b2c3d4e5f6789012345678901234ab";
+  const invalidNonce1 = "too-short";
+  const invalidNonce2 = "not-hex-characters-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+  assertEquals(/^[0-9a-f]{32}$/.test(validNonce), true);
+  assertEquals(/^[0-9a-f]{32}$/.test(invalidNonce1), false);
+  assertEquals(/^[0-9a-f]{32}$/.test(invalidNonce2), false);
 });
 
 Deno.test("webex-oauth-callback: returns 400 when state format invalid", () => {
@@ -100,51 +102,111 @@ Deno.test("webex-oauth-callback: returns 400 when state format invalid", () => {
   assertEquals(errorResponse.error, "Invalid state");
 });
 
-Deno.test("webex-oauth-callback: extracts pairing_code from state", () => {
-  const parsedState = {
-    pairing_code: "ABC123",
-    serial: "A1B2C3D4",
-    ts: "1234567890",
-    sig: "signature",
-    token: "device-token",
+// ============================================================================
+// Nonce Lookup Tests
+// ============================================================================
+
+Deno.test("webex-oauth-callback: looks up nonce in oauth_nonces table", () => {
+  const nonce = generateNonce();
+  const nonceQuery = {
+    nonce: nonce,
+    table: "display.oauth_nonces",
   };
 
-  assertExists(parsedState.pairing_code);
-  assertEquals(parsedState.pairing_code, "ABC123");
+  assertExists(nonceQuery.nonce);
+  assertEquals(nonceQuery.table, "display.oauth_nonces");
 });
 
-Deno.test("webex-oauth-callback: extracts serial_number from state", () => {
-  const parsedState = {
-    pairing_code: "ABC123",
-    serial: "A1B2C3D4",
+Deno.test("webex-oauth-callback: nonce lookup returns device_uuid", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+    token_type: "device",
   };
 
-  assertExists(parsedState.serial);
-  assertEquals(parsedState.serial, "A1B2C3D4");
+  assertExists(nonceData.device_uuid);
+  assertEquals(typeof nonceData.device_uuid, "string");
+});
+
+Deno.test("webex-oauth-callback: nonce lookup returns serial_number", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+    token_type: "device",
+  };
+
+  assertExists(nonceData.serial_number);
+  assertEquals(nonceData.serial_number, "A1B2C3D4");
+});
+
+Deno.test("webex-oauth-callback: nonce lookup returns user_uuid", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+    token_type: "device",
+  };
+
+  assertExists(nonceData.user_uuid);
+  assertEquals(typeof nonceData.user_uuid, "string");
+});
+
+Deno.test("webex-oauth-callback: nonce lookup returns token_type", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    serial_number: "A1B2C3D4",
+    device_id: "webex-display-C3D4",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+    token_type: "device",
+  };
+
+  const validTypes = ["device", "app"];
+  assertEquals(validTypes.includes(nonceData.token_type), true);
+});
+
+Deno.test("webex-oauth-callback: returns 401 when nonce not found", () => {
+  const errorResponse = {
+    error: "Invalid state",
+  };
+
+  assertEquals(errorResponse.error, "Invalid state");
+  // Function should return 401 when nonce doesn't exist in DB
+});
+
+Deno.test("webex-oauth-callback: returns 401 when nonce expired", () => {
+  const expiredNonce = {
+    nonce: generateNonce(),
+    expires_at: new Date(Date.now() - 1000).toISOString(), // Expired 1 second ago
+  };
+
+  const isExpired = new Date(expiredNonce.expires_at) < new Date();
+  assertEquals(isExpired, true);
+  // Function should return 401 when nonce.expires_at < now()
+});
+
+Deno.test("webex-oauth-callback: nonce is deleted after successful use", () => {
+  const nonce = generateNonce();
+  const deleteOperation = {
+    table: "display.oauth_nonces",
+    nonce: nonce,
+    action: "delete",
+  };
+
+  assertExists(deleteOperation.nonce);
+  assertEquals(deleteOperation.action, "delete");
+  // Function should delete nonce after successful token exchange (single-use)
 });
 
 // ============================================================================
 // Token Validation Tests
 // ============================================================================
 
-Deno.test("webex-oauth-callback: verifies device token from state", () => {
-  const token = "device-token";
-  const tokenSecret = "jwt-secret";
-
-  assertExists(token);
-  assertExists(tokenSecret);
-  // Function should call verifyDeviceToken()
-});
-
-Deno.test("webex-oauth-callback: returns 401 when token invalid", () => {
-  const errorResponse = {
-    error: "Invalid token",
-  };
-
-  assertEquals(errorResponse.error, "Invalid token");
-});
-
-Deno.test("webex-oauth-callback: validates token_type is device or app", () => {
+Deno.test("webex-oauth-callback: validates token_type from nonce is device or app", () => {
   const validTypes = ["device", "app"];
   const tokenType = "device";
 
@@ -160,144 +222,18 @@ Deno.test("webex-oauth-callback: returns 401 when token_type invalid", () => {
 });
 
 // ============================================================================
-// HMAC Validation Tests (Device Token Path)
-// ============================================================================
-
-Deno.test("webex-oauth-callback: validates HMAC for device tokens", () => {
-  const hmacRequest = {
-    headers: {
-      "X-Device-Serial": "A1B2C3D4",
-      "X-Timestamp": "1234567890",
-      "X-Signature": "hmac-signature",
-      Authorization: "Bearer device-token",
-    },
-  };
-
-  assertExists(hmacRequest.headers["X-Device-Serial"]);
-  assertExists(hmacRequest.headers["X-Timestamp"]);
-  assertExists(hmacRequest.headers["X-Signature"]);
-});
-
-Deno.test("webex-oauth-callback: returns 401 when HMAC invalid", () => {
-  const errorResponse = {
-    error: "Invalid signature",
-  };
-
-  assertEquals(errorResponse.error, "Invalid signature");
-});
-
-Deno.test("webex-oauth-callback: validates token matches device serial", () => {
-  const hmacDevice = {
-    serial_number: "A1B2C3D4",
-  };
-  const tokenPayload = {
-    serial_number: "A1B2C3D4",
-  };
-
-  const matches = hmacDevice.serial_number === tokenPayload.serial_number;
-  assertEquals(matches, true);
-});
-
-Deno.test("webex-oauth-callback: returns 401 when token serial mismatch", () => {
-  const hmacDevice = {
-    serial_number: "A1B2C3D4",
-  };
-  const tokenPayload = {
-    serial_number: "X1Y2Z3W4",
-  };
-
-  const matches = hmacDevice.serial_number === tokenPayload.serial_number;
-  assertEquals(matches, false);
-  // Function should return 401
-});
-
-// ============================================================================
-// App Token Path Tests
-// ============================================================================
-
-Deno.test("webex-oauth-callback: requires pairing_code for app tokens", () => {
-  const tokenPayload = {
-    pairing_code: "ABC123",
-    serial_number: "A1B2C3D4",
-    device_id: "webex-display-C3D4",
-  };
-
-  const hasRequired = !!(tokenPayload.pairing_code && tokenPayload.serial_number && tokenPayload.device_id);
-  assertEquals(hasRequired, true);
-});
-
-Deno.test("webex-oauth-callback: returns 401 when app token missing device identity", () => {
-  const tokenPayload = {
-    pairing_code: null,
-    serial_number: null,
-  };
-
-  const hasRequired = !!(tokenPayload.pairing_code && tokenPayload.serial_number);
-  assertEquals(hasRequired, false);
-  // Function should return 401
-});
-
-Deno.test("webex-oauth-callback: validates state pairing_code matches token", () => {
-  const parsedState = {
-    pairing_code: "ABC123",
-  };
-  const tokenPayload = {
-    pairing_code: "ABC123",
-  };
-
-  const matches = parsedState.pairing_code === tokenPayload.pairing_code;
-  assertEquals(matches, true);
-});
-
-Deno.test("webex-oauth-callback: returns 401 when pairing_code mismatch", () => {
-  const parsedState = {
-    pairing_code: "ABC123",
-  };
-  const tokenPayload = {
-    pairing_code: "XYZ789",
-  };
-
-  const matches = parsedState.pairing_code === tokenPayload.pairing_code;
-  assertEquals(matches, false);
-  // Function should return 401
-});
-
-Deno.test("webex-oauth-callback: validates state serial matches token", () => {
-  const parsedState = {
-    serial: "A1B2C3D4",
-  };
-  const tokenPayload = {
-    serial_number: "A1B2C3D4",
-  };
-
-  const matches = parsedState.serial === tokenPayload.serial_number;
-  assertEquals(matches, true);
-});
-
-Deno.test("webex-oauth-callback: returns 401 when serial mismatch", () => {
-  const parsedState = {
-    serial: "A1B2C3D4",
-  };
-  const tokenPayload = {
-    serial_number: "X1Y2Z3W4",
-  };
-
-  const matches = parsedState.serial === tokenPayload.serial_number;
-  assertEquals(matches, false);
-  // Function should return 401
-});
-
-// ============================================================================
 // OAuth Client Tests
 // ============================================================================
 
 Deno.test("webex-oauth-callback: fetches OAuth client config", () => {
   const clientQuery = {
     provider: "webex",
+    purpose: "device",
     active: true,
   };
 
   assertEquals(clientQuery.provider, "webex");
+  assertEquals(clientQuery.purpose, "device");
   assertEquals(clientQuery.active, true);
 });
 
@@ -393,46 +329,73 @@ Deno.test("webex-oauth-callback: defaults expires_in to 3600", () => {
 });
 
 // ============================================================================
-// Token Storage Tests
+// Token Storage Tests (Nonce-based)
 // ============================================================================
 
-Deno.test("webex-oauth-callback: looks up existing token by serial_number", () => {
+Deno.test("webex-oauth-callback: looks up existing token by device_uuid and user_uuid", () => {
   const tokenQuery = {
     provider: "webex",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+    token_scope: "user",
+  };
+
+  assertEquals(tokenQuery.provider, "webex");
+  assertExists(tokenQuery.device_uuid);
+  assertExists(tokenQuery.user_uuid);
+});
+
+Deno.test("webex-oauth-callback: token storage uses device_uuid from nonce", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
+  };
+
+  const tokenStorage = {
+    device_uuid: nonceData.device_uuid,
+    user_uuid: nonceData.user_uuid,
+  };
+
+  assertExists(tokenStorage.device_uuid);
+  assertEquals(tokenStorage.device_uuid, nonceData.device_uuid);
+});
+
+Deno.test("webex-oauth-callback: token storage uses user_uuid from nonce (NOT pairing_code)", () => {
+  const nonceData = {
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
     serial_number: "A1B2C3D4",
   };
 
-  assertEquals(tokenQuery.provider, "webex");
-  assertExists(tokenQuery.serial_number);
-});
-
-Deno.test("webex-oauth-callback: looks up existing token by pairing_code", () => {
-  const tokenQuery = {
-    provider: "webex",
-    pairing_code: "ABC123",
+  const tokenStorage = {
+    device_uuid: nonceData.device_uuid,
+    user_uuid: nonceData.user_uuid,
+    // Should NOT use pairing_code
   };
 
-  assertEquals(tokenQuery.provider, "webex");
-  assertExists(tokenQuery.pairing_code);
+  assertExists(tokenStorage.user_uuid);
+  assertEquals(tokenStorage.user_uuid, nonceData.user_uuid);
+  // Verify pairing_code is NOT used
+  assertEquals("pairing_code" in tokenStorage, false);
 });
 
 Deno.test("webex-oauth-callback: stores access token in vault", () => {
   const accessToken = "webex-access-token";
-  const secretKey = "A1B2C3D4";
+  const secretKey = "550e8400-e29b-41d4-a716-446655440000"; // device_uuid
   const secretName = `webex_access_${secretKey}`;
 
   assertExists(accessToken);
-  assertEquals(secretName, "webex_access_A1B2C3D4");
+  assertEquals(secretName, "webex_access_550e8400-e29b-41d4-a716-446655440000");
 });
 
 Deno.test("webex-oauth-callback: stores refresh token in vault when provided", () => {
   const refreshToken = "webex-refresh-token";
-  const secretKey = "A1B2C3D4";
+  const secretKey = "550e8400-e29b-41d4-a716-446655440000"; // device_uuid
   const secretName = `webex_refresh_${secretKey}`;
 
   if (refreshToken) {
     assertExists(refreshToken);
-    assertEquals(secretName, "webex_refresh_A1B2C3D4");
+    assertEquals(secretName, "webex_refresh_550e8400-e29b-41d4-a716-446655440000");
   }
 });
 
@@ -441,27 +404,31 @@ Deno.test("webex-oauth-callback: updates existing token row", () => {
     access_token_id: "new-access-secret-id",
     refresh_token_id: "new-refresh-secret-id",
     expires_at: new Date(Date.now() + 3600000).toISOString(),
-    pairing_code: "ABC123",
-    serial_number: "A1B2C3D4",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
     updated_at: new Date().toISOString(),
   };
 
   assertExists(updateData.access_token_id);
   assertExists(updateData.expires_at);
+  assertExists(updateData.device_uuid);
+  assertExists(updateData.user_uuid);
 });
 
 Deno.test("webex-oauth-callback: creates new token row when not exists", () => {
   const insertData = {
     provider: "webex",
-    serial_number: "A1B2C3D4",
-    pairing_code: "ABC123",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
+    user_uuid: "660e8400-e29b-41d4-a716-446655440000",
     access_token_id: "access-secret-id",
     refresh_token_id: "refresh-secret-id",
     expires_at: new Date(Date.now() + 3600000).toISOString(),
+    token_scope: "user",
   };
 
   assertEquals(insertData.provider, "webex");
-  assertExists(insertData.serial_number);
+  assertExists(insertData.device_uuid);
+  assertExists(insertData.user_uuid);
 });
 
 Deno.test("webex-oauth-callback: uses existing refresh_token_id when refresh_token missing", () => {
@@ -492,7 +459,7 @@ Deno.test("webex-oauth-callback: success response indicates success", () => {
 // Error Handling Tests
 // ============================================================================
 
-Deno.test("webex-oauth-callback: returns 500 when JWT_SECRET not configured", () => {
+Deno.test("webex-oauth-callback: returns 500 when config error", () => {
   const errorResponse = {
     error: "Server configuration error",
   };

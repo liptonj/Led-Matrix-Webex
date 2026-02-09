@@ -3,7 +3,7 @@
  *
  * Devices call this to acknowledge command completion (success or failure).
  *
- * Authentication: Bearer token (from device-auth) OR HMAC headers
+ * Authentication: Bearer token (from device-auth) AND HMAC headers (both required)
  *
  * Request body:
  *   {
@@ -19,8 +19,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { validateDeviceAuth } from "../_shared/device_auth.ts";
 
 interface AckCommandRequest {
   command_id: string;
@@ -29,44 +28,6 @@ interface AckCommandRequest {
   error?: string;
 }
 
-interface TokenPayload {
-  sub: string;
-  pairing_code: string;
-  serial_number: string;
-  token_type: string;
-  exp: number;
-  device_uuid?: string;
-}
-
-/**
- * Validate bearer token and return device info
- */
-async function validateBearerToken(
-  authHeader: string | null,
-  tokenSecret: string,
-): Promise<{ valid: boolean; error?: string; device?: TokenPayload }> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return { valid: false, error: "Missing or invalid Authorization header" };
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const payload = await verifyDeviceToken(token, tokenSecret);
-
-    // Verify token type
-    if (payload.token_type !== "device") {
-      return { valid: false, error: "Invalid token type" };
-    }
-
-    return { valid: true, device: payload };
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("expired")) {
-      return { valid: false, error: "Token expired" };
-    }
-    return { valid: false, error: "Invalid token" };
-  }
-}
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -86,19 +47,6 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-    if (!tokenSecret) {
-      console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
-      return new Response(
-        JSON.stringify({ success: false, error: "Server configuration error" }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
     // Create Supabase client with service role
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -110,73 +58,35 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Read body
+    // Read body for HMAC verification
     const body = await req.text();
 
-    let deviceInfo: { serial_number: string; device_uuid: string | null };
+    // Authenticate: require both JWT + HMAC with serial cross-validation
+    const authResult = await validateDeviceAuth(req, supabase, body);
+    if (!authResult.valid) {
+      return new Response(
+        JSON.stringify({ success: false, error: authResult.error }),
+        {
+          status: authResult.httpStatus || 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
-    // Try bearer token first, fall back to HMAC
-    const authHeader = req.headers.get("Authorization");
+    const deviceInfo = {
+      serial_number: authResult.serialNumber!,
+      device_uuid: authResult.deviceUuid || null,
+    };
 
-    if (authHeader?.startsWith("Bearer ")) {
-      const tokenResult = await validateBearerToken(authHeader, tokenSecret);
-      if (!tokenResult.valid || !tokenResult.device) {
-        return new Response(
-          JSON.stringify({ success: false, error: tokenResult.error }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      // Extract device_uuid from JWT token
-      if (!tokenResult.device.device_uuid) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Device UUID not found in token" }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      deviceInfo = {
-        serial_number: tokenResult.device.serial_number,
-        device_uuid: tokenResult.device.device_uuid,
-      };
-    } else {
-      // Fall back to HMAC authentication
-      const hmacResult = await validateHmacRequest(req, supabase, body);
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(
-          JSON.stringify({ success: false, error: hmacResult.error }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      // For HMAC, fetch device_uuid from devices table
-      const { data: dev } = await supabase
-        .schema("display")
-        .from("devices")
-        .select("id")
-        .eq("serial_number", hmacResult.device.serial_number)
-        .single();
-      
-      if (!dev?.id) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Device UUID not found" }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      
-      deviceInfo = {
-        serial_number: hmacResult.device.serial_number,
-        device_uuid: dev.id,
-      };
+    // Validate device_uuid is present
+    if (!deviceInfo.device_uuid) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Device UUID not found" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     // Parse request body

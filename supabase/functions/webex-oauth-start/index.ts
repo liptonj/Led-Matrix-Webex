@@ -1,28 +1,19 @@
 /**
  * Webex OAuth Start
  *
- * Validates device HMAC + JWT and returns a Webex authorization URL.
+ * Two modes:
+ * 1. Create Mode (with Authorization header): Device creates a nonce, returns nonce + page_url
+ * 2. Resolve Mode (no Authorization header): Browser resolves nonce to get OAuth URL
  */
 
-import { encodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 
-interface TokenPayload {
-  pairing_code: string;
-  serial_number: string;
+interface ExtendedTokenPayload extends TokenPayload {
   device_id?: string;
-  token_type: string;
-}
-
-function toBase64Url(input: string): string {
-  return encodeBase64(new TextEncoder().encode(input))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
 }
 
 serve(async (req: Request) => {
@@ -54,60 +45,130 @@ serve(async (req: Request) => {
     });
 
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response(JSON.stringify({ error: "Missing device token" }), {
+
+    // CREATE MODE: Device creates a nonce
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      const payload = (await verifyDeviceToken(token, tokenSecret)) as unknown as ExtendedTokenPayload;
+
+      if (payload.token_type !== "device" && payload.token_type !== "app") {
+        return new Response(JSON.stringify({ error: "Invalid token type" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let serialNumber = payload.serial_number;
+      let deviceId: string | undefined = payload.device_id;
+      let deviceUuid = payload.device_uuid;
+      let userUuid = payload.user_uuid ?? null;
+
+      // For device tokens: validate HMAC and cross-validate serial
+      if (payload.token_type === "device") {
+        const body = await req.text();
+        const hmacResult = await validateHmacRequest(req, supabase, body);
+        if (!hmacResult.valid || !hmacResult.device) {
+          return new Response(JSON.stringify({ error: hmacResult.error || "Invalid signature" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        if (hmacResult.device.serial_number !== payload.serial_number) {
+          return new Response(JSON.stringify({ error: "Token does not match device" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        serialNumber = hmacResult.device.serial_number;
+        deviceId = hmacResult.device.device_id ?? deviceId;
+      } else {
+        // For app tokens: require serial_number and device_uuid in JWT payload
+        if (!serialNumber) {
+          return new Response(JSON.stringify({ error: "Token missing serial_number" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (!deviceUuid) {
+          return new Response(JSON.stringify({ error: "Token missing device_uuid" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Create nonce
+      const { data: nonceRow, error: nonceError } = await supabase
+        .schema("display")
+        .from("oauth_nonces")
+        .insert({
+          serial_number: serialNumber,
+          device_id: deviceId,
+          device_uuid: deviceUuid,
+          user_uuid: userUuid,
+          token_type: payload.token_type,
+        })
+        .select("nonce")
+        .single();
+
+      if (nonceError || !nonceRow) {
+        console.error("Failed to create nonce:", nonceError);
+        return new Response(JSON.stringify({ error: "Failed to create nonce" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          nonce: nonceRow.nonce,
+          page_url: `https://display.5ls.us/webexauth?nonce=${nonceRow.nonce}&serial=${serialNumber}`,
+        }),
+        {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // RESOLVE MODE: Browser resolves nonce to get OAuth URL
+    const bodyText = await req.text();
+    let body: { nonce?: string };
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!body.nonce) {
+      return new Response(JSON.stringify({ error: "Missing nonce" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Look up nonce
+    const { data: nonceRow, error: nonceError } = await supabase
+      .schema("display")
+      .from("oauth_nonces")
+      .select("serial_number, device_id, device_uuid, user_uuid, token_type")
+      .eq("nonce", body.nonce)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+
+    if (nonceError || !nonceRow) {
+      return new Response(JSON.stringify({ error: "Invalid or expired nonce" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const token = authHeader.slice(7);
-    const payload = (await verifyDeviceToken(token, tokenSecret)) as unknown as TokenPayload;
-    if (payload.token_type !== "device" && payload.token_type !== "app") {
-      return new Response(JSON.stringify({ error: "Invalid token type" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    let pairingCode = payload.pairing_code;
-    let serialNumber = payload.serial_number;
-    let deviceId = payload.device_id ?? "";
-    // Always set a timestamp for state validation (app tokens need this for callback validation)
-    let ts = String(Math.floor(Date.now() / 1000));
-    let sig = "";
-
-    if (payload.token_type === "device") {
-      const body = await req.text();
-      const hmacResult = await validateHmacRequest(req, supabase, body);
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(JSON.stringify({ error: hmacResult.error || "Invalid signature" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (hmacResult.device.serial_number !== payload.serial_number) {
-        return new Response(JSON.stringify({ error: "Token does not match device" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      pairingCode = hmacResult.device.pairing_code;
-      serialNumber = hmacResult.device.serial_number;
-      deviceId = hmacResult.device.device_id ?? deviceId;
-      ts = req.headers.get("X-Timestamp") || "";
-      sig = req.headers.get("X-Signature") || "";
-    } else {
-      if (!pairingCode || !serialNumber) {
-        return new Response(JSON.stringify({ error: "Token missing pairing/serial" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
+    // Look up OAuth client config
     const { data: clientRow, error: clientError } = await supabase
       .schema("display")
       .from("oauth_clients")
@@ -126,23 +187,13 @@ serve(async (req: Request) => {
       });
     }
 
-    const statePayload = {
-      pairing_code: pairingCode,
-      serial: serialNumber,
-      device_id: deviceId,
-      ts,
-      sig,
-      token,
-      token_type: payload.token_type,
-    };
-
-    const state = toBase64Url(JSON.stringify(statePayload));
+    // Build Webex OAuth URL with state=nonce (plain nonce string)
     const authUrl = new URL("https://webexapis.com/v1/authorize");
     authUrl.searchParams.set("client_id", clientRow.client_id as string);
     authUrl.searchParams.set("response_type", "code");
     authUrl.searchParams.set("redirect_uri", clientRow.redirect_uri as string);
     authUrl.searchParams.set("scope", "spark:people_read");
-    authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("state", body.nonce);
 
     return new Response(JSON.stringify({ auth_url: authUrl.toString() }), {
       status: 200,

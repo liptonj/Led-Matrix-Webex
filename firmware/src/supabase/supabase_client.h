@@ -229,6 +229,29 @@ public:
     bool syncWebexStatus(String& webexStatus, const String& payload = "");
     bool isWebexTokenMissing() const { return _webexTokenMissing; }
 
+    /**
+     * @brief Make an HTTP request with automatic 401 retry handling
+     * 
+     * Wraps makeRequest() to automatically handle 401 Unauthorized by:
+     * 1. Invalidating the current token
+     * 2. Re-authenticating to get a new token
+     * 3. Retrying the original request once
+     * 
+     * This consolidates the 401 retry pattern used in:
+     * - postDeviceState()
+     * - pollCommands()
+     * - ackCommand()
+     * - insertDeviceLog()
+     * 
+     * @param endpoint Function name (e.g., "post-device-state" or "webex-oauth-start")
+     * @param method HTTP method ("GET" or "POST")
+     * @param body Request body (empty for GET)
+     * @param response Output: response body
+     * @return HTTP status code (0 on connection failure, -2 if rate limited)
+     */
+    int makeRequestWithRetry(const String& endpoint, const String& method,
+                            const String& body, String& response);
+
 private:
     String _supabaseUrl;
     String _pairingCode;
@@ -260,29 +283,6 @@ private:
      */
     int makeRequest(const String& endpoint, const String& method,
                     const String& body, String& response, bool useHmac = false, bool allowImmediate = false);
-    
-    /**
-     * @brief Make an HTTP request with automatic 401 retry handling
-     * 
-     * Wraps makeRequest() to automatically handle 401 Unauthorized by:
-     * 1. Invalidating the current token
-     * 2. Re-authenticating to get a new token
-     * 3. Retrying the original request once
-     * 
-     * This consolidates the 401 retry pattern used in:
-     * - postDeviceState()
-     * - pollCommands()
-     * - ackCommand()
-     * - insertDeviceLog()
-     * 
-     * @param endpoint Function name (e.g., "post-device-state")
-     * @param method HTTP method ("GET" or "POST")
-     * @param body Request body (empty for GET)
-     * @param response Output: response body
-     * @return HTTP status code (0 on connection failure, -2 if rate limited)
-     */
-    int makeRequestWithRetry(const String& endpoint, const String& method,
-                            const String& body, String& response);
     
     bool beginRequestSlot(bool allowImmediate);
 

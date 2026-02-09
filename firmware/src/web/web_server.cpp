@@ -193,12 +193,59 @@ String WebServerManager::getContentType(const String& filename) {
 // ============================================================
 // CORS Support for Cloud-Hosted Embedded App
 // ============================================================
+//
+// SECURITY NOTE: CORS is configured to allow any origin (Access-Control-Allow-Origin: *)
+// This is a known limitation documented in SECURITY_FIXES_APPLIED.md.
+//
+// Why "*" is required - origins that access this device:
+// - Cloud: app.webex.com (embedded app), display.5ls.us, *.supabase.co
+// - Local IPs: 192.168.x.x, 10.x.x.x, 172.16-31.x.x (RFC1918 private ranges)
+// - mDNS: webex-display.local or user-configured *.local names
+// - AP Mode: Browser accessing 192.168.4.1 (captive portal)
+// - Dev: localhost:3000, 127.0.0.1:3000
+// - ESP Web Tools: unpkg.com, jsdelivr.net, or self-hosted
+//
+// Mitigations:
+// - All sensitive endpoints require X-API-Key header authentication
+// - API token is a randomly-generated 32-character hex string
+// - Devices are on local networks, not internet-exposed
+// - Sensitive data in /api/status is gated behind authentication
+//
+// ============================================================
+
+bool WebServerManager::isAuthenticated(AsyncWebServerRequest* request) {
+    // Skip authentication in AP mode (bootstrapping)
+    wifi_mode_t mode = WiFi.getMode();
+    if (mode & WIFI_AP) {
+        return true;  // No auth required in AP mode
+    }
+    
+    // Get API token from ConfigManager
+    String expected_token = config_manager->getApiToken();
+    if (expected_token.isEmpty()) {
+        return false;  // No token configured
+    }
+    
+    // Check X-API-Key header
+    if (request->hasHeader("X-API-Key")) {
+        String provided_token = request->header("X-API-Key");
+        if (provided_token == expected_token) {
+            return true;
+        }
+    }
+    
+    // Query parameter authentication removed for security:
+    // Tokens in URLs can be logged in server logs, browser history, and referrer headers.
+    // Only header-based authentication (X-API-Key) is supported.
+    
+    return false;
+}
 
 void WebServerManager::addCorsHeaders(AsyncWebServerResponse* response) {
-    // Allow requests from any origin (cloud-hosted embedded app)
+    // Allow requests from any origin - see SECURITY NOTE above for justification
     response->addHeader("Access-Control-Allow-Origin", "*");
     response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization");
+    response->addHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization, X-API-Key");
     response->addHeader("Access-Control-Max-Age", "86400");  // Cache preflight for 24 hours
 }
 

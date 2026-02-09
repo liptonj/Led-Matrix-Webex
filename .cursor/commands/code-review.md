@@ -25,6 +25,8 @@ Perform a comprehensive code review of the current file or selection against the
 - [ ] Complex logic is documented
 - [ ] No dead/commented-out code
 - [ ] Proper indentation and formatting
+- [ ] No God Functions
+- [ ] No God Files
 
 ## 🔒 Security Review
 - [ ] **CRITICAL: No hardcoded secrets** (passwords, API keys, tokens)

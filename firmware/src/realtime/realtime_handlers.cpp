@@ -141,8 +141,8 @@ void handleBroadcastPairing(const JsonObject& record) {
     bool statusChanged = false;
 
     if (newAppConnected != deps.app_state.embedded_app_connected ||
-        newWebexStatus != deps.app_state.webex_status ||
-        (!newDisplayName.isEmpty() && newDisplayName != deps.app_state.embedded_app_display_name)) {
+        strcmp(newWebexStatus.c_str(), deps.app_state.webex_status) != 0 ||
+        (!newDisplayName.isEmpty() && strcmp(newDisplayName.c_str(), deps.app_state.embedded_app_display_name) != 0)) {
         statusChanged = true;
     }
 
@@ -167,11 +167,11 @@ void handleBroadcastPairing(const JsonObject& record) {
     deps.app_state.supabase_app_connected = newAppConnected;
     deps.app_state.embedded_app_connected = newAppConnected;
     if (newAppConnected) {
-        deps.app_state.webex_status = newWebexStatus;
+        safeStrCopy(deps.app_state.webex_status, sizeof(deps.app_state.webex_status), newWebexStatus);
         deps.app_state.webex_status_received = true;
-        deps.app_state.webex_status_source = "embedded_app";
+        safeStrCopyLiteral(deps.app_state.webex_status_source, sizeof(deps.app_state.webex_status_source), "embedded_app");
         if (!newDisplayName.isEmpty()) {
-            deps.app_state.embedded_app_display_name = newDisplayName;
+            safeStrCopy(deps.app_state.embedded_app_display_name, sizeof(deps.app_state.embedded_app_display_name), newDisplayName);
         }
         if (!deps.app_state.xapi_connected) {
             deps.app_state.camera_on = newCameraOn;
@@ -296,12 +296,12 @@ void handlePairingUpdate(const JsonObject& data) {
     }
 
     // Check webex status change
-    if (newWebexStatus != deps.app_state.webex_status) {
+    if (strcmp(newWebexStatus.c_str(), deps.app_state.webex_status) != 0) {
         statusChanged = true;
     }
 
     // Check display name change (only if non-empty)
-    if (!newDisplayName.isEmpty() && newDisplayName != deps.app_state.embedded_app_display_name) {
+    if (!newDisplayName.isEmpty() && strcmp(newDisplayName.c_str(), deps.app_state.embedded_app_display_name) != 0) {
         statusChanged = true;
     }
 
@@ -328,12 +328,12 @@ void handlePairingUpdate(const JsonObject& data) {
     deps.app_state.supabase_app_connected = newAppConnected;
     deps.app_state.embedded_app_connected = newAppConnected;
     if (newAppConnected) {
-        deps.app_state.webex_status = newWebexStatus;
+        safeStrCopy(deps.app_state.webex_status, sizeof(deps.app_state.webex_status), newWebexStatus);
         deps.app_state.webex_status_received = true;
-        deps.app_state.webex_status_source = "embedded_app";
+        safeStrCopyLiteral(deps.app_state.webex_status_source, sizeof(deps.app_state.webex_status_source), "embedded_app");
 
         if (!newDisplayName.isEmpty()) {
-            deps.app_state.embedded_app_display_name = newDisplayName;
+            safeStrCopy(deps.app_state.embedded_app_display_name, sizeof(deps.app_state.embedded_app_display_name), newDisplayName);
         }
 
         // Only update camera/mic/call if not using xAPI
@@ -498,10 +498,10 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     
     // Check if status changed
     bool statusChanged = false;
-    if (webexStatus != deps.app_state.webex_status) {
+    if (strcmp(webexStatus.c_str(), deps.app_state.webex_status) != 0) {
         statusChanged = true;
         ESP_LOGI(TAG, "Webex status changed: %s -> %s",
-                 deps.app_state.webex_status.c_str(), webexStatus.c_str());
+                 deps.app_state.webex_status, webexStatus.c_str());
     }
     
     if (inCall != deps.app_state.in_call) {
@@ -525,10 +525,10 @@ void handleWebexStatusUpdate(JsonObject& payload) {
                  micMuted ? "muted" : "unmuted");
     }
     
-    if (!displayName.isEmpty() && displayName != deps.app_state.embedded_app_display_name) {
+    if (!displayName.isEmpty() && strcmp(displayName.c_str(), deps.app_state.embedded_app_display_name) != 0) {
         statusChanged = true;
         ESP_LOGI(TAG, "Display name changed: %s -> %s",
-                 deps.app_state.embedded_app_display_name.c_str(),
+                 deps.app_state.embedded_app_display_name,
                  displayName.c_str());
     }
     
@@ -538,9 +538,9 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     }
     
     // Update app state
-    deps.app_state.webex_status = webexStatus;
+    safeStrCopy(deps.app_state.webex_status, sizeof(deps.app_state.webex_status), webexStatus);
     deps.app_state.webex_status_received = true;
-    deps.app_state.webex_status_source = "realtime_user_channel";
+    safeStrCopyLiteral(deps.app_state.webex_status_source, sizeof(deps.app_state.webex_status_source), "realtime_user_channel");
     deps.app_state.in_call = inCall;
     deps.app_state.camera_on = cameraOn;
     deps.app_state.mic_muted = micMuted;
@@ -549,7 +549,7 @@ void handleWebexStatusUpdate(JsonObject& payload) {
     deps.config.setLastWebexStatus(webexStatus);
     
     if (!displayName.isEmpty()) {
-        deps.app_state.embedded_app_display_name = displayName;
+        safeStrCopy(deps.app_state.embedded_app_display_name, sizeof(deps.app_state.embedded_app_display_name), displayName);
         // Also save to config for persistence
         deps.config.setDisplayName(displayName);
     }

@@ -4,7 +4,7 @@
  * Devices poll for pending commands. Returns up to 10 oldest pending
  * commands for the device's pairing code.
  *
- * Authentication: Bearer token (from device-auth) OR HMAC headers
+ * Authentication: Bearer token (from device-auth) AND HMAC headers (both required)
  *
  * Response:
  *   {
@@ -22,8 +22,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { validateDeviceAuth } from "../_shared/device_auth.ts";
 
 const MAX_COMMANDS_PER_POLL = 10;
 
@@ -39,46 +38,6 @@ interface PollCommandsResponse {
   commands: CommandItem[];
 }
 
-interface TokenPayload {
-  sub: string;
-  pairing_code: string;
-  serial_number: string;
-  token_type: string;
-  exp: number;
-  device_uuid?: string;
-  user_uuid?: string | null;
-}
-
-/**
- * Validate bearer token and return device info
- */
-async function validateBearerToken(
-  authHeader: string | null,
-  tokenSecret: string,
-): Promise<{ valid: boolean; error?: string; device?: TokenPayload }> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return { valid: false, error: "Missing or invalid Authorization header" };
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const payload = await verifyDeviceToken(token, tokenSecret);
-
-    // Verify token type
-    if (payload.token_type !== "device") {
-      return { valid: false, error: "Invalid token type" };
-    }
-
-    return { valid: true, device: payload };
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("expired")) {
-      return { valid: false, error: "Token expired" };
-    }
-    return { valid: false, error: "Invalid token" };
-  }
-}
-
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -92,19 +51,6 @@ Deno.serve(async (req) => {
         JSON.stringify({ success: false, error: "Method not allowed" }),
         {
           status: 405,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Get Supabase JWT signing secret (required for PostgREST/Realtime auth)
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-    if (!tokenSecret) {
-      console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
-      return new Response(
-        JSON.stringify({ success: false, error: "Server configuration error" }),
-        {
-          status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -127,44 +73,23 @@ Deno.serve(async (req) => {
       body = await req.text();
     }
 
-    let deviceInfo: { serial_number: string; pairing_code: string; device_uuid?: string };
-
-    // Try bearer token first, fall back to HMAC
-    const authHeader = req.headers.get("Authorization");
-
-    if (authHeader?.startsWith("Bearer ")) {
-      const tokenResult = await validateBearerToken(authHeader, tokenSecret);
-      if (!tokenResult.valid || !tokenResult.device) {
-        return new Response(
-          JSON.stringify({ success: false, error: tokenResult.error }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      deviceInfo = {
-        serial_number: tokenResult.device.serial_number,
-        pairing_code: tokenResult.device.pairing_code,
-        device_uuid: tokenResult.device.device_uuid,
-      };
-    } else {
-      // Fall back to HMAC authentication
-      const hmacResult = await validateHmacRequest(req, supabase, body);
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(
-          JSON.stringify({ success: false, error: hmacResult.error }),
-          {
-            status: 401,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
-      deviceInfo = {
-        serial_number: hmacResult.device.serial_number,
-        pairing_code: hmacResult.device.pairing_code,
-      };
+    // Authenticate: require both JWT + HMAC with serial cross-validation
+    const authResult = await validateDeviceAuth(req, supabase, body);
+    if (!authResult.valid) {
+      return new Response(
+        JSON.stringify({ success: false, error: authResult.error }),
+        {
+          status: authResult.httpStatus || 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
+
+    const deviceInfo = {
+      serial_number: authResult.serialNumber!,
+      pairing_code: authResult.pairingCode || "",
+      device_uuid: authResult.deviceUuid,
+    };
 
     // Query pending commands for this device using device_uuid (preferred) or pairing_code (fallback)
     let query = supabase

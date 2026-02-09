@@ -452,18 +452,25 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     uint32_t hmacTimestamp = 0;
     bool hmacUsed = false;
     
-    if (useHmac) {
-        // Add HMAC authentication headers using helper
+    // Always add Bearer token when available
+    if (!_token.isEmpty()) {
+        http.addHeader("Authorization", "Bearer " + _token);
+    }
+    
+    // Always add HMAC headers when device is provisioned
+    if (deviceCredentials.isProvisioned()) {
         if (!addHmacHeaders(http, body)) {
-            http.end();
-            return 0;
-        }
-        hmacUsed = true;
-        hmacTimestamp = DeviceCredentials::getTimestamp(); // For debug logging
-    } else {
-        // Add Bearer token
-        if (!_token.isEmpty()) {
-            http.addHeader("Authorization", "Bearer " + _token);
+            if (useHmac) {
+                // HMAC was explicitly required (e.g., device-auth) - fail
+                http.end();
+                _requestInFlight = false;
+                return 0;
+            }
+            // HMAC was best-effort - continue without it
+            ESP_LOGW(TAG, "HMAC headers failed (best-effort), continuing with JWT only");
+        } else {
+            hmacUsed = true;
+            hmacTimestamp = DeviceCredentials::getTimestamp();
         }
     }
 
@@ -471,14 +478,15 @@ int SupabaseClient::makeRequest(const String& endpoint, const String& method,
     if (endpoint == "device-auth") {
         ESP_LOGD(TAG, "Request debug: %s %s", method.c_str(), url.c_str());
         ESP_LOGD(TAG, "Request headers: Content-Type=application/json");
+        if (!_token.isEmpty()) {
+            ESP_LOGD(TAG, "Request headers: Authorization=Bearer <redacted>");
+        }
         if (hmacUsed) {
             ESP_LOGD(TAG, "Request headers: X-Device-Serial=%s",
                      deviceCredentials.getSerialNumber().c_str());
             ESP_LOGD(TAG, "Request headers: X-Timestamp=%lu",
                      (unsigned long)hmacTimestamp);
             ESP_LOGD(TAG, "Request headers: X-Signature=<redacted>");
-        } else if (!_token.isEmpty()) {
-            ESP_LOGD(TAG, "Request headers: Authorization=Bearer <redacted>");
         }
         if (body.isEmpty()) {
             ESP_LOGD(TAG, "Request payload: (empty)");

@@ -189,6 +189,10 @@ public:
     void setDateFormat(const String& format);
     uint8_t getDateFormatCode() const;
 
+    // API Token Configuration
+    String getApiToken();
+    void regenerateApiToken();
+
     // Factory reset
     void factoryReset();
 

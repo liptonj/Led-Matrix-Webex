@@ -30,6 +30,13 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
     static int last_web_progress = -1;
 
     if (index == 0) {
+        // Check authentication on first chunk
+        if (!isAuthenticated(request)) {
+            ota_upload_error = "Unauthorized";
+            ESP_LOGW(TAG, "OTA upload rejected: authentication failed");
+            return;
+        }
+        
         ota_upload_in_progress = true;
         ota_upload_error = "";
         ota_upload_size = total > 0 ? total : request->contentLength();
@@ -308,6 +315,15 @@ void WebServerManager::handleOTAUploadChunk(AsyncWebServerRequest* request,
 }
 
 void WebServerManager::handleOTAUploadComplete(AsyncWebServerRequest* request) {
+    // Check authentication (belt and suspenders)
+    if (!isAuthenticated(request)) {
+        JsonDocument doc;
+        doc["error"] = "Unauthorized";
+        doc["message"] = "Authentication required";
+        sendJsonResponse(request, 401, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+        return;
+    }
+    
     JsonDocument doc;
     
     if (ota_upload_error.isEmpty()) {
@@ -329,6 +345,13 @@ void WebServerManager::handleOTAFilesystemUploadChunk(AsyncWebServerRequest* req
                                                        bool final) {
     // Filesystem-only upload (legacy - not typically used anymore)
     if (index == 0) {
+        // Check authentication on first chunk
+        if (!isAuthenticated(request)) {
+            ota_upload_error = "Unauthorized";
+            ESP_LOGW(TAG, "Filesystem upload rejected: authentication failed");
+            return;
+        }
+        
         ota_upload_in_progress = true;
         ota_upload_error = "";
         ESP_LOGI(TAG, "Filesystem upload start: %s", filename.c_str());
@@ -365,6 +388,15 @@ void WebServerManager::handleOTAFilesystemUploadChunk(AsyncWebServerRequest* req
 }
 
 void WebServerManager::handleOTAFilesystemUploadComplete(AsyncWebServerRequest* request) {
+    // Check authentication (belt and suspenders)
+    if (!isAuthenticated(request)) {
+        JsonDocument doc;
+        doc["error"] = "Unauthorized";
+        doc["message"] = "Authentication required";
+        sendJsonResponse(request, 401, doc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });
+        return;
+    }
+    
     JsonDocument doc;
     
     if (ota_upload_error.isEmpty()) {

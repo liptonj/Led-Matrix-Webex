@@ -15,7 +15,7 @@ void WebServerManager::handleEmbeddedStatusGet(AsyncWebServerRequest* request) {
     // Return current status for embedded app to read
     JsonDocument doc;
     
-    doc["status"] = app_state->webex_status;
+    doc["status"] = app_state->webex_status;  // ArduinoJson handles char arrays directly
     doc["camera_on"] = app_state->camera_on;
     doc["mic_muted"] = app_state->mic_muted;
     doc["in_call"] = app_state->in_call;
@@ -84,12 +84,12 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
         EmbeddedStatusLookup::NormalizedStatus normalized = 
             EmbeddedStatusLookup::normalize(newStatus.c_str());
         
-        app_state->webex_status = normalized.status;
+        safeStrCopy(app_state->webex_status, sizeof(app_state->webex_status), normalized.status);
         if (normalized.sets_in_call) {
             app_state->in_call = true;
         }
         
-        ESP_LOGI(TAG, "Embedded app status update: %s", app_state->webex_status.c_str());
+        ESP_LOGI(TAG, "Embedded app status update: %s", app_state->webex_status);
     }
     
     // Handle call state
@@ -117,7 +117,7 @@ void WebServerManager::handleEmbeddedStatus(AsyncWebServerRequest* request, uint
     
     JsonDocument responseDoc;
     responseDoc["success"] = true;
-    responseDoc["status"] = app_state->webex_status;
+    responseDoc["status"] = app_state->webex_status;  // ArduinoJson handles char arrays directly
     responseDoc["message"] = "Status updated from embedded app";
     
     sendJsonResponse(request, 200, responseDoc, [this](AsyncWebServerResponse* r) { addCorsHeaders(r); });

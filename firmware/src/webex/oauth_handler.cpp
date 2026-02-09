@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <WiFiClientSecure.h>
 #include <esp_random.h>
+#include <time.h>
 #include "../common/ca_certs.h"
 #include "../common/secure_client_config.h"
 #include "../common/url_utils.h"
@@ -201,7 +202,7 @@ bool OAuthHandler::needsRefresh() const {
     }
     
     // Refresh if token expires in less than 5 minutes
-    unsigned long now = millis() / 1000;
+    time_t now = time(nullptr);
     return (token_expiry > 0 && now >= (token_expiry - 300));
 }
 
@@ -239,7 +240,7 @@ bool OAuthHandler::parseTokenResponse(const String& response) {
     
     // Calculate expiry time
     int expires_in = doc["expires_in"] | 3600;
-    token_expiry = (millis() / 1000) + expires_in;
+    token_expiry = time(nullptr) + expires_in;
     
     ESP_LOGI(TAG, "Token received, expires in %d seconds", expires_in);
     return true;

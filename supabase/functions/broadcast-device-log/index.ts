@@ -5,8 +5,8 @@
  * Intended for admin dashboards; logs are NOT stored in the database.
  *
  * Authentication:
- * - Bearer token (from device-auth), signed with SUPABASE_JWT_SECRET, OR
- * - HMAC headers (X-Device-Serial, X-Timestamp, X-Signature)
+ * - Bearer token (from device-auth) AND HMAC headers (both required)
+ * - Headers: Authorization Bearer + X-Device-Serial, X-Timestamp, X-Signature
  *
  * Request body:
  *   { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
@@ -15,8 +15,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendBroadcast } from "../_shared/broadcast.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
+import { validateDeviceAuth } from "../_shared/device_auth.ts";
 
 const MAX_LOGS_PER_MINUTE = 60;
 const RATE_WINDOW_SECONDS = 60;
@@ -27,36 +26,6 @@ interface InsertLogRequest {
   level: LogLevel;
   message: string;
   metadata?: Record<string, unknown>;
-}
-
-async function validateBearerToken(
-  authHeader: string | null,
-  tokenSecret: string,
-): Promise<{ valid: boolean; error?: string; device?: TokenPayload }> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return { valid: false, error: "Missing or invalid Authorization header" };
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    const payload = await verifyDeviceToken(token, tokenSecret);
-
-    if (payload.token_type !== "device") {
-      return { valid: false, error: "Invalid token type" };
-    }
-
-    if (!payload.serial_number || !payload.device_uuid) {
-      return { valid: false, error: "Invalid token payload" };
-    }
-
-    return { valid: true, device: payload };
-  } catch (err) {
-    if (err instanceof Error && err.message.includes("expired")) {
-      return { valid: false, error: "Token expired" };
-    }
-    return { valid: false, error: "Invalid token" };
-  }
 }
 
 Deno.serve(async (req) => {
@@ -72,15 +41,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-    if (!tokenSecret) {
-      console.error("SUPABASE_JWT_SECRET/DEVICE_JWT_SECRET not configured");
-      return new Response(JSON.stringify({ success: false, error: "Server configuration error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey, {
@@ -89,34 +49,19 @@ Deno.serve(async (req) => {
 
     const bodyText = await req.text();
 
-    let serialNumber = "";
-    let deviceId = "";
-    let deviceUuid = "";
-    let isDebugEnabled = false;
-
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      const tokenResult = await validateBearerToken(authHeader, tokenSecret);
-      if (!tokenResult.valid || !tokenResult.device) {
-        return new Response(JSON.stringify({ success: false, error: tokenResult.error }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      serialNumber = tokenResult.device.serial_number;
-      deviceUuid = tokenResult.device.device_uuid || "";
-    } else {
-      const hmacResult = await validateHmacRequest(req, supabase, bodyText);
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(JSON.stringify({ success: false, error: hmacResult.error }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      serialNumber = hmacResult.device.serial_number;
-      deviceId = hmacResult.device.device_id;
-      isDebugEnabled = hmacResult.device.debug_enabled;
+    // Authenticate: require both JWT + HMAC with serial cross-validation
+    const authResult = await validateDeviceAuth(req, supabase, bodyText);
+    if (!authResult.valid) {
+      return new Response(JSON.stringify({ success: false, error: authResult.error }), {
+        status: authResult.httpStatus || 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+
+    let serialNumber = authResult.serialNumber || "";
+    let deviceId = authResult.deviceId || "";
+    let deviceUuid = authResult.deviceUuid || "";
+    let isDebugEnabled = authResult.debugEnabled || false;
 
     // If we used a bearer token, fetch device_id and debug_enabled once (service role, cheap query).
     if (!deviceId || !deviceUuid || !isDebugEnabled) {

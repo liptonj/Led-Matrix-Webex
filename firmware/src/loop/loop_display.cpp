@@ -199,10 +199,10 @@ void update_display() {
 
     // Build display data
     DisplayData data;
-    data.webex_status = deps.app_state.webex_status;
+    data.webex_status = String(deps.app_state.webex_status);
     // Prefer embedded app display name (from Webex SDK), fallback to config, then device name
-    if (deps.app_state.embedded_app_connected && !deps.app_state.embedded_app_display_name.isEmpty()) {
-        data.display_name = extractFirstName(deps.app_state.embedded_app_display_name);
+    if (deps.app_state.embedded_app_connected && deps.app_state.embedded_app_display_name[0] != '\0') {
+        data.display_name = extractFirstName(String(deps.app_state.embedded_app_display_name));
     } else if (!cached.display_name_short.isEmpty()) {
         data.display_name = cached.display_name_short;
     } else {
@@ -216,7 +216,7 @@ void update_display() {
     data.show_call_status = deps.app_state.xapi_connected || deps.app_state.embedded_app_connected || deps.app_state.in_call;
     data.temperature = deps.app_state.temperature;
     data.humidity = deps.app_state.humidity;
-    data.door_status = deps.app_state.door_status;
+    data.door_status = String(deps.app_state.door_status);
     data.air_quality_index = deps.app_state.air_quality_index;
     data.tvoc = deps.app_state.tvoc;
     data.co2_ppm = deps.app_state.co2_ppm;

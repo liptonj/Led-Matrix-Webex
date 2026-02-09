@@ -53,13 +53,13 @@ void handleMQTT(LoopContext& ctx) {
         if (configured_display_sensor.isEmpty()) {
             ctx.app_state->temperature = latest.temperature;
             ctx.app_state->humidity = latest.humidity;
-            ctx.app_state->door_status = latest.door_status;
+            safeStrCopy(ctx.app_state->door_status, sizeof(ctx.app_state->door_status), latest.door_status);
             ctx.app_state->air_quality_index = latest.air_quality_index;
             ctx.app_state->tvoc = latest.tvoc;
             ctx.app_state->co2_ppm = latest.co2_ppm;
             ctx.app_state->pm2_5 = latest.pm2_5;
             ctx.app_state->ambient_noise = latest.ambient_noise;
-            ctx.app_state->sensor_mac = latest.sensor_mac;
+            safeStrCopy(ctx.app_state->sensor_mac, sizeof(ctx.app_state->sensor_mac), latest.sensor_mac);
             last_display_sensor = latest.sensor_mac;
             ctx.app_state->sensor_data_valid = latest.valid;
             ctx.app_state->last_sensor_update = millis();
@@ -89,13 +89,13 @@ void handleMQTT(LoopContext& ctx) {
         if (ctx.mqtt_client->getSensorData(configured_display_sensor, selected)) {
             ctx.app_state->temperature = selected.temperature;
             ctx.app_state->humidity = selected.humidity;
-            ctx.app_state->door_status = selected.door_status;
+            safeStrCopy(ctx.app_state->door_status, sizeof(ctx.app_state->door_status), selected.door_status);
             ctx.app_state->air_quality_index = selected.air_quality_index;
             ctx.app_state->tvoc = selected.tvoc;
             ctx.app_state->co2_ppm = selected.co2_ppm;
             ctx.app_state->pm2_5 = selected.pm2_5;
             ctx.app_state->ambient_noise = selected.ambient_noise;
-            ctx.app_state->sensor_mac = configured_display_sensor;
+            safeStrCopy(ctx.app_state->sensor_mac, sizeof(ctx.app_state->sensor_mac), configured_display_sensor);
             last_display_sensor = configured_display_sensor;
             ctx.app_state->sensor_data_valid = selected.valid;
             ctx.app_state->last_sensor_update = millis();

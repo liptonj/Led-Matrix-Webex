@@ -19,37 +19,63 @@ static const char* TAG = "API_WEBEX";
 
 void WebServerManager::handleWebexAuth(AsyncWebServerRequest* request) {
     auto& deps = getDependencies();
-    const String pairing_code = deps.pairing.getCode();
     const String serial = deps.credentials.getSerialNumber();
-    const String token = deps.supabase.getAccessToken();
-    const uint32_t ts = DeviceCredentials::getTimestamp();
-    const String sig = deps.credentials.signRequest(ts, "");
 
-    if (pairing_code.isEmpty() || serial.isEmpty()) {
+    if (serial.isEmpty()) {
         request->send(400, "application/json", "{\"error\":\"Device not ready\"}");
         return;
     }
-    if (sig.isEmpty()) {
+    if (!deps.credentials.isProvisioned()) {
         request->send(400, "application/json", "{\"error\":\"Device not provisioned\"}");
         return;
     }
-    if (token.isEmpty()) {
+    if (deps.supabase.getAccessToken().isEmpty()) {
         request->send(400, "application/json", "{\"error\":\"Device auth token not available\"}");
         return;
     }
 
-    String auth_url = "https://display.5ls.us/webexauth";
-    auth_url += "?pairing_code=" + urlEncode(pairing_code);
-    auth_url += "&serial=" + urlEncode(serial);
-    auth_url += "&ts=" + String(ts);
-    auth_url += "&sig=" + urlEncode(sig);
-    auth_url += "&token=" + urlEncode(token);
+    // Ensure we have a valid authentication token
+    if (!deps.supabase.isAuthenticated()) {
+        if (!deps.supabase.authenticate()) {
+            ESP_LOGE(TAG, "Failed to authenticate with Supabase");
+            request->send(502, "application/json", "{\"error\":\"Failed to authenticate\"}");
+            return;
+        }
+    }
+
+    // Request a nonce from the webex-oauth-start edge function
+    // The Supabase client will automatically include JWT + HMAC headers
+    String responseBody;
+    int httpCode = deps.supabase.makeRequestWithRetry(
+        "webex-oauth-start", "POST", "{}", responseBody
+    );
+
+    if (httpCode != 200) {
+        ESP_LOGE(TAG, "Failed to get OAuth nonce, HTTP %d", httpCode);
+        request->send(502, "application/json", "{\"error\":\"Failed to initiate OAuth\"}");
+        return;
+    }
 
     JsonDocument doc;
-    doc["auth_url"] = auth_url;
+    DeserializationError err = deserializeJson(doc, responseBody);
+    if (err || !doc["nonce"].is<const char*>()) {
+        ESP_LOGE(TAG, "Invalid nonce response: %s", err.c_str());
+        request->send(502, "application/json", "{\"error\":\"Invalid OAuth response\"}");
+        return;
+    }
+
+    const char* nonce = doc["nonce"];
+    
+    // Build URL with only nonce and serial (no secrets)
+    String auth_url = "https://display.5ls.us/webexauth";
+    auth_url += "?nonce=" + urlEncode(String(nonce));
+    auth_url += "&serial=" + urlEncode(serial);
+
+    JsonDocument respDoc;
+    respDoc["auth_url"] = auth_url;
 
     String response;
-    serializeJson(doc, response);
+    serializeJson(respDoc, response);
     request->send(200, "application/json", response);
 }
 

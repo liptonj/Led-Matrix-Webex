@@ -176,10 +176,10 @@ void SyncManager::performSync(bool isHeartbeat) {
 
         if (appState.app_connected) {
             deps.app_state.supabase_app_connected = true;
-            deps.app_state.webex_status = appState.webex_status;
+            safeStrCopy(deps.app_state.webex_status, sizeof(deps.app_state.webex_status), appState.webex_status);
             deps.app_state.webex_status_received = true;
             if (!appState.display_name.isEmpty()) {
-                deps.app_state.embedded_app_display_name = appState.display_name;
+                safeStrCopy(deps.app_state.embedded_app_display_name, sizeof(deps.app_state.embedded_app_display_name), appState.display_name);
             }
             deps.app_state.camera_on = appState.camera_on;
             deps.app_state.mic_muted = appState.mic_muted;

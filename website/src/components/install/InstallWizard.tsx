@@ -214,6 +214,13 @@ export function InstallWizard() {
           sendTokenWithRetry().catch((error) => {
             console.error('[InstallWizard] Error sending provision token:', error);
           });
+
+          // Request pairing code from device in case we missed the boot output
+          setTimeout(() => {
+            sendCommand('SUPABASE').catch((error) => {
+              console.error('[InstallWizard] Error sending SUPABASE command:', error);
+            });
+          }, 500);
         } else {
           console.warn('[InstallWizard] Failed to create provision token, continuing with pairing code fallback');
         }

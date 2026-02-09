@@ -336,13 +336,13 @@ static void handle_status_command() {
     snprintf(buf, sizeof(buf), "Supabase: %s | App: %s | Webex Source: %s",
              deps.supabase.isAuthenticated() ? "Yes" : "No",
              deps.supabase.isAppConnected() ? "Yes" : "No",
-             deps.app_state.webex_status_source.c_str());
+             deps.app_state.webex_status_source);
     Serial.println(buf);
 
     snprintf(buf, sizeof(buf), "Realtime: %s | MQTT: %s | Webex: %s (%s)",
              deps.realtime.isConnected() ? "Yes" : "No",
              (deps.mqtt.isInitialized() && deps.mqtt.isConnected()) ? "Yes" : "No",
-             deps.app_state.webex_status.c_str(),
+             deps.app_state.webex_status,
              deps.app_state.webex_authenticated ? "auth" : "no-auth");
     Serial.println(buf);
 
@@ -841,9 +841,9 @@ static void handle_webex_command() {
     char buf[128];
     snprintf(buf, sizeof(buf), "Authenticated: %s", deps.app_state.webex_authenticated ? "Yes" : "No");
     Serial.println(buf);
-    snprintf(buf, sizeof(buf), "Status: %s", deps.app_state.webex_status.c_str());
+    snprintf(buf, sizeof(buf), "Status: %s", deps.app_state.webex_status);
     Serial.println(buf);
-    snprintf(buf, sizeof(buf), "Source: %s", deps.app_state.webex_status_source.c_str());
+    snprintf(buf, sizeof(buf), "Source: %s", deps.app_state.webex_status_source);
     Serial.println(buf);
     snprintf(buf, sizeof(buf), "Status Received: %s", deps.app_state.webex_status_received ? "Yes" : "No");
     Serial.println(buf);
@@ -854,8 +854,8 @@ static void handle_webex_command() {
     snprintf(buf, sizeof(buf), "Token Missing: %s", deps.supabase.isWebexTokenMissing() ? "Yes" : "No");
     Serial.println(buf);
 
-    if (deps.app_state.embedded_app_display_name.length() > 0) {
-        snprintf(buf, sizeof(buf), "Display Name: %s", deps.app_state.embedded_app_display_name.c_str());
+    if (deps.app_state.embedded_app_display_name[0] != '\0') {
+        snprintf(buf, sizeof(buf), "Display Name: %s", deps.app_state.embedded_app_display_name);
         Serial.println(buf);
     }
 
@@ -886,7 +886,7 @@ static void handle_sensor_command() {
         Serial.println(buf);
         snprintf(buf, sizeof(buf), "Humidity: %.1f %%", deps.app_state.humidity);
         Serial.println(buf);
-        snprintf(buf, sizeof(buf), "Door: %s", deps.app_state.door_status.c_str());
+        snprintf(buf, sizeof(buf), "Door: %s", deps.app_state.door_status);
         Serial.println(buf);
         snprintf(buf, sizeof(buf), "Air Quality: %d  TVOC: %.1f ppb",
                  deps.app_state.air_quality_index, deps.app_state.tvoc);
@@ -896,7 +896,7 @@ static void handle_sensor_command() {
         Serial.println(buf);
         snprintf(buf, sizeof(buf), "Ambient Noise: %.1f dB", deps.app_state.ambient_noise);
         Serial.println(buf);
-        snprintf(buf, sizeof(buf), "Sensor MAC: %s", deps.app_state.sensor_mac.c_str());
+        snprintf(buf, sizeof(buf), "Sensor MAC: %s", deps.app_state.sensor_mac);
         Serial.println(buf);
 
         if (deps.app_state.last_sensor_update > 0) {

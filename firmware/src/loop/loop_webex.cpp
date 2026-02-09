@@ -110,9 +110,9 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
         } else {
             cloud_synced = deps.supabase.syncWebexStatus(cloud_status);
             if (cloud_synced) {
-                ctx.app_state->webex_status = cloud_status;
+                safeStrCopy(ctx.app_state->webex_status, sizeof(ctx.app_state->webex_status), cloud_status);
                 ctx.app_state->webex_status_received = true;
-                ctx.app_state->webex_status_source = "cloud";
+                safeStrCopyLiteral(ctx.app_state->webex_status_source, sizeof(ctx.app_state->webex_status_source), "cloud");
                 // Cloud successfully fetched Webex status using server-side OAuth tokens
                 // Mark as authenticated so the UI reflects the connection
                 if (!ctx.app_state->webex_authenticated) {
@@ -144,9 +144,9 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
         ESP_LOGW(TAG, "Cloud status failed, falling back to local API");
         WebexPresence presence;
         if (ctx.webex_client->getPresence(presence)) {
-            ctx.app_state->webex_status = presence.status;
+            safeStrCopy(ctx.app_state->webex_status, sizeof(ctx.app_state->webex_status), presence.status);
             ctx.app_state->webex_status_received = true;
-            ctx.app_state->webex_status_source = "local";
+            safeStrCopyLiteral(ctx.app_state->webex_status_source, sizeof(ctx.app_state->webex_status_source), "local");
 
             // Auto-populate display name with firstName if not already set
             if (ctx.config_manager->getDisplayName().isEmpty() && !presence.first_name.isEmpty()) {

@@ -2,29 +2,13 @@
  * Webex OAuth Callback
  *
  * Exchanges the auth code for tokens and stores them in vault + display.oauth_tokens.
+ * Uses nonce-based state lookup instead of JWT extraction.
  */
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
-import { decodeBase64 } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-import { validateHmacRequest } from "../_shared/hmac.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
 import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
-
-interface StatePayload {
-  pairing_code: string;
-  serial: string;
-  ts: string;
-  sig: string;
-  token: string;
-}
-
-function fromBase64Url(input: string): string {
-  const padded = input.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((input.length + 3) % 4);
-  const bytes = decodeBase64(padded);
-  return new TextDecoder().decode(bytes);
-}
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -41,14 +25,6 @@ serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const tokenSecret = Deno.env.get("SUPABASE_JWT_SECRET") || Deno.env.get("DEVICE_JWT_SECRET");
-
-    if (!tokenSecret) {
-      return new Response(JSON.stringify({ error: "Server configuration error" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const { code, state } = await req.json();
     if (!code || !state) {
@@ -58,81 +34,31 @@ serve(async (req: Request) => {
       });
     }
 
-    let parsedState: StatePayload;
-    try {
-      parsedState = JSON.parse(fromBase64Url(state));
-    } catch {
-      return new Response(JSON.stringify({ error: "Invalid state" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const authHeader = `Bearer ${parsedState.token}`;
-    const payload = await verifyDeviceToken(parsedState.token, tokenSecret);
-    if (payload.token_type !== "device" && payload.token_type !== "app") {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
+    // Look up nonce from oauth_nonces table
+    const { data: nonceRow, error: nonceError } = await supabase
+      .schema("display")
+      .from("oauth_nonces")
+      .select("serial_number, device_id, device_uuid, user_uuid, token_type")
+      .eq("nonce", state)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+
+    if (nonceError || !nonceRow) {
+      return new Response(JSON.stringify({ error: "Invalid or expired nonce" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    let pairingCode = parsedState.pairing_code || payload.pairing_code;
-    let serialNumber = parsedState.serial || payload.serial_number;
-    let deviceId = parsedState.device_id || payload.device_id;
-
-    if (payload.token_type === "device") {
-      const hmacRequest = new Request("https://local", {
-        headers: {
-          "X-Device-Serial": parsedState.serial,
-          "X-Timestamp": parsedState.ts,
-          "X-Signature": parsedState.sig,
-          Authorization: authHeader,
-        },
-      });
-
-      const hmacResult = await validateHmacRequest(hmacRequest, supabase, "");
-      if (!hmacResult.valid || !hmacResult.device) {
-        return new Response(JSON.stringify({ error: hmacResult.error || "Invalid signature" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      if (hmacResult.device.serial_number !== payload.serial_number) {
-        return new Response(JSON.stringify({ error: "Token does not match device" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      pairingCode = hmacResult.device.pairing_code;
-      serialNumber = hmacResult.device.serial_number;
-      deviceId = hmacResult.device.device_id;
-    } else {
-      if (!pairingCode || !serialNumber || !deviceId) {
-        return new Response(JSON.stringify({ error: "Token missing device identity" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (parsedState.pairing_code && parsedState.pairing_code !== payload.pairing_code) {
-        return new Response(JSON.stringify({ error: "Token does not match pairing" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (parsedState.serial && parsedState.serial !== payload.serial_number) {
-        return new Response(JSON.stringify({ error: "Token does not match serial" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
+    // Extract device identity from nonce row
+    const serialNumber = nonceRow.serial_number;
+    const deviceId = nonceRow.device_id;
+    const deviceUuid = nonceRow.device_uuid;
+    const userUuid = nonceRow.user_uuid;
 
     const { data: clientRow, error: clientError } = await supabase
       .schema("display")
@@ -179,50 +105,25 @@ serve(async (req: Request) => {
     const expiresIn = typeof tokenData.expires_in === "number" ? tokenData.expires_in : 3600;
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    // Resolve user_uuid and device_uuid from pairings table (via pairing_code from OAuth state)
-    let userUuid: string | null = null;
-    let deviceUuid: string | null = null;
-    
-    if (pairingCode) {
-      const { data: pairing } = await supabase
-        .schema("display")
-        .from("pairings")
-        .select("user_uuid, device_uuid")
-        .eq("pairing_code", pairingCode)
-        .maybeSingle();
-      userUuid = pairing?.user_uuid ?? null;
-      deviceUuid = pairing?.device_uuid ?? null;
-    } else if (serialNumber) {
-      const { data: pairing } = await supabase
-        .schema("display")
-        .from("pairings")
-        .select("user_uuid, device_uuid")
-        .eq("serial_number", serialNumber)
-        .maybeSingle();
-      userUuid = pairing?.user_uuid ?? null;
-      deviceUuid = pairing?.device_uuid ?? null;
-    }
-
+    // Look up existing tokens using priority: user_uuid > device_uuid > serial_number
     let existingQuery = supabase
       .schema("display")
       .from("oauth_tokens")
       .select("id, access_token_id, refresh_token_id")
       .eq("provider", "webex");
 
-    // Query by user_id as primary lookup (Webex tokens are user-owned)
     if (userUuid) {
       existingQuery = existingQuery.eq("user_id", userUuid).eq("token_scope", "user");
-    } else if (serialNumber) {
-      // Fallback to serial_number for backward compatibility
+    } else if (deviceUuid) {
+      existingQuery = existingQuery.eq("device_uuid", deviceUuid);
+    } else {
       existingQuery = existingQuery.eq("serial_number", serialNumber);
-    } else if (pairingCode) {
-      // Fallback to pairing_code for backward compatibility
-      existingQuery = existingQuery.eq("pairing_code", pairingCode);
     }
 
     const { data: existing } = await existingQuery.maybeSingle();
 
-    const secretKey = userUuid || serialNumber || pairingCode || "token";
+    // Use user_uuid or device_uuid for vault secret naming (not pairing_code)
+    const secretKey = userUuid || deviceUuid || serialNumber || "token";
 
     const accessTokenId = await updateSecret(
       supabase,
@@ -245,12 +146,11 @@ serve(async (req: Request) => {
         access_token_id: accessTokenId,
         refresh_token_id: refreshTokenId,
         expires_at: expiresAt,
-        pairing_code: pairingCode,
         serial_number: serialNumber,
         updated_at: new Date().toISOString(),
       };
       
-      // Add user_id and device_uuid if resolved (for migration)
+      // Include device_uuid and user_uuid from nonce
       if (userUuid) {
         updatePayload.user_id = userUuid;
       }
@@ -267,14 +167,13 @@ serve(async (req: Request) => {
       const insertPayload: Record<string, unknown> = {
         provider: "webex",
         serial_number: serialNumber,
-        pairing_code: pairingCode,
         access_token_id: accessTokenId,
         refresh_token_id: refreshTokenId,
         expires_at: expiresAt,
         token_scope: "user", // Webex tokens belong to users
       };
       
-      // Add user_id and device_uuid if resolved
+      // Include device_uuid and user_uuid from nonce
       if (userUuid) {
         insertPayload.user_id = userUuid;
       }
@@ -287,6 +186,9 @@ serve(async (req: Request) => {
         .from("oauth_tokens")
         .insert(insertPayload);
     }
+
+    // Delete the nonce after successful use (single-use)
+    await supabase.schema("display").from("oauth_nonces").delete().eq("nonce", state);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

@@ -35,9 +35,9 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
     }
 
     // Determine status source for logging
-    const char* status_source = ctx.app_state->webex_status_source.isEmpty()
+    const char* status_source = (ctx.app_state->webex_status_source[0] == '\0')
         ? (ctx.app_state->embedded_app_connected ? "embedded_app" : "unknown")
-        : ctx.app_state->webex_status_source.c_str();
+        : ctx.app_state->webex_status_source;
 
     // Get pairing code for display
     String pairing_code = ctx.pairing_manager ? ctx.pairing_manager->getCode() : "";
@@ -55,7 +55,7 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
              WiFi.localIP().toString().c_str(),
              ctx.mdns_manager->getHostname().c_str());
     ESP_LOGI(TAG, "Status: %s (via %s) | MQTT: %s",
-             ctx.app_state->webex_status.c_str(),
+             ctx.app_state->webex_status,
              status_source,
              ctx.app_state->mqtt_connected ? "Yes" : "No");
     ESP_LOGI(TAG, "Supabase: %s | App: %s | Webex Source: %s",

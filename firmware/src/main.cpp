@@ -181,20 +181,25 @@ void setup() {
  * 14. Display update (always last)
  */
 void loop() {
-    // Build the loop context with references to all managers
-    LoopContext ctx;
+    // Static context - pointer fields initialized once, reused every iteration
+    static LoopContext ctx = [] {
+        LoopContext c{};
+        c.app_state = &app_state;
+        c.config_manager = &config_manager;
+        c.matrix_display = &matrix_display;
+        c.mdns_manager = &mdns_manager;
+        c.web_server = &web_server;
+        c.webex_client = &webex_client;
+        c.xapi_websocket = &xapi_websocket;
+        c.pairing_manager = &pairing_manager;
+        c.mqtt_client = &mqtt_client;
+        c.ota_manager = &ota_manager;
+        c.wifi_manager = &wifi_manager;
+        return c;
+    }();
+
+    // Only update the time-varying field each iteration
     ctx.current_time = millis();
-    ctx.app_state = &app_state;
-    ctx.config_manager = &config_manager;
-    ctx.matrix_display = &matrix_display;
-    ctx.mdns_manager = &mdns_manager;
-    ctx.web_server = &web_server;
-    ctx.webex_client = &webex_client;
-    ctx.xapi_websocket = &xapi_websocket;
-    ctx.pairing_manager = &pairing_manager;
-    ctx.mqtt_client = &mqtt_client;
-    ctx.ota_manager = &ota_manager;
-    ctx.wifi_manager = &wifi_manager;
 
     // Execute all loop handlers in correct order
     executeLoopHandlers(ctx);

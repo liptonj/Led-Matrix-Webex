@@ -139,6 +139,9 @@ private:
     // Utility
     String getContentType(const String& filename);
     
+    // Authentication
+    bool isAuthenticated(AsyncWebServerRequest* request);
+    
     // CORS support for cloud-hosted embedded app
     void addCorsHeaders(AsyncWebServerResponse* response);
     void handleCorsPreflightRequest(AsyncWebServerRequest* request);

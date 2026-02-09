@@ -23,7 +23,7 @@
 struct OAuthTokens {
     String access_token;
     String refresh_token;
-    unsigned long expires_at;
+    time_t expires_at;
     bool valid;
 };
 
@@ -96,7 +96,7 @@ private:
     ConfigManager* config_manager;
     String access_token;
     String refresh_token;
-    unsigned long token_expiry;
+    time_t token_expiry;
     String oauth_state;  // Store state for CSRF validation
     
     bool parseTokenResponse(const String& response);

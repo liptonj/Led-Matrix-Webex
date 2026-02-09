@@ -143,12 +143,12 @@ void DeviceInfo::applyAppState(const SupabaseAppState& appState) {
 
     // If Supabase reports app connected, use it as source of truth
     if (appState.app_connected) {
-        deps.app_state.webex_status = appState.webex_status;
+        safeStrCopy(deps.app_state.webex_status, sizeof(deps.app_state.webex_status), appState.webex_status);
         deps.app_state.webex_status_received = true;
-        deps.app_state.webex_status_source = "embedded_app";
+        safeStrCopyLiteral(deps.app_state.webex_status_source, sizeof(deps.app_state.webex_status_source), "embedded_app");
 
         if (!appState.display_name.isEmpty()) {
-            deps.app_state.embedded_app_display_name = appState.display_name;
+            safeStrCopy(deps.app_state.embedded_app_display_name, sizeof(deps.app_state.embedded_app_display_name), appState.display_name);
         }
 
         // Only update camera/mic/call state if not using xAPI
@@ -158,10 +158,10 @@ void DeviceInfo::applyAppState(const SupabaseAppState& appState) {
             deps.app_state.in_call = appState.in_call;
 
             // Fallback: derive in_call from status if not explicitly set
-            if (!appState.in_call && (appState.webex_status == "meeting" ||
-                                       appState.webex_status == "busy" ||
-                                       appState.webex_status == "call" ||
-                                       appState.webex_status == "presenting")) {
+            if (!appState.in_call && (strcmp(appState.webex_status.c_str(), "meeting") == 0 ||
+                                       strcmp(appState.webex_status.c_str(), "busy") == 0 ||
+                                       strcmp(appState.webex_status.c_str(), "call") == 0 ||
+                                       strcmp(appState.webex_status.c_str(), "presenting") == 0)) {
                 deps.app_state.in_call = true;
             }
         }

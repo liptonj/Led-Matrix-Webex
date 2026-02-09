@@ -156,27 +156,28 @@ public:
 // to ensure proper memory alignment
 struct MockAppState {
     // Match AppState layout exactly (from app_state.h)
+    // NOTE: Must stay in sync with AppState fields and types
     bool wifi_connected = true;
     bool webex_authenticated = false;
     bool embedded_app_connected = false;
     bool xapi_connected = false;
     bool mqtt_connected = false;
-    String webex_status = "unknown";
+    char webex_status[16] = "unknown";
     bool webex_status_received = false;
-    String webex_status_source = "unknown";
-    String embedded_app_display_name = "";
+    char webex_status_source[16] = "unknown";
+    char embedded_app_display_name[65] = "";
     bool camera_on = false;
     bool mic_muted = false;
     bool in_call = false;
     float temperature = 0.0f;
     float humidity = 0.0f;
-    String door_status = "";
+    char door_status[8] = "";
     int air_quality_index = 0;
     float tvoc = 0.0f;
     float co2_ppm = 0.0f;
     float pm2_5 = 0.0f;
     float ambient_noise = 0.0f;
-    String sensor_mac = "";
+    char sensor_mac[18] = "";
     bool sensor_data_valid = false;
     unsigned long last_sensor_update = 0;
     unsigned long last_poll_time = 0;
