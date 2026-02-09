@@ -101,7 +101,7 @@ export default memo(function DeviceActionsPanel({
                         id="log-level-select"
                         value={logLevel}
                         onChange={(e) => handleLogLevelChange(e.target.value as LogLevel)}
-                        disabled={commandSubmitting || !device.pairing_code}
+                        disabled={commandSubmitting || !device.id}
                         className="w-full rounded-md border border-gray-300 bg-white text-xs px-3 py-2 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                     >
                         {LOG_LEVELS.map((l) => (
@@ -120,7 +120,7 @@ export default memo(function DeviceActionsPanel({
                 <p className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: 'var(--color-text-muted)' }}>Device Control</p>
                 <button
                     onClick={onSendReboot}
-                    disabled={commandSubmitting || !device.pairing_code}
+                    disabled={commandSubmitting || !device.id}
                     className="w-full rounded-md bg-blue-600 text-white text-xs px-3 py-2 hover:bg-blue-700 disabled:opacity-50"
                 >
                     Send reboot command

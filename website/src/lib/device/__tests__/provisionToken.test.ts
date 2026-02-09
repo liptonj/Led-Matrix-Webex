@@ -228,7 +228,7 @@ describe('provisionToken utilities', () => {
 
   describe('waitForDeviceApproval', () => {
     const mockDevice: Device = {
-      id: 'device-123',
+      id: '550e8400-e29b-41d4-a716-446655440000',
       serial_number: 'A1B2C3D4',
       device_id: 'webex-display-C3D4',
       pairing_code: 'ABC123',

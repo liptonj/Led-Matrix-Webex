@@ -1,34 +1,34 @@
 import { getSession } from "./auth";
 import { getSupabase } from "./core";
 import type { Command, Pairing } from "./types";
-import { isValidPairingCode } from "@/lib/utils/validation";
+import { isValidPairingCode, isValidUUID } from "@/lib/utils/validation";
 
 /**
- * Subscribe to pairing state changes for a specific pairing code.
+ * Subscribe to pairing state changes for a specific device UUID.
  * Receives updates when device telemetry or connection state changes.
  */
 export async function subscribeToPairing(
-  pairingCode: string,
+  deviceUuid: string,
   onUpdate: (pairing: Partial<Pairing>) => void,
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
 ): Promise<() => void> {
-  // Validate pairing code format to prevent filter injection
-  if (!isValidPairingCode(pairingCode)) {
-    throw new Error('Invalid pairing code format');
+  // Validate UUID format to prevent filter injection
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
   }
 
   const supabase = await getSupabase();
 
   const channel = supabase
-    .channel(`pairing-${pairingCode}`)
+    .channel(`device:${deviceUuid}:events`)
     .on(
       "postgres_changes",
       {
         event: "UPDATE",
         schema: "display",
         table: "pairings",
-        filter: `pairing_code=eq.${pairingCode}`,
+        filter: `device_uuid=eq.${deviceUuid}`,
       },
       (payload) => {
         onUpdate(payload.new as Partial<Pairing>);
@@ -40,7 +40,7 @@ export async function subscribeToPairing(
         event: "INSERT",
         schema: "display",
         table: "pairings",
-        filter: `pairing_code=eq.${pairingCode}`,
+        filter: `device_uuid=eq.${deviceUuid}`,
       },
       (payload) => {
         onUpdate(payload.new as Partial<Pairing>);
@@ -67,31 +67,31 @@ export async function subscribeToPairing(
 }
 
 /**
- * Subscribe to command status changes for a specific pairing code.
+ * Subscribe to command status changes for a specific device UUID.
  * Receives updates when commands are acked/failed by the device.
  */
 export async function subscribeToCommands(
-  pairingCode: string,
+  deviceUuid: string,
   onCommandUpdate: (command: Partial<Command>) => void,
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
 ): Promise<() => void> {
-  // Validate pairing code format to prevent filter injection
-  if (!isValidPairingCode(pairingCode)) {
-    throw new Error('Invalid pairing code format');
+  // Validate UUID format to prevent filter injection
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
   }
 
   const supabase = await getSupabase();
 
   const channel = supabase
-    .channel(`commands-${pairingCode}`)
+    .channel(`device:${deviceUuid}:commands`)
     .on(
       "postgres_changes",
       {
         event: "UPDATE",
         schema: "display",
         table: "commands",
-        filter: `pairing_code=eq.${pairingCode}`,
+        filter: `device_uuid=eq.${deviceUuid}`,
       },
       (payload) => {
         onCommandUpdate(payload.new as Partial<Command>);
@@ -103,7 +103,7 @@ export async function subscribeToCommands(
         event: "INSERT",
         schema: "display",
         table: "commands",
-        filter: `pairing_code=eq.${pairingCode}`,
+        filter: `device_uuid=eq.${deviceUuid}`,
       },
       (payload) => {
         onCommandUpdate(payload.new as Partial<Command>);
@@ -132,6 +132,7 @@ export async function subscribeToCommands(
 // Explicit column list for pairings table
 const PAIRING_COLUMNS = `
   pairing_code,
+  pairing_code_expires_at,
   serial_number,
   device_id,
   device_uuid,
@@ -159,12 +160,12 @@ const PAIRING_COLUMNS = `
 `;
 
 /**
- * Get a pairing by code
+ * Get a pairing by device UUID
  */
-export async function getPairing(pairingCode: string): Promise<Pairing | null> {
-  // Validate pairing code format for consistency and security
-  if (!isValidPairingCode(pairingCode)) {
-    throw new Error('Invalid pairing code format');
+export async function getPairing(deviceUuid: string): Promise<Pairing | null> {
+  // Validate UUID format for consistency and security
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
   }
 
   const supabase = await getSupabase();
@@ -172,18 +173,17 @@ export async function getPairing(pairingCode: string): Promise<Pairing | null> {
     .schema("display")
     .from("pairings")
     .select(PAIRING_COLUMNS)
-    .eq("pairing_code", pairingCode)
+    .eq("device_uuid", deviceUuid)
     .single();
 
   if (error && error.code !== "PGRST116") throw error;
   return data;
 }
 
-// Explicit column list for commands table
+// Explicit column list for commands table (post-UUID migration)
 const COMMAND_COLUMNS = `
   id,
-  pairing_code,
-  serial_number,
+  device_uuid,
   command,
   payload,
   status,
@@ -195,17 +195,22 @@ const COMMAND_COLUMNS = `
 `;
 
 /**
- * Get pending commands for a pairing code
+ * Get pending commands for a device UUID
  */
 export async function getPendingCommands(
-  pairingCode: string,
+  deviceUuid: string,
 ): Promise<Command[]> {
+  // Validate UUID format
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
+  }
+
   const supabase = await getSupabase();
   const { data, error } = await supabase
     .schema("display")
     .from("commands")
     .select(COMMAND_COLUMNS)
-    .eq("pairing_code", pairingCode)
+    .eq("device_uuid", deviceUuid)
     .eq("status", "pending")
     .order("created_at", { ascending: false });
 
@@ -214,15 +219,20 @@ export async function getPendingCommands(
 }
 
 export async function getCommands(
-  pairingCode: string,
+  deviceUuid: string,
   options: { status?: Command["status"] | "all"; limit?: number } = {},
 ): Promise<Command[]> {
+  // Validate UUID format
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
+  }
+
   const supabase = await getSupabase();
   let query = supabase
     .schema("display")
     .from("commands")
     .select(COMMAND_COLUMNS)
-    .eq("pairing_code", pairingCode)
+    .eq("device_uuid", deviceUuid)
     .order("created_at", { ascending: false });
 
   if (options.status && options.status !== "all") {
@@ -238,13 +248,18 @@ export async function getCommands(
 }
 
 export async function getCommandsPage(
-  pairingCode: string,
+  deviceUuid: string,
   options: {
     status?: Command["status"] | "all";
     page?: number;
     pageSize?: number;
   } = {},
 ): Promise<{ data: Command[]; count: number | null }> {
+  // Validate UUID format
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
+  }
+
   const supabase = await getSupabase();
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.max(1, options.pageSize ?? 10);
@@ -255,7 +270,7 @@ export async function getCommandsPage(
     .schema("display")
     .from("commands")
     .select(COMMAND_COLUMNS, { count: "exact" })
-    .eq("pairing_code", pairingCode)
+    .eq("device_uuid", deviceUuid)
     .order("created_at", { ascending: false });
 
   if (options.status && options.status !== "all") {
@@ -272,28 +287,21 @@ export async function getCommandsPage(
  * Uses Edge Function to ensure real-time broadcast to device.
  */
 export async function insertCommand(
-  pairingCode: string,
+  deviceUuid: string,
   serialNumber: string,
   command: string,
   payload: Record<string, unknown> = {},
 ): Promise<Command> {
+  // Validate UUID format
+  if (!isValidUUID(deviceUuid)) {
+    throw new Error('Invalid device UUID format');
+  }
+
   const supabase = await getSupabase();
   const sessionResult = await getSession();
   const token = sessionResult.data.session?.access_token;
   if (!token) {
     throw new Error("Not authenticated.");
-  }
-
-  // Look up device_uuid from pairing
-  const { data: pairing, error: pairingError } = await supabase
-    .schema("display")
-    .from("pairings")
-    .select("device_uuid")
-    .eq("pairing_code", pairingCode)
-    .single();
-  
-  if (pairingError || !pairing?.device_uuid) {
-    throw new Error("Failed to find device for pairing code.");
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -310,7 +318,7 @@ export async function insertCommand(
     body: JSON.stringify({
       command,
       payload,
-      device_uuid: pairing.device_uuid,
+      device_uuid: deviceUuid,
     }),
   });
 

@@ -14,8 +14,7 @@ const mockSubscribeToCommands = pairingsModule.subscribeToCommands as jest.Mocke
 
 const createMockCommand = (id: string, status: Command['status']): Command => ({
   id,
-  pairing_code: 'PAIR123',
-  serial_number: 'ABC123',
+  device_uuid: '550e8400-e29b-41d4-a716-446655440000',
   command: 'reboot',
   payload: {},
   status,
@@ -39,7 +38,7 @@ describe('useDeviceCommands', () => {
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 0 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: '550e8400-e29b-41d4-a716-446655440000' })
     );
 
     expect(result.current.commands).toEqual([]);
@@ -53,16 +52,17 @@ describe('useDeviceCommands', () => {
       createMockCommand('cmd-1', 'pending'),
       createMockCommand('cmd-2', 'acked'),
     ];
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
 
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ data: mockCommands, count: 2 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
-      expect(mockGetCommandsPage).toHaveBeenCalledWith('PAIR123', {
+      expect(mockGetCommandsPage).toHaveBeenCalledWith(deviceUuid, {
         status: 'pending',
         page: 1,
         pageSize: 10,
@@ -86,11 +86,12 @@ describe('useDeviceCommands', () => {
     );
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 0 });
 
-    renderHook(() => useDeviceCommands({ pairingCode: 'PAIR123' }));
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
+    renderHook(() => useDeviceCommands({ pairingCode: deviceUuid }));
 
     await waitFor(() => {
       expect(mockSubscribeToCommands).toHaveBeenCalledWith(
-        'PAIR123',
+        deviceUuid,
         expect.any(Function),
         expect.any(Function),
         expect.any(Function)
@@ -110,11 +111,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should handle pagination', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 25 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123', pageSize: 10 })
+      useDeviceCommands({ pairingCode: deviceUuid, pageSize: 10 })
     );
 
     await waitFor(() => {
@@ -126,7 +128,7 @@ describe('useDeviceCommands', () => {
     });
 
     await waitFor(() => {
-      expect(mockGetCommandsPage).toHaveBeenCalledWith('PAIR123', {
+      expect(mockGetCommandsPage).toHaveBeenCalledWith(deviceUuid, {
         status: 'pending',
         page: 2,
         pageSize: 10,
@@ -137,11 +139,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should auto-correct page if it exceeds total pages', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 5 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123', pageSize: 10 })
+      useDeviceCommands({ pairingCode: deviceUuid, pageSize: 10 })
     );
 
     await waitFor(() => {
@@ -158,12 +161,13 @@ describe('useDeviceCommands', () => {
   });
 
   it('should reset page when filter changes', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     // Mock enough items to support multiple pages
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 30 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -192,6 +196,7 @@ describe('useDeviceCommands', () => {
   });
 
   it('should filter commands by status', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     const pendingCommands = [createMockCommand('cmd-1', 'pending')];
     const ackedCommands = [createMockCommand('cmd-2', 'acked')];
 
@@ -201,7 +206,7 @@ describe('useDeviceCommands', () => {
       .mockResolvedValueOnce({ data: ackedCommands, count: 1 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -216,7 +221,7 @@ describe('useDeviceCommands', () => {
       expect(result.current.commands).toEqual(ackedCommands);
     });
 
-    expect(mockGetCommandsPage).toHaveBeenLastCalledWith('PAIR123', {
+    expect(mockGetCommandsPage).toHaveBeenLastCalledWith(deviceUuid, {
       status: 'acked',
       page: 1,
       pageSize: 10,
@@ -224,11 +229,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should handle fetch error', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockRejectedValue(new Error('Network error'));
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -237,11 +243,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should handle non-Error exceptions', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockRejectedValue('String error');
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -271,8 +278,9 @@ describe('useDeviceCommands', () => {
     );
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 0 });
 
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -293,6 +301,7 @@ describe('useDeviceCommands', () => {
   });
 
   it('should handle subscription error', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     let onError: (() => void) | undefined;
     
     mockSubscribeToCommands.mockImplementation(
@@ -304,7 +313,7 @@ describe('useDeviceCommands', () => {
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 0 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -319,11 +328,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should unsubscribe on unmount', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 0 });
 
     const { unmount } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {
@@ -336,11 +346,12 @@ describe('useDeviceCommands', () => {
   });
 
   it('should calculate safe page correctly', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ data: [], count: 25 });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123', pageSize: 10 })
+      useDeviceCommands({ pairingCode: deviceUuid, pageSize: 10 })
     );
 
     await waitFor(() => {
@@ -356,6 +367,7 @@ describe('useDeviceCommands', () => {
   });
 
   it('should handle null count from API', async () => {
+    const deviceUuid = '550e8400-e29b-41d4-a716-446655440000';
     mockSubscribeToCommands.mockResolvedValue(mockUnsubscribe);
     mockGetCommandsPage.mockResolvedValue({ 
       data: [createMockCommand('cmd-1', 'pending')], 
@@ -363,7 +375,7 @@ describe('useDeviceCommands', () => {
     });
 
     const { result } = renderHook(() => 
-      useDeviceCommands({ pairingCode: 'PAIR123' })
+      useDeviceCommands({ pairingCode: deviceUuid })
     );
 
     await waitFor(() => {

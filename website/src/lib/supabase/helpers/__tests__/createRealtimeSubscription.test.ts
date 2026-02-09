@@ -63,15 +63,16 @@ describe("createRealtimeSubscription", () => {
 
     it("should create subscription with filter", async () => {
       const onMessage = jest.fn();
+      const deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
 
       await createRealtimeSubscription(
-        "pairing-ABC123",
+        `device-${deviceUuid}`,
         {
           type: "postgres_changes",
           event: "UPDATE",
           schema: "display",
           table: "pairings",
-          filter: "pairing_code=eq.ABC123",
+          filter: `device_uuid=eq.${deviceUuid}`,
         },
         { onMessage }
       );
@@ -82,7 +83,7 @@ describe("createRealtimeSubscription", () => {
           event: "UPDATE",
           schema: "display",
           table: "pairings",
-          filter: "pairing_code=eq.ABC123",
+          filter: `device_uuid=eq.${deviceUuid}`,
         },
         expect.any(Function)
       );

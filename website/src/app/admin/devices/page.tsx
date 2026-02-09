@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export default function DevicesPage() {
     const router = useRouter();
     const [devices, setDevices] = useState<Device[]>([]);
-    const [pairings, setPairings] = useState<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>({});
+    const [pairings, setPairings] = useState<Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
@@ -39,10 +39,10 @@ export default function DevicesPage() {
 
         try {
             const rows = await getPairingsForDevices(
-                list.map((device) => device.pairing_code),
+                list.map((device) => device.id),
             );
-            const map = rows.reduce<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>((acc, row) => {
-                acc[row.pairing_code] = row;
+            const map = rows.reduce<Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>((acc, row) => {
+                acc[row.device_uuid] = row;
                 return acc;
             }, {});
             setPairings(map);
@@ -614,14 +614,14 @@ export default function DevicesPage() {
 
 function getLastSeenValue(
     device: Device,
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ): string | null {
-    return pairingMap[device.pairing_code]?.device_last_seen ?? device.last_seen ?? null;
+    return pairingMap[device.id]?.device_last_seen ?? device.last_seen ?? null;
 }
 
 function getLastSeenMs(
     device: Device,
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ): number {
     const lastSeen = getLastSeenValue(device, pairingMap);
     return lastSeen ? new Date(lastSeen).getTime() : 0;
@@ -629,7 +629,7 @@ function getLastSeenMs(
 
 function isDeviceOnline(
     device: Device,
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
     nowMs: number,
 ): boolean {
     const lastSeenMs = getLastSeenMs(device, pairingMap);
@@ -638,7 +638,7 @@ function isDeviceOnline(
 
 function sortDevices(
     list: Device[],
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ) {
     return [...list].sort(
         (a, b) => getLastSeenMs(b, pairingMap) - getLastSeenMs(a, pairingMap),

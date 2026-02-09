@@ -1,13 +1,13 @@
 'use client';
 
-import { Device } from '@/lib/supabase';
+import { Device, Pairing } from '@/lib/supabase';
 import { memo } from 'react';
 
 type SubscriptionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface DeviceInfoCardProps {
     device: Device;
-    pairing?: { last_seen?: string; webex_status?: string } | null;
+    pairing?: Pairing | null;
     pairingStatus: SubscriptionStatus;
     commandStatus: SubscriptionStatus;
     logStatus: SubscriptionStatus;
@@ -29,13 +29,22 @@ export default memo(function DeviceInfoCard({
                 : 'Active';
 
     const getOnlineStatus = () => {
-        if (!pairing?.last_seen) return { label: 'Unknown', color: 'bg-gray-200 text-gray-600' };
-        const lastSeenMs = Date.now() - new Date(pairing.last_seen).getTime();
+        if (!pairing?.device_last_seen) return { label: 'Unknown', color: 'bg-gray-200 text-gray-600' };
+        const lastSeenMs = Date.now() - new Date(pairing.device_last_seen).getTime();
         const twoMinutes = 2 * 60 * 1000;
         if (lastSeenMs < twoMinutes) return { label: 'Online', color: 'bg-green-100 text-green-800' };
         return { label: 'Offline', color: 'bg-gray-200 text-gray-600' };
     };
     const onlineStatus = getOnlineStatus();
+
+    // Check if pairing_code is active (not null and not expired)
+    const hasActivePairingCode = pairing?.pairing_code && (
+        !pairing.pairing_code_expires_at || 
+        new Date(pairing.pairing_code_expires_at) > new Date()
+    );
+
+    // Display first 8 characters of device UUID
+    const deviceUuidDisplay = device.id ? device.id.substring(0, 8) : 'N/A';
 
     const realtimeStatuses: SubscriptionStatus[] = [pairingStatus, commandStatus, logStatus];
     const realtimeAllConnected = realtimeStatuses.every((status) => status === 'connected');
@@ -76,6 +85,20 @@ export default memo(function DeviceInfoCard({
             </div>
             <p className="text-sm mt-2" style={{ color: 'var(--color-text)' }}>{device.display_name || 'Unnamed device'}</p>
             <p className="panel-subtext">Firmware {device.firmware_version || 'Unknown'}</p>
+            <div className="mt-2">
+                <span className="panel-subtext">Device UUID:</span>
+                <span className="ml-2 text-sm font-mono" style={{ color: 'var(--color-text)' }}>
+                    {deviceUuidDisplay}...
+                </span>
+            </div>
+            {hasActivePairingCode && (
+                <div className="mt-2">
+                    <span className="panel-subtext">Pairing Code:</span>
+                    <span className="ml-2 text-sm font-mono" style={{ color: 'var(--color-text)' }}>
+                        {pairing.pairing_code}
+                    </span>
+                </div>
+            )}
             <div className="mt-2">
                 <span className="panel-subtext">Paired user:</span>
                 <span className="ml-2 text-sm" style={{ color: 'var(--color-text)' }}>

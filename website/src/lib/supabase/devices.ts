@@ -10,7 +10,6 @@ const DEVICE_COLUMNS = `
   id,
   serial_number,
   device_id,
-  pairing_code,
   display_name,
   firmware_version,
   target_firmware_version,
@@ -45,19 +44,19 @@ export async function getDevices(): Promise<Device[]> {
 }
 
 
-// Helper to get pairings for a set of pairing codes
+// Helper to get pairings for a set of device UUIDs
 export async function getPairingsForDevices(
-  pairingCodes: string[],
-): Promise<Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>[]> {
-  if (!pairingCodes.length) return [];
+  deviceUuids: string[],
+): Promise<Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>[]> {
+  if (!deviceUuids.length) return [];
 
   const supabase = await getSupabase();
   const { data, error } = await withTimeout(
     supabase
       .schema("display")
       .from("pairings")
-      .select("pairing_code, app_last_seen, device_last_seen, app_connected, device_connected")
-      .in("pairing_code", pairingCodes),
+      .select("device_uuid, app_last_seen, device_last_seen, app_connected, device_connected")
+      .in("device_uuid", deviceUuids),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while loading pairings.",
   );
@@ -130,15 +129,15 @@ export async function getPairedUser(deviceUuid: string): Promise<{ name?: string
   };
 }
 
-// Helper to get a single device
-export async function getDevice(serialNumber: string): Promise<Device | null> {
+// Helper to get a single device by device UUID (id)
+export async function getDevice(deviceId: string): Promise<Device | null> {
   const supabase = await getSupabase();
   const { data, error } = await withTimeout(
     supabase
       .schema("display")
       .from("devices")
       .select(DEVICE_COLUMNS)
-      .eq("serial_number", serialNumber)
+      .eq("id", deviceId)
       .single(),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while loading the device record.",

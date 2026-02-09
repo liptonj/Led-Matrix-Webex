@@ -8,7 +8,7 @@ jest.mock('@/lib/supabase/devices');
 const mockGetDevice = devicesModule.getDevice as jest.MockedFunction<typeof devicesModule.getDevice>;
 
 const mockDevice: Device = {
-  id: 'device-1',
+  id: '550e8400-e29b-41d4-a716-446655440000',
   serial_number: 'ABC123',
   device_id: 'device-001',
   pairing_code: 'PAIR123',
@@ -25,6 +25,7 @@ const mockDevice: Device = {
   registered_at: '2024-01-01T00:00:00Z',
   provisioned_at: '2024-01-01T00:00:00Z',
   metadata: {},
+  release_channel: 'production',
 };
 
 describe('useDeviceDetails', () => {

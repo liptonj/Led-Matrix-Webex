@@ -40,8 +40,9 @@ export default function ApproveDevicePage() {
         return;
       }
 
-      const response = await fetch(
-        `${supabaseUrl}/functions/v1/approve-device`,
+      // Step 1: Exchange pairing_code for device_uuid
+      const exchangeResponse = await fetch(
+        `${supabaseUrl}/functions/v1/exchange-pairing-code`,
         {
           method: 'POST',
           headers: {
@@ -54,13 +55,40 @@ export default function ApproveDevicePage() {
         }
       );
 
-      const data = await response.json();
+      const exchangeData = await exchangeResponse.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to approve device');
+      if (!exchangeResponse.ok) {
+        throw new Error(exchangeData.error || 'Invalid or expired pairing code');
       }
 
-      setMessage(data.message || 'Device approved successfully!');
+      // Extract device_uuid from exchange response
+      const deviceUuid = exchangeData.device_uuid;
+      if (!deviceUuid) {
+        throw new Error('Device UUID not returned from pairing code exchange');
+      }
+
+      // Step 2: Approve device using device_uuid
+      const approveResponse = await fetch(
+        `${supabaseUrl}/functions/v1/approve-device`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ 
+            device_uuid: deviceUuid
+          })
+        }
+      );
+
+      const approveData = await approveResponse.json();
+
+      if (!approveResponse.ok) {
+        throw new Error(approveData.error || 'Failed to approve device');
+      }
+
+      setMessage(approveData.message || 'Device approved successfully!');
       setPairingCode('');
 
       // Redirect to dashboard after 2 seconds

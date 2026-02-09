@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 
 interface Device {
   serial_number: string;
+  device_uuid: string;
   provisioning_method: string;
   created_at: string;
   webex_polling_enabled: boolean;
@@ -52,6 +53,7 @@ export default function UserDashboard() {
           .from('user_devices')
           .select(`
             serial_number,
+            device_uuid,
             provisioning_method,
             created_at,
             webex_polling_enabled,
@@ -73,6 +75,7 @@ export default function UserDashboard() {
         if (assignments) {
           const deviceList: Device[] = assignments.map((d: any) => ({
             serial_number: d.serial_number,
+            device_uuid: d.device_uuid,
             provisioning_method: d.provisioning_method || 'unknown',
             created_at: d.created_at,
             webex_polling_enabled: d.webex_polling_enabled || false,
@@ -105,6 +108,174 @@ export default function UserDashboard() {
 
     loadDevices();
   }, []);
+
+  // Set up realtime subscriptions for user_devices changes
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let userDevicesChannel: any = null;
+
+    async function setupUserDevicesSubscription() {
+      const { data: { session } } = await getSession();
+      if (!session) return;
+
+      const supabaseClient = await getSupabase();
+
+      // Subscribe to user_devices changes (INSERT/UPDATE/DELETE) for this user
+      userDevicesChannel = supabaseClient
+        .channel('user-devices-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'display',
+            table: 'user_devices',
+            filter: `user_id=eq.${session.user.id}`,
+          },
+          () => {
+            // Reload devices when user_devices changes
+            async function reload() {
+              const { data: { session } } = await getSession();
+              if (!session) return;
+              const supabase = await getSupabase();
+              const { data: assignments } = await supabase
+                .schema('display')
+                .from('user_devices')
+                .select(`
+                  serial_number,
+                  device_uuid,
+                  provisioning_method,
+                  created_at,
+                  webex_polling_enabled,
+                  devices!user_devices_device_uuid_fkey (
+                    device_id,
+                    display_name,
+                    firmware_version,
+                    last_seen
+                  )
+                `)
+                .eq('user_id', session.user.id);
+              
+              if (assignments) {
+                const deviceList: Device[] = assignments.map((d: any) => ({
+                  serial_number: d.serial_number,
+                  device_uuid: d.device_uuid,
+                  provisioning_method: d.provisioning_method || 'unknown',
+                  created_at: d.created_at,
+                  webex_polling_enabled: d.webex_polling_enabled || false,
+                  device: d.devices
+                }));
+                setDevices(deviceList);
+                
+                const now = new Date();
+                const onlineThreshold = 5 * 60 * 1000;
+                const online = deviceList.filter((d) => {
+                  const lastSeen = new Date(d.device.last_seen);
+                  return now.getTime() - lastSeen.getTime() < onlineThreshold;
+                }).length;
+                setSummary({
+                  total: deviceList.length,
+                  online,
+                  offline: deviceList.length - online
+                });
+              }
+            }
+            reload();
+          }
+        )
+        .subscribe();
+    }
+
+    setupUserDevicesSubscription();
+
+    return () => {
+      if (userDevicesChannel) {
+        getSupabase().then(supabase => {
+          supabase.removeChannel(userDevicesChannel!);
+        });
+      }
+    };
+  }, []);
+
+  // Set up realtime subscriptions for device updates (last_seen, etc.)
+  useEffect(() => {
+    if (devices.length === 0) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const channels: any[] = [];
+    let supabaseClientInstance: Awaited<ReturnType<typeof getSupabase>> | null = null;
+
+    async function setupDeviceSubscriptions() {
+      supabaseClientInstance = await getSupabase();
+
+      // Subscribe to each device's updates
+      devices.forEach(device => {
+        const channel = supabaseClientInstance!
+          .channel(`device-${device.device_uuid}-updates`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'display',
+              table: 'devices',
+              filter: `id=eq.${device.device_uuid}`,
+            },
+            (payload) => {
+              // Update the device's data in local state
+              setDevices(prev => {
+                const updated = prev.map(d => 
+                  d.device_uuid === device.device_uuid && payload.new
+                    ? {
+                        ...d,
+                        device: {
+                          ...d.device,
+                          last_seen: (payload.new as any).last_seen || d.device.last_seen,
+                          display_name: (payload.new as any).display_name ?? d.device.display_name,
+                          firmware_version: (payload.new as any).firmware_version ?? d.device.firmware_version,
+                        }
+                      }
+                    : d
+                );
+                
+                // Recalculate summary
+                const now = new Date();
+                const onlineThreshold = 5 * 60 * 1000;
+                const online = updated.filter((d) => {
+                  const lastSeen = new Date(d.device.last_seen);
+                  return now.getTime() - lastSeen.getTime() < onlineThreshold;
+                }).length;
+                setSummary({
+                  total: updated.length,
+                  online,
+                  offline: updated.length - online
+                });
+                
+                return updated;
+              });
+            }
+          )
+          .subscribe();
+        channels.push(channel);
+      });
+    }
+
+    setupDeviceSubscriptions();
+
+    return () => {
+      if (supabaseClientInstance) {
+        channels.forEach(channel => {
+          supabaseClientInstance!.removeChannel(channel);
+        });
+      } else {
+        // Fallback: get supabase client if not already available
+        getSupabase().then(supabase => {
+          channels.forEach(channel => {
+            supabase.removeChannel(channel);
+          });
+        });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices.map(d => d.device_uuid).sort().join(',')]);
 
   const getStatusColor = (lastSeen: string) => {
     const now = new Date();

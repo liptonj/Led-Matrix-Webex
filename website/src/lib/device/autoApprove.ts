@@ -1,5 +1,9 @@
 /**
  * Auto-approve device using pairing code.
+ * 
+ * Uses a two-step flow:
+ * 1. exchange-pairing-code: Convert temporary pairing_code → device_uuid
+ * 2. approve-device: Approve the device using device_uuid
  */
 
 import { getSession } from '@/lib/supabase/auth';
@@ -8,13 +12,18 @@ interface AutoApproveResult {
   success: boolean;
   message: string;
   error?: string;
+  deviceUuid?: string;
 }
 
 /**
  * Approve a device using its pairing code.
  * 
+ * This function performs a two-step approval:
+ * 1. Exchange pairing_code for device_uuid (and clear the pairing code)
+ * 2. Approve the device using device_uuid
+ * 
  * @param pairingCode - 6-character pairing code
- * @returns Result object with success status and message
+ * @returns Result object with success status, message, and device_uuid
  */
 export async function autoApproveDevice(pairingCode: string): Promise<AutoApproveResult> {
   try {
@@ -50,8 +59,8 @@ export async function autoApproveDevice(pairingCode: string): Promise<AutoApprov
       };
     }
 
-    // Call approve-device API
-    const response = await fetch(`${supabaseUrl}/functions/v1/approve-device`, {
+    // Step 1: Exchange pairing code for device_uuid
+    const exchangeResponse = await fetch(`${supabaseUrl}/functions/v1/exchange-pairing-code`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -62,19 +71,52 @@ export async function autoApproveDevice(pairingCode: string): Promise<AutoApprov
       }),
     });
 
-    const data = await response.json();
+    const exchangeData = await exchangeResponse.json();
 
-    if (!response.ok) {
+    if (!exchangeResponse.ok) {
+      return {
+        success: false,
+        message: 'Pairing code exchange failed',
+        error: exchangeData.error || `HTTP ${exchangeResponse.status}: Failed to exchange pairing code`,
+      };
+    }
+
+    const deviceUuid = exchangeData.device_uuid;
+    if (!deviceUuid) {
+      return {
+        success: false,
+        message: 'Exchange failed',
+        error: 'No device UUID returned from exchange',
+      };
+    }
+
+    // Step 2: Approve device using device_uuid
+    const approveResponse = await fetch(`${supabaseUrl}/functions/v1/approve-device`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        device_uuid: deviceUuid,
+      }),
+    });
+
+    const approveData = await approveResponse.json();
+
+    if (!approveResponse.ok) {
       return {
         success: false,
         message: 'Approval failed',
-        error: data.error || `HTTP ${response.status}: Failed to approve device`,
+        error: approveData.error || `HTTP ${approveResponse.status}: Failed to approve device`,
+        deviceUuid, // Return UUID even on approval failure for debugging
       };
     }
 
     return {
       success: true,
-      message: data.message || 'Device approved successfully!',
+      message: approveData.message || 'Device approved successfully!',
+      deviceUuid,
     };
   } catch (error) {
     return {

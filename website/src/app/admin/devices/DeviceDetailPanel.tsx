@@ -114,7 +114,7 @@ export default function DeviceDetailPanel({
     }, [serialNumber]);
 
     useEffect(() => {
-        if (!device?.serial_number) return;
+        if (!device?.serial_number || !device?.id) return;
 
         let pairingUnsubscribe: (() => void) | null = null;
         let logsUnsubscribe: (() => void) | null = null;
@@ -122,9 +122,9 @@ export default function DeviceDetailPanel({
         let isMounted = true;
 
         const loadPairing = async () => {
-            if (!device.pairing_code) return;
+            if (!device.id) return;
             try {
-                const data = await getPairing(device.pairing_code);
+                const data = await getPairing(device.id);
                 if (!isMounted) return;
                 setPairing(data);
             } catch (err) {
@@ -144,10 +144,10 @@ export default function DeviceDetailPanel({
         loadPairing();
         loadLogs();
 
-        if (device.pairing_code) {
+        if (device.id) {
             setPairingStatus('connecting');
             subscribeToPairing(
-                device.pairing_code,
+                device.id,
                 (update) => {
                     setPairing((prev) => ({ ...(prev || {}), ...update } as Pairing));
                 },
@@ -164,7 +164,7 @@ export default function DeviceDetailPanel({
             });
             setCommandStatus('connecting');
             subscribeToCommands(
-                device.pairing_code,
+                device.id,
                 (update) => {
                     if (update.id) {
                         setCommandRefreshToken((prev) => prev + 1);
@@ -227,7 +227,7 @@ export default function DeviceDetailPanel({
             if (logsUnsubscribe) logsUnsubscribe();
             if (commandsUnsubscribe) commandsUnsubscribe();
         };
-    }, [device?.serial_number, device?.pairing_code, device?.id, userUuid]);
+    }, [device?.serial_number, device?.id, userUuid]);
 
     const filteredLogs = useMemo(() => {
         if (logFilter === 'all') return logs;
@@ -239,7 +239,7 @@ export default function DeviceDetailPanel({
     }, [commandFilter, commandPageSize]);
 
     useEffect(() => {
-        if (!device?.pairing_code) {
+        if (!device?.id) {
             setCommands([]);
             setCommandCount(0);
             return;
@@ -248,7 +248,7 @@ export default function DeviceDetailPanel({
         let isMounted = true;
         (async () => {
             try {
-                const result = await getCommandsPage(device.pairing_code, {
+                const result = await getCommandsPage(device.id, {
                     status: commandFilter,
                     page: commandPage,
                     pageSize: commandPageSize,
@@ -266,7 +266,7 @@ export default function DeviceDetailPanel({
         return () => {
             isMounted = false;
         };
-    }, [device?.pairing_code, commandFilter, commandPage, commandPageSize, commandRefreshToken]);
+    }, [device?.id, commandFilter, commandPage, commandPageSize, commandRefreshToken]);
 
     const handleToggleDebug = async () => {
         if (!device) return;
@@ -340,10 +340,10 @@ export default function DeviceDetailPanel({
     };
 
     const handleInsertCommand = async (command: string, payload: Record<string, unknown> = {}) => {
-        if (!device?.pairing_code) return;
+        if (!device?.id) return;
         try {
             setCommandSubmitting(true);
-            const result = await insertCommand(device.pairing_code, device.serial_number, command, payload);
+            const result = await insertCommand(device.id, device.serial_number, command, payload);
             void result;
         } catch (err) {
             setCommandError(err instanceof Error ? err.message : 'Failed to send command.');

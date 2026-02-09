@@ -22,7 +22,7 @@ interface Stats {
 export default function AdminDashboardPage() {
     const [stats, setStats] = useState<Stats | null>(null);
     const [recentDevices, setRecentDevices] = useState<Device[]>([]);
-    const [pairings, setPairings] = useState<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>({});
+    const [pairings, setPairings] = useState<Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -31,11 +31,11 @@ export default function AdminDashboardPage() {
             try {
                 const [devices, releases] = await Promise.all([getDevices(), getReleases()]);
                 const pairingRows = await getPairingsForDevices(
-                    devices.map((device) => device.pairing_code),
+                    devices.map((device) => device.id),
                 );
-                const pairingMap = pairingRows.reduce<Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>(
+                const pairingMap = pairingRows.reduce<Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>>(
                     (acc, row) => {
-                        acc[row.pairing_code] = row;
+                        acc[row.device_uuid] = row;
                         return acc;
                     },
                     {},
@@ -142,8 +142,8 @@ export default function AdminDashboardPage() {
                         </p>
                     ) : (
                         recentDevices.map((device) => {
-                            const lastSeen = getLastSeenValue(device, pairings[device.pairing_code]);
-                            const isOnline = isDeviceOnlineWithHeartbeat(device, pairings[device.pairing_code], Date.now());
+                            const lastSeen = getLastSeenValue(device, pairings[device.id]);
+                            const isOnline = isDeviceOnlineWithHeartbeat(device, pairings[device.id], Date.now());
                             return (
                                 <div key={device.id} className="border border-[var(--color-border)] rounded-lg p-3">
                                     <div className="flex items-center justify-between mb-2">
@@ -207,7 +207,7 @@ export default function AdminDashboardPage() {
                                     <DeviceRow
                                         key={device.id}
                                         device={device}
-                                        pairing={pairings[device.pairing_code]}
+                                        pairing={pairings[device.id]}
                                     />
                                 ))
                             )}
@@ -271,7 +271,7 @@ function DeviceRow({
     pairing,
 }: {
     device: Device;
-    pairing?: Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>;
+    pairing?: Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>;
 }) {
     const lastSeen = getLastSeenValue(device, pairing);
     const isOnline = isDeviceOnlineWithHeartbeat(device, pairing, Date.now());
@@ -285,8 +285,8 @@ function DeviceRow({
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
-                <span className="text-sm font-mono text-[var(--color-text)]">
-                    {device.pairing_code}
+                <span className="text-sm font-mono text-[var(--color-text)]" title={device.id}>
+                    {device.id.slice(0, 8)}...
                 </span>
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
@@ -316,30 +316,30 @@ function DeviceRow({
 
 function getLastSeenValue(
     device: Device,
-    pairing?: Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>,
+    pairing?: Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>,
 ): string | null {
     return pairing?.device_last_seen ?? device.last_seen ?? null;
 }
 
 function getLastSeenMs(
     device: Device,
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
 ): number {
-    const lastSeen = getLastSeenValue(device, pairingMap[device.pairing_code]);
+    const lastSeen = getLastSeenValue(device, pairingMap[device.id]);
     return lastSeen ? new Date(lastSeen).getTime() : 0;
 }
 
 function isDeviceOnlineWithMap(
     device: Device,
-    pairingMap: Record<string, Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
+    pairingMap: Record<string, Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'>>,
     nowMs: number,
 ): boolean {
-    return isDeviceOnlineWithHeartbeat(device, pairingMap[device.pairing_code], nowMs);
+    return isDeviceOnlineWithHeartbeat(device, pairingMap[device.id], nowMs);
 }
 
 function isDeviceOnlineWithHeartbeat(
     device: Device,
-    pairing: Pick<Pairing, 'pairing_code' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'> | undefined,
+    pairing: Pick<Pairing, 'device_uuid' | 'app_last_seen' | 'device_last_seen' | 'app_connected' | 'device_connected'> | undefined,
     nowMs: number,
 ): boolean {
     const lastSeen = getLastSeenValue(device, pairing);

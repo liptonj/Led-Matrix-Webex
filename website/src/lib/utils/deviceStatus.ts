@@ -12,22 +12,24 @@ export function getLastSeenValue(
 
 /**
  * Gets the last seen timestamp for a device from a pairing map
+ * Uses device.id (device_uuid) as the key
  */
 export function getLastSeenValueFromMap(
   device: Device,
   pairingMap: Record<string, Pairing>,
 ): string | null {
-  return getLastSeenValue(device, pairingMap[device.pairing_code]);
+  return getLastSeenValue(device, pairingMap[device.id]);
 }
 
 /**
  * Gets the last seen time in milliseconds since epoch
+ * Uses device.id (device_uuid) as the key
  */
 export function getLastSeenMs(
   device: Device,
   pairingMap: Record<string, Pairing>,
 ): number {
-  const lastSeen = getLastSeenValue(device, pairingMap[device.pairing_code]);
+  const lastSeen = getLastSeenValue(device, pairingMap[device.id]);
   return lastSeen ? new Date(lastSeen).getTime() : 0;
 }
 
@@ -47,13 +49,14 @@ export function isDeviceOnline(
 
 /**
  * Determines if a device is online using a pairing map
+ * Uses device.id (device_uuid) as the key
  */
 export function isDeviceOnlineFromMap(
   device: Device,
   pairingMap: Record<string, Pairing>,
   nowMs: number,
 ): boolean {
-  return isDeviceOnline(device, pairingMap[device.pairing_code], nowMs);
+  return isDeviceOnline(device, pairingMap[device.id], nowMs);
 }
 
 /**

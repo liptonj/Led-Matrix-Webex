@@ -9,3 +9,13 @@
 export function isValidPairingCode(code: string): boolean {
   return /^[A-HJ-NP-Z2-9]{6}$/.test(code);
 }
+
+/**
+ * Validates a UUID format (UUID v4).
+ *
+ * @param uuid - The UUID to validate
+ * @returns `true` if the UUID matches the required format, `false` otherwise
+ */
+export function isValidUUID(uuid: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid);
+}

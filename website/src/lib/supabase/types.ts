@@ -1,8 +1,8 @@
 export interface Device {
-  id: string;
+  id: string; // device_uuid - primary identifier
   serial_number: string;
   device_id: string;
-  pairing_code: string;
+  pairing_code?: string | null; // Temporary, nullable after pairing (not always selected)
   display_name: string | null;
   firmware_version: string | null;
   target_firmware_version: string | null;
@@ -86,10 +86,11 @@ export interface OAuthClient {
 }
 
 export interface Pairing {
-  pairing_code: string;
+  device_uuid: string; // Primary key - always present
+  pairing_code: string | null; // Temporary, nullable after pairing
+  pairing_code_expires_at: string | null;
   serial_number: string;
   device_id: string | null;
-  device_uuid: string | null;
   user_uuid: string | null;
   app_last_seen: string | null;
   device_last_seen: string | null;
@@ -115,8 +116,7 @@ export interface Pairing {
 
 export interface Command {
   id: string;
-  pairing_code: string;
-  serial_number: string;
+  device_uuid: string;
   command: string;
   payload: Record<string, unknown>;
   status: "pending" | "acked" | "failed" | "expired";
