@@ -144,8 +144,8 @@ describe('supportSessions', () => {
         admin_id: 'admin-789',
         joined_at: '2026-02-07T12:05:00Z',
       };
-      mockSingle.mockResolvedValueOnce({
-        data: activeSession,
+      mockSelect.mockResolvedValueOnce({
+        data: [activeSession],
         error: null,
       });
 
@@ -165,31 +165,29 @@ describe('supportSessions', () => {
     });
 
     it('only joins sessions with waiting status', async () => {
-      mockSingle.mockResolvedValueOnce({
-        data: null,
-        error: { message: 'No rows returned', code: 'PGRST116' },
+      mockSelect.mockResolvedValueOnce({
+        data: [],
+        error: null,
       });
 
       // Attempting to join a closed session should fail
-      await expect(joinSupportSession('closed-session', 'admin-789')).rejects.toEqual({
-        message: 'No rows returned',
-        code: 'PGRST116',
-      });
+      await expect(joinSupportSession('closed-session', 'admin-789')).rejects.toThrow(
+        'Session is not available or has already been joined.'
+      );
 
       // Verify the status filter was applied
       expect(mockEq).toHaveBeenCalledWith('status', 'waiting');
     });
 
     it('throws error when join fails', async () => {
-      mockSingle.mockResolvedValueOnce({
-        data: null,
-        error: { message: 'Session not found', code: 'PGRST116' },
+      mockSelect.mockResolvedValueOnce({
+        data: [],
+        error: null,
       });
 
-      await expect(joinSupportSession('session-123', 'admin-789')).rejects.toEqual({
-        message: 'Session not found',
-        code: 'PGRST116',
-      });
+      await expect(joinSupportSession('session-123', 'admin-789')).rejects.toThrow(
+        'Session is not available or has already been joined.'
+      );
     });
   });
 

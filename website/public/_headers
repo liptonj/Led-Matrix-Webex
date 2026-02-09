@@ -7,6 +7,9 @@
 # Firmware now points directly to Supabase: https://YOUR_PROJECT.supabase.co/functions/v1/get-manifest
 
 # Embedded App - Allow Webex to iframe and enable CORS for local display access
+# Note: CORS * is required because the embedded app is accessed from Webex iframes
+# and needs to communicate with ESP32 devices on the local network.
+# Security is enforced via frame-ancestors CSP which restricts iframe embedding to Webex domains.
 /embedded/*
   Content-Security-Policy: frame-ancestors 'self' https://*.webex.com https://*.wbx2.com https://*.ciscospark.com
   Access-Control-Allow-Origin: *

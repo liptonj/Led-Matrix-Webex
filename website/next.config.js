@@ -35,6 +35,10 @@ const nextConfig = {
           },
           {
             key: 'Content-Security-Policy',
+            // Note on CSP:
+            // - 'unsafe-eval' required for ESP Web Tools (esptool.js uses eval for WebAssembly)
+            // - 'unsafe-inline' required for theme initialization script in layout.tsx
+            // - unpkg.com hosts ESP Web Tools library
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://unpkg.com",

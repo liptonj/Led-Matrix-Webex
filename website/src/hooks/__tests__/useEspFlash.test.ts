@@ -5,9 +5,9 @@
  * and error handling functionality.
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { useEspFlash } from '../useEspFlash';
 import { spyOnConsole } from '@/test-utils/setup';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useEspFlash } from '../useEspFlash';
 
 // Mock esptool-js
 const mockChipRom = {

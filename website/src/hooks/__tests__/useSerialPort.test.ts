@@ -5,10 +5,10 @@
  * and error handling functionality.
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { TextEncoder, TextDecoder } from 'util';
-import { useSerialPort } from '../useSerialPort';
 import { spyOnConsole } from '@/test-utils/setup';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { TextDecoder, TextEncoder } from 'util';
+import { useSerialPort } from '../useSerialPort';
 
 // Mock Web Serial API types
 interface MockReadableStreamReader {

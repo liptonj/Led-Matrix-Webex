@@ -166,12 +166,19 @@ export default function UserDashboard() {
 
   async function handleToggleWebexPolling(serialNumber: string, currentValue: boolean) {
     try {
+      const { data: { session } } = await getSession();
+      if (!session) {
+        console.error('Not authenticated');
+        return;
+      }
+      
       const supabase = await getSupabase();
       const { error } = await supabase
         .schema('display')
         .from('user_devices')
         .update({ webex_polling_enabled: !currentValue })
-        .eq('serial_number', serialNumber);
+        .eq('serial_number', serialNumber)
+        .eq('user_id', session.user.id);
 
       if (error) {
         console.error('Error toggling webex polling:', error);

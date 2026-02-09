@@ -1,6 +1,7 @@
-import { getSupabase } from "./core";
 import { getSession } from "./auth";
+import { getSupabase } from "./core";
 import type { Command, Pairing } from "./types";
+import { isValidPairingCode } from "@/lib/utils/validation";
 
 /**
  * Subscribe to pairing state changes for a specific pairing code.
@@ -12,6 +13,11 @@ export async function subscribeToPairing(
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
 ): Promise<() => void> {
+  // Validate pairing code format to prevent filter injection
+  if (!isValidPairingCode(pairingCode)) {
+    throw new Error('Invalid pairing code format');
+  }
+
   const supabase = await getSupabase();
 
   const channel = supabase
@@ -70,6 +76,11 @@ export async function subscribeToCommands(
   onStatusChange?: (subscribed: boolean) => void,
   onError?: (error: string) => void,
 ): Promise<() => void> {
+  // Validate pairing code format to prevent filter injection
+  if (!isValidPairingCode(pairingCode)) {
+    throw new Error('Invalid pairing code format');
+  }
+
   const supabase = await getSupabase();
 
   const channel = supabase
@@ -151,6 +162,11 @@ const PAIRING_COLUMNS = `
  * Get a pairing by code
  */
 export async function getPairing(pairingCode: string): Promise<Pairing | null> {
+  // Validate pairing code format for consistency and security
+  if (!isValidPairingCode(pairingCode)) {
+    throw new Error('Invalid pairing code format');
+  }
+
   const supabase = await getSupabase();
   const { data, error } = await supabase
     .schema("display")

@@ -33,3 +33,9 @@ export {
   withTimeout,
   TimeoutError,
 } from "./fetchWithTimeout";
+
+// Logger utility
+export { logger, default as loggerDefault } from "./logger";
+
+// Validation utilities
+export { isValidPairingCode } from "./validation";

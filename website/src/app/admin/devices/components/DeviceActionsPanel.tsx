@@ -1,7 +1,8 @@
 'use client';
 
+import { ConfirmDialog, useConfirmDialog } from '@/components/ui';
 import { Device } from '@/lib/supabase';
-import { memo, useState, useEffect } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 const LOG_LEVELS = [
     { value: 'none', label: 'None (silent)' },
@@ -44,6 +45,8 @@ export default memo(function DeviceActionsPanel({
     onSetLogLevel,
 }: DeviceActionsPanelProps) {
     const [logLevel, setLogLevel] = useState<LogLevel>((currentLogLevel as LogLevel) || 'info');
+    const confirmDisable = useConfirmDialog();
+    const confirmBlacklist = useConfirmDialog();
 
     useEffect(() => {
         if (currentLogLevel) {
@@ -57,17 +60,21 @@ export default memo(function DeviceActionsPanel({
     };
 
     const handleDisableClick = () => {
-        const action = device.disabled ? 'enable' : 'disable';
-        if (window.confirm(`Are you sure you want to ${action} this device?`)) {
-            onToggleDisabled();
-        }
+        confirmDisable.open();
     };
 
     const handleBlacklistClick = () => {
-        const action = device.blacklisted ? 'remove from blacklist' : 'blacklist';
-        if (window.confirm(`Are you sure you want to ${action} this device? ${!device.blacklisted ? 'Blacklisted devices cannot connect.' : ''}`)) {
-            onToggleBlacklisted();
-        }
+        confirmBlacklist.open();
+    };
+
+    const handleConfirmDisable = () => {
+        onToggleDisabled();
+        confirmDisable.close();
+    };
+
+    const handleConfirmBlacklist = () => {
+        onToggleBlacklisted();
+        confirmBlacklist.close();
     };
 
     return (
@@ -163,6 +170,27 @@ export default memo(function DeviceActionsPanel({
                     Delete device
                 </button>
             </div>
+
+            {/* Confirm Dialogs */}
+            <ConfirmDialog
+                open={confirmDisable.isOpen}
+                onClose={() => confirmDisable.close()}
+                onConfirm={handleConfirmDisable}
+                title={device.disabled ? 'Enable Device' : 'Disable Device'}
+                message={`Are you sure you want to ${device.disabled ? 'enable' : 'disable'} this device?`}
+                variant="warning"
+                confirmLabel={device.disabled ? 'Enable' : 'Disable'}
+            />
+
+            <ConfirmDialog
+                open={confirmBlacklist.isOpen}
+                onClose={() => confirmBlacklist.close()}
+                onConfirm={handleConfirmBlacklist}
+                title={device.blacklisted ? 'Remove from Blacklist' : 'Blacklist Device'}
+                message={`Are you sure you want to ${device.blacklisted ? 'remove this device from the blacklist' : 'blacklist this device'}?${!device.blacklisted ? ' Blacklisted devices cannot connect.' : ''}`}
+                variant="danger"
+                confirmLabel={device.blacklisted ? 'Remove' : 'Blacklist'}
+            />
         </div>
     );
 });

@@ -5,9 +5,9 @@
  * and lifecycle management.
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { useSupportSession } from '../useSupportSession';
 import { spyOnConsole } from '@/test-utils/setup';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useSupportSession } from '../useSupportSession';
 
 // Mock Supabase helpers
 const mockCreateSupportSession = jest.fn();

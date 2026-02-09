@@ -221,7 +221,7 @@ describe("Type Definitions", () => {
         id: "uuid-123",
         serial_number: "A1B2C3D4",
         device_id: "webex-display-C3D4",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         display_name: "Test Device",
         firmware_version: "1.0.0",
         target_firmware_version: null,
@@ -239,7 +239,7 @@ describe("Type Definitions", () => {
 
       expect(device.serial_number).toBe("A1B2C3D4");
       expect(device.device_id).toBe("webex-display-C3D4");
-      expect(device.pairing_code).toBe("ABC123");
+      expect(device.pairing_code).toBe("ABCD23");
       expect(device.debug_enabled).toBe(false);
       expect(device.is_provisioned).toBe(true);
     });
@@ -517,7 +517,7 @@ describe("setLatestRelease", () => {
 describe("Pairing Type Definitions", () => {
   it("should have all required pairing fields", () => {
     const pairing = {
-      pairing_code: "ABC123",
+      pairing_code: "ABCD23",
       serial_number: "A1B2C3D4",
       device_id: "webex-display-C3D4",
       app_last_seen: "2026-01-28T12:00:00Z",
@@ -541,7 +541,7 @@ describe("Pairing Type Definitions", () => {
       updated_at: "2026-01-28T12:00:00Z",
     };
 
-    expect(pairing.pairing_code).toBe("ABC123");
+    expect(pairing.pairing_code).toBe("ABCD23");
     expect(pairing.serial_number).toBe("A1B2C3D4");
     expect(pairing.app_connected).toBe(true);
     expect(pairing.device_connected).toBe(true);
@@ -562,7 +562,7 @@ describe("Command Type Definitions", () => {
   it("should have all required command fields", () => {
     const command = {
       id: "uuid-cmd-123",
-      pairing_code: "ABC123",
+      pairing_code: "ABCD23",
       serial_number: "A1B2C3D4",
       command: "set_brightness",
       payload: { value: 200 },
@@ -615,7 +615,7 @@ describe("subscribeToPairing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    const unsubscribe = await subscribeToPairing("ABC123", onUpdate);
+    const unsubscribe = await subscribeToPairing("ABCD23", onUpdate);
     expect(typeof unsubscribe).toBe("function");
   });
 
@@ -624,7 +624,7 @@ describe("subscribeToPairing", () => {
     const onUpdate = jest.fn();
     const onStatusChange = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate, onStatusChange);
+    await subscribeToPairing("ABCD23", onUpdate, onStatusChange);
     expect(onStatusChange).toHaveBeenCalledWith(true);
   });
 
@@ -632,7 +632,7 @@ describe("subscribeToPairing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    const unsubscribe = await subscribeToPairing("ABC123", onUpdate);
+    const unsubscribe = await subscribeToPairing("ABCD23", onUpdate);
     unsubscribe();
     expect(mockRemoveChannel).toHaveBeenCalled();
   });
@@ -641,7 +641,7 @@ describe("subscribeToPairing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate);
+    await subscribeToPairing("ABCD23", onUpdate);
 
     // Should have called .on() twice - once for UPDATE, once for INSERT
     expect(mockChannel.on).toHaveBeenCalledTimes(2);
@@ -659,7 +659,7 @@ describe("subscribeToPairing", () => {
     const onStatusChange = jest.fn();
     const onError = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate, onStatusChange, onError);
+    await subscribeToPairing("ABCD23", onUpdate, onStatusChange, onError);
     expect(onError).toHaveBeenCalledWith("Failed to subscribe to pairing updates");
     expect(onStatusChange).toHaveBeenCalledWith(false);
   });
@@ -675,7 +675,7 @@ describe("subscribeToPairing", () => {
     const onStatusChange = jest.fn();
     const onError = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate, onStatusChange, onError);
+    await subscribeToPairing("ABCD23", onUpdate, onStatusChange, onError);
     expect(onError).toHaveBeenCalledWith("Pairing subscription timed out");
   });
 });
@@ -701,7 +701,7 @@ describe("subscribeToCommands", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    const unsubscribe = await subscribeToCommands("ABC123", onCommandUpdate);
+    const unsubscribe = await subscribeToCommands("ABCD23", onCommandUpdate);
     expect(typeof unsubscribe).toBe("function");
   });
 
@@ -710,7 +710,7 @@ describe("subscribeToCommands", () => {
     const onCommandUpdate = jest.fn();
     const onStatusChange = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate, onStatusChange);
+    await subscribeToCommands("ABCD23", onCommandUpdate, onStatusChange);
     expect(onStatusChange).toHaveBeenCalledWith(true);
   });
 
@@ -718,7 +718,7 @@ describe("subscribeToCommands", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    const unsubscribe = await subscribeToCommands("ABC123", onCommandUpdate);
+    const unsubscribe = await subscribeToCommands("ABCD23", onCommandUpdate);
     unsubscribe();
     expect(mockRemoveChannel).toHaveBeenCalled();
   });
@@ -727,7 +727,7 @@ describe("subscribeToCommands", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Should have called .on() twice - once for UPDATE, once for INSERT
     expect(mockChannel.on).toHaveBeenCalledTimes(2);
@@ -745,7 +745,7 @@ describe("subscribeToCommands", () => {
     const onStatusChange = jest.fn();
     const onError = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate, onStatusChange, onError);
+    await subscribeToCommands("ABCD23", onCommandUpdate, onStatusChange, onError);
     expect(onError).toHaveBeenCalledWith("Failed to subscribe to command updates");
     expect(onStatusChange).toHaveBeenCalledWith(false);
   });
@@ -762,7 +762,7 @@ describe("getPairing", () => {
 
   it("should query pairing by pairing code", async () => {
     const { getPairing } = await import("../supabase");
-    const pairing = await getPairing("ABC123");
+    const pairing = await getPairing("ABCD23");
     expect(pairing).toBeNull(); // Mock returns null
   });
 });
@@ -778,7 +778,7 @@ describe("getPendingCommands", () => {
 
   it("should query pending commands by pairing code", async () => {
     const { getPendingCommands } = await import("../supabase");
-    const commands = await getPendingCommands("ABC123");
+    const commands = await getPendingCommands("ABCD23");
     expect(Array.isArray(commands)).toBe(true);
   });
 });
@@ -870,12 +870,12 @@ describe("subscribeToPairing - payload parsing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate);
+    await subscribeToPairing("ABCD23", onUpdate);
 
     // Simulate receiving a pairing update
     const mockPayload = {
       new: {
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         device_connected: true,
         device_last_seen: "2026-01-28T12:00:00Z",
@@ -902,12 +902,12 @@ describe("subscribeToPairing - payload parsing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate);
+    await subscribeToPairing("ABCD23", onUpdate);
 
     // Simulate receiving a partial update (only device telemetry)
     const mockPayload = {
       new: {
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         rssi: -70,
         device_last_seen: "2026-01-28T12:05:00Z",
       },
@@ -923,12 +923,12 @@ describe("subscribeToPairing - payload parsing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate);
+    await subscribeToPairing("ABCD23", onUpdate);
 
     // Simulate device disconnecting
     const disconnectPayload = {
       new: {
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         device_connected: false,
         device_last_seen: "2026-01-28T12:10:00Z",
       },
@@ -947,12 +947,12 @@ describe("subscribeToPairing - payload parsing", () => {
     const { subscribeToPairing } = await import("../supabase");
     const onUpdate = jest.fn();
 
-    await subscribeToPairing("ABC123", onUpdate);
+    await subscribeToPairing("ABCD23", onUpdate);
 
     // Simulate Webex status change
     const statusPayload = {
       new: {
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         webex_status: "meeting",
         in_call: true,
         camera_on: true,
@@ -1037,13 +1037,13 @@ describe("subscribeToCommands - command ack handling", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Simulate receiving a command ack
     const ackPayload = {
       new: {
         id: "cmd-uuid-1",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         command: "set_brightness",
         payload: { value: 200 },
@@ -1070,13 +1070,13 @@ describe("subscribeToCommands - command ack handling", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Simulate receiving a command failure
     const failedPayload = {
       new: {
         id: "cmd-uuid-2",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         command: "set_config",
         payload: { invalid: true },
@@ -1102,13 +1102,13 @@ describe("subscribeToCommands - command ack handling", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Simulate receiving a command expiration
     const expiredPayload = {
       new: {
         id: "cmd-uuid-3",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         command: "reboot",
         payload: {},
@@ -1133,13 +1133,13 @@ describe("subscribeToCommands - command ack handling", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Simulate receiving a new command insert notification
     const insertPayload = {
       new: {
         id: "cmd-uuid-4",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         command: "get_status",
         payload: {},
@@ -1168,13 +1168,13 @@ describe("subscribeToCommands - command ack handling", () => {
     const { subscribeToCommands } = await import("../supabase");
     const onCommandUpdate = jest.fn();
 
-    await subscribeToCommands("ABC123", onCommandUpdate);
+    await subscribeToCommands("ABCD23", onCommandUpdate);
 
     // Simulate receiving a command ack with complex response
     const complexPayload = {
       new: {
         id: "cmd-uuid-5",
-        pairing_code: "ABC123",
+        pairing_code: "ABCD23",
         serial_number: "A1B2C3D4",
         command: "get_config",
         payload: {},
