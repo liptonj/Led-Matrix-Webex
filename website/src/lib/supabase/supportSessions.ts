@@ -71,10 +71,11 @@ export async function joinSupportSession(
   );
 
   if (error) throw error;
-  if (!data || data.length === 0) {
+  const session = data?.[0];
+  if (!session) {
     throw new Error("Session is not available or has already been joined.");
   }
-  return data[0];
+  return session;
 }
 
 /**
