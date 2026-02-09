@@ -169,6 +169,11 @@ describe('supportSessions', () => {
         data: [],
         error: null,
       });
+      // Mock the rejoin check to return "no rows" error
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'No rows returned', code: 'PGRST116' },
+      });
 
       // Attempting to join a closed session should fail
       await expect(joinSupportSession('closed-session', 'admin-789')).rejects.toThrow(
@@ -183,6 +188,11 @@ describe('supportSessions', () => {
       mockSelect.mockResolvedValueOnce({
         data: [],
         error: null,
+      });
+      // Mock the rejoin check to return "no rows" error
+      mockSingle.mockResolvedValueOnce({
+        data: null,
+        error: { message: 'No rows returned', code: 'PGRST116' },
       });
 
       await expect(joinSupportSession('session-123', 'admin-789')).rejects.toThrow(
