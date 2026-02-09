@@ -16,14 +16,42 @@ describe('StatusBadge', () => {
 
     it('renders dot indicator by default', () => {
       const { container } = render(<StatusBadge status="online" />);
-      const dot = container.querySelector('span[aria-hidden="true"]');
+      // Dot is the first span with aria-hidden, has rounded-full class
+      const dot = container.querySelector('span.rounded-full[aria-hidden="true"]');
       expect(dot).toBeInTheDocument();
     });
 
     it('hides dot indicator when showDot is false', () => {
       const { container } = render(<StatusBadge status="online" showDot={false} />);
-      const dot = container.querySelector('span[aria-hidden="true"]');
+      // Check that the dot (rounded-full) is not present
+      const dot = container.querySelector('span.rounded-full[aria-hidden="true"]');
       expect(dot).not.toBeInTheDocument();
+    });
+
+    it('renders icon for accessibility', () => {
+      render(<StatusBadge status="online" />);
+      // Icon is always present - check for checkmark (✓) for online status
+      expect(screen.getByText('✓')).toBeInTheDocument();
+    });
+
+    it('renders appropriate icon for each status', () => {
+      const statusIcons: Record<string, string> = {
+        online: '✓',
+        offline: '○',
+        pending: '⚠',
+        warning: '⚠',
+        rejected: '✕',
+        danger: '✕',
+        active: 'ℹ',
+      };
+
+      Object.entries(statusIcons).forEach(([status, icon]) => {
+        const { rerender } = render(
+          <StatusBadge status={status as import('../StatusBadge').StatusVariant} />
+        );
+        expect(screen.getByText(icon)).toBeInTheDocument();
+        rerender(<div />); // Clear for next iteration
+      });
     });
   });
 
@@ -79,6 +107,18 @@ describe('StatusBadge', () => {
   });
 
   describe('accessibility', () => {
+    it('has proper ARIA role and label', () => {
+      render(<StatusBadge status="online" label="Device Online" />);
+      const badge = screen.getByRole('status');
+      expect(badge).toHaveAttribute('aria-label', 'Status: Device Online');
+    });
+
+    it('uses default label in ARIA when no custom label provided', () => {
+      render(<StatusBadge status="pending" />);
+      const badge = screen.getByRole('status');
+      expect(badge).toHaveAttribute('aria-label', 'Status: Pending');
+    });
+
     it('forwards ref correctly', () => {
       const ref = jest.fn();
       render(<StatusBadge status="online" ref={ref} />);
