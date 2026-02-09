@@ -129,16 +129,28 @@ export async function getPairedUser(deviceUuid: string): Promise<{ name?: string
   };
 }
 
-// Helper to get a single device by device UUID (id)
-export async function getDevice(deviceId: string): Promise<Device | null> {
+// Helper to detect UUID format
+function isUUID(s: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(s);
+}
+
+// Helper to get a single device by UUID (id) or serial_number
+// Automatically detects whether the identifier is a UUID or serial_number
+export async function getDevice(identifier: string): Promise<Device | null> {
   const supabase = await getSupabase();
+  const query = supabase
+    .schema("display")
+    .from("devices")
+    .select(DEVICE_COLUMNS);
+
+  // Query by id if UUID, otherwise query by serial_number
+  const filteredQuery = isUUID(identifier)
+    ? query.eq("id", identifier)
+    : query.eq("serial_number", identifier);
+
   const { data, error } = await withTimeout(
-    supabase
-      .schema("display")
-      .from("devices")
-      .select(DEVICE_COLUMNS)
-      .eq("id", deviceId)
-      .single(),
+    filteredQuery.single(),
     SUPABASE_REQUEST_TIMEOUT_MS,
     "Timed out while loading the device record.",
   );

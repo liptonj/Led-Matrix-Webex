@@ -8,6 +8,12 @@ import type { RealtimeStatus, WebexStatusBroadcast } from '../types';
 
 const API_TIMEOUT_MS = 15000;
 
+// Helper to detect UUID format
+function isUUID(s: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(s);
+}
+
 export interface UsePairingOptions {
   addLog: (message: string) => void;
 }
@@ -174,14 +180,20 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const refreshPairingSnapshot = useCallback(async (deviceUuid: string, reason: string) => {
     if (!supabaseRef.current || !deviceUuid) return;
     try {
-      // Query devices table by UUID to get pairing_code (always exists for assigned devices)
+      // Query devices table by UUID or serial_number to get pairing_code
       // This avoids the 406 error when no pairing row exists yet
-      const { data: device, error: deviceError } = await supabaseRef.current
+      // When device_uuid is null, we may have a serial_number instead (legacy fallback)
+      const query = supabaseRef.current
         .schema('display')
         .from('devices')
-        .select('pairing_code, last_seen')
-        .eq('id', deviceUuid)
-        .maybeSingle();
+        .select('pairing_code, last_seen');
+      
+      // Query by id if UUID, otherwise query by serial_number (legacy fallback)
+      const filteredQuery = isUUID(deviceUuid)
+        ? query.eq('id', deviceUuid)
+        : query.eq('serial_number', deviceUuid);
+
+      const { data: device, error: deviceError } = await filteredQuery.maybeSingle();
 
       if (!device || deviceError) {
         addLog(`No device found for UUID ${deviceUuid.slice(0, 8)}...`);
