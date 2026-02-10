@@ -2,7 +2,7 @@
  * Poll Commands Edge Function
  *
  * Devices poll for pending commands. Returns up to 10 oldest pending
- * commands for the device's pairing code.
+ * commands for the device's UUID.
  *
  * Authentication: Bearer token (from device-auth) AND HMAC headers (both required)
  *
@@ -85,30 +85,27 @@ Deno.serve(async (req) => {
       );
     }
 
-    const deviceInfo = {
-      serial_number: authResult.serialNumber!,
-      pairing_code: authResult.pairingCode || "",
-      device_uuid: authResult.deviceUuid,
-    };
+    // Validate device_uuid is available
+    if (!authResult.deviceUuid) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Device UUID not found" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
 
-    // Query pending commands for this device using device_uuid (preferred) or pairing_code (fallback)
-    let query = supabase
+    // Query pending commands for this device using device_uuid
+    const { data: commands, error: queryError } = await supabase
       .schema("display")
       .from("commands")
       .select("id, command, payload, created_at")
       .eq("status", "pending")
+      .eq("device_uuid", authResult.deviceUuid)
       .gt("expires_at", new Date().toISOString()) // Only non-expired commands
       .order("created_at", { ascending: true })
       .limit(MAX_COMMANDS_PER_POLL);
-
-    // Use device_uuid if available, otherwise fall back to pairing_code
-    if (deviceInfo.device_uuid) {
-      query = query.eq("device_uuid", deviceInfo.device_uuid);
-    } else {
-      query = query.eq("pairing_code", deviceInfo.pairing_code);
-    }
-
-    const { data: commands, error: queryError } = await query;
 
     if (queryError) {
       console.error("Failed to query commands:", queryError);

@@ -1,13 +1,13 @@
 /**
  * Approve Device Edge Function
  *
- * Allows authenticated users to approve devices by pairing code.
+ * Allows authenticated users to approve devices by device UUID.
  * Updates devices table with user_approved_by and approved_at.
  * Creates entry in user_devices table.
  *
  * Request body:
  * {
- *   "pairing_code": "ABC123"  // 6 characters
+ *   "device_uuid": "550e8400-e29b-41d4-a716-446655440000"  // Device UUID (devices.id)
  * }
  *
  * Response:
@@ -20,12 +20,11 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
-import { isCodeExpired, validatePairingCode } from "../_shared/pairing_code.ts";
 import { getUserFromRequest } from "../_shared/user_auth.ts";
 import { sendBroadcast } from "../_shared/broadcast.ts";
 
 interface ApproveRequest {
-  pairing_code: string;
+  device_uuid: string;
 }
 
 serve(async (req: Request) => {
@@ -61,12 +60,13 @@ serve(async (req: Request) => {
       );
     }
 
-    // Parse and validate pairing code
+    // Parse and validate device UUID
     const body: ApproveRequest = await req.json();
-    const validation = validatePairingCode(body.pairing_code);
-    if (!validation.valid) {
+    const deviceUuid = body.device_uuid;
+    
+    if (!deviceUuid || typeof deviceUuid !== "string" || deviceUuid.trim().length === 0) {
       return new Response(
-        JSON.stringify({ error: validation.error }),
+        JSON.stringify({ error: "device_uuid is required" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -74,19 +74,17 @@ serve(async (req: Request) => {
       );
     }
 
-    const normalizedCode = validation.code!;
-
     // Use service role client for database operations
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    // Look up device by pairing_code (include device UUID)
+    // Look up device by device_uuid (id field)
     const { data: device, error: deviceError } = await (supabase as any)
       .schema("display")
       .from("devices")
       .select("id, serial_number, user_approved_by, created_at")
-      .eq("pairing_code", normalizedCode)
+      .eq("id", deviceUuid)
       .single();
 
     if (deviceError || !device) {
@@ -94,17 +92,6 @@ serve(async (req: Request) => {
         JSON.stringify({ error: "Device not found" }),
         {
           status: 404,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    // Check if pairing code expired
-    if (isCodeExpired(device.created_at)) {
-      return new Response(
-        JSON.stringify({ error: "Pairing code has expired" }),
-        {
-          status: 410,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         },
       );
@@ -124,7 +111,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Update device with approval
+    // Update device with approval using device_uuid
     const { error: updateError } = await (supabase as any)
       .schema("display")
       .from("devices")
@@ -132,7 +119,7 @@ serve(async (req: Request) => {
         user_approved_by: user.id,
         approved_at: new Date().toISOString(),
       })
-      .eq("pairing_code", normalizedCode);
+      .eq("id", deviceUuid);
 
     if (updateError) {
       console.error("Failed to update device approval:", updateError);
@@ -145,7 +132,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // Create or update user_devices entry (include device_uuid)
+    // Create or update user_devices entry using device_uuid
     const { error: upsertError } = await (supabase as any)
       .schema("display")
       .from("user_devices")
@@ -153,7 +140,7 @@ serve(async (req: Request) => {
         {
           user_id: user.id,
           serial_number: device.serial_number,
-          device_uuid: device.id,
+          device_uuid: deviceUuid,
           created_by: user.id,
           provisioning_method: "user_approved",
           provisioned_at: new Date().toISOString(),
@@ -170,16 +157,14 @@ serve(async (req: Request) => {
       // Just log the error
     }
 
-    // Update pairings.user_uuid (use UPSERT to handle race condition)
+    // Update pairings.user_uuid using device_uuid (use UPSERT to handle race condition)
     const { error: pairingUpdateError } = await (supabase as any)
       .schema("display")
       .from("pairings")
-      .upsert({
-        pairing_code: normalizedCode,
-        serial_number: device.serial_number,
-        device_uuid: device.id,
+      .update({
         user_uuid: user.id,
-      }, { onConflict: "pairing_code" });
+      })
+      .eq("device_uuid", deviceUuid);
 
     if (pairingUpdateError) {
       console.error("Failed to update pairings.user_uuid:", pairingUpdateError);
@@ -194,8 +179,7 @@ serve(async (req: Request) => {
         "user_assigned",
         {
           user_uuid: user.id,
-          device_uuid: device.id,
-          pairing_code: normalizedCode,
+          device_uuid: deviceUuid,
         },
       );
       console.log(`Broadcasted user_assigned event to user:${user.id}`);
@@ -209,6 +193,7 @@ serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         message: "Device approved successfully",
+        device_uuid: deviceUuid,
       }),
       {
         status: 200,

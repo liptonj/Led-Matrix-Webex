@@ -28,16 +28,24 @@ export default function AuthCallbackPage() {
         }
 
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
         if (!supabaseUrl) {
           throw new Error('Supabase URL not configured.');
         }
 
         // POST code and state to Edge Function
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        if (supabaseAnonKey) {
+          headers['apikey'] = supabaseAnonKey;
+        }
+
         const response = await fetchWithTimeout(
           `${supabaseUrl}/functions/v1/webex-user-callback`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ code, state }),
           },
           OAUTH_CALLBACK_TIMEOUT_MS
@@ -45,7 +53,8 @@ export default function AuthCallbackPage() {
 
         const data = await response.json();
         if (!response.ok) {
-          throw new Error(data?.error || 'Failed to complete authentication');
+          console.error('webex-user-callback error response:', data);
+          throw new Error(data?.details || data?.error || 'Failed to complete authentication');
         }
 
         // Extract token from redirect_url if present

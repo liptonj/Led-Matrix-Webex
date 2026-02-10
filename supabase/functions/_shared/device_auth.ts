@@ -28,8 +28,7 @@ export interface DeviceAuthResult {
   httpStatus?: number; // suggested HTTP status code for error responses
   serialNumber?: string;
   deviceId?: string;
-  deviceUuid?: string;
-  pairingCode?: string;
+  deviceUuid?: string; // Primary device identifier (from devices.id)
   debugEnabled?: boolean;
   targetFirmwareVersion?: string | null;
   userUuid?: string | null;
@@ -128,7 +127,6 @@ export async function validateDeviceAuth(
       valid: true,
       serialNumber: tokenPayload.serial_number,
       deviceUuid: tokenPayload.device_uuid,
-      pairingCode: tokenPayload.pairing_code,
       userUuid: tokenPayload.user_uuid ?? null,
       tokenType: tokenPayload.token_type,
       tokenPayload,
@@ -163,12 +161,12 @@ export async function validateDeviceAuth(
   }
 
   // Success: Return combined data from both JWT and HMAC
+  // Use device_uuid from HMAC result (freshest from DB) if available, otherwise from JWT
   return {
     valid: true,
     serialNumber: tokenPayload.serial_number,
     deviceId: hmacResult.device.device_id,
-    deviceUuid: tokenPayload.device_uuid,
-    pairingCode: hmacResult.device.pairing_code,
+    deviceUuid: hmacResult.device.device_uuid || tokenPayload.device_uuid,
     debugEnabled: hmacResult.device.debug_enabled,
     targetFirmwareVersion: hmacResult.device.target_firmware_version,
     userUuid: tokenPayload.user_uuid ?? null,

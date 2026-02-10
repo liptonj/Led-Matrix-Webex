@@ -6,8 +6,8 @@
  * 2. Resolve Mode (no Authorization header): Browser resolves nonce to get OAuth URL
  */
 
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
+import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { validateHmacRequest } from "../_shared/hmac.ts";
 import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";

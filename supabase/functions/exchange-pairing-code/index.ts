@@ -6,7 +6,7 @@
  * (PostgREST + Realtime) without requiring a Supabase Auth user session.
  *
  * Input: { pairing_code: string }
- * Output: { serial_number, device_id, token, expires_at }
+ * Output: { serial_number, device_id, device_uuid, token, expires_at }
  *
  * The token is signed with SUPABASE_JWT_SECRET using HS256 and has a short TTL.
  */
@@ -14,6 +14,7 @@
 import { create, getNumericDate } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 import { createClient } from "@supabase/supabase-js";
 import { corsHeaders } from "../_shared/cors.ts";
+import { getUserFromRequest } from "../_shared/user_auth.ts";
 
 // Token configuration
 const TOKEN_TTL_SECONDS = 3600; // 1 hour
@@ -26,6 +27,7 @@ interface ExchangeRequest {
 interface ExchangeResponse {
   serial_number: string;
   device_id: string;
+  device_uuid: string;
   token: string;
   expires_at: string;
 }
@@ -123,7 +125,7 @@ Deno.serve(async (req) => {
     const { data: device, error: dbError } = await supabase
       .schema("display")
       .from("devices")
-      .select("serial_number, device_id, pairing_code, is_provisioned")
+      .select("id, serial_number, device_id, pairing_code, pairing_code_expires_at, is_provisioned")
       .eq("pairing_code", normalizedCode)
       .single();
 
@@ -138,13 +140,61 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Look up pairing record to get device_uuid and user_uuid
+    // Check if pairing code has expired
+    if (device.pairing_code_expires_at) {
+      const expiresAt = new Date(device.pairing_code_expires_at);
+      if (expiresAt < new Date()) {
+        console.log(`Pairing code expired: ${normalizedCode}`);
+        return new Response(
+          JSON.stringify({ error: "Pairing code expired" }),
+          {
+            status: 410,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+    }
+
+    const deviceUuid = device.id;
+
+    // Look up pairing record to get user_uuid (if already paired)
     const { data: pairing } = await supabase
       .schema("display")
       .from("pairings")
       .select("device_uuid, user_uuid")
-      .eq("pairing_code", normalizedCode)
+      .eq("device_uuid", deviceUuid)
       .maybeSingle();
+
+    // Try to get authenticated user from request (optional - user may not be authenticated)
+    let userUuid: string | null = null;
+    const authResult = await getUserFromRequest(req);
+    if (authResult.user && !authResult.error) {
+      userUuid = authResult.user.id;
+    }
+
+    // Update pairings table with user_uuid if user is authenticated
+    if (userUuid) {
+      const { error: updateError } = await supabase
+        .schema("display")
+        .from("pairings")
+        .upsert(
+          {
+            device_uuid: deviceUuid,
+            user_uuid: userUuid,
+            serial_number: device.serial_number,
+            device_id: device.device_id,
+          },
+          {
+            onConflict: "device_uuid",
+            ignoreDuplicates: false,
+          },
+        );
+
+      if (updateError) {
+        console.error("Failed to update pairing with user_uuid:", updateError);
+        // Continue anyway - pairing might already exist with different user
+      }
+    }
 
     // Calculate expiration
     const now = Math.floor(Date.now() / 1000);
@@ -159,9 +209,9 @@ Deno.serve(async (req) => {
       pairing_code: device.pairing_code,
       serial_number: device.serial_number,
       device_id: device.device_id,
-      // Include device_uuid and user_uuid from pairing record if available
-      ...(pairing?.device_uuid && { device_uuid: pairing.device_uuid }),
-      ...(pairing?.user_uuid && { user_uuid: pairing.user_uuid }),
+      // Include device_uuid (primary identifier) and user_uuid
+      device_uuid: deviceUuid,
+      ...(userUuid && { user_uuid: userUuid }),
       // "token_type" is used by RLS policies (must be "app")
       token_type: "app",
       // "type" field is used by bridge for token validation (must be "app_auth")
@@ -264,11 +314,22 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Token issued for device ${device.serial_number} (expires ${expiresAtISO})`);
+    // Clear pairing code after successful pairing
+    const { error: clearError } = await (supabase as any).schema("display").rpc("clear_pairing_code", {
+      target_device_uuid: deviceUuid,
+    });
+
+    if (clearError) {
+      console.error("Failed to clear pairing code:", clearError);
+      // Continue anyway - token is already issued
+    }
+
+    console.log(`Token issued for device ${device.serial_number} (device_uuid: ${deviceUuid}, expires ${expiresAtISO})`);
 
     const response: ExchangeResponse = {
       serial_number: device.serial_number,
       device_id: device.device_id,
+      device_uuid: deviceUuid,
       token,
       expires_at: expiresAtISO,
     };

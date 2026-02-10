@@ -112,12 +112,14 @@ Deno.test("exchange-pairing-code: success response has required fields", () => {
   const mockResponse = {
     serial_number: "A1B2C3D4",
     device_id: "webex-display-C3D4",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
     token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.signature",
     expires_at: "2026-01-28T13:00:00Z",
   };
 
   assertExists(mockResponse.serial_number, "serial_number is required");
   assertExists(mockResponse.device_id, "device_id is required");
+  assertExists(mockResponse.device_uuid, "device_uuid is required");
   assertExists(mockResponse.token, "token is required");
   assertExists(mockResponse.expires_at, "expires_at is required");
 });
@@ -181,14 +183,14 @@ Deno.test("exchange-pairing-code: token expiry is correctly calculated", () => {
   assertEquals(expiresAt > now, true);
 });
 
-Deno.test("exchange-pairing-code: app token uses token_type 'app' and Supabase claims", () => {
+Deno.test("exchange-pairing-code: app token uses token_type 'app' and includes device_uuid", () => {
   const tokenPayload = {
     sub: crypto.randomUUID(),
     role: "authenticated",
     aud: "authenticated",
-    pairing_code: "ABC123",
     serial_number: "A1B2C3D4",
     device_id: "webex-display-C3D4",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
     token_type: "app",
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS,
@@ -197,6 +199,7 @@ Deno.test("exchange-pairing-code: app token uses token_type 'app' and Supabase c
   assertEquals(tokenPayload.token_type, "app");
   assertEquals(tokenPayload.role, "authenticated");
   assertEquals(tokenPayload.aud, "authenticated");
+  assertExists(tokenPayload.device_uuid);
 });
 
 // ============================================================================

@@ -138,7 +138,7 @@ Deno.serve(async (req) => {
     }
 
     // Check rate limit using public schema wrapper
-    const rateLimitKey = `device:${deviceInfo.serial_number}:post-state`;
+    const rateLimitKey = `device-state:${authResult.deviceUuid}`;
     const { data: rateLimitResult, error: rateLimitError } = await supabase
       .rpc("display_check_rate_limit", {
         rate_key: rateLimitKey,
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
     }
 
     if (rateLimitResult === false) {
-      console.log(`Rate limited: ${deviceInfo.serial_number}`);
+      console.log(`Rate limited: ${authResult.deviceUuid}`);
       return new Response(
         JSON.stringify({
           success: false,
@@ -251,21 +251,12 @@ Deno.serve(async (req) => {
       // If pairing doesn't exist, try to create it
       if (updateError.code === "PGRST116") {
         // No rows returned - pairing doesn't exist
-        // Fetch pairing_code from devices table for backward compatibility
-        const { data: deviceData } = await supabase
-          .schema("display")
-          .from("devices")
-          .select("pairing_code")
-          .eq("id", deviceInfo.device_uuid)
-          .single();
-
         const { error: insertError } = await supabase
           .schema("display")
           .from("pairings")
           .insert({
             device_uuid: deviceInfo.device_uuid,
             serial_number: deviceInfo.serial_number,
-            pairing_code: deviceData?.pairing_code || null,
             device_last_seen: now,
             device_connected: true,
             ...telemetryData,

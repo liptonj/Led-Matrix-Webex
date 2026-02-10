@@ -48,7 +48,6 @@ Deno.test("poll-commands: accepts HMAC authentication as fallback", () => {
 Deno.test("poll-commands: queries by device_uuid from JWT", () => {
   const mockJwtPayload = {
     device_uuid: TEST_DEVICE_UUID,
-    pairing_code: TEST_PAIRING_CODE,
     serial_number: "A1B2C3D4",
     token_type: "device",
   };
@@ -105,29 +104,15 @@ Deno.test("poll-commands: filters out commands for other devices", () => {
   assertNotEquals(filteredCommands[0].device_uuid, TEST_DEVICE_UUID_2);
 });
 
-Deno.test("poll-commands: falls back to pairing_code when device_uuid missing", () => {
-  const mockJwtPayloadLegacy = {
-    pairing_code: TEST_PAIRING_CODE,
-    serial_number: "A1B2C3D4",
-    token_type: "device",
-    device_uuid: undefined, // device_uuid missing
-  } as { pairing_code: string; serial_number: string; token_type: string; device_uuid?: string };
-
-  const queryKey = mockJwtPayloadLegacy.device_uuid || mockJwtPayloadLegacy.pairing_code;
-  assertEquals(queryKey, TEST_PAIRING_CODE);
-});
-
-Deno.test("poll-commands: prefers device_uuid over pairing_code", () => {
+Deno.test("poll-commands: requires device_uuid in JWT", () => {
   const mockJwtPayload = {
     device_uuid: TEST_DEVICE_UUID,
-    pairing_code: TEST_PAIRING_CODE,
     serial_number: "A1B2C3D4",
     token_type: "device",
   };
 
-  const queryKey = mockJwtPayload.device_uuid || mockJwtPayload.pairing_code;
-  assertEquals(queryKey, TEST_DEVICE_UUID);
-  assertNotEquals(queryKey, TEST_PAIRING_CODE);
+  assertExists(mockJwtPayload.device_uuid);
+  assertEquals(mockJwtPayload.device_uuid, TEST_DEVICE_UUID);
 });
 
 // ============================================================================
@@ -255,18 +240,3 @@ Deno.test("poll-commands: 500 for database error", () => {
   assertStringIncludes(errorResponse.error, "Failed");
 });
 
-// ============================================================================
-// Backward Compatibility Tests
-// ============================================================================
-
-Deno.test("poll-commands: backward compatibility - works with pairing_code only", () => {
-  const mockJwtPayloadLegacy = {
-    pairing_code: TEST_PAIRING_CODE,
-    serial_number: "A1B2C3D4",
-    token_type: "device",
-  };
-
-  // Should still work without device_uuid
-  assertExists(mockJwtPayloadLegacy.pairing_code);
-  assertEquals(mockJwtPayloadLegacy.pairing_code.length, 6);
-});

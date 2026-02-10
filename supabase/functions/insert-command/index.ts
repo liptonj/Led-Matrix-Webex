@@ -4,12 +4,13 @@
  * Embedded app calls this to queue a command for the device.
  * The device polls for commands via poll-commands or receives them via realtime.
  *
- * Authentication: Bearer token (from exchange-pairing-code)
+ * Authentication: Bearer token (from exchange-pairing-code or user session)
  *
  * Request body:
  *   {
  *     command: string,           // Command name (e.g., "set_brightness", "reboot")
- *     payload?: object           // Optional command parameters
+ *     payload?: object,          // Optional command parameters
+ *     device_uuid?: string       // Required for user session auth, optional for app tokens (can come from JWT)
  *   }
  *
  * Response:
@@ -31,7 +32,7 @@ const COMMAND_EXPIRY_SECONDS = 300;
 interface InsertCommandRequest {
   command: string;
   payload?: Record<string, unknown>;
-  device_uuid?: string; // Required for user session auth, optional for app tokens
+  device_uuid?: string; // Required for user session auth, optional for app tokens (can come from JWT)
 }
 
 interface InsertCommandResponse {
@@ -65,6 +66,7 @@ interface CallerInfo {
 const VALID_COMMANDS = [
   "set_brightness",
   "set_config",
+  "set_remote_debug",
   "get_config",
   "get_status",
   "get_telemetry",
@@ -249,19 +251,8 @@ Deno.serve(async (req) => {
         );
       }
     } else {
-      // App token auth: prefer request body, then token, then look up from pairing_code
+      // App token auth: prefer request body, then token
       deviceUuid = commandData.device_uuid || caller.device_uuid;
-
-      if (!deviceUuid && caller.pairing_code) {
-        const { data: pairingRecord } = await supabase
-          .schema("display")
-          .from("pairings")
-          .select("device_uuid")
-          .eq("pairing_code", caller.pairing_code)
-          .maybeSingle();
-
-        deviceUuid = pairingRecord?.device_uuid;
-      }
     }
 
     if (!deviceUuid) {
@@ -316,28 +307,11 @@ Deno.serve(async (req) => {
     // Calculate expiry
     const expiresAt = new Date(Date.now() + COMMAND_EXPIRY_SECONDS * 1000);
 
-    // Look up pairing_code for the device (needed for DB insert)
-    let pairingCode = caller.pairing_code;
-    let serialNumber = caller.serial_number;
-    if (!pairingCode || !serialNumber) {
-      const { data: device } = await supabase
-        .schema("display")
-        .from("devices")
-        .select("pairing_code, serial_number")
-        .eq("id", deviceUuid)
-        .maybeSingle();
-
-      pairingCode = pairingCode || device?.pairing_code;
-      serialNumber = serialNumber || device?.serial_number;
-    }
-
-    // Insert command with device_uuid
+    // Insert command with device_uuid only
     const { data: command, error: insertError } = await supabase
       .schema("display")
       .from("commands")
       .insert({
-        pairing_code: pairingCode || "unknown",
-        serial_number: serialNumber || "unknown",
         device_uuid: deviceUuid,
         command: commandData.command,
         payload: commandData.payload || {},
@@ -350,12 +324,12 @@ Deno.serve(async (req) => {
     if (insertError) {
       console.error("Failed to insert command:", insertError);
 
-      // Check if it's a foreign key error (pairing doesn't exist)
+      // Check if it's a foreign key error (device doesn't exist)
       if (insertError.code === "23503") {
         return new Response(
           JSON.stringify({
             success: false,
-            error: "Pairing not found. Device may not be connected.",
+            error: "Device not found. Device may not be properly registered.",
           }),
           {
             status: 404,

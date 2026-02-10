@@ -53,6 +53,20 @@ serve(async (req: Request) => {
       );
     }
 
+    // Validate device_uuid is present
+    if (!result.device?.device_uuid) {
+      console.error("Device UUID missing from auth result");
+      return new Response(
+        JSON.stringify({ success: false, error: "Device UUID not found" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    const deviceUuid = result.device.device_uuid;
+
     // Determine target version
     const url = new URL(req.url);
     let targetVersion = url.searchParams.get("version");
@@ -60,6 +74,8 @@ serve(async (req: Request) => {
     if (!targetVersion && result.device?.target_firmware_version) {
       targetVersion = result.device.target_firmware_version;
     }
+
+    console.log(`Firmware request for device_uuid: ${deviceUuid}, version: ${targetVersion || "latest"}`);
 
     // Get release info
     let releaseQuery = supabase
@@ -76,6 +92,7 @@ serve(async (req: Request) => {
     const { data: release, error: releaseError } = await releaseQuery.single();
 
     if (releaseError || !release) {
+      console.error(`Release not found for device_uuid: ${deviceUuid}, version: ${targetVersion || "latest"}`);
       return new Response(
         JSON.stringify({ success: false, error: "Release not found" }),
         {
@@ -90,6 +107,7 @@ serve(async (req: Request) => {
     if (rolloutPercentage < 100) {
       const serialNumber = result.device?.serial_number || "";
       if (!isDeviceInRollout(serialNumber, release.version, rolloutPercentage)) {
+        console.log(`Rollout check failed for device_uuid: ${deviceUuid}, version: ${release.version}, rollout: ${rolloutPercentage}%`);
         return new Response(
           JSON.stringify({
             success: false,
@@ -114,7 +132,7 @@ serve(async (req: Request) => {
       .createSignedUrl(filePath, SIGNED_URL_EXPIRY_SECONDS);
 
     if (urlError || !signedUrl) {
-      console.error("Failed to generate signed URL:", urlError);
+      console.error(`Failed to generate signed URL for device_uuid: ${deviceUuid}, version: ${release.version}:`, urlError);
       return new Response(
         JSON.stringify({
           success: false,
@@ -127,6 +145,7 @@ serve(async (req: Request) => {
       );
     }
 
+    console.log(`Firmware download URL generated for device_uuid: ${deviceUuid}, version: ${release.version}`);
     return new Response(
       JSON.stringify({
         success: true,

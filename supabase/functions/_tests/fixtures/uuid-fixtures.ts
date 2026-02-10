@@ -77,11 +77,7 @@ export const mockCommand = {
 
 export const mockJwtPayload = {
   sub: crypto.randomUUID(),
-  role: 'authenticated',
-  aud: 'authenticated',
   serial_number: TEST_SERIAL_NUMBER,
-  pairing_code: TEST_PAIRING_CODE,
-  device_id: TEST_DEVICE_ID,
   device_uuid: TEST_DEVICE_UUID,
   user_uuid: TEST_USER_UUID,
   token_type: 'device',
@@ -91,11 +87,7 @@ export const mockJwtPayload = {
 
 export const mockJwtPayloadUnassigned = {
   sub: crypto.randomUUID(),
-  role: 'authenticated',
-  aud: 'authenticated',
   serial_number: TEST_SERIAL_NUMBER,
-  pairing_code: TEST_PAIRING_CODE,
-  device_id: TEST_DEVICE_ID,
   device_uuid: TEST_DEVICE_UUID,
   user_uuid: null,
   token_type: 'device',

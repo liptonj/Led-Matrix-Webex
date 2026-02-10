@@ -72,6 +72,17 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
   const subscribeToUserChannelRef = useRef<((userId: string) => Promise<void>) | null>(null);
   const attemptReconnectRef = useRef<((userId: string) => Promise<void>) | null>(null);
 
+  // Mirror refs - always reflect current state for use in callbacks/intervals
+  // (React state values captured in closures go stale; refs always return current value)
+  const isPairedRef = useRef(false);
+  const rtStatusRef = useRef<RealtimeStatus>('disconnected');
+  const selectedDeviceUuidRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
+
+  // Hardening refs
+  const isCoolingDownRef = useRef(false);
+  const cooldownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatFailCountRef = useRef(0);
 
   const updatePairingState = useCallback(async (stateData: { 
     webex_status?: string;
@@ -140,41 +151,74 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     }
   }, [session]);
 
+  // Keep mirror refs in sync with state
+  useEffect(() => { isPairedRef.current = isPaired; }, [isPaired]);
+  useEffect(() => { rtStatusRef.current = rtStatus; }, [rtStatus]);
+  useEffect(() => { selectedDeviceUuidRef.current = selectedDeviceUuid; }, [selectedDeviceUuid]);
+
   const attemptReconnect = useCallback(async (userId: string) => {
-    if (isReconnectingRef.current || reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) { 
-      if (reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) { 
-        setRtStatus('error'); 
-        setConnectionError('Failed to reconnect after multiple attempts'); 
-        addLog('Reconnection failed: maximum attempts reached'); 
-        isReconnectingRef.current = false; 
-        reconnectAttemptsRef.current = 0; 
-      } 
-      return; 
+    // Don't attempt if offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      addLog('Skipping reconnect attempt - device is offline');
+      return;
     }
-    isReconnectingRef.current = true; 
-    reconnectAttemptsRef.current += 1; 
-    setRtStatus('connecting'); 
-    addLog(`Reconnection attempt ${reconnectAttemptsRef.current}/${CONFIG.reconnectMaxAttempts}...`);
+
+    if (isReconnectingRef.current) return;
+
+    // Check if max burst attempts reached -> enter cooldown
+    if (reconnectAttemptsRef.current >= CONFIG.reconnectMaxAttempts) {
+      if (!isCoolingDownRef.current) {
+        isCoolingDownRef.current = true;
+        isReconnectingRef.current = false;
+        reconnectAttemptsRef.current = 0;
+        setRtStatus('error');
+        setConnectionError(`Reconnection failed. Retrying in ${CONFIG.reconnectCooldownMs / 1000}s...`);
+        addLog(`Max reconnection attempts reached. Cooling down for ${CONFIG.reconnectCooldownMs / 1000}s...`);
+
+        if (cooldownTimeoutRef.current) clearTimeout(cooldownTimeoutRef.current);
+        cooldownTimeoutRef.current = setTimeout(() => {
+          isCoolingDownRef.current = false;
+          setConnectionError(null);
+          addLog('Cooldown complete, retrying connection...');
+          if (isPairedRef.current && userIdRef.current) {
+            attemptReconnectRef.current?.(userIdRef.current);
+          }
+        }, CONFIG.reconnectCooldownMs);
+      }
+      return;
+    }
+
+    isReconnectingRef.current = true;
+    reconnectAttemptsRef.current += 1;
+    setRtStatus('connecting');
+
+    // Exponential backoff with jitter: delay = min(base * 2^attempt, max) + random jitter
+    const attempt = reconnectAttemptsRef.current;
+    const delay = Math.min(
+      CONFIG.reconnectDelayMs * Math.pow(2, attempt - 1),
+      CONFIG.reconnectMaxDelayMs
+    ) + Math.random() * CONFIG.reconnectJitterMs;
+    addLog(`Reconnection attempt ${attempt}/${CONFIG.reconnectMaxAttempts} (delay ${Math.round(delay)}ms)...`);
+
     if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     reconnectTimeoutRef.current = setTimeout(async () => {
-      try { 
+      try {
         if (subscribeToUserChannelRef.current) {
           await subscribeToUserChannelRef.current(userId);
         } else {
           throw new Error('Subscribe function not available');
         }
-      } catch (err) { 
-        addLog(`Reconnection attempt failed: ${err instanceof Error ? err.message : 'Unknown error'}`); 
+      } catch (err) {
+        addLog(`Reconnection attempt failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        isReconnectingRef.current = false;
         if (reconnectAttemptsRef.current < CONFIG.reconnectMaxAttempts) {
           attemptReconnect(userId);
-        } else { 
-          setRtStatus('error'); 
-          setConnectionError('Failed to reconnect'); 
-          isReconnectingRef.current = false; 
-          reconnectAttemptsRef.current = 0; 
-        } 
+        } else {
+          // Will enter cooldown on next call
+          attemptReconnect(userId);
+        }
       }
-    }, CONFIG.reconnectDelayMs);
+    }, delay);
   }, [addLog]);
   attemptReconnectRef.current = attemptReconnect;
 
@@ -247,9 +291,10 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       userChannelRef.current = null; 
     }
     
-    // Refresh device connection status for selected device
-    if (selectedDeviceUuid) {
-      await refreshPairingSnapshot(selectedDeviceUuid, 'initial connection');
+    // Refresh device connection status for selected device (read ref for current value)
+    const currentDeviceUuid = selectedDeviceUuidRef.current;
+    if (currentDeviceUuid) {
+      await refreshPairingSnapshot(currentDeviceUuid, 'initial connection');
     }
     
     const channelName = `user:${userId}`;
@@ -261,9 +306,9 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       }
     })
     .on('broadcast', { event: 'webex_status' }, (payload: { payload: WebexStatusBroadcast }) => {
-      // Handle webex_status broadcast events
+      // Handle webex_status broadcast events (use ref for current device UUID)
       const broadcast = payload.payload;
-      if (broadcast.device_uuid === selectedDeviceUuid) {
+      if (broadcast.device_uuid === selectedDeviceUuidRef.current) {
         lastPairingSnapshotRef.current = Date.now();
         addLog(`Received webex_status broadcast: ${broadcast.webex_status}`);
       }
@@ -303,8 +348,9 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       }
     })
     .on('broadcast', { event: 'device_telemetry' }, (payload: { payload: { device_uuid: string; rssi?: number; free_heap?: number; uptime?: number; firmware_version?: string; temperature?: number; ssid?: string; timestamp?: number } }) => {
+      // Use ref for current device UUID (closure value would be stale)
       const telemetry = payload.payload;
-      if (telemetry.device_uuid === selectedDeviceUuid) {
+      if (telemetry.device_uuid === selectedDeviceUuidRef.current) {
         lastPairingSnapshotRef.current = Date.now();
         setLastDeviceSeenMs(Date.now());
         setIsPeerConnected(true);
@@ -312,8 +358,9 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
       }
     })
     .on('broadcast', { event: 'device_config' }, (payload: { payload: { device_uuid: string; [key: string]: unknown } }) => {
+      // Use ref for current device UUID (closure value would be stale)
       const config = payload.payload;
-      if (config.device_uuid === selectedDeviceUuid) {
+      if (config.device_uuid === selectedDeviceUuidRef.current) {
         lastPairingSnapshotRef.current = Date.now();
         setLastDeviceSeenMs(Date.now());
         setIsPeerConnected(true);
@@ -326,46 +373,54 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
         setRtStatus('connected'); 
         reconnectAttemptsRef.current = 0; 
         isReconnectingRef.current = false; 
+        isCoolingDownRef.current = false;
+        heartbeatFailCountRef.current = 0;
         if (reconnectTimeoutRef.current) { 
           clearTimeout(reconnectTimeoutRef.current); 
           reconnectTimeoutRef.current = null; 
+        }
+        if (cooldownTimeoutRef.current) {
+          clearTimeout(cooldownTimeoutRef.current);
+          cooldownTimeoutRef.current = null;
         }
         addLog('Realtime connection established');
       }
       else if (status === 'CHANNEL_ERROR') {
         const errorMsg = err ? `: ${err.message}` : '';
         addLog(`Realtime channel error${errorMsg}`);
-        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+        // Use isPairedRef (not isPaired) to avoid stale closure
+        if (isPairedRef.current && !isReconnectingRef.current && attemptReconnectRef.current) { 
           setRtStatus('disconnected'); 
           attemptReconnectRef.current(userId); 
-        } else if (!isPaired) { 
+        } else if (!isPairedRef.current) { 
           setRtStatus('error'); 
           setConnectionError(`Realtime channel error${errorMsg}`); 
         }
       }
       else if (status === 'CLOSED') {
         addLog('Realtime connection closed');
-        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+        if (isPairedRef.current && !isReconnectingRef.current && attemptReconnectRef.current) { 
           setRtStatus('disconnected'); 
           attemptReconnectRef.current(userId); 
-        } else if (!isPaired) { 
+        } else if (!isPairedRef.current) { 
           setRtStatus('error'); 
           setConnectionError('Realtime connection closed'); 
         }
       }
       else if (status === 'TIMED_OUT') {
         addLog('Realtime connection timed out');
-        if (isPaired && !isReconnectingRef.current && attemptReconnectRef.current) { 
+        if (isPairedRef.current && !isReconnectingRef.current && attemptReconnectRef.current) { 
           setRtStatus('disconnected'); 
           attemptReconnectRef.current(userId); 
-        } else if (!isPaired) { 
+        } else if (!isPairedRef.current) { 
           setRtStatus('error'); 
           setConnectionError('Realtime connection timed out'); 
         }
       }
     });
     userChannelRef.current = channel;
-  }, [isPaired, selectedDeviceUuid, refreshPairingSnapshot, addLog]);
+  // Removed isPaired and selectedDeviceUuid from deps - accessed via refs to avoid stale closures
+  }, [refreshPairingSnapshot, addLog]);
   subscribeToUserChannelRef.current = subscribeToUserChannel;
 
   const handleConnect = useCallback(async () => {
@@ -389,58 +444,78 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     
     try {
       const userId = session.user.id;
+      userIdRef.current = userId;
       await subscribeToUserChannel(userId);
       setIsPaired(true);
       setRtStatus('connected');
       addLog(`Connected to user channel`);
       
       // Start heartbeat interval - write to connection_heartbeats table
+      // Uses refs to always read current values (not stale closure captures)
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      heartbeatFailCountRef.current = 0;
       heartbeatIntervalRef.current = setInterval(async () => {
-        if (!supabaseRef.current || !selectedDeviceUuid) return;
+        const deviceUuid = selectedDeviceUuidRef.current;
+        if (!supabaseRef.current || !deviceUuid) return;
         try {
           await supabaseRef.current.schema('display').from('connection_heartbeats')
             .upsert({
-              device_uuid: selectedDeviceUuid,
+              device_uuid: deviceUuid,
               app_last_seen: new Date().toISOString(),
               app_connected: true
             }, { onConflict: 'device_uuid' });
-        } catch (error) {
-          // Silently fail heartbeat update
+          heartbeatFailCountRef.current = 0;
+        } catch {
+          heartbeatFailCountRef.current += 1;
+          if (heartbeatFailCountRef.current >= 3 && !isReconnectingRef.current && !isCoolingDownRef.current) {
+            addLog(`Heartbeat failed ${heartbeatFailCountRef.current} times, triggering reconnect...`);
+            heartbeatFailCountRef.current = 0;
+            if (userIdRef.current && attemptReconnectRef.current) {
+              attemptReconnectRef.current(userIdRef.current);
+            }
+          }
         }
       }, CONFIG.heartbeatIntervalMs);
       
-      // Start connection watchdog - force reconnect if no activity for 2 minutes
+      // Start connection watchdog - force reconnect if no activity
+      // Uses rtStatusRef (not rtStatus) to avoid stale closure
       if (connectionWatchdogRef.current) clearInterval(connectionWatchdogRef.current);
       connectionWatchdogRef.current = setInterval(() => {
         const timeSinceLastUpdate = Date.now() - lastPairingSnapshotRef.current;
-        const staleThreshold = 120000; // 2 minutes
-        if (timeSinceLastUpdate > staleThreshold && rtStatus === 'connected' && !isReconnectingRef.current) {
+        if (timeSinceLastUpdate > CONFIG.staleConnectionThresholdMs && rtStatusRef.current === 'connected' && !isReconnectingRef.current && !isCoolingDownRef.current) {
           addLog(`Connection appears stale (${Math.floor(timeSinceLastUpdate / 1000)}s since last update), forcing reconnect...`);
-          if (attemptReconnectRef.current) {
-            attemptReconnectRef.current(userId);
+          if (attemptReconnectRef.current && userIdRef.current) {
+            attemptReconnectRef.current(userIdRef.current);
           }
         }
-      }, 30000); // Check every 30 seconds
+      }, CONFIG.watchdogIntervalMs);
     } catch (err) {
       setRtStatus('error');
       setConnectionError(err instanceof Error ? err.message : 'Failed to connect');
     } finally {
       connectInFlightRef.current = false;
     }
-  }, [addLog, session, selectedDeviceUuid, subscribeToUserChannel, rtStatus]);
+  // Removed rtStatus from deps - accessed via rtStatusRef in watchdog
+  }, [addLog, session, selectedDeviceUuid, subscribeToUserChannel]);
 
   const handleDisconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
+    if (cooldownTimeoutRef.current) {
+      clearTimeout(cooldownTimeoutRef.current);
+      cooldownTimeoutRef.current = null;
+    }
     if (connectionWatchdogRef.current) {
       clearInterval(connectionWatchdogRef.current);
       connectionWatchdogRef.current = null;
     }
     isReconnectingRef.current = false;
+    isCoolingDownRef.current = false;
     reconnectAttemptsRef.current = 0;
+    heartbeatFailCountRef.current = 0;
+    userIdRef.current = null;
     if (heartbeatIntervalRef.current) {
       clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = null;
@@ -452,12 +527,13 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     setIsPaired(false);
     setIsPeerConnected(false);
     setRtStatus('disconnected');
+    setConnectionError(null);
     addLog('Disconnected');
   }, [addLog]);
 
-  // Auto-reconnect when connection is lost
+  // Auto-reconnect when connection is lost (covers both 'disconnected' and 'error' states)
   useEffect(() => {
-    if (isPaired && rtStatus === 'disconnected' && !isReconnectingRef.current && session?.user?.id && attemptReconnectRef.current) {
+    if (isPaired && (rtStatus === 'disconnected' || rtStatus === 'error') && !isReconnectingRef.current && !isCoolingDownRef.current && session?.user?.id && attemptReconnectRef.current) {
       addLog('Connection lost, attempting to reconnect...');
       attemptReconnectRef.current(session.user.id);
     }
@@ -472,12 +548,76 @@ export function usePairing({ addLog }: UsePairingOptions): UsePairingResult {
     return () => clearInterval(pollInterval);
   }, [isPaired, selectedDeviceUuid, rtStatus, refreshPairingSnapshot]);
   
+  // Network awareness - reconnect when back online, skip reconnects when offline
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOnline = () => {
+      addLog('Network connection restored');
+      if (isPairedRef.current && (rtStatusRef.current === 'disconnected' || rtStatusRef.current === 'error') && !isReconnectingRef.current && userIdRef.current) {
+        // Cancel any cooldown and immediately retry
+        isCoolingDownRef.current = false;
+        reconnectAttemptsRef.current = 0;
+        if (cooldownTimeoutRef.current) {
+          clearTimeout(cooldownTimeoutRef.current);
+          cooldownTimeoutRef.current = null;
+        }
+        addLog('Attempting reconnect after network restored...');
+        attemptReconnectRef.current?.(userIdRef.current);
+      }
+    };
+
+    const handleOffline = () => {
+      addLog('Network connection lost');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [addLog]);
+
+  // Visibility awareness - refresh and reconnect when tab becomes visible
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+
+      // Tab became visible - check connection health
+      const deviceUuid = selectedDeviceUuidRef.current;
+      if (isPairedRef.current && deviceUuid) {
+        refreshPairingSnapshot(deviceUuid, 'tab visible').catch(() => {});
+      }
+
+      // Reconnect if needed (cancel cooldown - user is back)
+      if (isPairedRef.current && (rtStatusRef.current === 'disconnected' || rtStatusRef.current === 'error') && !isReconnectingRef.current && userIdRef.current) {
+        isCoolingDownRef.current = false;
+        reconnectAttemptsRef.current = 0;
+        if (cooldownTimeoutRef.current) {
+          clearTimeout(cooldownTimeoutRef.current);
+          cooldownTimeoutRef.current = null;
+        }
+        addLog('Reconnecting after tab became visible...');
+        attemptReconnectRef.current?.(userIdRef.current);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [addLog, refreshPairingSnapshot]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (connectionWatchdogRef.current) clearInterval(connectionWatchdogRef.current);
+      if (cooldownTimeoutRef.current) clearTimeout(cooldownTimeoutRef.current);
     };
   }, []);
 

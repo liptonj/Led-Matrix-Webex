@@ -73,13 +73,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    const deviceInfo = {
-      serial_number: authResult.serialNumber!,
-      device_uuid: authResult.deviceUuid || null,
-    };
-
     // Validate device_uuid is present
-    if (!deviceInfo.device_uuid) {
+    if (!authResult.deviceUuid) {
       return new Response(
         JSON.stringify({ success: false, error: "Device UUID not found" }),
         {
@@ -144,9 +139,9 @@ Deno.serve(async (req) => {
     }
 
     // Verify ownership using device_uuid directly from command
-    if (!command.device_uuid || command.device_uuid !== deviceInfo.device_uuid) {
+    if (!command.device_uuid || command.device_uuid !== authResult.deviceUuid) {
       console.log(
-        `Command ${ackData.command_id} belongs to device ${command.device_uuid || "unknown"}, not ${deviceInfo.device_uuid}`,
+        `Command ${ackData.command_id} belongs to device ${command.device_uuid || "unknown"}, not ${authResult.deviceUuid}`,
       );
       return new Response(
         JSON.stringify({ success: false, error: "Command not found" }),
@@ -190,7 +185,8 @@ Deno.serve(async (req) => {
       .schema("display")
       .from("commands")
       .update(updateData)
-      .eq("id", ackData.command_id);
+      .eq("id", ackData.command_id)
+      .eq("device_uuid", authResult.deviceUuid);
 
     if (updateError) {
       console.error("Failed to update command:", updateError);

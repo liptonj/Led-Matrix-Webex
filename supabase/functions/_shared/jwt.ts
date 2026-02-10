@@ -2,11 +2,13 @@ import { verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 
 export interface TokenPayload {
   sub: string;
-  pairing_code: string;
+  role?: string;
+  aud?: string;
   serial_number: string;
   token_type: string;
   exp: number;
-  device_uuid?: string; // Optional UUID from devices.id
+  iat?: number;
+  device_uuid: string; // UUID from devices.id - primary device identifier
   user_uuid?: string | null; // Optional UUID from auth.users.id, can be null if not assigned
 }
 

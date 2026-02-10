@@ -18,10 +18,20 @@ export const CONFIG = {
   heartbeatIntervalMs: 30 * 1000,
   /** Command timeout (increased from 10s to 15s) */
   commandTimeoutMs: 15 * 1000,
-  /** Delay before attempting reconnection */
+  /** Base delay before attempting reconnection (doubles each attempt) */
   reconnectDelayMs: 2000,
-  /** Maximum reconnection attempts */
+  /** Maximum reconnection attempts per burst */
   reconnectMaxAttempts: 5,
+  /** Maximum delay between reconnection attempts (exponential backoff cap) */
+  reconnectMaxDelayMs: 30 * 1000,
+  /** Random jitter added to reconnection delay to prevent thundering herd */
+  reconnectJitterMs: 500,
+  /** Cooldown period after max reconnection burst before retrying */
+  reconnectCooldownMs: 60 * 1000,
+  /** Connection staleness threshold for watchdog */
+  staleConnectionThresholdMs: 2 * 60 * 1000,
+  /** Watchdog check interval */
+  watchdogIntervalMs: 30 * 1000,
   /** Default Webex API poll interval */
   webexPollIntervalMs: 30 * 1000,
 } as const;

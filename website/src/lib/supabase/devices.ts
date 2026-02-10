@@ -386,6 +386,21 @@ export async function setDeviceDebugMode(
     .eq("serial_number", serialNumber);
 
   if (error) throw error;
+
+  // Also send a command for immediate effect on the device
+  // (database update alone requires waiting for next sync cycle)
+  try {
+    await supabase.functions.invoke("insert-command", {
+      body: {
+        serial_number: serialNumber,
+        command: "set_remote_debug",
+        payload: { enabled },
+      },
+    });
+  } catch {
+    // Command delivery is best-effort; database is the source of truth
+    console.warn("Failed to send set_remote_debug command, device will sync on next cycle");
+  }
 }
 
 // Helper to update device target firmware

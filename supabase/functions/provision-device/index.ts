@@ -3,7 +3,7 @@
  *
  * Called by ESP32 on first boot to register the device with Supabase.
  * The device sends its serial number and a hash of its secret (key_hash).
- * Returns a persistent pairing code that never changes.
+ * Returns a temporary pairing code that expires after 10 minutes.
  *
  * For migration from pre-HMAC firmware: the device can send its existing
  * pairing code, which will be preserved if valid. This ensures users don't
@@ -21,8 +21,10 @@
  * Response:
  * {
  *   "success": true,
+ *   "device_uuid": "uuid-string",      // Primary device identifier (UUID)
  *   "device_id": "webex-display-1234",
- *   "pairing_code": "ABC123"
+ *   "pairing_code": "ABC123",          // Temporary code, expires in 10 minutes
+ *   "pairing_code_expires_at": "2026-02-09T12:10:00Z"
  * }
  */
 
@@ -151,7 +153,7 @@ serve(async (req: Request) => {
     const { data: existingDevice, error: _lookupError } = await supabase
       .schema("display")
       .from("devices")
-      .select("id, device_id, pairing_code, is_provisioned, user_approved_by, created_at")
+      .select("id, device_id, pairing_code, pairing_code_expires_at, is_provisioned, user_approved_by, created_at")
       .eq("serial_number", serial_number.toUpperCase())
       .single();
 
@@ -204,17 +206,19 @@ serve(async (req: Request) => {
             .from("pairings")
             .upsert({
               pairing_code: existingDevice.pairing_code,
+              pairing_code_expires_at: existingDevice.pairing_code_expires_at,
               serial_number: serial_number.toUpperCase(),
               device_uuid: existingDevice.id,
               user_uuid: autoApproveUserId
-            }, { onConflict: "pairing_code" });
+            }, { onConflict: "device_uuid" });
 
           return new Response(
             JSON.stringify({
               success: true,
+              device_uuid: existingDevice.id, // Primary identifier
               device_id: existingDevice.device_id,
-              pairing_code: existingDevice.pairing_code,
-              device_uuid: existingDevice.id,
+              pairing_code: existingDevice.pairing_code, // Temporary code
+              pairing_code_expires_at: existingDevice.pairing_code_expires_at || null,
               user_uuid: autoApproveUserId,
               already_provisioned: existingDevice.is_provisioned,
             }),
@@ -227,22 +231,39 @@ serve(async (req: Request) => {
 
         // Check if pairing code has expired (more than 4 minutes old)
         if (existingDevice.created_at && isCodeExpired(existingDevice.created_at)) {
-          // Generate a new pairing code and update the device
+          // Generate a new pairing code with expiry and update the device
           const newPairingCode = generatePairingCode();
+          const now = new Date();
+          const pairingCodeExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+          
           await supabase
             .schema("display")
             .from("devices")
             .update({
               pairing_code: newPairingCode,
-              created_at: new Date().toISOString(),
+              pairing_code_expires_at: pairingCodeExpiresAt,
+              created_at: now.toISOString(),
             })
             .eq("serial_number", serial_number.toUpperCase());
+
+          // Update pairings table with new code and expiry
+          await supabase
+            .schema("display")
+            .from("pairings")
+            .upsert({
+              pairing_code: newPairingCode,
+              pairing_code_expires_at: pairingCodeExpiresAt,
+              serial_number: serial_number.toUpperCase(),
+              device_uuid: existingDevice.id,
+            }, { onConflict: "device_uuid" });
 
           return new Response(
             JSON.stringify({
               error: "Device not approved yet. Ask device owner to approve it on the website.",
               serial_number: serial_number.toUpperCase(),
-              pairing_code: newPairingCode,
+              device_uuid: existingDevice.id, // Primary identifier
+              pairing_code: newPairingCode, // Temporary code, expires in 10 minutes
+              pairing_code_expires_at: pairingCodeExpiresAt,
               awaiting_approval: true,
             }),
             {
@@ -257,7 +278,9 @@ serve(async (req: Request) => {
           JSON.stringify({
             error: "Device not approved yet. Ask device owner to approve it on the website.",
             serial_number: serial_number.toUpperCase(),
-            pairing_code: existingDevice.pairing_code,
+            device_uuid: existingDevice.id, // Primary identifier
+            pairing_code: existingDevice.pairing_code, // Temporary code
+            pairing_code_expires_at: existingDevice.pairing_code_expires_at || null,
             awaiting_approval: true,
           }),
           {
@@ -284,9 +307,10 @@ serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: true,
+          device_uuid: existingDevice.id, // Primary identifier
           device_id: existingDevice.device_id,
-          pairing_code: existingDevice.pairing_code,
-          device_uuid: existingDevice.id,
+          pairing_code: existingDevice.pairing_code, // Temporary code (may be null if expired)
+          pairing_code_expires_at: existingDevice.pairing_code_expires_at || null,
           user_uuid: existingDevice.user_approved_by || null,
           already_provisioned: existingDevice.is_provisioned,
         }),
@@ -306,7 +330,11 @@ serve(async (req: Request) => {
         ? existing_pairing_code.toUpperCase()
         : generatePairingCode();
 
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowISO = now.toISOString();
+    // Set pairing code expiry to 10 minutes from now
+    const pairingCodeExpiresAt = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+    
     const { data: newDevice, error: insertError } = await supabase
       .schema("display")
       .from("devices")
@@ -314,12 +342,13 @@ serve(async (req: Request) => {
         serial_number: serial_number.toUpperCase(),
         device_id: deviceId,
         pairing_code: pairingCode,
+        pairing_code_expires_at: pairingCodeExpiresAt,
         key_hash: key_hash,
         firmware_version: firmware_version || null,
         ip_address: ip_address || null,
         is_provisioned: false,
         user_approved_by: autoApproveUserId || null,
-        approved_at: autoApproveUserId ? now : null,
+        approved_at: autoApproveUserId ? nowISO : null,
       })
       .select("id")
       .single();
@@ -347,7 +376,7 @@ serve(async (req: Request) => {
             device_uuid: newDevice.id,
             created_by: autoApproveUserId,
             provisioning_method: "provision_token",
-            provisioned_at: now,
+            provisioned_at: nowISO,
           },
           {
             onConflict: "user_id,serial_number",
@@ -366,17 +395,19 @@ serve(async (req: Request) => {
         .from("pairings")
         .upsert({
           pairing_code: pairingCode,
+          pairing_code_expires_at: pairingCodeExpiresAt,
           serial_number: serial_number.toUpperCase(),
           device_uuid: newDevice.id,
           user_uuid: autoApproveUserId
-        }, { onConflict: "pairing_code" });
+        }, { onConflict: "device_uuid" });
 
       return new Response(
         JSON.stringify({
           success: true,
+          device_uuid: newDevice.id, // Primary identifier
           device_id: deviceId,
-          pairing_code: pairingCode,
-          device_uuid: newDevice.id,
+          pairing_code: pairingCode, // Temporary code, expires in 10 minutes
+          pairing_code_expires_at: pairingCodeExpiresAt,
           user_uuid: autoApproveUserId,
           already_provisioned: false,
         }),
@@ -392,8 +423,10 @@ serve(async (req: Request) => {
       JSON.stringify({
         error: "Device registered but not approved yet. Ask device owner to approve it on the website.",
         serial_number: serial_number.toUpperCase(),
+        device_uuid: newDevice.id, // Primary identifier
         device_id: deviceId,
-        pairing_code: pairingCode,
+        pairing_code: pairingCode, // Temporary code, expires in 10 minutes
+        pairing_code_expires_at: pairingCodeExpiresAt,
         awaiting_approval: true,
       }),
       {

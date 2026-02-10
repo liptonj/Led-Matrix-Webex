@@ -16,7 +16,7 @@ export interface ValidationResult {
   device?: {
     serial_number: string;
     device_id: string;
-    pairing_code: string;
+    device_uuid: string; // UUID from devices.id - primary identifier
     debug_enabled: boolean;
     target_firmware_version: string | null;
   };
@@ -35,9 +35,9 @@ export interface ValidationResult {
  *   signature = HMAC-SHA256(message, key_hash)
  */
 interface DeviceRecord {
+  id: string; // device_uuid
   serial_number: string;
   device_id: string;
-  pairing_code: string;
   key_hash: string;
   debug_enabled: boolean;
   target_firmware_version: string | null;
@@ -73,7 +73,7 @@ export async function validateHmacRequest(
     .schema("display")
     .from("devices")
     .select(
-      "serial_number, device_id, pairing_code, key_hash, debug_enabled, target_firmware_version, last_auth_timestamp",
+      "id, serial_number, device_id, key_hash, debug_enabled, target_firmware_version, last_auth_timestamp",
     )
     .eq("serial_number", serialNumber)
     .single();
@@ -135,7 +135,7 @@ export async function validateHmacRequest(
     device: {
       serial_number: device.serial_number,
       device_id: device.device_id,
-      pairing_code: device.pairing_code,
+      device_uuid: device.id,
       debug_enabled: device.debug_enabled,
       target_firmware_version: device.target_firmware_version,
     },

@@ -5,8 +5,8 @@
  * Uses nonce-based state lookup instead of JWT extraction.
  */
 
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
+import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { fetchDecryptedSecret, updateSecret } from "../_shared/vault.ts";
 

@@ -211,13 +211,13 @@ Deno.test("post-device-state: updates device telemetry in pairings", () => {
 Deno.test("post-device-state: creates pairing if not exists", () => {
   // When pairing doesn't exist (PGRST116 error), create it
   const insertData = {
-    pairing_code: "ABC123",
+    device_uuid: "550e8400-e29b-41d4-a716-446655440000",
     serial_number: "A1B2C3D4",
     device_connected: true,
     device_last_seen: new Date().toISOString(),
   };
 
-  assertExists(insertData.pairing_code);
+  assertExists(insertData.device_uuid);
   assertExists(insertData.serial_number);
 });
 

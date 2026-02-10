@@ -19,7 +19,7 @@ import {
 } from "../_shared/webex.ts";
 
 interface SyncRequest {
-  pairing_code?: string;
+  device_uuid?: string;
   serial_number?: string;
   device_id?: string;
   camera_on?: boolean;
@@ -72,50 +72,28 @@ serve(async (req: Request) => {
       }
     }
 
+    // device_uuid comes from auth context (JWT claim or HMAC validation)
     const deviceUuid = authResult.deviceUuid || body.device_uuid || null;
-    const pairingCode = body.pairing_code || authResult.pairingCode || null;
     const serialNumber = body.serial_number || authResult.serialNumber || null;
     const deviceId = body.device_id || authResult.deviceId || null;
 
-    if (!deviceUuid && !serialNumber && !pairingCode) {
-      return new Response(JSON.stringify({ error: "Missing device selector" }), {
+    if (!deviceUuid) {
+      return new Response(JSON.stringify({ error: "Missing device_uuid from auth context" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Resolve user_uuid from pairings table
-    let userUuid: string | null = null;
-    let resolvedDeviceUuid: string | null = deviceUuid;
+    // Resolve user_uuid from pairings table using device_uuid
+    const { data: pairing } = await supabase
+      .schema("display")
+      .from("pairings")
+      .select("user_uuid, device_uuid")
+      .eq("device_uuid", deviceUuid)
+      .maybeSingle();
     
-    if (deviceUuid) {
-      const { data: pairing } = await supabase
-        .schema("display")
-        .from("pairings")
-        .select("user_uuid, device_uuid")
-        .eq("device_uuid", deviceUuid)
-        .maybeSingle();
-      userUuid = pairing?.user_uuid ?? null;
-      resolvedDeviceUuid = pairing?.device_uuid ?? deviceUuid;
-    } else if (serialNumber) {
-      const { data: pairing } = await supabase
-        .schema("display")
-        .from("pairings")
-        .select("user_uuid, device_uuid")
-        .eq("serial_number", serialNumber)
-        .maybeSingle();
-      userUuid = pairing?.user_uuid ?? null;
-      resolvedDeviceUuid = pairing?.device_uuid ?? null;
-    } else if (pairingCode) {
-      const { data: pairing } = await supabase
-        .schema("display")
-        .from("pairings")
-        .select("user_uuid, device_uuid")
-        .eq("pairing_code", pairingCode)
-        .maybeSingle();
-      userUuid = pairing?.user_uuid ?? null;
-      resolvedDeviceUuid = pairing?.device_uuid ?? null;
-    }
+    const userUuid = pairing?.user_uuid ?? null;
+    const resolvedDeviceUuid = pairing?.device_uuid ?? deviceUuid;
 
     const hasLocalStatus = typeof body.webex_status === "string" && body.webex_status.trim().length > 0;
     let webexStatus: string;
@@ -134,7 +112,7 @@ serve(async (req: Request) => {
       const { data: tokenRow, error: tokenError } = await supabase
         .schema("display")
         .from("oauth_tokens")
-        .select("id, provider, serial_number, pairing_code, access_token_id, refresh_token_id, expires_at")
+        .select("id, provider, serial_number, access_token_id, refresh_token_id, expires_at")
         .eq("provider", "webex")
         .eq("user_id", userUuid)
         .eq("token_scope", "user")
@@ -164,7 +142,8 @@ serve(async (req: Request) => {
         });
       }
 
-      const secretKey = userUuid || serialNumber || pairingCode || "token";
+      // Use device_uuid for rate limiting keys
+      const secretKey = deviceUuid || userUuid || "token";
       let accessToken = await fetchDecryptedSecret(supabase, tokenRow.access_token_id);
       const refreshTokenId = tokenRow.refresh_token_id as string | null;
       const refreshToken = refreshTokenId
@@ -271,20 +250,13 @@ serve(async (req: Request) => {
         .from("pairings")
         .update(updateData)
         .eq("device_uuid", resolvedDeviceUuid);
-    } else {
-      // All devices now get device_uuid from device-auth, so this should not happen
-      console.warn("Skipping pairings update: device_uuid not available", {
-        pairing_code: pairingCode,
-        serial_number: serialNumber,
-        device_id: deviceId,
-      });
     }
 
     return new Response(
       JSON.stringify({
         success: true,
         webex_status: webexStatus,
-        pairing_code: pairingCode,
+        device_uuid: resolvedDeviceUuid,
         device_id: deviceId,
         serial_number: serialNumber,
       }),

@@ -61,7 +61,7 @@ serve(async (req: Request) => {
     const { data: legacyTokens } = await supabase
       .schema("display")
       .from("oauth_tokens")
-      .select("id, pairing_code, serial_number")
+      .select("id, device_uuid, serial_number")
       .eq("provider", "webex")
       .is("user_id", null)
       .limit(100); // Process in batches
@@ -71,12 +71,12 @@ serve(async (req: Request) => {
         try {
           let userUuid: string | null = null;
           
-          if (token.pairing_code) {
+          if (token.device_uuid) {
             const { data: pairing } = await supabase
               .schema("display")
               .from("pairings")
               .select("user_uuid")
-              .eq("pairing_code", token.pairing_code)
+              .eq("device_uuid", token.device_uuid)
               .maybeSingle();
             userUuid = pairing?.user_uuid ?? null;
           } else if (token.serial_number) {
@@ -98,7 +98,7 @@ serve(async (req: Request) => {
               .eq("id", token.id);
           }
         } catch (err) {
-          console.error("Backfill token failed:", err);
+          console.error(`Backfill token failed for device_uuid ${token.device_uuid || token.serial_number}:`, err);
           // Continue processing other tokens
         }
       }
@@ -192,11 +192,11 @@ serve(async (req: Request) => {
 
           // Update all user's enabled devices
           for (const serialNumber of serialNumbers) {
-            // Get pairing code and UUIDs for this device
+            // Get device UUIDs and status for this device
             const { data: pairing } = await supabase
               .schema("display")
               .from("pairings")
-              .select("pairing_code, webex_status, device_uuid, user_uuid")
+              .select("webex_status, device_uuid, user_uuid")
               .eq("serial_number", serialNumber)
               .maybeSingle();
 
@@ -247,7 +247,7 @@ serve(async (req: Request) => {
             }
           }
         } catch (err) {
-          console.error("User token sweep failed:", err);
+          console.error(`User token sweep failed for user ${userId}:`, err);
           failed++;
         }
       }

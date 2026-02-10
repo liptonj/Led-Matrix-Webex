@@ -265,14 +265,14 @@ Deno.test("device-auth: device token has 24-hour TTL", () => {
   assertEquals(DEVICE_TOKEN_TTL_SECONDS, 24 * 60 * 60);
 });
 
-Deno.test("device-auth: device token payload has token_type 'device' and Supabase claims", () => {
+Deno.test("device-auth: device token payload has token_type 'device' and device_uuid", () => {
   const tokenPayload = {
     sub: crypto.randomUUID(),
     role: "authenticated",
     aud: "authenticated",
-    device_id: "webex-display-C3D4",
-    pairing_code: "ABC123",
     serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: TEST_USER_UUID,
     token_type: "device",
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + DEVICE_TOKEN_TTL_SECONDS,
@@ -281,19 +281,43 @@ Deno.test("device-auth: device token payload has token_type 'device' and Supabas
   assertEquals(tokenPayload.token_type, "device");
   assertEquals(tokenPayload.role, "authenticated");
   assertEquals(tokenPayload.aud, "authenticated");
+  assertExists(tokenPayload.device_uuid);
+  assertExists(tokenPayload.serial_number);
 });
 
-Deno.test("device-auth: device token contains pairing_code", () => {
+Deno.test("device-auth: device token contains device_uuid", () => {
   const tokenPayload = {
     sub: crypto.randomUUID(),
-    device_id: "webex-display-C3D4",
-    pairing_code: "ABC123",
+    role: "authenticated",
+    aud: "authenticated",
     serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: null,
     token_type: "device",
   };
 
-  assertExists(tokenPayload.pairing_code);
-  assertEquals(tokenPayload.pairing_code.length, 6);
+  assertExists(tokenPayload.device_uuid);
+  assertEquals(tokenPayload.device_uuid, TEST_DEVICE_UUID);
+});
+
+Deno.test("device-auth: device token includes role and aud claims for Supabase Realtime", () => {
+  const tokenPayload = {
+    sub: crypto.randomUUID(),
+    role: "authenticated",
+    aud: "authenticated",
+    serial_number: "A1B2C3D4",
+    device_uuid: TEST_DEVICE_UUID,
+    user_uuid: TEST_USER_UUID,
+    token_type: "device",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + DEVICE_TOKEN_TTL_SECONDS,
+  };
+
+  // Supabase Realtime requires role and exp claims in JWT
+  assertEquals(tokenPayload.role, "authenticated");
+  assertEquals(tokenPayload.aud, "authenticated");
+  assertExists(tokenPayload.exp);
+  assertExists(tokenPayload.iat);
 });
 
 // ============================================================================

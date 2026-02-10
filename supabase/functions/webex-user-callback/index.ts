@@ -88,7 +88,9 @@ serve(async (req: Request) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceKey);
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
     // Decode state to get redirect_to (no PKCE - state is just for CSRF protection)
     let stateObj;
@@ -263,17 +265,40 @@ serve(async (req: Request) => {
           });
 
         if (createError || !newUser.user) {
-          console.error("Failed to create user:", createError);
-          return new Response(
-            JSON.stringify({ error: "Failed to create user" }),
-            {
-              status: 500,
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            },
-          );
+          // Handle "user already registered" - auth user exists but no profile
+          if (createError?.message?.includes("already been registered") ||
+              createError?.message?.includes("already exists")) {
+            console.warn("[webex-user-callback] Auth user exists without profile, looking up by email");
+            const { data: authUsers } = await supabase.auth.admin.listUsers();
+            const existingAuthUser = authUsers?.users?.find(
+              (u) => u.email === webexUser.email,
+            );
+            if (existingAuthUser) {
+              userId = existingAuthUser.id;
+              console.log("[webex-user-callback] Found existing auth user:", userId);
+            } else {
+              console.error("[webex-user-callback] Failed to create user and could not find existing:", createError);
+              return new Response(
+                JSON.stringify({ error: "Failed to create user" }),
+                {
+                  status: 500,
+                  headers: { ...corsHeaders, "Content-Type": "application/json" },
+                },
+              );
+            }
+          } else {
+            console.error("[webex-user-callback] Failed to create user:", createError);
+            return new Response(
+              JSON.stringify({ error: "Failed to create user", details: createError?.message }),
+              {
+                status: 500,
+                headers: { ...corsHeaders, "Content-Type": "application/json" },
+              },
+            );
+          }
+        } else {
+          userId = newUser.user.id;
         }
-
-        userId = newUser.user.id;
 
         // Create user profile
         const { error: profileError } = await supabase
@@ -298,12 +323,12 @@ serve(async (req: Request) => {
     }
 
     // Store OAuth tokens in oauth_tokens table
+    // Note: Only set user-relevant columns. pairing_code was dropped by UUID migration;
+    // serial_number and device_uuid are device-scope only.
     const { error: upsertError } = await supabase.schema("display").from("oauth_tokens").upsert({
       provider: "webex",
       user_id: userId,
       token_scope: "user",
-      serial_number: null,
-      pairing_code: null,
       access_token_id: accessTokenId,
       refresh_token_id: refreshTokenId,
       expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
@@ -398,9 +423,12 @@ serve(async (req: Request) => {
       },
     );
   } catch (err) {
-    console.error("webex-user-callback error:", err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : undefined;
+    console.error("[webex-user-callback] Unhandled error:", errorMessage);
+    if (errorStack) console.error("[webex-user-callback] Stack:", errorStack);
     return new Response(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({ error: "Internal server error", details: errorMessage }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

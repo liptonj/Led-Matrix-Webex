@@ -24,6 +24,11 @@ export function getSupabaseClient(): SupabaseClient {
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
+      realtime: {
+        heartbeatIntervalMs: 25000,
+        reconnectAfterMs: (tries: number) =>
+          Math.min(1000 * Math.pow(2, tries), 30000),
+      },
     });
   }
 

@@ -31,7 +31,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { sendBroadcast } from "../_shared/broadcast.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { verifyDeviceToken } from "../_shared/jwt.ts";
+import { verifyDeviceToken, type TokenPayload } from "../_shared/jwt.ts";
 import { getUserFromRequest } from "../_shared/user_auth.ts";
 
 interface UpdateAppStateRequest {
@@ -47,14 +47,6 @@ interface UpdateAppStateResponse {
   success: boolean;
   device_connected: boolean;
   device_last_seen: string | null;
-}
-
-interface TokenPayload {
-  sub: string;
-  pairing_code: string;
-  serial_number?: string;
-  token_type: string;
-  exp: number;
 }
 
 // Valid Webex status values (includes firmware-supported aliases)
@@ -112,6 +104,11 @@ async function validateAppToken(
       return { valid: false, error: "Invalid token type" };
     }
 
+    // Verify device_uuid is present (required for UUID migration)
+    if (!payload.device_uuid) {
+      return { valid: false, error: "Token missing device_uuid" };
+    }
+
     return { valid: true, token: payload };
   } catch (err) {
     if (err instanceof Error && err.message.includes("expired")) {
@@ -125,7 +122,7 @@ async function validateAppToken(
  * Authentication result - either app token or user session
  */
 type AuthResult =
-  | { type: "app"; pairingCode: string }
+  | { type: "app"; deviceUuid: string }
   | { type: "user"; userUuid: string };
 
 Deno.serve(async (req) => {
@@ -170,8 +167,8 @@ Deno.serve(async (req) => {
     } else {
       // Fall back to app token authentication
       const tokenResult = await validateAppToken(authHeader, tokenSecret);
-      if (tokenResult.valid && tokenResult.token) {
-        authResult = { type: "app", pairingCode: tokenResult.token.pairing_code };
+      if (tokenResult.valid && tokenResult.token && tokenResult.token.device_uuid) {
+        authResult = { type: "app", deviceUuid: tokenResult.token.device_uuid };
       }
     }
 
@@ -237,11 +234,11 @@ Deno.serve(async (req) => {
     let pairingQuery = supabase
       .schema("display")
       .from("pairings")
-      .select("pairing_code, webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid");
+      .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid");
 
     if (authResult.type === "app") {
-      // App token: use pairing_code
-      pairingQuery = pairingQuery.eq("pairing_code", authResult.pairingCode);
+      // App token: use device_uuid from token
+      pairingQuery = pairingQuery.eq("device_uuid", authResult.deviceUuid);
     } else {
       // User session: use device_uuid if provided, otherwise we'll broadcast only
       if (targetDeviceUuid) {
@@ -330,14 +327,13 @@ Deno.serve(async (req) => {
       const { data: device, error: deviceLookupError } = await supabase
         .schema("display")
         .from("devices")
-        .select("pairing_code, serial_number, device_id")
+        .select("serial_number, device_id")
         .eq("id", targetDeviceUuid)
         .single();
 
       if (device && !deviceLookupError) {
         // Build pairing data with provided state
         const pairingData: Record<string, unknown> = {
-          pairing_code: device.pairing_code,
           serial_number: device.serial_number,
           device_id: device.device_id,
           device_uuid: targetDeviceUuid,
@@ -363,11 +359,12 @@ Deno.serve(async (req) => {
         }
 
         // Upsert pairing (in case of race condition with device-auth)
+        // device_uuid is now the primary key
         const { data: newPairing, error: insertError } = await supabase
           .schema("display")
           .from("pairings")
-          .upsert(pairingData, { onConflict: "pairing_code" })
-          .select("pairing_code, webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid")
+          .upsert(pairingData, { onConflict: "device_uuid" })
+          .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid")
           .single();
 
         if (newPairing && !insertError) {
@@ -426,10 +423,12 @@ Deno.serve(async (req) => {
 
     const now = new Date().toISOString();
 
-    // Get pairing_code for validation
-    const pairingCode = currentPairing?.pairing_code || (authResult.type === "app" ? authResult.pairingCode : null);
+    // Get device_uuid for validation and queries
+    const deviceUuid = currentPairing?.device_uuid || 
+      (authResult.type === "app" ? authResult.deviceUuid : null) ||
+      targetDeviceUuid;
     
-    if (!pairingCode) {
+    if (!deviceUuid) {
       return new Response(
         JSON.stringify({ success: false, error: "Pairing not found" }),
         {
@@ -444,7 +443,7 @@ Deno.serve(async (req) => {
       .schema("display")
       .from("pairings")
       .select("device_connected, device_last_seen")
-      .eq("pairing_code", pairingCode)
+      .eq("device_uuid", deviceUuid)
       .maybeSingle();
 
     // ONLY update pairings table if status actually changed (triggers realtime)
@@ -452,26 +451,12 @@ Deno.serve(async (req) => {
     let updateError: { code?: string; message?: string } | null = null;
 
     if (hasStatusChange) {
-      // Build update query - support both pairing_code and device_uuid
-      let updateQuery = supabase
+      // Build update query - use device_uuid for all updates
+      const updateQuery = supabase
         .schema("display")
         .from("pairings")
-        .update(statusUpdateData);
-
-      if (authResult.type === "app") {
-        updateQuery = updateQuery.eq("pairing_code", authResult.pairingCode);
-      } else if (targetDeviceUuid) {
-        updateQuery = updateQuery.eq("device_uuid", targetDeviceUuid);
-      } else {
-        // Should not happen - we already handled broadcast-only case
-        return new Response(
-          JSON.stringify({ success: false, error: "Invalid request" }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
-      }
+        .update(statusUpdateData)
+        .eq("device_uuid", deviceUuid);
 
       const { data, error } = await updateQuery
         .select("webex_status, camera_on, mic_muted, in_call, display_name, app_connected, device_uuid, user_uuid")
@@ -516,12 +501,12 @@ Deno.serve(async (req) => {
     if (updateError) {
       // If pairing doesn't exist, try to create it (only for app tokens)
       if (updateError.code === "PGRST116" && authResult.type === "app") {
-        // Look up device info from devices table (including id for device_uuid)
+        // Look up device info from devices table using device_uuid
         const { data: device } = await supabase
           .schema("display")
           .from("devices")
           .select("id, serial_number, device_id")
-          .eq("pairing_code", authResult.pairingCode)
+          .eq("id", authResult.deviceUuid)
           .single();
 
         if (device) {
@@ -529,7 +514,6 @@ Deno.serve(async (req) => {
             .schema("display")
             .from("pairings")
             .insert({
-              pairing_code: authResult.pairingCode,
               serial_number: device.serial_number,
               device_id: device.device_id,
               device_uuid: device.id,

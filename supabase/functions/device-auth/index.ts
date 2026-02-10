@@ -146,21 +146,20 @@ Deno.serve(async (req) => {
 
     const deviceUuid = deviceRecord.id;
 
-    // Ensure pairing row exists (upsert) with device_uuid
+    // Ensure pairing row exists (upsert) with device_uuid as conflict target (PK post-migration)
     const { error: pairingError } = await (supabase as any)
       .schema("display")
       .from("pairings")
       .upsert(
         {
-          pairing_code: device.pairing_code,
+          device_uuid: deviceUuid,
           serial_number: device.serial_number,
           device_id: device.device_id,
-          device_uuid: deviceUuid,
           device_connected: true,
           device_last_seen: new Date().toISOString(),
         },
         {
-          onConflict: "pairing_code",
+          onConflict: "device_uuid",
           ignoreDuplicates: false,
         },
       );
@@ -175,7 +174,7 @@ Deno.serve(async (req) => {
       .schema("display")
       .from("pairings")
       .select("user_uuid")
-      .eq("pairing_code", device.pairing_code)
+      .eq("device_uuid", deviceUuid)
       .maybeSingle();
 
     const userUuid = pairingRecord?.user_uuid || null;
@@ -191,11 +190,9 @@ Deno.serve(async (req) => {
       role: "authenticated",
       aud: "authenticated",
       serial_number: device.serial_number,
-      pairing_code: device.pairing_code,
-      device_id: device.device_id,
+      token_type: "device",
       device_uuid: deviceUuid,
       user_uuid: userUuid,
-      token_type: "device",
       iat: getNumericDate(0),
       exp: getNumericDate(DEVICE_TOKEN_TTL_SECONDS),
     };
