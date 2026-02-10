@@ -35,8 +35,16 @@ String DeviceInfo::buildStatusJson() {
     doc["camera_on"] = deps.app_state.camera_on;
     doc["mic_muted"] = deps.app_state.mic_muted;
     doc["in_call"] = deps.app_state.in_call;
-    doc["pairing_code"] = deps.pairing.getCode();
     doc["serial_number"] = deps.credentials.getSerialNumber();
+    
+    // Include device_uuid if authenticated (UUID identity migration)
+    if (deps.supabase.isAuthenticated()) {
+        String deviceUuid = deps.config.getDeviceUuid();
+        if (!deviceUuid.isEmpty()) {
+            doc["device_uuid"] = deviceUuid;
+        }
+    }
+    
     doc["ip_address"] = WiFi.localIP().toString();
     doc["mac_address"] = WiFi.macAddress();
     doc["free_heap"] = ESP.getFreeHeap();
@@ -104,8 +112,15 @@ String DeviceInfo::buildConfigJson() {
     doc["has_webex_tokens"] = deps.config.hasWebexTokens();
     doc["ota_url"] = deps.config.getOTAUrl();
     doc["auto_update"] = deps.config.getAutoUpdate();
-    doc["pairing_code"] = deps.pairing.getCode();
     doc["tls_verify"] = deps.config.getTlsVerify();
+    
+    // Include device_uuid if authenticated (UUID identity migration)
+    if (deps.supabase.isAuthenticated()) {
+        String deviceUuid = deps.config.getDeviceUuid();
+        if (!deviceUuid.isEmpty()) {
+            doc["device_uuid"] = deviceUuid;
+        }
+    }
 
     // MQTT settings - always include so embedded app can show current state
     doc["mqtt_broker"] = deps.config.getMQTTBroker();

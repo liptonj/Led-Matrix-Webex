@@ -104,22 +104,29 @@ static LogQueueLevel parseLogLevel(const char* formatted) {
  * 4. Non-blocking: uses zero timeout for queue send
  */
 static int remote_log_vprintf(const char* fmt, va_list args) {
+    // Copy va_list BEFORE consuming it (va_list can only be consumed once per C/C++ standard)
+    va_list args_copy;
+    va_copy(args_copy, args);
+
     // Always call original vprintf for Serial output
     int result = _s_origVprintf ? _s_origVprintf(fmt, args) : vprintf(fmt, args);
 
     // If suppressed, don't queue anything (not even errors)
     if (_s_suppressed) {
+        va_end(args_copy);
         return result;
     }
 
     // If queue not initialized, skip remote logging
     if (_s_queue == nullptr) {
+        va_end(args_copy);
         return result;
     }
 
     // Format message to a temporary buffer to parse level
     char tempBuf[LOG_QUEUE_MSG_LEN + 64]; // Extra space for formatting
-    int formattedLen = vsnprintf(tempBuf, sizeof(tempBuf), fmt, args);
+    int formattedLen = vsnprintf(tempBuf, sizeof(tempBuf), fmt, args_copy);
+    va_end(args_copy);
     
     if (formattedLen < 0 || formattedLen >= (int)sizeof(tempBuf)) {
         // Formatting failed or truncated - skip remote logging

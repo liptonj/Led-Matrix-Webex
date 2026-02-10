@@ -36,7 +36,6 @@ void SupabaseRealtime::attemptReconnect() {
     ESP_LOGI(TAG, "Reconnecting (next attempt in %lu ms)...", _reconnectDelay);
     uint32_t minHeap = minHeapRequired();
     if (ESP.getFreeHeap() < minHeap) {
-        unsigned long now = millis();
         if (now - _lowHeapLogAt > REALTIME_LOW_HEAP_LOG_MS) {
             _lowHeapLogAt = now;
             ESP_LOGW(TAG, "Skipping reconnect - low heap (%lu < %lu)",
@@ -45,6 +44,9 @@ void SupabaseRealtime::attemptReconnect() {
         return;
     }
     
+    // Disconnect and reconnect - channels will be re-subscribed automatically
+    // using cached channel topics (device:{device_uuid} and user:{user_uuid})
+    // The websocketEventHandler will rejoin channels on WEBSOCKET_EVENT_CONNECTED
     disconnect();
     begin(_supabaseUrl, _anonKey, _accessToken);
 }

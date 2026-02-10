@@ -45,19 +45,17 @@ void SupabaseClient::begin(const String& supabase_url, const String& pairing_cod
         _supabaseUrl.remove(_supabaseUrl.length() - 1);
     }
     
-    _pairingCode = pairing_code;
-    _pairingCode.toUpperCase();
+    // Pairing code parameter is deprecated - device_uuid is used instead
+    // Ignore pairing_code parameter for backward compatibility
     
     ESP_LOGI(TAG, "Initialized with URL: %s", _supabaseUrl.c_str());
-    ESP_LOGI(TAG, "Pairing code configured");
+    ESP_LOGI(TAG, "Device UUID will be used for identification");
 }
 
 void SupabaseClient::setPairingCode(const String& code) {
-    _pairingCode = code;
-    _pairingCode.toUpperCase();
-    
-    // Invalidate token when pairing code changes
-    invalidateToken();
+    // Deprecated - no-op, device_uuid is used instead
+    // Keep for backward compatibility with existing code
+    (void)code;  // Suppress unused parameter warning
 }
 
 SupabaseAppState SupabaseClient::postDeviceState(int rssi, uint32_t freeHeap, 
@@ -325,6 +323,12 @@ bool SupabaseClient::ackCommand(const String& commandId, bool success,
     ESP_LOGI(TAG, "Command %s acknowledged (success=%d, broadcast=%d)",
              trimmedId.c_str(), success, broadcastSent);
     return true;
+}
+
+String SupabaseClient::getPairingCode() const {
+    // Deprecated - return device_uuid instead for backward compatibility
+    auto& deps = getDependencies();
+    return deps.config.getDeviceUuid();
 }
 
 bool SupabaseClient::insertDeviceLog(const String& level, const String& message, const String& metadataJson) {

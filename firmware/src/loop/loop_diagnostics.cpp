@@ -39,8 +39,8 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
         ? (ctx.app_state->embedded_app_connected ? "embedded_app" : "unknown")
         : ctx.app_state->webex_status_source;
 
-    // Get pairing code for display
-    String pairing_code = ctx.pairing_manager ? ctx.pairing_manager->getCode() : "";
+    // Get device UUID for display
+    String device_uuid = ctx.config_manager ? ctx.config_manager->getDeviceUuid() : "";
     
     // Get user UUID for association check
     String user_uuid = ctx.config_manager ? ctx.config_manager->getUserUuid() : "";
@@ -63,8 +63,8 @@ void handleConnectionStatusLogging(LoopContext& ctx) {
              ctx.app_state->embedded_app_connected ? "Yes" : "No",
              status_source);
     ESP_LOGI(TAG, "User: %s", has_user ? "Yes" : "No");
-    if (!pairing_code.isEmpty()) {
-        ESP_LOGI(TAG, "PAIRING CODE: %s", pairing_code.c_str());
+    if (!device_uuid.isEmpty()) {
+        ESP_LOGI(TAG, "DEVICE UUID: %s", device_uuid.c_str());
     }
     ESP_LOGI(TAG, "============================");
 }

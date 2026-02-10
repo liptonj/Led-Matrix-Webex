@@ -28,33 +28,34 @@
 // Mock HTTP Response Data
 // ============================================================================
 
-// Successful authentication response
+// Successful authentication response (UUID identity migration)
 // NOTE: Use const char* instead of String to avoid stream read position issues
 const char* mockAuthResponse = R"({
     "success": true,
     "serial_number": "A1B2C3D4",
-    "pairing_code": "XYZ789",
     "device_id": "webex-display-C3D4",
+    "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "user_uuid": "123e4567-e89b-12d3-a456-426614174000",
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJBMUIyQzNENCJ9.signature",
     "expires_at": "2026-01-28T13:00:00Z",
     "target_firmware_version": "1.5.2"
 })";
 
-// Auth response without target firmware version
+// Auth response without target firmware version (UUID identity migration)
 const char* mockAuthResponseNoOTA = R"({
     "success": true,
     "serial_number": "A1B2C3D4",
-    "pairing_code": "XYZ789",
     "device_id": "webex-display-C3D4",
+    "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
+    "user_uuid": "123e4567-e89b-12d3-a456-426614174000",
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig",
     "expires_at": "2026-01-28T13:00:00Z"
 })";
 
-// Auth response with UUID fields (Phase 3)
+// Auth response with UUID fields (UUID identity migration - primary format)
 const char* mockAuthResponseWithUUIDs = R"({
     "success": true,
     "serial_number": "A1B2C3D4",
-    "pairing_code": "XYZ789",
     "device_id": "webex-display-C3D4",
     "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
     "user_uuid": "123e4567-e89b-12d3-a456-426614174000",
@@ -187,7 +188,7 @@ const char* mockRateLimitWithRetry = R"({
 // ============================================================================
 
 void test_authenticate_success() {
-    // Test: Mock HTTP 200 with valid token
+    // Test: Mock HTTP 200 with valid token (UUID identity migration)
     // Simulates successful device-auth response parsing
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, mockAuthResponse);
@@ -195,14 +196,18 @@ void test_authenticate_success() {
     TEST_ASSERT_FALSE(error);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
     TEST_ASSERT_EQUAL_STRING("A1B2C3D4", doc["serial_number"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("XYZ789", doc["pairing_code"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING("webex-display-C3D4", doc["device_id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", doc["device_uuid"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("123e4567-e89b-12d3-a456-426614174000", doc["user_uuid"].as<const char*>());
     // Verify token starts with "eyJ" (JWT header prefix)
     const char* token = doc["token"].as<const char*>();
     TEST_ASSERT_NOT_NULL(token);
     TEST_ASSERT_EQUAL(0, strncmp(token, "eyJ", 3));
     TEST_ASSERT_EQUAL_STRING("2026-01-28T13:00:00Z", doc["expires_at"].as<const char*>());
     TEST_ASSERT_EQUAL_STRING("1.5.2", doc["target_firmware_version"].as<const char*>());
+    
+    // pairing_code should not be present in UUID-based responses
+    TEST_ASSERT_FALSE(doc.containsKey("pairing_code"));
 }
 
 void test_authenticate_success_no_ota() {
@@ -334,8 +339,18 @@ void test_parse_auth_response_uuid_format() {
 }
 
 void test_parse_auth_response_uuid_optional() {
+    // Note: After UUID migration, device_uuid should always be present in auth responses
+    // This test verifies backward compatibility for missing UUID fields
+    const char* legacyResponse = R"({
+        "success": true,
+        "serial_number": "A1B2C3D4",
+        "device_id": "webex-display-C3D4",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.sig",
+        "expires_at": "2026-01-28T13:00:00Z"
+    })";
+    
     JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, mockAuthResponse);
+    DeserializationError error = deserializeJson(doc, legacyResponse);
     
     TEST_ASSERT_FALSE(error);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
@@ -346,6 +361,9 @@ void test_parse_auth_response_uuid_optional() {
     
     TEST_ASSERT_TRUE(device_uuid.isEmpty());
     TEST_ASSERT_TRUE(user_uuid.isEmpty());
+    
+    // pairing_code should not be present
+    TEST_ASSERT_FALSE(doc.containsKey("pairing_code"));
 }
 
 void test_parse_auth_response_uuid_storage() {

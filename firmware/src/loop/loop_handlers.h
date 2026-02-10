@@ -16,6 +16,11 @@
 #include <Arduino.h>
 #include "app_state.h"
 
+// TLS heap thresholds for safe HTTPS/WebSocket operations
+// First-connect requires more heap than steady-state operations
+constexpr uint32_t TLS_HEAP_MIN_FREE = 65000;
+constexpr uint32_t TLS_HEAP_MIN_BLOCK = 40000;
+
 // Forward declarations for external types
 class ConfigManager;
 class MatrixDisplay;

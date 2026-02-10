@@ -93,7 +93,7 @@ bool SupabaseClient::authenticate() {
     
     _token = result.token;
     _tokenExpiresAt = result.expires_at;
-    _pairingCode = result.pairing_code;
+    // pairing_code is deprecated - device_uuid is used instead (stored in ConfigManager)
     _targetFirmwareVersion = result.target_firmware_version;
     _remoteDebugEnabled = result.debug_enabled;
     _supabaseAnonKey = result.anon_key;
@@ -102,8 +102,10 @@ bool SupabaseClient::authenticate() {
 
     // Debug: log auth response summary without secrets
 #if SUPABASE_AUTH_DEBUG
-    ESP_LOGI(TAG, "Auth response summary: pairing=%s device_id=%s expires_at=%lu debug=%d",
-             result.pairing_code.isEmpty() ? "(none)" : "***",
+    auto& deps = getDependencies();
+    String deviceUuid = deps.config.getDeviceUuid();
+    ESP_LOGI(TAG, "Auth response summary: device_uuid=%s device_id=%s expires_at=%lu debug=%d",
+             deviceUuid.isEmpty() ? "(none)" : deviceUuid.substring(0, 8).c_str(),
              result.device_id.c_str(),
              result.expires_at,
              result.debug_enabled ? 1 : 0);

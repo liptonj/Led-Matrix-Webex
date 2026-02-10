@@ -30,6 +30,33 @@
 // Include for hasSafeTlsHeap
 #include "../loop/loop_handlers.h"
 
+namespace {
+// Valid command names for whitelist validation
+constexpr const char* VALID_COMMANDS[] = {
+    "get_status",
+    "get_telemetry",
+    "get_troubleshooting_status",
+    "get_config",
+    "set_config",
+    "set_brightness",
+    "regenerate_pairing",
+    "set_remote_debug",
+    "ota_update",
+    "reboot",
+    "factory_reset"
+};
+constexpr size_t VALID_COMMANDS_COUNT = sizeof(VALID_COMMANDS) / sizeof(VALID_COMMANDS[0]);
+
+bool isValidCommand(const String& cmd) {
+    for (size_t i = 0; i < VALID_COMMANDS_COUNT; i++) {
+        if (cmd == VALID_COMMANDS[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
 static const char* TAG = "CMD";
 
 // Global instance
@@ -115,7 +142,7 @@ void CommandProcessor::processPendingActions() {
     const unsigned long now = millis();
     deps.app_state.realtime_defer_until = now + 60000UL;
 
-    if (!hasSafeTlsHeap(65000, 40000)) {
+    if (!hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         if (now - _pendingActionLastLog > 10000) {
             _pendingActionLastLog = now;
             ESP_LOGD(TAG, "Pending command waiting for TLS heap (%lus)",
@@ -177,7 +204,7 @@ void CommandProcessor::processPendingAcks() {
         return;
     }
 
-    if (!hasSafeTlsHeap(65000, 40000)) {
+    if (!hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         return;
     }
 
@@ -195,7 +222,7 @@ bool CommandProcessor::sendOrQueueAck(const String& id, bool success,
                                        const String& response, const String& error) {
     auto& deps = getDependencies();
     const bool realtime_connecting = deps.realtime.isConnecting();
-    if (realtime_connecting || !hasSafeTlsHeap(65000, 40000)) {
+    if (realtime_connecting || !hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         return enqueuePendingAck(id, success, response, error);
     }
 
@@ -211,6 +238,17 @@ bool CommandProcessor::sendOrQueueAck(const String& id, bool success,
 
 void handleSupabaseCommand(const SupabaseCommand& cmd) {
     auto& deps = getDependencies();
+    
+    // Validate command against whitelist
+    if (!isValidCommand(cmd.command)) {
+        ESP_LOGW(TAG, "Unknown command rejected: %s (id=%s)", 
+                 cmd.command.c_str(), cmd.id.c_str());
+        commandProcessor.sendOrQueueAck(cmd.id, false, "", 
+                                        "Unknown command: " + cmd.command);
+        commandProcessor.markProcessed(cmd.id);
+        return;
+    }
+    
     ESP_LOGI(TAG, "Processing: %s (id=%s)", cmd.command.c_str(), cmd.id.c_str());
     
     bool success = true;
@@ -225,7 +263,7 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
         uint32_t freeHeap = ESP.getFreeHeap();
         uint32_t uptime = millis() / 1000;
         float temp = deps.app_state.temperature;
-        if (!hasSafeTlsHeap(65000, 40000)) {
+        if (!hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
             success = false;
             error = "low_heap";
         } else {
@@ -363,10 +401,12 @@ void handleSupabaseCommand(const SupabaseCommand& cmd) {
                 esp_log_level_set("*", esp_level);
                 ESP_LOGI(TAG, "Log level set to %s via set_config", level.c_str());
             }
-            
+
+            yield();  // Feed WDT after NVS writes
             response = DeviceInfo::buildConfigJson();
             ESP_LOGI(TAG, "Config updated via set_config");
-            syncManager.broadcastDeviceConfig();
+            syncManager.broadcastDeviceConfig(response);
+            yield();  // Feed WDT before ack
         }
         
     } else if (cmd.command == "set_brightness") {

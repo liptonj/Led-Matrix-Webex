@@ -34,35 +34,37 @@ const char* phoenixHeartbeat = R"([null,1,"phoenix","heartbeat",{}])";
 // Phoenix heartbeat response
 const char* phoenixHeartbeatReply = R"([null,1,"phoenix","phx_reply",{"status":"ok","response":{}}])";
 
-// Phoenix join message for postgres_changes
-const char* phoenixJoinMessage = R"([1,1,"realtime:display:multi:pairing_code=eq.ABC123","phx_join",{"config":{"broadcast":{"self":false},"presence":{"key":""},"postgres_changes":[{"event":"*","schema":"display","table":"commands","filter":"pairing_code=eq.ABC123"}]},"access_token":"eyJhbGciOiJIUzI1NiJ9.test"}])";
+// Phoenix join message for device channel (UUID identity migration)
+// Topic format: realtime:device:{device_uuid}
+const char* phoenixJoinMessage = R"([1,1,"realtime:device:550e8400-e29b-41d4-a716-446655440000","phx_join",{"config":{"broadcast":{"self":false},"presence":{"key":""},"private":true},"access_token":"eyJhbGciOiJIUzI1NiJ9.test"}])";
 
-// Phoenix join success response
-const char* phoenixJoinReplyOk = R"([1,1,"realtime:display:multi:pairing_code=eq.ABC123","phx_reply",{"status":"ok","response":{"postgres_changes":[{"id":12345}]}}])";
+// Phoenix join success response (UUID identity migration)
+const char* phoenixJoinReplyOk = R"([1,1,"realtime:device:550e8400-e29b-41d4-a716-446655440000","phx_reply",{"status":"ok","response":{}}])";
 
 // Phoenix join failure response
 const char* phoenixJoinReplyError = R"([1,1,"realtime:display:multi","phx_reply",{"status":"error","response":{"reason":"invalid access token"}}])";
 
-// Phoenix postgres_changes INSERT event
-const char* phoenixInsertEvent = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"INSERT","table":"commands","schema":"display","record":{"id":"cmd-uuid-1234","command":"set_brightness","payload":{"value":200},"pairing_code":"ABC123","created_at":"2026-01-28T12:00:00Z","acked_at":null},"old_record":null},"ids":[12345]}])";
+// Phoenix broadcast INSERT event for commands (UUID identity migration)
+// Commands are now delivered via broadcast on device channel, not postgres_changes
+const char* phoenixInsertEvent = R"([null,null,"realtime:device:550e8400-e29b-41d4-a716-446655440000","broadcast",{"event":"command","data":{"id":"cmd-uuid-1234","command":"set_brightness","payload":{"value":200},"device_uuid":"550e8400-e29b-41d4-a716-446655440000","created_at":"2026-01-28T12:00:00Z","status":"pending"}}])";
 
-// Phoenix postgres_changes UPDATE event
-const char* phoenixUpdateEvent = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"UPDATE","table":"device_state","schema":"display","record":{"id":"state-uuid","webex_status":"meeting","display_name":"John Doe","camera_on":false,"mic_muted":true,"in_call":true,"updated_at":"2026-01-28T12:05:00Z"},"old_record":{"webex_status":"active","camera_on":true,"mic_muted":false,"in_call":false}},"ids":[12346]}])";
+// Phoenix broadcast UPDATE event for webex status (UUID identity migration)
+const char* phoenixUpdateEvent = R"([null,null,"realtime:user:123e4567-e89b-12d3-a456-426614174000","broadcast",{"event":"webex_status","data":{"device_uuid":"550e8400-e29b-41d4-a716-446655440000","webex_status":"meeting","display_name":"John Doe","camera_on":false,"mic_muted":true,"in_call":true,"updated_at":"2026-01-28T12:05:00Z"}}])";
 
-// Phoenix postgres_changes DELETE event
-const char* phoenixDeleteEvent = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"DELETE","table":"commands","schema":"display","record":null,"old_record":{"id":"cmd-uuid-1234","command":"set_brightness","acked_at":"2026-01-28T12:01:00Z"}},"ids":[12345]}])";
+// Phoenix broadcast DELETE event for commands (UUID identity migration)
+const char* phoenixDeleteEvent = R"([null,null,"realtime:device:550e8400-e29b-41d4-a716-446655440000","broadcast",{"event":"command_deleted","data":{"id":"cmd-uuid-1234","command":"set_brightness","device_uuid":"550e8400-e29b-41d4-a716-446655440000","acked_at":"2026-01-28T12:01:00Z"}}])";
 
-// Phoenix broadcast event (for custom messages)
-const char* phoenixBroadcastEvent = R"([null,null,"realtime:display:multi","broadcast",{"event":"status_update","payload":{"status":"active","message":"App connected"}}])";
+// Phoenix broadcast event (for custom messages - UUID identity migration)
+const char* phoenixBroadcastEvent = R"([null,null,"realtime:user:123e4567-e89b-12d3-a456-426614174000","broadcast",{"event":"status_update","payload":{"status":"active","message":"App connected"}}])";
 
-// Phoenix leave message
-const char* phoenixLeaveMessage = R"([null,2,"realtime:display:multi","phx_leave",{}])";
+// Phoenix leave message (UUID identity migration)
+const char* phoenixLeaveMessage = R"([null,2,"realtime:device:550e8400-e29b-41d4-a716-446655440000","phx_leave",{}])";
 
-// Phoenix leave response
-const char* phoenixLeaveReply = R"([null,2,"realtime:display:multi","phx_reply",{"status":"ok","response":{}}])";
+// Phoenix leave response (UUID identity migration)
+const char* phoenixLeaveReply = R"([null,2,"realtime:device:550e8400-e29b-41d4-a716-446655440000","phx_reply",{"status":"ok","response":{}}])";
 
-// System event - presence state
-const char* phoenixPresenceState = R"([null,null,"realtime:display:multi","presence_state",{"user1":{"metas":[{"phx_ref":"ABC123","online_at":1706443200}]}}])";
+// System event - presence state (UUID identity migration)
+const char* phoenixPresenceState = R"([null,null,"realtime:user:123e4567-e89b-12d3-a456-426614174000","presence_state",{"user1":{"metas":[{"phx_ref":"ABC123","online_at":1706443200}]}}])";
 
 // ============================================================================
 // Phoenix Message Parsing Tests
@@ -110,11 +112,11 @@ void test_parse_join_message_structure() {
     
     // join_ref for join messages
     TEST_ASSERT_EQUAL(1, arr[0].as<int>());
-    // topic with filter
+    // topic with device_uuid (UUID identity migration)
     const char* topic = arr[2].as<const char*>();
     TEST_ASSERT_NOT_NULL(topic);
-    TEST_ASSERT_TRUE(strstr(topic, "realtime:") == topic);
-    TEST_ASSERT_NOT_NULL(strstr(topic, "pairing_code=eq.ABC123"));
+    TEST_ASSERT_TRUE(strstr(topic, "realtime:device:") == topic);
+    TEST_ASSERT_NOT_NULL(strstr(topic, "550e8400-e29b-41d4-a716-446655440000"));
     // event
     TEST_ASSERT_EQUAL_STRING("phx_join", arr[3].as<const char*>());
 }
@@ -126,21 +128,18 @@ void test_parse_join_payload_config() {
     JsonArray arr = doc.as<JsonArray>();
     JsonObject payload = arr[4];
     
-    // Check config structure
+    // Check config structure (UUID identity migration - broadcast-only channels)
     JsonObject config = payload["config"];
     TEST_ASSERT_FALSE(config.isNull());
     
     // broadcast.self should be false
     TEST_ASSERT_FALSE(config["broadcast"]["self"].as<bool>());
     
-    // postgres_changes array
-    JsonArray pgChanges = config["postgres_changes"];
-    TEST_ASSERT_EQUAL(1, pgChanges.size());
+    // private channel flag should be true
+    TEST_ASSERT_TRUE(config["private"].as<bool>());
     
-    JsonObject change = pgChanges[0];
-    TEST_ASSERT_EQUAL_STRING("*", change["event"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("display", change["schema"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("commands", change["table"].as<const char*>());
+    // postgres_changes not used in UUID-based channels (broadcast-only)
+    TEST_ASSERT_FALSE(config.containsKey("postgres_changes"));
 }
 
 void test_parse_join_access_token() {
@@ -167,9 +166,8 @@ void test_parse_join_reply_success() {
     
     TEST_ASSERT_EQUAL_STRING("ok", payload["status"].as<const char*>());
     
-    // Response contains postgres_changes subscription IDs
-    JsonArray pgChanges = payload["response"]["postgres_changes"];
-    TEST_ASSERT_GREATER_THAN(0, pgChanges.size());
+    // UUID-based channels use broadcast-only (no postgres_changes subscription IDs)
+    TEST_ASSERT_FALSE(payload["response"].containsKey("postgres_changes"));
 }
 
 void test_parse_join_reply_error() {
@@ -199,16 +197,17 @@ void test_parse_insert_event() {
     TEST_ASSERT_TRUE(arr[0].isNull());
     TEST_ASSERT_TRUE(arr[1].isNull());
     
-    // Event type
-    TEST_ASSERT_EQUAL_STRING("postgres_changes", arr[3].as<const char*>());
+    // Event type (UUID identity migration - broadcast events, not postgres_changes)
+    TEST_ASSERT_EQUAL_STRING("broadcast", arr[3].as<const char*>());
     
     // Data structure
     JsonObject payload = arr[4];
-    JsonObject data = payload["data"];
+    TEST_ASSERT_EQUAL_STRING("command", payload["event"].as<const char*>());
     
-    TEST_ASSERT_EQUAL_STRING("INSERT", data["type"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("commands", data["table"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("display", data["schema"].as<const char*>());
+    JsonObject data = payload["data"];
+    TEST_ASSERT_EQUAL_STRING("cmd-uuid-1234", data["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("set_brightness", data["command"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", data["device_uuid"].as<const char*>());
 }
 
 void test_parse_insert_record() {
@@ -216,12 +215,16 @@ void test_parse_insert_record() {
     deserializeJson(doc, phoenixInsertEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonObject record = arr[4]["data"]["record"];
+    JsonObject data = arr[4]["data"];
     
-    TEST_ASSERT_EQUAL_STRING("cmd-uuid-1234", record["id"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("set_brightness", record["command"].as<const char*>());
-    TEST_ASSERT_EQUAL(200, record["payload"]["value"].as<int>());
-    TEST_ASSERT_EQUAL_STRING("ABC123", record["pairing_code"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("cmd-uuid-1234", data["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("set_brightness", data["command"].as<const char*>());
+    TEST_ASSERT_EQUAL(200, data["payload"]["value"].as<int>());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", data["device_uuid"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("pending", data["status"].as<const char*>());
+    
+    // pairing_code should not be present (UUID identity migration)
+    TEST_ASSERT_FALSE(data.containsKey("pairing_code"));
 }
 
 void test_parse_update_event() {
@@ -230,22 +233,19 @@ void test_parse_update_event() {
     TEST_ASSERT_FALSE(error);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonObject data = arr[4]["data"];
+    TEST_ASSERT_EQUAL_STRING("broadcast", arr[3].as<const char*>());
     
-    TEST_ASSERT_EQUAL_STRING("UPDATE", data["type"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("device_state", data["table"].as<const char*>());
+    JsonObject payload = arr[4];
+    TEST_ASSERT_EQUAL_STRING("webex_status", payload["event"].as<const char*>());
     
-    // New record values
-    JsonObject record = data["record"];
-    TEST_ASSERT_EQUAL_STRING("meeting", record["webex_status"].as<const char*>());
-    TEST_ASSERT_FALSE(record["camera_on"].as<bool>());
-    TEST_ASSERT_TRUE(record["mic_muted"].as<bool>());
-    TEST_ASSERT_TRUE(record["in_call"].as<bool>());
-    
-    // Old record values (for comparison/audit)
-    JsonObject oldRecord = data["old_record"];
-    TEST_ASSERT_EQUAL_STRING("active", oldRecord["webex_status"].as<const char*>());
-    TEST_ASSERT_TRUE(oldRecord["camera_on"].as<bool>());
+    // New record values (UUID identity migration - broadcast format)
+    JsonObject data = payload["data"];
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", data["device_uuid"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("meeting", data["webex_status"].as<const char*>());
+    TEST_ASSERT_FALSE(data["camera_on"].as<bool>());
+    TEST_ASSERT_TRUE(data["mic_muted"].as<bool>());
+    TEST_ASSERT_TRUE(data["in_call"].as<bool>());
+    TEST_ASSERT_EQUAL_STRING("John Doe", data["display_name"].as<const char*>());
 }
 
 void test_parse_delete_event() {
@@ -253,15 +253,16 @@ void test_parse_delete_event() {
     deserializeJson(doc, phoenixDeleteEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonObject data = arr[4]["data"];
+    TEST_ASSERT_EQUAL_STRING("broadcast", arr[3].as<const char*>());
     
-    TEST_ASSERT_EQUAL_STRING("DELETE", data["type"].as<const char*>());
+    JsonObject payload = arr[4];
+    TEST_ASSERT_EQUAL_STRING("command_deleted", payload["event"].as<const char*>());
     
-    // Record is null for DELETE, old_record contains deleted data
-    TEST_ASSERT_TRUE(data["record"].isNull());
-    
-    JsonObject oldRecord = data["old_record"];
-    TEST_ASSERT_EQUAL_STRING("cmd-uuid-1234", oldRecord["id"].as<const char*>());
+    // Data contains deleted command info (UUID identity migration - broadcast format)
+    JsonObject data = payload["data"];
+    TEST_ASSERT_EQUAL_STRING("cmd-uuid-1234", data["id"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("set_brightness", data["command"].as<const char*>());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", data["device_uuid"].as<const char*>());
 }
 
 void test_parse_broadcast_event() {
@@ -304,7 +305,8 @@ void test_build_join_message() {
     
     int joinRef = 1;
     int msgRef = 1;
-    String topic = "realtime:display:commands";
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    String topic = "realtime:device:" + deviceUuid;  // UUID identity migration
     
     arr.add(joinRef);
     arr.add(msgRef);
@@ -315,12 +317,10 @@ void test_build_join_message() {
     JsonObject config = payloadDoc["config"].to<JsonObject>();
     config["broadcast"]["self"] = false;
     config["presence"]["key"] = "";
+    config["private"] = true;  // UUID-based channels are private
     
-    JsonArray pgChanges = config["postgres_changes"].to<JsonArray>();
-    JsonObject change = pgChanges.add<JsonObject>();
-    change["event"] = "*";
-    change["schema"] = "display";
-    change["table"] = "commands";
+    // UUID-based channels use broadcast-only (no postgres_changes)
+    // Commands and events are delivered via broadcast messages
     
     payloadDoc["access_token"] = "test-token";
     
@@ -332,7 +332,8 @@ void test_build_join_message() {
     // Verify structure
     TEST_ASSERT_TRUE(message.startsWith("["));
     TEST_ASSERT_TRUE(message.indexOf("phx_join") > 0);
-    TEST_ASSERT_TRUE(message.indexOf("postgres_changes") > 0);
+    TEST_ASSERT_TRUE(message.indexOf("realtime:device:") > 0);
+    TEST_ASSERT_TRUE(message.indexOf(deviceUuid.c_str()) > 0);
 }
 
 void test_build_leave_message() {
@@ -341,7 +342,8 @@ void test_build_leave_message() {
     
     arr.add(nullptr);  // null join_ref for non-join
     arr.add(2);
-    arr.add("realtime:display:multi");
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    arr.add("realtime:device:" + deviceUuid);  // UUID identity migration
     arr.add("phx_leave");
     arr.add(JsonObject());
     
@@ -349,46 +351,39 @@ void test_build_leave_message() {
     serializeJson(doc, message);
     
     TEST_ASSERT_TRUE(message.indexOf("phx_leave") > 0);
+    TEST_ASSERT_TRUE(message.indexOf("realtime:device:") > 0);
 }
 
 // ============================================================================
 // Channel Topic Format Tests
 // ============================================================================
 
-void test_topic_format_single_table() {
-    String schema = "display";
-    String table = "commands";
-    String filter = "pairing_code=eq.ABC123";
+void test_topic_format_device_channel() {
+    // UUID identity migration - device channel format
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    String topic = "realtime:device:" + deviceUuid;
     
-    String topic = "realtime:" + schema + ":" + table;
-    if (!filter.isEmpty()) {
-        topic += ":" + filter;
-    }
-    
-    TEST_ASSERT_EQUAL_STRING("realtime:display:commands:pairing_code=eq.ABC123", 
+    TEST_ASSERT_EQUAL_STRING("realtime:device:550e8400-e29b-41d4-a716-446655440000", 
                              topic.c_str());
 }
 
-void test_topic_format_multi_table() {
-    String schema = "display";
-    String filter = "pairing_code=eq.XYZ789";
+void test_topic_format_user_channel() {
+    // UUID identity migration - user channel format
+    String userUuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    String topic = "realtime:user:" + userUuid;
     
-    // Multi-table uses "multi" instead of table name
-    String topic = "realtime:" + schema + ":multi";
-    if (!filter.isEmpty()) {
-        topic += ":" + filter;
-    }
-    
-    TEST_ASSERT_EQUAL_STRING("realtime:display:multi:pairing_code=eq.XYZ789", 
+    TEST_ASSERT_EQUAL_STRING("realtime:user:a1b2c3d4-e5f6-7890-abcd-ef1234567890", 
                              topic.c_str());
 }
 
-void test_filter_format_equality() {
-    // Supabase filter format: column=op.value
-    String filter = "pairing_code=eq.ABC123";
+void test_channel_topic_uuid_format() {
+    // UUID identity migration - channels use UUIDs directly in topic, not filters
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    String topic = "realtime:device:" + deviceUuid;
     
-    // Should have = and eq.
-    TEST_ASSERT_TRUE(filter.indexOf("=eq.") > 0);
+    // Topic should contain UUID directly
+    TEST_ASSERT_TRUE(topic.indexOf(deviceUuid) > 0);
+    TEST_ASSERT_EQUAL(36, deviceUuid.length());  // UUID format length
 }
 
 // ============================================================================
@@ -400,30 +395,34 @@ void test_extract_event_type_from_data() {
     deserializeJson(doc, phoenixInsertEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    const char* eventType = arr[4]["data"]["type"].as<const char*>();
+    // UUID identity migration - events are broadcast, not postgres_changes
+    const char* eventType = arr[3].as<const char*>();
+    const char* eventName = arr[4]["event"].as<const char*>();
     
-    // Event type should be uppercase
-    TEST_ASSERT_EQUAL_STRING("INSERT", eventType);
+    TEST_ASSERT_EQUAL_STRING("broadcast", eventType);
+    TEST_ASSERT_EQUAL_STRING("command", eventName);
 }
 
-void test_extract_table_name() {
+void test_extract_event_name() {
     JsonDocument doc;
     deserializeJson(doc, phoenixUpdateEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    const char* table = arr[4]["data"]["table"].as<const char*>();
+    // UUID identity migration - extract event name from broadcast
+    const char* eventName = arr[4]["event"].as<const char*>();
     
-    TEST_ASSERT_EQUAL_STRING("device_state", table);
+    TEST_ASSERT_EQUAL_STRING("webex_status", eventName);
 }
 
-void test_extract_schema_name() {
+void test_extract_device_uuid_from_broadcast() {
     JsonDocument doc;
     deserializeJson(doc, phoenixInsertEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    const char* schema = arr[4]["data"]["schema"].as<const char*>();
+    // UUID identity migration - extract device_uuid from broadcast data
+    const char* deviceUuid = arr[4]["data"]["device_uuid"].as<const char*>();
     
-    TEST_ASSERT_EQUAL_STRING("display", schema);
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", deviceUuid);
 }
 
 // ============================================================================
@@ -449,26 +448,31 @@ void test_null_refs_handling() {
     TEST_ASSERT_EQUAL(0, ref);
 }
 
-void test_empty_old_record_on_insert() {
+void test_broadcast_events_have_data_not_record() {
     JsonDocument doc;
     deserializeJson(doc, phoenixInsertEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonVariant oldRecord = arr[4]["data"]["old_record"];
+    // UUID identity migration - broadcast events have "data" field, not "record"/"old_record"
+    JsonObject data = arr[4]["data"];
     
-    // INSERT events have null old_record
-    TEST_ASSERT_TRUE(oldRecord.isNull());
+    TEST_ASSERT_FALSE(data.isNull());
+    TEST_ASSERT_TRUE(data.containsKey("id"));
+    TEST_ASSERT_TRUE(data.containsKey("command"));
+    TEST_ASSERT_TRUE(data.containsKey("device_uuid"));
 }
 
-void test_empty_record_on_delete() {
+void test_broadcast_delete_has_data() {
     JsonDocument doc;
     deserializeJson(doc, phoenixDeleteEvent);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonVariant record = arr[4]["data"]["record"];
+    // UUID identity migration - broadcast delete events have "data" field
+    JsonObject data = arr[4]["data"];
     
-    // DELETE events have null record
-    TEST_ASSERT_TRUE(record.isNull());
+    TEST_ASSERT_FALSE(data.isNull());
+    TEST_ASSERT_TRUE(data.containsKey("id"));
+    TEST_ASSERT_TRUE(data.containsKey("device_uuid"));
 }
 
 // ============================================================================
@@ -503,11 +507,11 @@ void test_realtime_url_construction() {
 // Command Extraction from Realtime INSERT Events
 // ============================================================================
 
-// Realtime INSERT event for commands table (matches actual Supabase format)
-const char* realtimeCommandInsert = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"INSERT","table":"commands","schema":"display","record":{"id":"cmd-realtime-001","command":"set_brightness","payload":{"value":150},"pairing_code":"ABC123","serial_number":"A1B2C3D4","status":"pending","created_at":"2026-01-28T14:00:00Z","acked_at":null,"expires_at":"2026-01-28T14:05:00Z","response":null,"error":null},"old_record":null},"ids":[99999]}])";
+// Realtime broadcast event for commands (UUID identity migration)
+const char* realtimeCommandInsert = R"([null,null,"realtime:device:550e8400-e29b-41d4-a716-446655440000","broadcast",{"event":"command","data":{"id":"cmd-realtime-001","command":"set_brightness","payload":{"value":150},"device_uuid":"550e8400-e29b-41d4-a716-446655440000","serial_number":"A1B2C3D4","status":"pending","created_at":"2026-01-28T14:00:00Z","acked_at":null,"expires_at":"2026-01-28T14:05:00Z","response":null,"error":null}}])";
 
-// Realtime INSERT event with already-acked command (should be skipped)
-const char* realtimeCommandInsertAcked = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"INSERT","table":"commands","schema":"display","record":{"id":"cmd-realtime-002","command":"reboot","payload":{},"pairing_code":"ABC123","serial_number":"A1B2C3D4","status":"acked","created_at":"2026-01-28T14:00:00Z","acked_at":"2026-01-28T14:00:05Z","expires_at":"2026-01-28T14:05:00Z","response":{},"error":null},"old_record":null},"ids":[99998]}])";
+// Realtime broadcast event with already-acked command (should be skipped) (UUID identity migration)
+const char* realtimeCommandInsertAcked = R"([null,null,"realtime:device:550e8400-e29b-41d4-a716-446655440000","broadcast",{"event":"command","data":{"id":"cmd-realtime-002","command":"reboot","payload":{},"device_uuid":"550e8400-e29b-41d4-a716-446655440000","serial_number":"A1B2C3D4","status":"acked","created_at":"2026-01-28T14:00:00Z","acked_at":"2026-01-28T14:00:05Z","expires_at":"2026-01-28T14:05:00Z","response":{},"error":null}}])";
 
 void test_extract_command_from_realtime_insert() {
     JsonDocument doc;
@@ -516,35 +520,40 @@ void test_extract_command_from_realtime_insert() {
     
     JsonArray arr = doc.as<JsonArray>();
     
-    // Verify event type
-    TEST_ASSERT_EQUAL_STRING("postgres_changes", arr[3].as<const char*>());
+    // Verify event type (UUID identity migration - broadcast, not postgres_changes)
+    TEST_ASSERT_EQUAL_STRING("broadcast", arr[3].as<const char*>());
     
-    // Extract record from data
-    JsonObject data = arr[4]["data"];
-    TEST_ASSERT_EQUAL_STRING("INSERT", data["type"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("commands", data["table"].as<const char*>());
+    // Extract data from broadcast payload
+    JsonObject payload = arr[4];
+    TEST_ASSERT_EQUAL_STRING("command", payload["event"].as<const char*>());
     
-    JsonObject record = data["record"];
-    TEST_ASSERT_FALSE(record.isNull());
+    JsonObject data = payload["data"];
+    TEST_ASSERT_FALSE(data.isNull());
     
     // Extract command fields
-    const char* cmdId = record["id"].as<const char*>();
-    const char* cmdName = record["command"].as<const char*>();
-    const char* status = record["status"].as<const char*>();
-    int payloadValue = record["payload"]["value"].as<int>();
+    const char* cmdId = data["id"].as<const char*>();
+    const char* cmdName = data["command"].as<const char*>();
+    const char* status = data["status"].as<const char*>();
+    const char* deviceUuid = data["device_uuid"].as<const char*>();
+    int payloadValue = data["payload"]["value"].as<int>();
     
     TEST_ASSERT_EQUAL_STRING("cmd-realtime-001", cmdId);
     TEST_ASSERT_EQUAL_STRING("set_brightness", cmdName);
     TEST_ASSERT_EQUAL_STRING("pending", status);
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", deviceUuid);
     TEST_ASSERT_EQUAL(150, payloadValue);
+    
+    // pairing_code should not be present
+    TEST_ASSERT_FALSE(data.containsKey("pairing_code"));
 }
 
 void test_command_status_filter_pending() {
     JsonDocument doc;
     deserializeJson(doc, realtimeCommandInsert);
     
-    JsonObject record = doc[4]["data"]["record"];
-    const char* status = record["status"].as<const char*>();
+    // UUID identity migration - extract from broadcast data
+    JsonObject data = doc[4]["data"];
+    const char* status = data["status"].as<const char*>();
     
     // Only process pending commands
     bool shouldProcess = (strcmp(status, "pending") == 0);
@@ -555,8 +564,9 @@ void test_command_status_filter_skip_acked() {
     JsonDocument doc;
     deserializeJson(doc, realtimeCommandInsertAcked);
     
-    JsonObject record = doc[4]["data"]["record"];
-    const char* status = record["status"].as<const char*>();
+    // UUID identity migration - extract from broadcast data
+    JsonObject data = doc[4]["data"];
+    const char* status = data["status"].as<const char*>();
     
     // Should NOT process already acked commands
     bool shouldProcess = (strcmp(status, "pending") == 0);
@@ -567,7 +577,8 @@ void test_serialize_command_payload_to_string() {
     JsonDocument doc;
     deserializeJson(doc, realtimeCommandInsert);
     
-    JsonObject cmdPayload = doc[4]["data"]["record"]["payload"];
+    // UUID identity migration - extract from broadcast data
+    JsonObject cmdPayload = doc[4]["data"]["payload"];
     
     // Serialize payload to string (as main.cpp does)
     String payloadStr;
@@ -584,11 +595,11 @@ void test_serialize_command_payload_to_string() {
 // Pairings UPDATE Event Handling (App State Changes)
 // ============================================================================
 
-// Realtime UPDATE event for pairings table - app connection
-const char* realtimePairingUpdate = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"UPDATE","table":"pairings","schema":"display","record":{"pairing_code":"ABC123","serial_number":"A1B2C3D4","device_id":"webex-display-C3D4","app_last_seen":"2026-01-28T14:10:00Z","device_last_seen":"2026-01-28T14:09:55Z","app_connected":true,"device_connected":true,"webex_status":"meeting","camera_on":false,"mic_muted":true,"in_call":true,"display_name":"Jane Smith","rssi":-65,"free_heap":180000,"uptime":7200,"temperature":42.5,"config":{},"created_at":"2026-01-28T12:00:00Z","updated_at":"2026-01-28T14:10:00Z"},"old_record":{"app_connected":false,"webex_status":"offline","camera_on":false,"mic_muted":false,"in_call":false}},"ids":[88888]}])";
+// Realtime broadcast event for app state update (UUID identity migration)
+const char* realtimePairingUpdate = R"([null,null,"realtime:user:123e4567-e89b-12d3-a456-426614174000","broadcast",{"event":"app_state","data":{"device_uuid":"550e8400-e29b-41d4-a716-446655440000","serial_number":"A1B2C3D4","device_id":"webex-display-C3D4","app_last_seen":"2026-01-28T14:10:00Z","device_last_seen":"2026-01-28T14:09:55Z","app_connected":true,"device_connected":true,"webex_status":"meeting","camera_on":false,"mic_muted":true,"in_call":true,"display_name":"Jane Smith","rssi":-65,"free_heap":180000,"uptime":7200,"temperature":42.5,"config":{},"created_at":"2026-01-28T12:00:00Z","updated_at":"2026-01-28T14:10:00Z"}}])";
 
-// Realtime UPDATE event - app disconnected
-const char* realtimePairingDisconnect = R"([null,null,"realtime:display:multi:pairing_code=eq.ABC123","postgres_changes",{"data":{"type":"UPDATE","table":"pairings","schema":"display","record":{"pairing_code":"ABC123","serial_number":"A1B2C3D4","app_connected":false,"device_connected":true,"webex_status":"offline","camera_on":false,"mic_muted":false,"in_call":false,"display_name":"","updated_at":"2026-01-28T14:15:00Z"},"old_record":{"app_connected":true,"webex_status":"meeting"}},"ids":[88889]}])";
+// Realtime broadcast event - app disconnected (UUID identity migration)
+const char* realtimePairingDisconnect = R"([null,null,"realtime:user:123e4567-e89b-12d3-a456-426614174000","broadcast",{"event":"app_state","data":{"device_uuid":"550e8400-e29b-41d4-a716-446655440000","serial_number":"A1B2C3D4","app_connected":false,"device_connected":true,"webex_status":"offline","camera_on":false,"mic_muted":false,"in_call":false,"display_name":"","updated_at":"2026-01-28T14:15:00Z"}}])";
 
 void test_extract_app_state_from_pairing_update() {
     JsonDocument doc;
@@ -596,57 +607,63 @@ void test_extract_app_state_from_pairing_update() {
     TEST_ASSERT_FALSE(error);
     
     JsonArray arr = doc.as<JsonArray>();
-    JsonObject data = arr[4]["data"];
+    TEST_ASSERT_EQUAL_STRING("broadcast", arr[3].as<const char*>());
     
-    TEST_ASSERT_EQUAL_STRING("UPDATE", data["type"].as<const char*>());
-    TEST_ASSERT_EQUAL_STRING("pairings", data["table"].as<const char*>());
+    JsonObject payload = arr[4];
+    TEST_ASSERT_EQUAL_STRING("app_state", payload["event"].as<const char*>());
     
-    JsonObject record = data["record"];
+    JsonObject data = payload["data"];
     
-    // Extract app state fields
-    bool appConnected = record["app_connected"] | false;
-    String webexStatus = record["webex_status"] | "offline";
-    String displayName = record["display_name"] | "";
-    bool cameraOn = record["camera_on"] | false;
-    bool micMuted = record["mic_muted"] | false;
-    bool inCall = record["in_call"] | false;
+    // Extract app state fields (UUID identity migration - broadcast format)
+    bool appConnected = data["app_connected"] | false;
+    String webexStatus = data["webex_status"] | "offline";
+    String displayName = data["display_name"] | "";
+    String deviceUuid = data["device_uuid"] | "";
+    bool cameraOn = data["camera_on"] | false;
+    bool micMuted = data["mic_muted"] | false;
+    bool inCall = data["in_call"] | false;
     
     TEST_ASSERT_TRUE(appConnected);
     TEST_ASSERT_EQUAL_STRING("meeting", webexStatus.c_str());
     TEST_ASSERT_EQUAL_STRING("Jane Smith", displayName.c_str());
+    TEST_ASSERT_EQUAL_STRING("550e8400-e29b-41d4-a716-446655440000", deviceUuid.c_str());
     TEST_ASSERT_FALSE(cameraOn);
     TEST_ASSERT_TRUE(micMuted);
     TEST_ASSERT_TRUE(inCall);
+    
+    // pairing_code should not be present
+    TEST_ASSERT_FALSE(data.containsKey("pairing_code"));
 }
 
 void test_detect_app_disconnect_from_pairing_update() {
     JsonDocument doc;
     deserializeJson(doc, realtimePairingDisconnect);
     
-    JsonObject record = doc[4]["data"]["record"];
+    // UUID identity migration - extract from broadcast data
+    JsonObject data = doc[4]["data"];
     
-    bool appConnected = record["app_connected"] | false;
-    String webexStatus = record["webex_status"] | "offline";
+    bool appConnected = data["app_connected"] | false;
+    String webexStatus = data["webex_status"] | "offline";
     
     TEST_ASSERT_FALSE(appConnected);
     TEST_ASSERT_EQUAL_STRING("offline", webexStatus.c_str());
 }
 
 void test_compare_old_and_new_pairing_state() {
+    // UUID identity migration - broadcast events don't have old_record
+    // State comparison must be done by comparing current state with previous state
     JsonDocument doc;
     deserializeJson(doc, realtimePairingUpdate);
     
     JsonObject data = doc[4]["data"];
-    JsonObject record = data["record"];
-    JsonObject oldRecord = data["old_record"];
     
-    // Old state
-    bool wasConnected = oldRecord["app_connected"] | false;
-    String oldStatus = oldRecord["webex_status"] | "offline";
+    // New state (UUID identity migration - broadcast format)
+    bool isConnected = data["app_connected"] | false;
+    String newStatus = data["webex_status"] | "offline";
     
-    // New state
-    bool isConnected = record["app_connected"] | false;
-    String newStatus = record["webex_status"] | "offline";
+    // Simulate previous state (would be stored in app_state)
+    bool wasConnected = false;
+    String oldStatus = "offline";
     
     // Detect app connection event
     bool justConnected = !wasConnected && isConnected;
@@ -664,13 +681,12 @@ void test_detect_event_is_command_insert() {
     JsonDocument doc;
     deserializeJson(doc, realtimeCommandInsert);
     
+    // UUID identity migration - detect broadcast command events
     const char* event = doc[3].as<const char*>();
-    const char* table = doc[4]["data"]["table"].as<const char*>();
-    const char* type = doc[4]["data"]["type"].as<const char*>();
+    const char* eventName = doc[4]["event"].as<const char*>();
     
-    bool isCommandInsert = (strcmp(event, "postgres_changes") == 0 && 
-                            strcmp(table, "commands") == 0 && 
-                            strcmp(type, "INSERT") == 0);
+    bool isCommandInsert = (strcmp(event, "broadcast") == 0 && 
+                            strcmp(eventName, "command") == 0);
     
     TEST_ASSERT_TRUE(isCommandInsert);
 }
@@ -679,19 +695,18 @@ void test_detect_event_is_pairing_update() {
     JsonDocument doc;
     deserializeJson(doc, realtimePairingUpdate);
     
+    // UUID identity migration - detect broadcast app_state events
     const char* event = doc[3].as<const char*>();
-    const char* table = doc[4]["data"]["table"].as<const char*>();
-    const char* type = doc[4]["data"]["type"].as<const char*>();
+    const char* eventName = doc[4]["event"].as<const char*>();
     
-    bool isPairingUpdate = (strcmp(event, "postgres_changes") == 0 && 
-                            strcmp(table, "pairings") == 0 && 
-                            strcmp(type, "UPDATE") == 0);
+    bool isPairingUpdate = (strcmp(event, "broadcast") == 0 && 
+                            strcmp(eventName, "app_state") == 0);
     
     TEST_ASSERT_TRUE(isPairingUpdate);
 }
 
 void test_route_event_to_correct_handler() {
-    // Simulate routing logic from handleRealtimeMessage()
+    // Simulate routing logic from handleRealtimeMessage() (UUID identity migration)
     struct {
         const char* message;
         const char* expectedHandler;
@@ -709,17 +724,16 @@ void test_route_event_to_correct_handler() {
         const char* event = doc[3].as<const char*>();
         const char* handler = "unknown";
         
-        if (strcmp(event, "postgres_changes") == 0) {
-            const char* table = doc[4]["data"]["table"].as<const char*>();
-            const char* type = doc[4]["data"]["type"].as<const char*>();
+        if (strcmp(event, "broadcast") == 0) {
+            const char* eventName = doc[4]["event"].as<const char*>();
             
-            if (table && type && strcmp(table, "commands") == 0 && strcmp(type, "INSERT") == 0) {
+            if (eventName && strcmp(eventName, "command") == 0) {
                 handler = "handleSupabaseCommand";
-            } else if (table && type && strcmp(table, "pairings") == 0 && strcmp(type, "UPDATE") == 0) {
+            } else if (eventName && strcmp(eventName, "app_state") == 0) {
                 handler = "updateAppState";
+            } else {
+                handler = "handleBroadcast";
             }
-        } else if (strcmp(event, "broadcast") == 0) {
-            handler = "handleBroadcast";
         } else if (strcmp(event, "phx_reply") == 0) {
             handler = "updateHeartbeat";
         }
@@ -732,34 +746,32 @@ void test_route_event_to_correct_handler() {
 // Subscription Filter Verification
 // ============================================================================
 
-void test_filter_matches_pairing_code() {
-    String filter = "pairing_code=eq.ABC123";
-    String pairingCode = "ABC123";
+void test_channel_topic_matches_device_uuid() {
+    // UUID identity migration - channels use device_uuid directly in topic
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    String topic = "realtime:device:" + deviceUuid;
     
-    // Build expected filter
-    String expectedFilter = "pairing_code=eq." + pairingCode;
+    // Build expected topic
+    String expectedTopic = "realtime:device:" + deviceUuid;
     
-    TEST_ASSERT_EQUAL_STRING(expectedFilter.c_str(), filter.c_str());
+    TEST_ASSERT_EQUAL_STRING(expectedTopic.c_str(), topic.c_str());
 }
 
-void test_multi_table_subscription_topic() {
-    String schema = "display";
-    String filter = "pairing_code=eq.XYZ789";
-    const String tables[] = { "commands", "pairings" };
-    int tableCount = 2;
+void test_device_and_user_channel_subscriptions() {
+    // UUID identity migration - separate device and user channels
+    String deviceUuid = "550e8400-e29b-41d4-a716-446655440000";
+    String userUuid = "123e4567-e89b-12d3-a456-426614174000";
     
-    // Multi-table topic format
-    String topic = "realtime:" + schema + ":multi";
-    if (!filter.isEmpty()) {
-        topic += ":" + filter;
-    }
+    // Device channel topic format
+    String deviceTopic = "realtime:device:" + deviceUuid;
+    TEST_ASSERT_EQUAL_STRING("realtime:device:550e8400-e29b-41d4-a716-446655440000", deviceTopic.c_str());
     
-    TEST_ASSERT_EQUAL_STRING("realtime:display:multi:pairing_code=eq.XYZ789", topic.c_str());
+    // User channel topic format
+    String userTopic = "realtime:user:" + userUuid;
+    TEST_ASSERT_EQUAL_STRING("realtime:user:123e4567-e89b-12d3-a456-426614174000", userTopic.c_str());
     
-    // Verify tables would be in postgres_changes array
-    TEST_ASSERT_EQUAL(2, tableCount);
-    TEST_ASSERT_EQUAL_STRING("commands", tables[0].c_str());
-    TEST_ASSERT_EQUAL_STRING("pairings", tables[1].c_str());
+    // Both channels are used for different event types
+    TEST_ASSERT_NOT_EQUAL(deviceTopic.c_str(), userTopic.c_str());
 }
 
 // ============================================================================
@@ -843,20 +855,20 @@ static void run_supabase_realtime_tests() {
     RUN_TEST(test_build_join_message);
     RUN_TEST(test_build_leave_message);
     
-    // Topic Format
-    RUN_TEST(test_topic_format_single_table);
-    RUN_TEST(test_topic_format_multi_table);
-    RUN_TEST(test_filter_format_equality);
+    // Topic Format (UUID identity migration)
+    RUN_TEST(test_topic_format_device_channel);
+    RUN_TEST(test_topic_format_user_channel);
+    RUN_TEST(test_channel_topic_uuid_format);
     
-    // Message Extraction
+    // Message Extraction (UUID identity migration)
     RUN_TEST(test_extract_event_type_from_data);
-    RUN_TEST(test_extract_table_name);
-    RUN_TEST(test_extract_schema_name);
+    RUN_TEST(test_extract_event_name);
+    RUN_TEST(test_extract_device_uuid_from_broadcast);
     
-    // Edge Cases
+    // Edge Cases (UUID identity migration)
     RUN_TEST(test_null_refs_handling);
-    RUN_TEST(test_empty_old_record_on_insert);
-    RUN_TEST(test_empty_record_on_delete);
+    RUN_TEST(test_broadcast_events_have_data_not_record);
+    RUN_TEST(test_broadcast_delete_has_data);
     
     // URL Construction
     RUN_TEST(test_realtime_url_construction);
@@ -884,10 +896,10 @@ static void run_supabase_realtime_tests() {
     RUN_TEST(test_route_event_to_correct_handler);
     
     // ========================================================================
-    // Subscription Filter Verification
+    // Subscription Filter Verification (UUID identity migration)
     // ========================================================================
-    RUN_TEST(test_filter_matches_pairing_code);
-    RUN_TEST(test_multi_table_subscription_topic);
+    RUN_TEST(test_channel_topic_matches_device_uuid);
+    RUN_TEST(test_device_and_user_channel_subscriptions);
     
     // ========================================================================
     // Heartbeat and Connection Health Tests

@@ -27,11 +27,10 @@
 // ============================================================================
 
 void test_parseAuthResponse_extracts_device_uuid() {
-    // Mock auth response JSON
+    // Mock auth response JSON (UUID identity migration - device_uuid is primary)
     const char* json = R"({
         "success": true,
         "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "pairing_code": "ABC123",
         "device_id": "webex-display-C3D4",
         "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
         "user_uuid": "550e8400-e29b-41d4-a716-446655440001",
@@ -47,6 +46,9 @@ void test_parseAuthResponse_extracts_device_uuid() {
     String device_uuid = doc["device_uuid"] | "";
     TEST_ASSERT_EQUAL_STRING(TEST_DEVICE_UUID, device_uuid.c_str());
     TEST_ASSERT_EQUAL(36, device_uuid.length());
+    
+    // pairing_code should not be present in UUID-based responses
+    TEST_ASSERT_FALSE(doc.containsKey("pairing_code"));
 }
 
 void test_parseAuthResponse_extracts_user_uuid() {
@@ -87,10 +89,10 @@ void test_parseAuthResponse_handles_null_user_uuid() {
 
 void test_parseAuthResponse_handles_missing_uuid_fields() {
     // Mock auth response JSON without UUID fields (backward compatibility)
+    // Note: After UUID migration, device_uuid should always be present
     const char* json = R"({
         "success": true,
         "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "pairing_code": "ABC123",
         "device_id": "webex-display-C3D4"
     })";
     
@@ -105,6 +107,9 @@ void test_parseAuthResponse_handles_missing_uuid_fields() {
     // Should handle missing fields gracefully
     TEST_ASSERT_EQUAL(0, device_uuid.length());
     TEST_ASSERT_EQUAL(0, user_uuid.length());
+    
+    // pairing_code should not be present in UUID-based responses
+    TEST_ASSERT_FALSE(doc.containsKey("pairing_code"));
 }
 
 // ============================================================================
@@ -252,7 +257,6 @@ void test_parseAuthResponse_extracts_all_required_fields() {
     const char* json = R"({
         "success": true,
         "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-        "pairing_code": "ABC123",
         "device_id": "webex-display-C3D4",
         "device_uuid": "550e8400-e29b-41d4-a716-446655440000",
         "user_uuid": "550e8400-e29b-41d4-a716-446655440001",
@@ -265,8 +269,10 @@ void test_parseAuthResponse_extracts_all_required_fields() {
     TEST_ASSERT_TRUE(error == DeserializationError::Ok);
     TEST_ASSERT_TRUE(doc["success"].as<bool>());
     TEST_ASSERT_FALSE(String(doc["token"].as<const char*>()).isEmpty());
-    TEST_ASSERT_FALSE(String(doc["pairing_code"].as<const char*>()).isEmpty());
     TEST_ASSERT_FALSE(String(doc["device_uuid"].as<const char*>()).isEmpty());
+    
+    // pairing_code should not be present in UUID-based responses
+    TEST_ASSERT_FALSE(doc.containsKey("pairing_code"));
 }
 
 // ============================================================================

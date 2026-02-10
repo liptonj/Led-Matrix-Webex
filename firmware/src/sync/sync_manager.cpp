@@ -127,7 +127,7 @@ void SyncManager::loop(unsigned long current_time) {
     }
 
     // Sync (blocked during realtime connecting AND needs heap)
-    if (!realtime_connecting && hasSafeTlsHeap(65000, 40000)) {
+    if (!realtime_connecting && hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         performSync(isHeartbeat);
         _lastHeartbeat = current_time;
         if (!isHeartbeat) {
@@ -139,7 +139,7 @@ void SyncManager::loop(unsigned long current_time) {
     }
 
     // Poll for commands (NOT blocked during connecting, rate-limited independently)
-    if (!realtimeWorking && hasSafeTlsHeap(65000, 40000)) {
+    if (!realtimeWorking && hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         if (current_time - _lastPollCommands >= POLL_COMMANDS_MIN_INTERVAL) {
             pollCommands();
             _lastPollCommands = current_time;
@@ -269,6 +269,10 @@ void SyncManager::broadcastTelemetry() {
 }
 
 void SyncManager::broadcastDeviceConfig() {
+    broadcastDeviceConfig(DeviceInfo::buildConfigJson());
+}
+
+void SyncManager::broadcastDeviceConfig(const String& configStr) {
     auto& deps = getDependencies();
 
     if (!deps.realtime.isConnected()) {
@@ -276,8 +280,6 @@ void SyncManager::broadcastDeviceConfig() {
         return;
     }
 
-    String configStr = DeviceInfo::buildConfigJson();
-    
     JsonDocument configDoc;
     DeserializationError err = deserializeJson(configDoc, configStr);
     if (err) {
@@ -335,7 +337,7 @@ bool provisionDeviceWithSupabase() {
     last_attempt = now;
 
     // Heap check
-    if (!hasSafeTlsHeap(65000, 40000)) {
+    if (!hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
         if (now - last_low_heap_log > 60000) {
             last_low_heap_log = now;
             ESP_LOGW(TAG, "Skipping provisioning - low heap for TLS");
@@ -418,13 +420,25 @@ bool provisionDeviceWithSupabase() {
         return false;
     }
 
-    // Handle pairing code
+    // Handle device_uuid (primary identifier) and pairing_code (temporary, for initial pairing)
+    String device_uuid = result["device_uuid"] | "";
     String pairing_code = result["pairing_code"] | "";
+    
+    // Store device_uuid if provided (primary identifier)
+    if (!device_uuid.isEmpty()) {
+        String current_uuid = deps.config.getDeviceUuid();
+        if (current_uuid.isEmpty() || current_uuid != device_uuid) {
+            deps.config.setDeviceUuid(device_uuid);
+            ESP_LOGI(TAG, "Device UUID received and set: %s", device_uuid.substring(0, 8).c_str());
+            deps.app_state.supabase_realtime_resubscribe = true;
+        }
+    }
+    
+    // Handle pairing code (temporary, expires after use)
     if (!pairing_code.isEmpty()) {
         deps.pairing.setCode(pairing_code, true);
         deps.supabase.setPairingCode(pairing_code);
-        deps.app_state.supabase_realtime_resubscribe = true;
-        ESP_LOGI(TAG, "Pairing code received and set");
+        ESP_LOGI(TAG, "Temporary pairing code received (expires after use)");
     }
 
     // Success - reset state using helper
@@ -447,7 +461,7 @@ bool provisionDeviceWithSupabase() {
         }
         
         // Immediately update device_connected so embedded app knows device is online
-        if (hasSafeTlsHeap(65000, 40000)) {
+        if (hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
             ESP_LOGI(TAG, "Sending initial device state after provisioning...");
             int rssi = WiFi.RSSI();
             uint32_t freeHeap = ESP.getFreeHeap();

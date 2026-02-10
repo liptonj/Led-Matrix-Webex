@@ -71,11 +71,13 @@ bool RealtimeManager::attemptInit() {
     // Initialize WebSocket connection
     deps.realtime.begin(supabaseUrl, anonKey, accessToken);
 
-    // Subscribe to channels
+    // Subscribe to channels using UUID-based identity
+    // Device UUID comes from ConfigManager (set during device-auth response)
     String userUuid = deps.config.getUserUuid();
     String deviceUuid = deps.config.getDeviceUuid();
     bool queued = false;
     
+    // User channel subscription (required for pairing and status updates)
     if (!userUuid.isEmpty()) {
         queued = deps.realtime.subscribeToUserChannel(userUuid);
         if (!queued) {
@@ -90,14 +92,18 @@ bool RealtimeManager::attemptInit() {
         return false;
     }
     
-    // Subscribe to device channel if device UUID is available
+    // Device channel subscription (UUID-based: device:{device_uuid})
+    // Topic format: realtime:device:{device_uuid} (Phoenix protocol)
+    // RLS topic: device:{device_uuid} (used by backend for routing)
+    // Used for device-specific events: commands, firmware updates, heartbeats
     if (!deviceUuid.isEmpty()) {
         bool deviceQueued = deps.realtime.subscribeToDeviceChannel(deviceUuid);
         if (!deviceQueued) {
             ESP_LOGW(TAG, "Failed to subscribe to device channel (non-fatal)");
             // Continue anyway - user channel is more important
         } else {
-            ESP_LOGI(TAG, "Device channel subscription requested");
+            ESP_LOGI(TAG, "Device channel subscription requested (device_uuid: %s)", 
+                     deviceUuid.substring(0, 8).c_str());
         }
     } else {
         ESP_LOGD(TAG, "No device_uuid - skipping device channel subscription");

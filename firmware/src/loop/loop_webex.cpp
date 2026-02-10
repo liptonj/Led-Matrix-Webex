@@ -105,7 +105,7 @@ bool handleWebexFallbackPolling(LoopContext& ctx) {
     String cloud_status;
 
     if (deps.supabase.isAuthenticated()) {
-        if (!hasSafeTlsHeap(65000, 40000)) {
+        if (!hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
             ESP_LOGW(TAG, "Skipping webex-status - low heap for TLS");
         } else {
             cloud_synced = deps.supabase.syncWebexStatus(cloud_status);

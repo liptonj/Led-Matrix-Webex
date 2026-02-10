@@ -104,7 +104,7 @@ void SupabaseRealtime::sendHeartbeat() {
     String message = buildPhoenixMessage("phoenix", "heartbeat", emptyPayload);
     if (_client && esp_websocket_client_is_connected(_client)) {
         ESP_LOGD(TAG, "Sending heartbeat (ref=%d)", _msgRef);
-        esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+        esp_websocket_client_send_text(_client, message.c_str(), message.length(), pdMS_TO_TICKS(2000));
     }
 
     // Refresh access token on subscribed private channels
@@ -137,7 +137,7 @@ void SupabaseRealtime::sendAccessToken() {
             JsonDocument payload;
             payload["access_token"] = _accessToken;
             String message = buildPhoenixMessage(_channels[i].topic, "access_token", payload, _msgRef);
-            esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+            esp_websocket_client_send_text(_client, message.c_str(), message.length(), pdMS_TO_TICKS(2000));
         }
     }
 }
@@ -216,7 +216,7 @@ bool SupabaseRealtime::subscribeToUserChannel(const String& user_uuid) {
         return true;
     }
     
-    int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+    int sent = esp_websocket_client_send_text(_client, message.c_str(), message.length(), pdMS_TO_TICKS(2000));
     if (sent < 0) {
         ESP_LOGE(TAG, "Failed to send user channel subscription: %d", sent);
         channel.pendingJoinMessage = message;
@@ -242,7 +242,7 @@ void SupabaseRealtime::unsubscribe() {
             _msgRef++;
             String message = buildPhoenixMessage(_channels[i].topic, "phx_leave", emptyPayload);
             if (_client && esp_websocket_client_is_connected(_client)) {
-                esp_websocket_client_send_text(_client, message.c_str(), message.length(), portMAX_DELAY);
+                esp_websocket_client_send_text(_client, message.c_str(), message.length(), pdMS_TO_TICKS(2000));
             }
             _channels[i].subscribed = false;
         }
@@ -288,7 +288,7 @@ bool SupabaseRealtime::sendBroadcast(const String& topic, const String& event, c
     }
     
     int sent = esp_websocket_client_send_text(_client, message.c_str(), 
-                                              message.length(), portMAX_DELAY);
+                                              message.length(), pdMS_TO_TICKS(2000));
     
     if (sent < 0) {
         ESP_LOGW(TAG, "Failed to send broadcast: %d", sent);

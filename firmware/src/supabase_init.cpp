@@ -80,7 +80,7 @@ void initSupabase(
                 }
                 
                 // Immediately update device_connected so embedded app knows device is online
-                if (hasSafeTlsHeap(65000, 40000)) {
+                if (hasSafeTlsHeap(TLS_HEAP_MIN_FREE, TLS_HEAP_MIN_BLOCK)) {
                     ESP_LOGI(TAG, "Sending initial device state to mark device as connected...");
                     int rssi = WiFi.RSSI();
                     uint32_t freeHeap = ESP.getFreeHeap();

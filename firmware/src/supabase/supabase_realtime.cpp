@@ -186,6 +186,7 @@ void SupabaseRealtime::loop() {
         _msgQueueHead = (_msgQueueHead + 1) % MSG_QUEUE_SIZE;
         portEXIT_CRITICAL(&_rxMux);
         handleIncomingMessage(message);
+        yield();
     }
     
     unsigned long now = millis();
@@ -291,6 +292,8 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
         instance->_reconnectDelay = PHOENIX_RECONNECT_MIN_MS;
         
         // Rejoin all registered channels (rejection flags are cleared on disconnect/reconnect)
+        // Channels use UUID-based topics: realtime:device:{device_uuid} and realtime:user:{user_uuid}
+        // Cached channel topics are preserved during reconnection, ensuring UUID-based identity
         if (instance->_client && esp_websocket_client_is_connected(instance->_client)) {
             for (size_t i = 0; i < instance->_channelCount; i++) {
                 ChannelState& channel = instance->_channels[i];
@@ -316,6 +319,7 @@ void SupabaseRealtime::websocketEventHandler(void* handler_args, esp_event_base_
                     }
                 } else if (!channel.lastJoinPayload.isEmpty()) {
                     // Rejoin using cached payload (reconnection)
+                    // Channel topics are UUID-based (device:{device_uuid} or user:{user_uuid})
                     JsonDocument payloadDoc;
                     if (!deserializeJson(payloadDoc, channel.lastJoinPayload)) {
                         channel.joinRef = ++instance->_joinRef;
@@ -513,7 +517,13 @@ bool SupabaseRealtime::subscribeToDeviceChannel(const String& device_uuid) {
         return false;
     }
     
-    // Check if channel already exists
+    // Channel topic format: realtime:device:{device_uuid}
+    // Phoenix protocol requires "realtime:" prefix
+    // Backend RLS policies use "device:{device_uuid}" (without prefix) for routing
+    // Used for device-specific events:
+    //   - Commands: device:{device_uuid}:events
+    //   - Firmware: device:{device_uuid}:firmware
+    //   - Heartbeats: device:{device_uuid}:heartbeats
     String channelTopic = "realtime:device:" + device_uuid;
     if (findChannel(channelTopic) != nullptr) {
         ESP_LOGD(TAG, "Device channel already subscribed: %s", channelTopic.c_str());
@@ -525,7 +535,8 @@ bool SupabaseRealtime::subscribeToDeviceChannel(const String& device_uuid) {
     channel.topic = channelTopic;
     channel.privateChannel = true;
     
-    ESP_LOGI(TAG, "Subscribing to device channel: %s", channelTopic.c_str());
+    ESP_LOGI(TAG, "Subscribing to device channel: %s (device_uuid: %s)", 
+             channelTopic.c_str(), device_uuid.substring(0, 8).c_str());
     
     // Build join payload for device channel (broadcast-only, no postgres_changes)
     JsonDocument payload;

@@ -366,6 +366,9 @@ void tearDown(void) {
  * 
  * This is the main test for the bug fix - verifies that when a pairing code
  * is received from the server, it's properly saved to PairingManager.
+ * 
+ * Note: After UUID migration, pairing_code is temporary and device_uuid is primary.
+ * This test verifies backward compatibility for pairing_code handling.
  */
 void test_handle_awaiting_approval_saves_pairing_code_to_pairing_manager(void) {
     // Arrange

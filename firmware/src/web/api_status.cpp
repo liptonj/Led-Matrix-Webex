@@ -16,6 +16,55 @@
 #include <esp_ota_ops.h>
 #include <LittleFS.h>
 
+namespace {
+void addPartitionInfo(JsonObject& partitions, const char* label,
+                      esp_partition_subtype_t subtype,
+                      const esp_partition_t* running,
+                      ConfigManager* config_manager) {
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, subtype, nullptr);
+    if (!partition) return;
+
+    JsonObject info = partitions[label].to<JsonObject>();
+    info["size"] = partition->size;
+
+    bool is_running = (running && partition->address == running->address);
+    if (is_running) {
+        #ifdef FIRMWARE_VERSION
+        info["firmware_version"] = FIRMWARE_VERSION;
+        #else
+        info["firmware_version"] = "unknown";
+        #endif
+    } else {
+        String stored_version = config_manager->getPartitionVersion(label);
+        if (!stored_version.isEmpty()) {
+            info["firmware_version"] = stored_version;
+        } else {
+            esp_app_desc_t desc;
+            if (esp_ota_get_partition_description(partition, &desc) == ESP_OK) {
+                String version_str = String(desc.version);
+                if (version_str.startsWith("esp-idf:") || 
+                    version_str.startsWith("arduino-lib") ||
+                    version_str.startsWith("v") || 
+                    version_str.isEmpty() || version_str == "1") {
+                    String project_name = String(desc.project_name);
+                    if (!project_name.isEmpty() && 
+                        !project_name.startsWith("esp-idf") &&
+                        !project_name.startsWith("arduino-lib")) {
+                        version_str = project_name;
+                    } else {
+                        version_str = "unknown";
+                    }
+                }
+                info["firmware_version"] = version_str;
+            } else {
+                info["firmware_version"] = "empty";
+            }
+        }
+    }
+}
+}  // namespace
+
 void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     auto& deps = getDependencies();
     JsonDocument doc;
@@ -62,7 +111,7 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
     
     // Sensitive fields (only if authenticated)
     if (authenticated) {
-        doc["pairing_code"] = deps.pairing.getCode();
+        doc["device_uuid"] = config_manager->getDeviceUuid().isEmpty() ? "" : config_manager->getDeviceUuid();
         doc["ip_address"] = WiFi.localIP().toString();
         doc["mac_address"] = WiFi.macAddress();
         doc["serial_number"] = deps.credentials.getSerialNumber();
@@ -83,99 +132,9 @@ void WebServerManager::handleStatus(AsyncWebServerRequest* request) {
         // Partition storage info
         JsonObject partitions = doc["partitions"].to<JsonObject>();
 
-            // OTA_0 partition info
-        const esp_partition_t* ota0 = esp_partition_find_first(
-            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, nullptr);
-        if (ota0) {
-            JsonObject ota0_info = partitions["ota_0"].to<JsonObject>();
-            ota0_info["size"] = ota0->size;
-
-            // Check if this is the currently running partition
-            bool is_running = (running && ota0->address == running->address);
-
-            if (is_running) {
-                // For the currently running partition, use the compile-time version
-                // because Arduino framework doesn't populate esp_app_desc_t correctly
-                #ifdef FIRMWARE_VERSION
-                ota0_info["firmware_version"] = FIRMWARE_VERSION;
-                #else
-                ota0_info["firmware_version"] = "unknown";
-                #endif
-            } else {
-                // For non-running partitions, try stored version from NVS first
-                String stored_version = config_manager->getPartitionVersion("ota_0");
-                if (!stored_version.isEmpty()) {
-                    ota0_info["firmware_version"] = stored_version;
-                } else {
-                    // Fallback to reading from app descriptor (likely won't work with Arduino)
-                    esp_app_desc_t ota0_desc;
-                    if (esp_ota_get_partition_description(ota0, &ota0_desc) == ESP_OK) {
-                        String version_str = String(ota0_desc.version);
-                        // Arduino framework often puts "arduino-lib-builder" or "esp-idf:..." here
-                        // If it looks invalid, try project_name as fallback
-                        if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
-                            version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
-                            String project_name = String(ota0_desc.project_name);
-                            if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") &&
-                                !project_name.startsWith("arduino-lib")) {
-                                version_str = project_name;
-                            } else {
-                                version_str = "unknown";
-                            }
-                        }
-                        ota0_info["firmware_version"] = version_str;
-                    } else {
-                        ota0_info["firmware_version"] = "empty";
-                    }
-                }
-            }
-        }
-
-        // OTA_1 partition info
-        const esp_partition_t* ota1 = esp_partition_find_first(
-            ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, nullptr);
-        if (ota1) {
-            JsonObject ota1_info = partitions["ota_1"].to<JsonObject>();
-            ota1_info["size"] = ota1->size;
-
-            // Check if this is the currently running partition
-            bool is_running = (running && ota1->address == running->address);
-
-            if (is_running) {
-                // For the currently running partition, use the compile-time version
-                #ifdef FIRMWARE_VERSION
-                ota1_info["firmware_version"] = FIRMWARE_VERSION;
-                #else
-                ota1_info["firmware_version"] = "unknown";
-                #endif
-            } else {
-                // For non-running partitions, try stored version from NVS first
-                String stored_version = config_manager->getPartitionVersion("ota_1");
-                if (!stored_version.isEmpty()) {
-                    ota1_info["firmware_version"] = stored_version;
-                } else {
-                    // Fallback to reading from app descriptor (likely won't work with Arduino)
-                    esp_app_desc_t ota1_desc;
-                    if (esp_ota_get_partition_description(ota1, &ota1_desc) == ESP_OK) {
-                        String version_str = String(ota1_desc.version);
-                        // Arduino framework often puts "arduino-lib-builder" or "esp-idf:..." here
-                        if (version_str.startsWith("esp-idf:") || version_str.startsWith("arduino-lib") ||
-                            version_str.startsWith("v") || version_str.isEmpty() || version_str == "1") {
-                            String project_name = String(ota1_desc.project_name);
-                            if (!project_name.isEmpty() && !project_name.startsWith("esp-idf") &&
-                                !project_name.startsWith("arduino-lib")) {
-                                version_str = project_name;
-                            } else {
-                                version_str = "unknown";
-                            }
-                        }
-                        ota1_info["firmware_version"] = version_str;
-                    } else {
-                        ota1_info["firmware_version"] = "empty";
-                    }
-                }
-            }
-        }
+        // OTA partition info
+        addPartitionInfo(partitions, "ota_0", ESP_PARTITION_SUBTYPE_APP_OTA_0, running, config_manager);
+        addPartitionInfo(partitions, "ota_1", ESP_PARTITION_SUBTYPE_APP_OTA_1, running, config_manager);
 
         // SPIFFS/LittleFS partition info
         const esp_partition_t* spiffs = esp_partition_find_first(

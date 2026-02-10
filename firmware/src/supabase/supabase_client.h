@@ -55,7 +55,7 @@ struct SupabaseCommand {
 struct SupabaseAuthResult {
     bool success;
     String token;
-    String pairing_code;
+    String pairing_code;  // Deprecated - only parsed from response, not stored
     String device_id;
     String target_firmware_version;
     bool debug_enabled;
@@ -89,13 +89,13 @@ public:
     /**
      * @brief Initialize the Supabase client
      * @param supabase_url Base Supabase URL (e.g., https://xxx.supabase.co)
-     * @param pairing_code Device's pairing code
+     * @param pairing_code Device's pairing code (deprecated - ignored, device_uuid is used instead)
      */
     void begin(const String& supabase_url, const String& pairing_code);
 
     /**
-     * @brief Update the pairing code
-     * @param code New pairing code
+     * @brief Update the pairing code (deprecated - no-op, device_uuid is used instead)
+     * @param code New pairing code (ignored)
      */
     void setPairingCode(const String& code);
 
@@ -166,10 +166,10 @@ public:
     void setCommandHandler(SupabaseCommandHandler handler) { _commandHandler = handler; }
 
     /**
-     * @brief Get current pairing code
-     * @return Pairing code string
+     * @brief Get current pairing code (deprecated - returns device_uuid instead)
+     * @return Device UUID string (or empty if not set)
      */
-    String getPairingCode() const { return _pairingCode; }
+    String getPairingCode() const;
 
     /**
      * @brief Get target firmware version (from device-auth response)
@@ -254,7 +254,6 @@ public:
 
 private:
     String _supabaseUrl;
-    String _pairingCode;
     String _token;
     unsigned long _tokenExpiresAt;  // Unix timestamp
     String _targetFirmwareVersion;

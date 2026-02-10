@@ -124,7 +124,16 @@ public:
 
     /**
      * @brief Subscribe to device channel (device:{device_uuid}) for device-specific events
-     * @param device_uuid Device UUID to subscribe to
+     * 
+     * Channel topic format: realtime:device:{device_uuid} (Phoenix protocol)
+     * Backend RLS topic: device:{device_uuid} (used for routing)
+     * 
+     * Used for device-specific events:
+     *   - Commands: device:{device_uuid}:events
+     *   - Firmware: device:{device_uuid}:firmware
+     *   - Heartbeats: device:{device_uuid}:heartbeats
+     * 
+     * @param device_uuid Device UUID (from ConfigManager, set during device-auth)
      * @return true if subscription request sent
      */
     bool subscribeToDeviceChannel(const String& device_uuid);

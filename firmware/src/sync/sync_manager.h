@@ -39,6 +39,12 @@ public:
      */
     void broadcastDeviceConfig();
 
+    /**
+     * @brief Broadcast device config via realtime WebSocket using pre-built JSON
+     * @param configStr Pre-built config JSON string (avoids redundant buildConfigJson)
+     */
+    void broadcastDeviceConfig(const String& configStr);
+
 private:
     unsigned long _lastHeartbeat;
     unsigned long _lastFullSync;
