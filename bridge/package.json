@@ -21,7 +21,7 @@
   "license": "MIT",
   "dependencies": {
     "bonjour-service": "^1.2.1",
-    "dotenv": "^16.3.1",
+    "dotenv": "^17.3.1",
     "ws": "^8.16.0",
     "winston": "^3.11.0"
   },
